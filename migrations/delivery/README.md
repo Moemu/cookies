@@ -65,3 +65,9 @@ The monitoring migration is additive: it preserves legacy metric rows with
 the existing window end, and extends uniqueness for multi-window fixtures. It
 adds `delivery_alerts` with organization/project fingerprint uniqueness and CAS
 versions. No legacy metric or alert data is deleted or rewritten destructively.
+
+# Mock/Replay observatory
+
+`20260812120000_delivery_observatory_runs.up.sql` adds immutable observatory runs and append-only operator feedback. Runs reference an existing DecisionSelection and freeze the exact Decision, Configuration, and Workflow hashes. CHECK constraints admit only `mock`/`replay`, `observe_existing`/`prepare_new_local_form`, and `remote_write_enabled = FALSE`; the canonical input hash is unique per project for deterministic replay. Feedback references the immutable run, supports `accepted`/`modified`/`rejected`, and uses a project-scoped idempotency key. The migration does not rewrite any earlier payload or hash.
+
+`20260812121000_delivery_observatory_feedback_outcome.up.sql` freezes the reviewed run outcome directly on each feedback row. It is a forward-only compatibility migration because the initial observatory migration may already have been applied; no existing immutable JSON or canonical hash is rewritten.

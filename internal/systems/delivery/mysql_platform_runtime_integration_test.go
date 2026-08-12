@@ -185,7 +185,7 @@ func TestMySQLPlatformRuntimeRoundTripAndLegacyUpgradeCompatibility(t *testing.T
 	reusedIntentVersion.CreatedAt = service.now().Add(time.Minute)
 	configurationV2 := cloneJSONPointer(loaded.CurrentVersion.PlatformConfiguration)
 	configurationV2.VersionNumber = 2
-	configurationV2.Payload.OceanEngine.Project.BudgetAndBidding.DailyBudgetMinor--
+	configurationV2.Payload.OceanEngine.Project.BudgetAndBidding.DailyBudgetMinor++
 	configurationV2.CanonicalHash = ""
 	configurationV2Value, err := FinalizePlatformConfiguration(*configurationV2)
 	if err != nil {
@@ -208,7 +208,7 @@ func TestMySQLPlatformRuntimeRoundTripAndLegacyUpgradeCompatibility(t *testing.T
 		Evidence:   []string{"simulation://metric/current-" + suffix}, CreatedBy: actor.Principal.ID, CreatedAt: service.now(),
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("build decision: %v plan_version=%d configuration=%#v intent=%#v", err, decisionPlan.CurrentVersionNumber, decisionPlan.CurrentVersion.PlatformConfiguration, decisionPlan.CurrentVersion.DeliveryIntent)
 	}
 	decision, err = repository.CreateDecision(ctx, decision)
 	if err != nil {
@@ -233,7 +233,56 @@ func TestMySQLPlatformRuntimeRoundTripAndLegacyUpgradeCompatibility(t *testing.T
 	if err != nil || !replay {
 		t.Fatalf("replay selection replay=%t err=%v", replay, err)
 	}
+	observatoryRequest := validObservatoryRequest(selection, ObservatoryModeObserveExisting)
+	observatoryRequest.Fixture.FixtureID = "mysql-fixture-" + suffix
+	observatoryRun, err := BuildObservatoryRun(selection, observatoryRequest, actor.Principal.ID, service.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observatoryRun, replay, err = repository.CreateObservatoryRun(ctx, observatoryRun)
+	if err != nil || replay || observatoryRun.RemoteWriteEnabled {
+		t.Fatalf("persist observatory replay=%t err=%v value=%#v", replay, err, observatoryRun)
+	}
+	_, replay, err = repository.CreateObservatoryRun(ctx, observatoryRun)
+	if err != nil || !replay {
+		t.Fatalf("replay observatory replay=%t err=%v", replay, err)
+	}
+	insertProbe := func(runID, inputHash string, remoteWriteEnabled bool, payload []byte) error {
+		_, insertErr := db.ExecContext(ctx, `INSERT INTO delivery_observatory_runs (
+			organization_id,project_id,run_id,selection_id,decision_id,decision_canonical_hash,configuration_canonical_hash,workflow_id,workflow_canonical_hash,schema_version,runner_version,source,mode,data_state,status,outcome,remote_write_enabled,input_hash,canonical_hash,run_json,created_by,created_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, organizationID, projectID, runID, selection.ID, decision.ID, decision.CanonicalHash, selection.Configuration.CanonicalHash, selection.Workflow.ID, selection.Workflow.CanonicalHash, ObservatoryRunSchemaV1, ObservatoryRunnerV1, ObservatorySourceReplay, ObservatoryModeObserveExisting, ObservatoryDataReady, "completed", "in_sync", remoteWriteEnabled, inputHash, strings.Repeat("d", 64), payload, actor.Principal.ID, service.now())
+		return insertErr
+	}
+	observatoryJSON, err := json.Marshal(observatoryRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = insertProbe("observatory-enabled-"+suffix, strings.Repeat("e", 64), true, observatoryJSON); err == nil {
+		t.Fatal("database accepted remote_write_enabled=true")
+	}
+	remoteActionRun := observatoryRun
+	remoteActionRun.ID = "observatory-action-" + suffix
+	remoteActionRun.Steps = append([]ObservatoryStepObservation(nil), observatoryRun.Steps...)
+	remoteActionRun.Steps[0].ExecutedAction = WorkflowRiskRemoteWrite
+	remoteActionJSON, err := json.Marshal(remoteActionRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = insertProbe(remoteActionRun.ID, strings.Repeat("f", 64), false, remoteActionJSON); err == nil {
+		t.Fatal("database accepted an executable remote_write step in run_json")
+	}
+	feedback := DeliveryObservatoryFeedback{SchemaVersion: ObservatoryFeedbackSchemaV1, ID: "feedback-" + suffix, OrganizationID: organizationID, ProjectID: projectID, RunID: observatoryRun.ID, RunCanonicalHash: observatoryRun.CanonicalHash, RunOutcome: observatoryRun.Outcome, Disposition: ObservatoryFeedbackAccepted, Reason: "integration evidence reviewed", DiffKeys: []string{}, CreatedBy: actor.Principal.ID, CreatedAt: service.now()}
+	feedback.CanonicalHash, err = feedback.ComputeCanonicalHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedback, replay, err = repository.CreateObservatoryFeedback(ctx, feedback, "feedback-key-"+suffix, strings.Repeat("c", 64))
+	if err != nil || replay || feedback.RunCanonicalHash != observatoryRun.CanonicalHash {
+		t.Fatalf("persist feedback replay=%t err=%v value=%#v", replay, err, feedback)
+	}
 	t.Cleanup(func() {
+		_, _ = db.ExecContext(ctx, `DELETE FROM delivery_observatory_feedback WHERE organization_id=? AND project_id=? AND run_id=?`, organizationID, projectID, observatoryRun.ID)
+		_, _ = db.ExecContext(ctx, `DELETE FROM delivery_observatory_runs WHERE organization_id=? AND project_id=? AND run_id=?`, organizationID, projectID, observatoryRun.ID)
 		_, _ = db.ExecContext(ctx, `DELETE FROM delivery_decision_selections WHERE organization_id=? AND project_id=? AND decision_id=?`, organizationID, projectID, decision.ID)
 		_, _ = db.ExecContext(ctx, `DELETE FROM delivery_compiled_workflows WHERE organization_id=? AND project_id=? AND decision_id=?`, organizationID, projectID, decision.ID)
 		_, _ = db.ExecContext(ctx, `DELETE FROM delivery_decisions WHERE organization_id=? AND project_id=? AND decision_id=?`, organizationID, projectID, decision.ID)

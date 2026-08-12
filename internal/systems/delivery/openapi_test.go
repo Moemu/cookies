@@ -81,6 +81,30 @@ func TestOpenAPIContractCoversDecisionWorkflowAuthorityBoundary(t *testing.T) {
 	}
 }
 
+func TestOpenAPIContractCoversMockReplayObservatoryBoundary(t *testing.T) {
+	t.Parallel()
+	contents, err := os.ReadFile(filepath.Join("..", "..", "..", "api", "openapi", "delivery-v1.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := string(contents)
+	for _, expected := range []string{
+		"/decision-selections/{selection_id}/observatory-runs:",
+		"/observatory-runs/{run_id}/feedback:",
+		"DeliveryObservatoryRun:",
+		"DeliveryObservatoryFeedback:",
+		"enum: [mock, replay]",
+		"enum: [observe, prepare_local_form]",
+		"enum: [accepted, modified, rejected]",
+		"PHASE_C_REMOTE_WRITE_PROHIBITED",
+		"const: false",
+	} {
+		if !strings.Contains(contract, expected) {
+			t.Errorf("Delivery observatory OpenAPI is missing %q", expected)
+		}
+	}
+}
+
 func TestOpenAPIContractCoversProjectScopedMonitoringAlerts(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "..", "api", "openapi", "delivery-v1.yaml")

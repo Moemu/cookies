@@ -54,6 +54,18 @@ ChangeSet 冻结完整 `PlatformConfiguration` 目标快照与 hash。Decision �
 
 CompiledWorkflow 显式绑定平台、账户引用、配置身份与 hash，以及 capability/selector/action/compiler 四类版本契约，并按页面组织 `observe`、`prepare_local_form` 与 `remote_write` 步骤。Phase C 的 `remote_write_enabled` 永远为 false；最终提交步骤必须带 `PHASE_C_REMOTE_WRITE_PROHIBITED` 阻断原因。MySQL 表同时用 CHECK 约束禁止远程写入状态和非 `ready_for_final_approval` 状态入库。
 
+## Mock/Replay 观测闭环
+
+`DeliveryObservatoryRun` 只接受 `mock` 或 `replay` fixture，并绑定 Selection、Decision、Configuration、Workflow 的精确身份、canonical hash 与 schema 版本。Runner 是不持有网络或平台 adapter 的纯函数；同一冻结输入通过 canonical input hash 派生同一 run identity，数据库唯一约束保证重复运行返回原记录。
+
+- `observe_existing` 把 fixture 中的只读观测值与编译配置逐字段比较；不一致是 `drift_detected`，不是 runner 失败。
+- `prepare_new_local_form` 只准备本地未提交值，结果为 `local_form_prepared`，不会提交表单。
+- `insufficient_data`、`stale_data`、`blocked_by_asset`、`platform_pending` 在数据门禁处安全停止并保留原因和证据。
+- Mock/Replay 的受控步骤故障单独记录为 `runner_failure`。
+- 每个 run 都包含最终 `PHASE_C_REMOTE_WRITE_PROHIBITED` 边界观测；可执行动作集合不包含 `remote_write`，数据库再次要求 `remote_write_enabled=false`。
+
+运营反馈以独立不可变记录追加：`accepted` 与 `rejected` 记录理由和相关 diff；`modified` 额外冻结最终 `PlatformConfiguration` 及其 canonical hash。反馈不会更新或覆盖原始 Decision、Selection、Run、步骤或证据。真实平台 Shadow、Connector 与 Computer Use 不属于本阶段。
+
 ## OutcomeSimulation 与监控
 
 OutcomeSimulation 只接受已成功平台操作演练所绑定的 v2 PlanVersion 和 ChangeSet。相同输入、情景与稳定 seed 产生确定性指标窗口和事件。Decision 必须引用同一 SimulationRun、Execution 和指标窗口，并把指标业务内容纳入 canonical hash；旧 Recommendation 仅供 Tour 历史演示。
@@ -83,7 +95,7 @@ Tour 不生成操作包。最终页面明确说明行为工作流编译和真实
 
 ## 数据与迁移
 
-迁移保持严格增量。`delivery_intents`、`delivery_platform_configurations`、`delivery_decisions`、`delivery_decision_selections` 与 `delivery_compiled_workflows` 保存独立不可变 envelope；现有表只增加判别器与绑定列。禁止修改或删除旧迁移，禁止 UPDATE 历史 payload，禁止重算历史 hash。
+迁移保持严格增量。`delivery_intents`、`delivery_platform_configurations`、`delivery_decisions`、`delivery_decision_selections`、`delivery_compiled_workflows`、`delivery_observatory_runs` 与 `delivery_observatory_feedback` 保存独立不可变 envelope；现有表只增加判别器与绑定列。禁止修改或删除旧迁移，禁止 UPDATE 历史 payload，禁止重算历史 hash。
 
 完整机器契约见：
 
@@ -91,6 +103,8 @@ Tour 不生成操作包。最终页面明确说明行为工作流编译和真实
 - [`schemas/delivery-platform-configuration-v2.json`](./schemas/delivery-platform-configuration-v2.json)
 - [`schemas/delivery-decision-v1.json`](./schemas/delivery-decision-v1.json)
 - [`schemas/compiled-delivery-workflow-v1.json`](./schemas/compiled-delivery-workflow-v1.json)
+- [`schemas/delivery-observatory-run-v1.json`](./schemas/delivery-observatory-run-v1.json)
+- [`schemas/delivery-observatory-feedback-v1.json`](./schemas/delivery-observatory-feedback-v1.json)
 - [`platform-configuration-contracts.md`](./platform-configuration-contracts.md)
 - [`read-only-calibration-closeout.md`](./read-only-calibration-closeout.md)
 - [`oceanengine-schema-calibration.md`](./oceanengine-schema-calibration.md)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, ArrowRight, CheckCircle2, CircleAlert, Clock3, RefreshCw, Send, XCircle } from 'lucide-react'
+import { Activity, ArrowRight, CheckCircle2, CircleAlert, Clock3, RefreshCw, Send, ShieldCheck, XCircle } from 'lucide-react'
 import {
   DeliveryApiError,
   deliveryOptimizationApi,
@@ -8,6 +8,7 @@ import {
   type DeliveryDecision,
   type DeliveryDecisionCandidate,
   type DeliveryDecisionSelection,
+  type DeliveryObservatoryRun,
   type DeliveryPlan,
   type DeliveryRecommendation,
 } from '../api/delivery'
@@ -39,6 +40,72 @@ function formatTime(value?: string) {
 function formatCny(value: number) {
   return (value / 100).toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' })
 }
+
+const decisionCandidateLabel: Record<DeliveryDecisionCandidate['kind'], string> = {
+  conservative: '稳健方案',
+  balanced: '均衡方案',
+  exploratory: '探索方案',
+}
+
+const decisionUncertaintyLabel: Record<DeliveryDecisionCandidate['uncertainty'], string> = {
+  low: '判断把握较高',
+  medium: '判断把握中等',
+  high: '判断把握较低',
+}
+
+const decisionDiagnosticCopy: Record<DeliveryDecision['diagnostic']['code'], { label: string; explanation: string; nextAction: string }> = {
+  ready: { label: '可决策', explanation: '计划、模拟结果和指标证据均已完整绑定。', nextAction: '请选择一个候选方案并编译本地工作流。' },
+  insufficient_data: { label: '数据不足', explanation: '当前证据不足以生成可靠的候选方案。', nextAction: '请先完成投放演练、效果模拟和指标采集。' },
+  stale_data: { label: '数据已过期', explanation: '用于决策的平台事实或指标窗口已经过期。', nextAction: '请刷新平台事实并重新采集最新指标。' },
+  blocked_by_asset: { label: '素材受阻', explanation: '候选方案依赖的素材尚不可用。', nextAction: '请解决素材状态或更换素材后重新生成。' },
+  platform_pending: { label: '等待平台能力', explanation: '当前平台配置尚未具备生成候选方案的条件。', nextAction: '请完善平台配置或等待相应能力就绪。' },
+}
+
+function decisionPolicyLabel(value: DeliveryDecision['policyVersion']) {
+  return `决策规则 ${value.split('/').at(-1)?.toUpperCase() ?? 'V1'}`
+}
+
+function decisionRationaleLabel(value: string) {
+  const cpaMatch = /^current CPA is ([0-9.]+)x the baseline CPA$/.exec(value)
+  if (cpaMatch) return `当前转化成本为基准值的 ${cpaMatch[1]} 倍`
+  const reductionMatch = /^policy \S+ applies a (\d+)% budget reduction$/.exec(value)
+  if (reductionMatch) return `根据当前决策规则，建议将每日预算下调 ${reductionMatch[1]}%`
+  return recommendationLabel(value)
+}
+
+function businessObjectiveLabel(value?: string) {
+  if (!value) return '请选择投放计划'
+  return ({ 'qualified conversions': '获取高质量转化' } as Record<string, string>)[value] ?? value
+}
+
+function biddingStrategyLabel(value?: string) {
+  return ({ manual_bid: '手动出价' } as Record<string, string>)[value ?? ''] ?? value ?? '未设置'
+}
+
+function chargingModeLabel(value?: string) {
+  return ({ CPC: '按点击计费（CPC）', CPM: '按千次展示计费（CPM）', OCPM: '按优化目标计费（OCPM）' } as Record<string, string>)[value ?? ''] ?? value ?? '未设置'
+}
+
+function proposalComparison(plan: DeliveryPlan | undefined, selection: DeliveryDecisionSelection | undefined) {
+  const before = plan?.currentVersion.platformConfiguration?.payload.ocean_engine
+  const after = selection?.configuration.payload.ocean_engine
+  if (!before?.project || !after?.project) return []
+  const beforeMaterials = before.promotions.reduce((total, promotion) => total + promotion.base_material_references.length, 0)
+  const afterMaterials = after.promotions.reduce((total, promotion) => total + promotion.base_material_references.length, 0)
+  return [
+    { key: 'daily_budget', label: '每日预算', before: formatCny(before.project.budget_and_bidding.daily_budget_minor), after: formatCny(after.project.budget_and_bidding.daily_budget_minor), changed: before.project.budget_and_bidding.daily_budget_minor !== after.project.budget_and_bidding.daily_budget_minor },
+    { key: 'bidding_strategy', label: '出价方式', before: biddingStrategyLabel(before.project.budget_and_bidding.bidding_strategy), after: biddingStrategyLabel(after.project.budget_and_bidding.bidding_strategy), changed: before.project.budget_and_bidding.bidding_strategy !== after.project.budget_and_bidding.bidding_strategy },
+    { key: 'charging_mode', label: '计费方式', before: chargingModeLabel(before.project.budget_and_bidding.charging_mode), after: chargingModeLabel(after.project.budget_and_bidding.charging_mode), changed: before.project.budget_and_bidding.charging_mode !== after.project.budget_and_bidding.charging_mode },
+    { key: 'promotions', label: '推广单元', before: `${before.promotions.length} 个`, after: `${after.promotions.length} 个`, changed: before.promotions.length !== after.promotions.length },
+    { key: 'materials', label: '关联素材', before: `${beforeMaterials} 个`, after: `${afterMaterials} 个`, changed: beforeMaterials !== afterMaterials },
+  ]
+}
+
+const proposalDecisionLabel = {
+  accepted: '已接受优化方案',
+  modified: '已保存修改后的方案',
+  rejected: '已拒绝优化方案',
+} as const
 
 function recommendationLabel(value: string) {
   const budgetMatch = /^reduce_budget_(\d+)_percent$/.exec(value)
@@ -146,15 +213,21 @@ function DeliveryDecisionWorkspace({ state }: { state: DataState; activeView: st
   const [decisions, setDecisions] = useState<DeliveryDecision[]>([])
   const [selectedPlanId, setSelectedPlanId] = useState('')
   const [selection, setSelection] = useState<DeliveryDecisionSelection>()
+  const [selectingCandidateId, setSelectingCandidateId] = useState('')
+  const [observatoryRuns, setObservatoryRuns] = useState<DeliveryObservatoryRun[]>([])
+  const [modifiedBudgets, setModifiedBudgets] = useState<Record<string, string>>({})
+  const [proposalDecision, setProposalDecision] = useState<{ selectionId: string; disposition: 'accepted' | 'modified' | 'rejected' }>()
+  const workflowRef = useRef<HTMLElement>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
 
   const refresh = useCallback(async () => {
     setBusy(true)
     try {
-      const [nextPlans, nextDecisions] = await Promise.all([deliveryPlanApi.list(projectId), deliveryOptimizationApi.listDecisions(projectId)])
+      const [nextPlans, nextDecisions, nextRuns] = await Promise.all([deliveryPlanApi.list(projectId), deliveryOptimizationApi.listDecisions(projectId), deliveryOptimizationApi.listObservatoryRuns(projectId)])
       setPlans(nextPlans)
       setDecisions(nextDecisions)
+      setObservatoryRuns(nextRuns)
       setSelectedPlanId(current => nextPlans.some(plan => plan.id === current) ? current : nextPlans[0]?.id ?? '')
     } catch (error) {
       setNotice(errorMessage(error, '读取投放决策失败。'))
@@ -174,9 +247,9 @@ function DeliveryDecisionWorkspace({ state }: { state: DataState; activeView: st
     try {
       const decision = await deliveryOptimizationApi.generateDecision(projectId, selectedPlan.id, selectedPlan.currentVersionNumber)
       setDecisions(current => [decision, ...current.filter(item => item.id !== decision.id)])
-      setNotice('已生成不可变决策；请选择候选方案以编译本地工作流。')
+      setNotice('优化方案已生成，请比较方案依据和调整幅度。')
     } catch (error) {
-      setNotice(errorMessage(error, '生成投放决策失败。'))
+      setNotice(errorMessage(error, '生成优化方案失败。'))
     } finally {
       setBusy(false)
     }
@@ -184,47 +257,115 @@ function DeliveryDecisionWorkspace({ state }: { state: DataState; activeView: st
 
   const selectCandidate = async (decision: DeliveryDecision, candidate: DeliveryDecisionCandidate) => {
     setBusy(true)
+    setSelectingCandidateId(candidate.id)
     setNotice('')
     try {
       const result = await deliveryOptimizationApi.selectDecision(projectId, decision.id, candidate.id, decision.inputs.planVersion, `decision-${decision.id}-${candidate.id}`)
       setSelection(result)
-      setNotice('候选已冻结并编译；当前仅到达“等待最终审批”，没有执行任何平台写入。')
+      setProposalDecision(undefined)
+      setNotice('已生成待确认方案，请核对调整前后差异并作出运营决定。')
+      requestAnimationFrame(() => workflowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
     } catch (error) {
-      setNotice(errorMessage(error, '选择候选并编译工作流失败。'))
+      setNotice(errorMessage(error, '准备待确认方案失败。'))
+    } finally {
+      setSelectingCandidateId('')
+      setBusy(false)
+    }
+  }
+
+  const submitProposalDecision = async (disposition: 'accepted' | 'modified' | 'rejected') => {
+    if (!selection) return
+    setBusy(true)
+    setNotice('')
+    try {
+      let run = observatoryRuns.find(item => item.binding.selectionId === selection.id && item.mode === 'prepare_new_local_form')
+      if (!run) {
+        run = await deliveryOptimizationApi.runObservatory(projectId, selection.id, 'prepare_new_local_form')
+        setObservatoryRuns(current => [run!, ...current.filter(item => item.id !== run!.id)])
+      }
+      const diffKeys = run.steps.flatMap(step => step.diffs.filter(diff => !diff.matches).map(diff => diff.key))
+      const reason = disposition === 'accepted' ? '运营已核对方案依据与调整前后差异并接受优化方案' : disposition === 'modified' ? '运营已修改预算并保存调整后的优化方案' : '运营根据方案依据与调整影响拒绝当前优化方案'
+      let finalConfiguration
+      if (disposition === 'modified') {
+        const dailyBudgetYuan = Number(modifiedBudgets[selection.id])
+        const dailyBudget = Math.round(dailyBudgetYuan * 100)
+        const currentBudget = selection.configuration.payload.ocean_engine?.project.budget_and_bidding.daily_budget_minor
+        if (!Number.isFinite(dailyBudgetYuan) || dailyBudgetYuan < 0 || !Number.isInteger(dailyBudgetYuan * 100) || dailyBudget === currentBudget) {
+          setNotice('请输入与当前值不同的有效日预算金额，再记录修改后配置。')
+          return
+        }
+        finalConfiguration = structuredClone(selection.configuration)
+        finalConfiguration.payload.ocean_engine!.project.budget_and_bidding.daily_budget_minor = dailyBudget
+        delete finalConfiguration.canonical_hash
+      }
+      await deliveryOptimizationApi.submitObservatoryFeedback(projectId, run.id, disposition, reason, diffKeys, `observatory-feedback-${run.id}-${disposition}`, finalConfiguration)
+      setProposalDecision({ selectionId: selection.id, disposition })
+      setNotice(disposition === 'accepted' ? '优化方案已接受并保存；当前仍不会自动修改广告平台。' : disposition === 'modified' ? '修改后的优化方案已保存；当前仍不会自动修改广告平台。' : '当前优化方案已拒绝，可返回候选方案重新选择或重新生成。')
+    } catch (error) {
+      setNotice(errorMessage(error, '保存方案处理结果失败。'))
     } finally {
       setBusy(false)
     }
   }
 
-  return <StateBoundary state={state} contextLabel="智能投放 / 决策与编排" errorDetail="当前 Project 的决策链无法读取，请确认 Delivery 服务可用后刷新。">
+  const comparisonRows = proposalComparison(selectedPlan, selection)
+  const selectedRuns = selection ? observatoryRuns.filter(run => run.binding.selectionId === selection.id) : []
+  const currentProposalDecision = proposalDecision && proposalDecision.selectionId === selection?.id ? proposalDecision.disposition : undefined
+
+  return <StateBoundary state={state} contextLabel="智能投放 / 优化方案" errorDetail="当前 Project 的优化方案无法读取，请确认 Delivery 服务可用后刷新。">
     <div className="delivery-optimization-workspace">
       <section className="delivery-optimization-toolbar">
         <label>投放计划<select value={selectedPlanId} onChange={event => setSelectedPlanId(event.target.value)}>{plans.map(plan => <option key={plan.id} value={plan.id}>{plan.currentVersion.name} · V{plan.currentVersionNumber}</option>)}</select></label>
         <div className="delivery-optimization-toolbar-actions">
           <button className="secondary-button" onClick={() => void refresh()} disabled={busy}><RefreshCw size={14}/>刷新</button>
-          <button className="primary-button" onClick={() => void generate()} disabled={busy || !selectedPlan?.currentVersion.platformConfiguration}><Send size={14}/>生成解释型决策</button>
+          <button className="primary-button" onClick={() => void generate()} disabled={busy || !selectedPlan?.currentVersion.platformConfiguration}><Send size={14}/>生成优化方案</button>
         </div>
       </section>
       <section className="delivery-optimization-context">
-        <div><span>阶段 C 权限边界</span><b>Decision → CompiledWorkflow</b><small>选择与编译不是正式审批；远程写入在服务端和工作流中双重禁用。</small></div>
-        <div><CheckCircle2 size={17}/><span><b>最终状态：ready_for_final_approval</b><small>正式审批与真实平台写入属于阶段 D。</small></span></div>
+        <div><span>方案处理流程</span><b>生成方案 → 对比影响 → 运营确认</b><small>所有调整先保存为本地方案，不会自动修改广告平台。</small></div>
+        <div><span>当前业务目标</span><b>{businessObjectiveLabel(selectedPlan?.currentVersion.objective)}</b><small>{selectedPlan ? `计划 ${selectedPlan.currentVersion.name} · V${selectedPlan.currentVersionNumber}` : '选择计划后显示冻结目标与候选配置。'}</small></div>
+        <div><CheckCircle2 size={17}/><span><b>方案确认后：等待正式审批</b><small>当前阶段只完成方案确认，不会自动修改广告平台。</small></span></div>
       </section>
       <div className="delivery-config-recommendations delivery-optimization-list">
         {planDecisions.map(decision => <article className="delivery-recommendation-card delivery-optimization-card" key={decision.id}>
-          <header><div><span>{decision.policyVersion} · V{decision.inputs.planVersion}</span><h3>解释型投放决策</h3></div><strong className={`delivery-recommendation-status ${decision.diagnostic.code === 'ready' ? 'proposed' : 'stale'}`}>{decision.diagnostic.code}</strong></header>
-          {decision.diagnostic.code !== 'ready' ? <div className="delivery-optimization-stale"><CircleAlert size={17}/><span><b>{decision.diagnostic.explanation}</b><small>{decision.diagnostic.nextAction}</small></span></div> : null}
+          <header><div><span>{decisionPolicyLabel(decision.policyVersion)} · 计划 V{decision.inputs.planVersion}</span><h3>优化方案建议</h3></div><strong className={`delivery-recommendation-status ${decision.diagnostic.code === 'ready' ? 'proposed' : 'stale'}`}>{decisionDiagnosticCopy[decision.diagnostic.code].label}</strong></header>
+          {decision.diagnostic.code !== 'ready' ? <div className="delivery-optimization-stale"><CircleAlert size={17}/><span><b>{decisionDiagnosticCopy[decision.diagnostic.code].explanation}</b><small>{decisionDiagnosticCopy[decision.diagnostic.code].nextAction}</small></span></div> : null}
           <section className="delivery-optimization-evidence"><header><div><span>输入绑定</span><b>{decision.evidence.length} 条证据</b></div><code>{decision.canonicalHash.slice(0, 12)}</code></header></section>
           <div className="delivery-config-recommendations">
-            {decision.candidates.map(candidate => <article className="delivery-recommendation-card" key={candidate.id}>
-              <header><div><span>{candidate.uncertainty} uncertainty</span><h3>{candidate.kind}</h3></div>{candidate.id === decision.recommendedCandidateId ? <strong className="delivery-recommendation-status accepted">推荐</strong> : null}</header>
-              <dl className="delivery-recommendation-summary"><div><dt>预算变化</dt><dd>{candidate.budgetChangePercent}%</dd></div><div><dt>硬约束</dt><dd>{candidate.constraints.filter(item => item.passed).length}/{candidate.constraints.length} 通过</dd></div><div className="wide"><dt>理由</dt><dd>{candidate.rationale.join('；')}</dd></div></dl>
-              <footer><span>配置哈希 {candidate.targetConfiguration.canonical_hash?.slice(0, 12)}</span><button className="primary-button" disabled={busy} onClick={() => void selectCandidate(decision, candidate)}>选择并编译</button></footer>
-            </article>)}
+            {decision.candidates.map(candidate => {
+              const selected = selection?.decisionId === decision.id && selection.candidateId === candidate.id
+              const selecting = selectingCandidateId === candidate.id
+              return <article className="delivery-recommendation-card" key={candidate.id}>
+                <header><div><span>{decisionUncertaintyLabel[candidate.uncertainty]}</span><h3>{decisionCandidateLabel[candidate.kind]}</h3></div>{selected ? <strong className="delivery-recommendation-status accepted">已选择</strong> : candidate.id === decision.recommendedCandidateId ? <strong className="delivery-recommendation-status accepted">推荐</strong> : null}</header>
+                <dl className="delivery-recommendation-summary"><div><dt>预算变化</dt><dd>{candidate.budgetChangePercent}%</dd></div><div><dt>最终日预算</dt><dd>{candidate.targetConfiguration.payload.ocean_engine?.project ? formatCny(candidate.targetConfiguration.payload.ocean_engine.project.budget_and_bidding.daily_budget_minor) : '待平台能力确认'}</dd></div><div><dt>硬约束</dt><dd>{candidate.constraints.filter(item => item.passed).length}/{candidate.constraints.length} 通过</dd></div><div className="wide"><dt>理由</dt><dd>{candidate.rationale.map(decisionRationaleLabel).join('；')}</dd></div></dl>
+                <footer><span>{selected ? '已选为待确认方案' : `方案版本 ${candidate.targetConfiguration.canonical_hash?.slice(0, 8)}`}</span><button className="primary-button" aria-pressed={selected} disabled={busy || selected} onClick={() => void selectCandidate(decision, candidate)}>{selecting ? '正在准备方案…' : selected ? '待运营确认' : '选为待确认方案'}</button></footer>
+              </article>
+            })}
           </div>
         </article>)}
-        {!planDecisions.length ? <div className="panel-empty"><CircleAlert size={18}/>完成模拟与指标采集后，可为当前计划生成三个受硬约束的候选决策。</div> : null}
+        {!planDecisions.length ? <div className="panel-empty"><CircleAlert size={18}/>完成模拟与指标采集后，可为当前计划生成三种优化方案供运营比较。</div> : null}
       </div>
-      {selection ? <section className="delivery-optimization-context"><div><span>已编译工作流</span><b>{selection.workflow.status}</b><small>{selection.workflow.steps.length} 个步骤；remote_write_enabled = false</small></div><div><CircleAlert size={17}/><span><b>远程写入已阻断</b><small>{selection.workflow.steps.find(step => step.risk === 'remote_write')?.blockReason}</small></span></div></section> : null}
+      {selection ? <section ref={workflowRef} className="delivery-proposal-review" aria-live="polite">
+        <header className="delivery-proposal-review-heading">
+          <div><span>待运营确认</span><h3>优化方案调整明细</h3><p>请根据方案依据和调整前后差异决定是否接受。接受后只保存优化方案，不会自动修改广告平台。</p></div>
+          {currentProposalDecision ? <strong className={`delivery-recommendation-status ${currentProposalDecision === 'rejected' ? 'rejected' : 'accepted'}`}>{proposalDecisionLabel[currentProposalDecision]}</strong> : <strong className="delivery-recommendation-status">等待处理</strong>}
+        </header>
+        <div className="delivery-proposal-comparison" role="table" aria-label="优化方案调整前后对比">
+          <div className="delivery-proposal-comparison-head" role="row"><b role="columnheader">调整项</b><b role="columnheader">当前设置</b><b role="columnheader">优化后</b><b role="columnheader">变化</b></div>
+          {comparisonRows.map(row => <div className={row.changed ? 'is-changed' : ''} role="row" key={row.key}><b role="cell">{row.label}</b><span role="cell">{row.before}</span><strong role="cell">{row.after}</strong><em role="cell">{row.changed ? '将调整' : '保持不变'}</em></div>)}
+        </div>
+        <div className="delivery-proposal-safety"><ShieldCheck size={17}/><span><b>方案尚未应用到广告平台</b><small>系统只会保存本次运营决定和方案版本，平台写入保持禁用。</small></span></div>
+        <div className="delivery-proposal-actions">
+          <button className="secondary-button delivery-proposal-reject" disabled={busy || Boolean(currentProposalDecision)} onClick={() => void submitProposalDecision('rejected')}>拒绝此方案</button>
+          <div className="delivery-proposal-budget-edit">
+            <label htmlFor={`proposal-budget-${selection.id}`}>需要调整预算？</label>
+            <div className="delivery-proposal-budget-input"><span>¥</span><input id={`proposal-budget-${selection.id}`} aria-label="修改后的每日预算" type="number" min="0" step="0.01" placeholder="输入新的每日预算" value={modifiedBudgets[selection.id] ?? ''} onChange={event => setModifiedBudgets(current => ({ ...current, [selection.id]: event.target.value }))}/></div>
+            <button className="secondary-button" disabled={busy || Boolean(currentProposalDecision)} onClick={() => void submitProposalDecision('modified')}>保存修改后的方案</button>
+          </div>
+          <button className="primary-button delivery-proposal-accept" disabled={busy || Boolean(currentProposalDecision)} onClick={() => void submitProposalDecision('accepted')}>接受优化方案</button>
+        </div>
+        {selectedRuns.length ? <details className="delivery-proposal-audit"><summary>查看系统校验与审计记录</summary><div>{selectedRuns.map(run => <article key={run.id}><span>{formatTime(run.createdAt)}</span><b>{run.status === 'completed' ? '本地校验已完成' : '本地校验需要处理'}</b><small>{run.evidenceRefs.length} 条证据 · 未执行平台写入</small><code>{run.canonicalHash.slice(0, 12)}</code></article>)}</div></details> : null}
+      </section> : null}
       {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
     </div>
   </StateBoundary>

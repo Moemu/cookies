@@ -61,6 +61,14 @@ type decisionWorkflowApplication interface {
 	GetDecisionSelection(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DecisionSelection, error)
 }
 
+type observatoryApplication interface {
+	RunObservatory(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.RunObservatoryRequest) (delivery.DeliveryObservatoryRun, bool, error)
+	ListObservatoryRuns(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.DeliveryObservatoryRun, error)
+	GetObservatoryRun(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DeliveryObservatoryRun, error)
+	SubmitObservatoryFeedback(context.Context, contract.ActorContext, contract.ProjectID, string, string, delivery.SubmitObservatoryFeedbackRequest) (delivery.DeliveryObservatoryFeedback, bool, error)
+	ListObservatoryFeedback(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]delivery.DeliveryObservatoryFeedback, error)
+}
+
 type Server struct {
 	app Application
 	mux *http.ServeMux
@@ -93,6 +101,11 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/decisions/{decision_id}", server.getDecision)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/decisions/{decision_action}", server.decisionAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/decision-selections/{selection_id}", server.getDecisionSelection)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/decision-selections/{selection_id}/observatory-runs", server.runObservatory)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/observatory-runs", server.listObservatoryRuns)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}", server.getObservatoryRun)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/feedback", server.listObservatoryFeedback)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/feedback", server.submitObservatoryFeedback)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions", server.listExecutions)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}", server.getExecution)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/executions/{execution_id}/simulation-runs", server.createOutcomeSimulation)
@@ -105,6 +118,105 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/tour-runs/{tour_action}", server.tourRunAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/tour-runs/{run_id}", server.getTourRun)
 	return server
+}
+
+func (s *Server) observatoryApp() (observatoryApplication, error) {
+	app, ok := s.app.(observatoryApplication)
+	if !ok {
+		return nil, delivery.ErrUnsupportedConfigurationWorkflow
+	}
+	return app, nil
+}
+
+func (s *Server) runObservatory(w http.ResponseWriter, r *http.Request) {
+	var body delivery.RunObservatoryRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	app, err := s.observatoryApp()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	value, replay, err := app.RunObservatory(r.Context(), mustActor(r), projectID(r), r.PathValue("selection_id"), body)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	status := http.StatusCreated
+	if replay {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, value)
+}
+
+func (s *Server) listObservatoryRuns(w http.ResponseWriter, r *http.Request) {
+	app, err := s.observatoryApp()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	values, err := app.ListObservatoryRuns(r.Context(), mustActor(r), projectID(r), queryLimit(r))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+
+func (s *Server) getObservatoryRun(w http.ResponseWriter, r *http.Request) {
+	app, err := s.observatoryApp()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	value, err := app.GetObservatoryRun(r.Context(), mustActor(r), projectID(r), r.PathValue("run_id"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) submitObservatoryFeedback(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" {
+		writeError(w, r, delivery.ErrInvalidRequest)
+		return
+	}
+	var body delivery.SubmitObservatoryFeedbackRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	app, err := s.observatoryApp()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	value, replay, err := app.SubmitObservatoryFeedback(r.Context(), mustActor(r), projectID(r), r.PathValue("run_id"), key, body)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	status := http.StatusCreated
+	if replay {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, value)
+}
+
+func (s *Server) listObservatoryFeedback(w http.ResponseWriter, r *http.Request) {
+	app, err := s.observatoryApp()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	values, err := app.ListObservatoryFeedback(r.Context(), mustActor(r), projectID(r), r.PathValue("run_id"), queryLimit(r))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
 }
 
 func (s *Server) decisionApp() (decisionWorkflowApplication, error) {

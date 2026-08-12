@@ -222,6 +222,27 @@ func TestDecisionWorkflowHTTPStopsAtReadyForFinalApproval(t *testing.T) {
 	}
 }
 
+func TestObservatoryHTTPExposesReplayAndAuditableFeedback(t *testing.T) {
+	app := &applicationStub{
+		observatoryRun:      delivery.DeliveryObservatoryRun{ID: "observatory_1", SchemaVersion: delivery.ObservatoryRunSchemaV1, Source: delivery.ObservatorySourceReplay, Status: "completed", Outcome: "drift_detected", RemoteWriteEnabled: false},
+		observatoryFeedback: delivery.DeliveryObservatoryFeedback{ID: "feedback_1", SchemaVersion: delivery.ObservatoryFeedbackSchemaV1, Disposition: delivery.ObservatoryFeedbackAccepted},
+	}
+	server := New(app)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/decision-selections/selection_1/observatory-runs", `{"source":"replay","mode":"observe_existing","fixture":{"fixture_id":"fixture_1","data_state":"ready","observed_at":"2026-08-12T08:00:00Z","data_through":"2026-08-12T07:55:00Z","observed_values":{},"selector_matches":{},"evidence_refs":["replay://fixture/1"],"page_refs":[]}}`))
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"outcome":"drift_detected"`) || !strings.Contains(response.Body.String(), `"remote_write_enabled":false`) {
+		t.Fatalf("run status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request := authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/observatory-runs/observatory_1/feedback", `{"disposition":"accepted","reason":"reviewed evidence","diff_keys":[]}`)
+	request.Header.Set("Idempotency-Key", "feedback-1")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"disposition":"accepted"`) {
+		t.Fatalf("feedback status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func authenticatedRequest(method, target, body string) *http.Request {
 	request := httptest.NewRequest(method, target, bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -236,14 +257,16 @@ func authenticatedRequest(method, target, body string) *http.Request {
 }
 
 type applicationStub struct {
-	plan          delivery.DeliveryPlan
-	changeSet     delivery.ChangeSet
-	createdPlanID string
-	tourRun       delivery.DeliveryTourRun
-	tourRunID     string
-	tourReplay    bool
-	decision      delivery.DeliveryDecision
-	selection     delivery.DecisionSelection
+	plan                delivery.DeliveryPlan
+	changeSet           delivery.ChangeSet
+	createdPlanID       string
+	tourRun             delivery.DeliveryTourRun
+	tourRunID           string
+	tourReplay          bool
+	decision            delivery.DeliveryDecision
+	selection           delivery.DecisionSelection
+	observatoryRun      delivery.DeliveryObservatoryRun
+	observatoryFeedback delivery.DeliveryObservatoryFeedback
 }
 
 func (s *applicationStub) GenerateDecision(context.Context, contract.ActorContext, contract.ProjectID, string, int) (delivery.DeliveryDecision, error) {
@@ -260,6 +283,21 @@ func (s *applicationStub) SelectDecision(context.Context, contract.ActorContext,
 }
 func (s *applicationStub) GetDecisionSelection(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DecisionSelection, error) {
 	return s.selection, nil
+}
+func (s *applicationStub) RunObservatory(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.RunObservatoryRequest) (delivery.DeliveryObservatoryRun, bool, error) {
+	return s.observatoryRun, false, nil
+}
+func (s *applicationStub) ListObservatoryRuns(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.DeliveryObservatoryRun, error) {
+	return []delivery.DeliveryObservatoryRun{s.observatoryRun}, nil
+}
+func (s *applicationStub) GetObservatoryRun(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DeliveryObservatoryRun, error) {
+	return s.observatoryRun, nil
+}
+func (s *applicationStub) SubmitObservatoryFeedback(context.Context, contract.ActorContext, contract.ProjectID, string, string, delivery.SubmitObservatoryFeedbackRequest) (delivery.DeliveryObservatoryFeedback, bool, error) {
+	return s.observatoryFeedback, false, nil
+}
+func (s *applicationStub) ListObservatoryFeedback(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]delivery.DeliveryObservatoryFeedback, error) {
+	return []delivery.DeliveryObservatoryFeedback{s.observatoryFeedback}, nil
 }
 
 func (s *applicationStub) CreatePlan(context.Context, contract.ActorContext, contract.ProjectID, delivery.CreatePlanRequest) (delivery.DeliveryPlan, error) {

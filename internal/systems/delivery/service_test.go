@@ -837,16 +837,19 @@ func (a *observingAdapter) ExecuteStep(ctx context.Context, request PlatformStep
 }
 
 type memoryRepository struct {
-	plans             map[string]DeliveryPlan
-	changeSets        map[string]ChangeSet
-	approvals         map[string][]DeliveryApproval
-	executions        []ExecutionResult
-	metrics           []DeliveryMetricSnapshot
-	simulations       []OutcomeSimulationRun
-	alerts            map[string]DeliveryAlert
-	decisions         map[string]DeliveryDecision
-	selections        map[string]DecisionSelection
-	selectionRequests map[string]string
+	plans                       map[string]DeliveryPlan
+	changeSets                  map[string]ChangeSet
+	approvals                   map[string][]DeliveryApproval
+	executions                  []ExecutionResult
+	metrics                     []DeliveryMetricSnapshot
+	simulations                 []OutcomeSimulationRun
+	alerts                      map[string]DeliveryAlert
+	decisions                   map[string]DeliveryDecision
+	selections                  map[string]DecisionSelection
+	selectionRequests           map[string]string
+	observatoryRuns             map[string]DeliveryObservatoryRun
+	observatoryFeedback         map[string]DeliveryObservatoryFeedback
+	observatoryFeedbackRequests map[string]string
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -854,6 +857,7 @@ func newMemoryRepository() *memoryRepository {
 		plans: map[string]DeliveryPlan{}, changeSets: map[string]ChangeSet{},
 		approvals: map[string][]DeliveryApproval{},
 		decisions: map[string]DeliveryDecision{}, selections: map[string]DecisionSelection{}, selectionRequests: map[string]string{},
+		observatoryRuns: map[string]DeliveryObservatoryRun{}, observatoryFeedback: map[string]DeliveryObservatoryFeedback{}, observatoryFeedbackRequests: map[string]string{},
 	}
 }
 
@@ -913,6 +917,64 @@ func (r *memoryRepository) GetDecisionSelection(_ context.Context, organizationI
 		return DecisionSelection{}, ErrNotFound
 	}
 	return value, nil
+}
+
+func (r *memoryRepository) CreateObservatoryRun(_ context.Context, value DeliveryObservatoryRun) (DeliveryObservatoryRun, bool, error) {
+	for _, existing := range r.observatoryRuns {
+		if existing.OrganizationID == value.OrganizationID && existing.ProjectID == value.ProjectID && existing.InputHash == value.InputHash {
+			if existing.CanonicalHash != value.CanonicalHash {
+				return DeliveryObservatoryRun{}, false, ErrIdempotencyConflict
+			}
+			return existing, true, nil
+		}
+	}
+	r.observatoryRuns[repositoryKey(value.OrganizationID, value.ProjectID, value.ID)] = value
+	return value, false, nil
+}
+
+func (r *memoryRepository) ListObservatoryRuns(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, _ int) ([]DeliveryObservatoryRun, error) {
+	values := []DeliveryObservatoryRun{}
+	for _, value := range r.observatoryRuns {
+		if value.OrganizationID == organizationID && value.ProjectID == projectID {
+			values = append(values, value)
+		}
+	}
+	return values, nil
+}
+
+func (r *memoryRepository) GetObservatoryRun(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (DeliveryObservatoryRun, error) {
+	value, ok := r.observatoryRuns[repositoryKey(organizationID, projectID, id)]
+	if !ok {
+		return DeliveryObservatoryRun{}, ErrNotFound
+	}
+	return value, nil
+}
+
+func (r *memoryRepository) CreateObservatoryFeedback(_ context.Context, value DeliveryObservatoryFeedback, key, requestHash string) (DeliveryObservatoryFeedback, bool, error) {
+	scope := repositoryKey(value.OrganizationID, value.ProjectID, key)
+	if existingHash, ok := r.observatoryFeedbackRequests[scope]; ok {
+		if existingHash != requestHash {
+			return DeliveryObservatoryFeedback{}, false, ErrIdempotencyConflict
+		}
+		for _, existing := range r.observatoryFeedback {
+			if existing.OrganizationID == value.OrganizationID && existing.ProjectID == value.ProjectID && existing.ID == value.ID {
+				return existing, true, nil
+			}
+		}
+	}
+	r.observatoryFeedbackRequests[scope] = requestHash
+	r.observatoryFeedback[repositoryKey(value.OrganizationID, value.ProjectID, value.ID)] = value
+	return value, false, nil
+}
+
+func (r *memoryRepository) ListObservatoryFeedback(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, runID string, _ int) ([]DeliveryObservatoryFeedback, error) {
+	values := []DeliveryObservatoryFeedback{}
+	for _, value := range r.observatoryFeedback {
+		if value.OrganizationID == organizationID && value.ProjectID == projectID && value.RunID == runID {
+			values = append(values, value)
+		}
+	}
+	return values, nil
 }
 
 func repositoryKey(organizationID contract.OrganizationID, projectID contract.ProjectID, id string) string {

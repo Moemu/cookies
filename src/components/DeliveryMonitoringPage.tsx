@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, CircleAlert, Clock3, Database, Play, ShieldAlert, X } from 'lucide-react'
 import { DeliveryApiError, deliveryAlertApi, deliveryExecutionApi, type DeliveryAlert, type DeliveryAlertEvaluation, type DeliveryAlertFixture, type DeliveryOutcomeScenario, type DeliveryOutcomeSimulation } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
@@ -58,8 +58,10 @@ export function DeliveryMonitoringPage({ tourCase }: { tourCase?: string }) {
   const [simulation, setSimulation] = useState<DeliveryOutcomeSimulation>()
   const [busyId, setBusyId] = useState<string | null>(null)
   const [lastEvaluation, setLastEvaluation] = useState<DeliveryAlertEvaluation | null>(null)
+  const loadGeneration = useRef(0)
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current
     setError(null)
     setForbidden(false)
     try {
@@ -68,23 +70,22 @@ export function DeliveryMonitoringPage({ tourCase }: { tourCase?: string }) {
         targetPlanId ? deliveryExecutionApi.list(currentProject.id) : Promise.resolve([]),
       ])
       const succeededExecution = executions.find(value => value.changeSet.planId === targetPlanId && value.execution.status === 'succeeded')
-      setExecutionId(succeededExecution?.execution.id)
       let latestSimulation: DeliveryOutcomeSimulation | undefined
       if (succeededExecution) {
         try {
           latestSimulation = await deliveryExecutionApi.getLatestOutcomeSimulation(currentProject.id, succeededExecution.execution.id)
-          setSimulation(latestSimulation)
         } catch (reason) {
           if (!(reason instanceof DeliveryApiError && reason.status === 404)) throw reason
-          setSimulation(undefined)
         }
-      } else {
-        setSimulation(undefined)
       }
+      if (generation !== loadGeneration.current) return
+      setExecutionId(succeededExecution?.execution.id)
+      setSimulation(latestSimulation)
       setAlerts(targetPlanId
         ? records.filter(alert => alert.planId === targetPlanId && (!latestSimulation || alert.simulationRunId === latestSimulation.run.id))
         : records)
     } catch (reason) {
+      if (generation !== loadGeneration.current) return
       const message = reason instanceof Error ? reason.message : '无法读取监控告警。'
       setForbidden(reason instanceof DeliveryApiError && (reason.status === 403 || reason.code === 'PROJECT_ACCESS_DENIED'))
       setError(message)
@@ -99,6 +100,7 @@ export function DeliveryMonitoringPage({ tourCase }: { tourCase?: string }) {
       setError('当前计划还没有成功的平台操作演练；请先完成首次批准与演练。')
       return
     }
+    ++loadGeneration.current
     setBusyId('simulation')
     setError(null)
     try {
@@ -114,6 +116,7 @@ export function DeliveryMonitoringPage({ tourCase }: { tourCase?: string }) {
   }
 
   const evaluate = async () => {
+    ++loadGeneration.current
     setBusyId('evaluate')
     setError(null)
     try {

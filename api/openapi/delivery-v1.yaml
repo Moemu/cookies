@@ -401,6 +401,121 @@ paths:
               schema: { $ref: '#/components/schemas/DecisionSelection' }
         '404': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/decision-selections/{selection_id}/observatory-runs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: selection_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: runDeliveryObservatoryReplay
+      summary: Run a deterministic Mock/Replay observation without platform access
+      description: >-
+        Accepts only mock or replay fixtures. The runner can observe existing values or prepare
+        an unsubmitted local form, and always records PHASE_C_REMOTE_WRITE_PROHIBITED before the
+        platform-write boundary. Identical frozen inputs return the same immutable run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RunObservatoryRequest' }
+      responses:
+        '201':
+          description: Immutable observatory run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryObservatoryRun' }
+        '200':
+          description: Deterministic replay of an existing run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryObservatoryRun' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/observatory-runs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      operationId: listDeliveryObservatoryRuns
+      summary: List immutable Mock/Replay observatory runs
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Project-scoped runs ordered newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/DeliveryObservatoryRun' } }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: run_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getDeliveryObservatoryRun
+      summary: Get an immutable run with evidence and field diffs
+      responses:
+        '200':
+          description: Exact stored run.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryObservatoryRun' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/feedback:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: run_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: listDeliveryObservatoryFeedback
+      summary: List append-only operator feedback for a run
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Immutable feedback records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/DeliveryObservatoryFeedback' } }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: submitDeliveryObservatoryFeedback
+      summary: Append accepted, modified, or rejected operator feedback
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitObservatoryFeedbackRequest' }
+      responses:
+        '201':
+          description: New immutable feedback record.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryObservatoryFeedback' }
+        '200':
+          description: Idempotent replay.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryObservatoryFeedback' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -1654,6 +1769,144 @@ components:
         configuration: { $ref: '#/components/schemas/PlatformConfiguration' }
         workflow: { $ref: '#/components/schemas/CompiledDeliveryWorkflow' }
         final_approval_binding: { $ref: '#/components/schemas/FinalApprovalBinding' }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+    ObservatoryFixture:
+      type: object
+      additionalProperties: false
+      required: [fixture_id, data_state, data_state_reason, observed_at, data_through, observed_values, selector_matches, evidence_refs, page_refs]
+      properties:
+        fixture_id: { type: string, minLength: 1 }
+        data_state: { type: string, enum: [ready, insufficient_data, stale_data, blocked_by_asset, platform_pending] }
+        data_state_reason: { type: string }
+        observed_at: { type: string, format: date-time }
+        data_through: { type: string, format: date-time }
+        observed_values: { type: object, additionalProperties: true }
+        selector_matches:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+        evidence_refs:
+          type: array
+          minItems: 1
+          items: { type: string }
+        page_refs:
+          type: array
+          items: { type: string }
+        failure_step_id: { type: string, description: Deterministic Mock/Replay failure injection; never calls a platform. }
+    RunObservatoryRequest:
+      type: object
+      additionalProperties: false
+      required: [source, mode, fixture]
+      properties:
+        source: { type: string, enum: [mock, replay] }
+        mode: { type: string, enum: [observe_existing, prepare_new_local_form] }
+        fixture: { $ref: '#/components/schemas/ObservatoryFixture' }
+    ObservatoryBinding:
+      type: object
+      additionalProperties: false
+      required: [selection_id, decision_id, decision_canonical_hash, configuration_id, configuration_version, configuration_canonical_hash, workflow_id, workflow_canonical_hash, decision_schema_version, configuration_schema_version, workflow_schema_version]
+      properties:
+        selection_id: { type: string }
+        decision_id: { type: string }
+        decision_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        configuration_id: { type: string }
+        configuration_version: { type: integer, minimum: 1 }
+        configuration_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        workflow_id: { type: string }
+        workflow_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        decision_schema_version: { type: string, const: delivery-decision/v1 }
+        configuration_schema_version: { type: string }
+        workflow_schema_version: { type: string, const: compiled-delivery-workflow/v1 }
+    ObservatoryFieldDiff:
+      type: object
+      additionalProperties: false
+      required: [key, evidence_ref, expected_value, observed_value, matches]
+      properties:
+        key: { type: string }
+        evidence_ref: { type: string }
+        expected_value: {}
+        observed_value: {}
+        matches: { type: boolean }
+    ObservatoryStepObservation:
+      type: object
+      additionalProperties: false
+      required: [step_id, sequence, page, workflow_action, executed_action, status, selector_matches, evidence_refs, page_refs, diffs]
+      properties:
+        step_id: { type: string }
+        sequence: { type: integer, minimum: 1 }
+        page: { type: string }
+        workflow_action: { type: string }
+        executed_action: { type: string, enum: [observe, prepare_local_form] }
+        status: { type: string, enum: [observed, prepared_locally, blocked, failed] }
+        selector_matches: { type: array, items: { type: string } }
+        evidence_refs: { type: array, items: { type: string } }
+        page_refs: { type: array, items: { type: string } }
+        diffs: { type: array, items: { $ref: '#/components/schemas/ObservatoryFieldDiff' } }
+        block_reason: { type: string, enum: [PHASE_C_REMOTE_WRITE_PROHIBITED, insufficient_data, stale_data, blocked_by_asset, platform_pending, MOCK_REPLAY_RUNNER_FAILURE] }
+    DeliveryObservatoryRun:
+      type: object
+      additionalProperties: false
+      required: [schema_version, id, organization_id, project_id, runner_version, source, mode, input_hash, binding, data_state, data_state_reason, observed_at, data_through, status, outcome, remote_write_enabled, steps, evidence_refs, page_refs, canonical_hash, created_by, created_at]
+      properties:
+        schema_version: { type: string, const: delivery-observatory-run/v1 }
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        runner_version: { type: string, const: mock-replay-observatory-runner/v1 }
+        source: { type: string, enum: [mock, replay] }
+        mode: { type: string, enum: [observe_existing, prepare_new_local_form] }
+        input_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        binding: { $ref: '#/components/schemas/ObservatoryBinding' }
+        data_state: { type: string, enum: [ready, insufficient_data, stale_data, blocked_by_asset, platform_pending] }
+        data_state_reason: { type: string }
+        observed_at: { type: string, format: date-time }
+        data_through: { type: string, format: date-time }
+        status: { type: string, enum: [completed, blocked, runner_failed] }
+        outcome: { type: string, enum: [in_sync, drift_detected, local_form_prepared, insufficient_data, stale_data, blocked_by_asset, platform_pending, runner_failure] }
+        remote_write_enabled: { type: boolean, const: false }
+        steps: { type: array, minItems: 1, items: { $ref: '#/components/schemas/ObservatoryStepObservation' } }
+        evidence_refs: { type: array, minItems: 1, items: { type: string } }
+        page_refs: { type: array, items: { type: string } }
+        canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+    SubmitObservatoryFeedbackRequest:
+      type: object
+      additionalProperties: false
+      required: [disposition, reason, diff_keys]
+      properties:
+        disposition: { type: string, enum: [accepted, modified, rejected] }
+        reason: { type: string, minLength: 1 }
+        diff_keys: { type: array, items: { type: string } }
+        final_configuration: { $ref: '#/components/schemas/PlatformConfiguration' }
+      allOf:
+        - if: { properties: { disposition: { const: modified } }, required: [disposition] }
+          then: { required: [final_configuration] }
+        - if: { properties: { disposition: { enum: [accepted, rejected] } }, required: [disposition] }
+          then: { not: { required: [final_configuration] } }
+    DeliveryObservatoryFeedback:
+      type: object
+      additionalProperties: false
+      required: [schema_version, id, organization_id, project_id, run_id, run_canonical_hash, run_outcome, disposition, reason, diff_keys, canonical_hash, created_by, created_at]
+      properties:
+        schema_version: { type: string, const: delivery-observatory-feedback/v1 }
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        run_id: { type: string }
+        run_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        run_outcome: { type: string, enum: [in_sync, drift_detected, local_form_prepared, insufficient_data, stale_data, blocked_by_asset, platform_pending, runner_failure] }
+        disposition: { type: string, enum: [accepted, modified, rejected] }
+        reason: { type: string }
+        diff_keys: { type: array, items: { type: string } }
+        final_configuration: { $ref: '#/components/schemas/PlatformConfiguration' }
+        final_configuration_canonical_hash:
+          oneOf:
+            - { $ref: '#/components/schemas/CanonicalHash' }
+            - { type: string, const: '' }
+        canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
     RecommendationStatus:

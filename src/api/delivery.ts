@@ -272,6 +272,41 @@ export type DeliveryDecisionSelection = {
   createdAt: string
 }
 
+export type DeliveryObservatoryRun = {
+  schemaVersion: 'delivery-observatory-run/v1'
+  id: string
+  source: 'mock' | 'replay'
+  mode: 'observe_existing' | 'prepare_new_local_form'
+  inputHash: string
+  binding: { selectionId: string; decisionId: string; decisionCanonicalHash: string; configurationCanonicalHash: string; workflowId: string; workflowCanonicalHash: string }
+  dataState: 'ready' | 'insufficient_data' | 'stale_data' | 'blocked_by_asset' | 'platform_pending'
+  dataStateReason: string
+  status: 'completed' | 'blocked' | 'runner_failed'
+  outcome: 'in_sync' | 'drift_detected' | 'local_form_prepared' | 'insufficient_data' | 'stale_data' | 'blocked_by_asset' | 'platform_pending' | 'runner_failure'
+  remoteWriteEnabled: false
+  steps: Array<{ stepId: string; sequence: number; page: string; workflowAction: string; executedAction: 'observe' | 'prepare_local_form'; status: string; selectorMatches: string[]; evidenceRefs: string[]; pageRefs: string[]; diffs: Array<{ key: string; evidenceRef: string; expectedValue: unknown; observedValue: unknown; matches: boolean }>; blockReason?: string }>
+  evidenceRefs: string[]
+  pageRefs: string[]
+  canonicalHash: string
+  createdAt: string
+}
+
+export type DeliveryObservatoryFeedback = {
+  schemaVersion: 'delivery-observatory-feedback/v1'
+  id: string
+  runId: string
+  runCanonicalHash: string
+  runOutcome: DeliveryObservatoryRun['outcome']
+  disposition: 'accepted' | 'modified' | 'rejected'
+  reason: string
+  diffKeys: string[]
+  finalConfiguration?: PlatformConfiguration
+  finalConfigurationCanonicalHash?: string
+  canonicalHash: string
+  createdBy: string
+  createdAt: string
+}
+
 export type DeliveryPlan = {
   id: string
   organizationId: string
@@ -631,6 +666,19 @@ type WireDecisionSelection = {
   created_at: string
 }
 
+type WireObservatoryRun = {
+  schema_version: 'delivery-observatory-run/v1'; id: string; source: DeliveryObservatoryRun['source']; mode: DeliveryObservatoryRun['mode']; input_hash: string
+  binding: { selection_id: string; decision_id: string; decision_canonical_hash: string; configuration_canonical_hash: string; workflow_id: string; workflow_canonical_hash: string }
+  data_state: DeliveryObservatoryRun['dataState']; data_state_reason: string; status: DeliveryObservatoryRun['status']; outcome: DeliveryObservatoryRun['outcome']; remote_write_enabled: false
+  steps: Array<{ step_id: string; sequence: number; page: string; workflow_action: string; executed_action: 'observe' | 'prepare_local_form'; status: string; selector_matches: string[]; evidence_refs: string[]; page_refs: string[]; diffs: Array<{ key: string; evidence_ref: string; expected_value: unknown; observed_value: unknown; matches: boolean }>; block_reason?: string }>
+  evidence_refs: string[]; page_refs: string[]; canonical_hash: string; created_at: string
+}
+
+type WireObservatoryFeedback = {
+  schema_version: 'delivery-observatory-feedback/v1'; id: string; run_id: string; run_canonical_hash: string; run_outcome: DeliveryObservatoryRun['outcome']; disposition: DeliveryObservatoryFeedback['disposition']; reason: string; diff_keys: string[]
+  final_configuration?: PlatformConfiguration; final_configuration_canonical_hash?: string; canonical_hash: string; created_by: string; created_at: string
+}
+
 type WireDeliveryPlan = {
   id: string
   organization_id: string
@@ -874,6 +922,28 @@ export const deliveryOptimizationApi = {
       `/decisions/${encodeURIComponent(decisionId)}:select`,
       { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ candidate_id: candidateId, expected_plan_version: expectedPlanVersion }) },
     ))
+  },
+  async runObservatory(projectId: string, selectionId: string, mode: DeliveryObservatoryRun['mode'], source: DeliveryObservatoryRun['source'] = 'replay'): Promise<DeliveryObservatoryRun> {
+    const now = new Date()
+    return toObservatoryRun(await deliveryPlanRequest<WireObservatoryRun>(projectId, `/decision-selections/${encodeURIComponent(selectionId)}/observatory-runs`, {
+      method: 'POST', body: JSON.stringify({ source, mode, fixture: { fixture_id: `workspace-${selectionId}`, data_state: 'ready', data_state_reason: '', observed_at: now.toISOString(), data_through: now.toISOString(), observed_values: {}, selector_matches: {}, evidence_refs: [`${source}://workspace/${selectionId}`], page_refs: ['replay://local/observatory'] } }),
+    }))
+  },
+  async listObservatoryRuns(projectId: string): Promise<DeliveryObservatoryRun[]> {
+    const response = await deliveryPlanRequest<{ items?: WireObservatoryRun[] | null }>(projectId, '/observatory-runs')
+    return (response.items ?? []).map(toObservatoryRun)
+  },
+  async getObservatoryRun(projectId: string, runId: string): Promise<DeliveryObservatoryRun> {
+    return toObservatoryRun(await deliveryPlanRequest<WireObservatoryRun>(projectId, `/observatory-runs/${encodeURIComponent(runId)}`))
+  },
+  async listObservatoryFeedback(projectId: string, runId: string): Promise<DeliveryObservatoryFeedback[]> {
+    const response = await deliveryPlanRequest<{ items?: WireObservatoryFeedback[] | null }>(projectId, `/observatory-runs/${encodeURIComponent(runId)}/feedback`)
+    return (response.items ?? []).map(toObservatoryFeedback)
+  },
+  async submitObservatoryFeedback(projectId: string, runId: string, disposition: DeliveryObservatoryFeedback['disposition'], reason: string, diffKeys: string[], idempotencyKey: string, finalConfiguration?: PlatformConfiguration): Promise<DeliveryObservatoryFeedback> {
+    return toObservatoryFeedback(await deliveryPlanRequest<WireObservatoryFeedback>(projectId, `/observatory-runs/${encodeURIComponent(runId)}/feedback`, {
+      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ disposition, reason, diff_keys: diffKeys, ...(finalConfiguration ? { final_configuration: finalConfiguration } : {}) }),
+    }))
   },
   async generateRecommendations(projectId: string, planId: string, expectedVersion: number): Promise<DeliveryRecommendation> {
     const response = await deliveryPlanRequest<WireDeliveryRecommendation>(
@@ -1615,6 +1685,20 @@ function toDecisionSelection(value: WireDecisionSelection): DeliveryDecisionSele
     },
     createdAt: value.created_at,
   }
+}
+
+function toObservatoryRun(value: WireObservatoryRun): DeliveryObservatoryRun {
+  return {
+    schemaVersion: value.schema_version, id: value.id, source: value.source, mode: value.mode, inputHash: value.input_hash,
+    binding: { selectionId: value.binding.selection_id, decisionId: value.binding.decision_id, decisionCanonicalHash: value.binding.decision_canonical_hash, configurationCanonicalHash: value.binding.configuration_canonical_hash, workflowId: value.binding.workflow_id, workflowCanonicalHash: value.binding.workflow_canonical_hash },
+    dataState: value.data_state, dataStateReason: value.data_state_reason, status: value.status, outcome: value.outcome, remoteWriteEnabled: value.remote_write_enabled,
+    steps: value.steps.map(step => ({ stepId: step.step_id, sequence: step.sequence, page: step.page, workflowAction: step.workflow_action, executedAction: step.executed_action, status: step.status, selectorMatches: step.selector_matches ?? [], evidenceRefs: step.evidence_refs ?? [], pageRefs: step.page_refs ?? [], diffs: (step.diffs ?? []).map(diff => ({ key: diff.key, evidenceRef: diff.evidence_ref, expectedValue: diff.expected_value, observedValue: diff.observed_value, matches: diff.matches })), blockReason: step.block_reason })),
+    evidenceRefs: value.evidence_refs ?? [], pageRefs: value.page_refs ?? [], canonicalHash: value.canonical_hash, createdAt: value.created_at,
+  }
+}
+
+function toObservatoryFeedback(value: WireObservatoryFeedback): DeliveryObservatoryFeedback {
+  return { schemaVersion: value.schema_version, id: value.id, runId: value.run_id, runCanonicalHash: value.run_canonical_hash, runOutcome: value.run_outcome, disposition: value.disposition, reason: value.reason, diffKeys: value.diff_keys ?? [], finalConfiguration: value.final_configuration, finalConfigurationCanonicalHash: value.final_configuration_canonical_hash, canonicalHash: value.canonical_hash, createdBy: value.created_by, createdAt: value.created_at }
 }
 
 function toDeliveryRecommendation(value: WireDeliveryRecommendation): DeliveryRecommendation {

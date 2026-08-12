@@ -29,6 +29,28 @@ test('decision workflow client freezes candidate selection at the Phase C write 
   assert.deepEqual(JSON.parse(calls[2].init?.body as string), { candidate_id: 'balanced', expected_plan_version: 2 })
 })
 
+test('observatory client exposes deterministic replay evidence and immutable feedback', async t => {
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ url: string; init?: RequestInit }> = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init })
+    if (String(url).endsWith('/feedback')) return jsonResponse({ schema_version: 'delivery-observatory-feedback/v1', id: 'feedback_1', run_id: 'observatory_1', run_canonical_hash: 'f'.repeat(64), run_outcome: 'drift_detected', disposition: 'accepted', reason: 'reviewed', diff_keys: ['step.field'], canonical_hash: 'a'.repeat(64), created_by: 'user_1', created_at: now })
+    if (String(url).endsWith('/observatory-runs')) return init?.method === 'POST' ? jsonResponse(observatoryRunPayload()) : jsonResponse({ items: [observatoryRunPayload()] })
+    return jsonResponse(observatoryRunPayload())
+  }
+  t.after(() => { globalThis.fetch = originalFetch })
+
+  const run = await deliveryOptimizationApi.runObservatory('project_1', 'selection_1', 'observe_existing')
+  const listed = await deliveryOptimizationApi.listObservatoryRuns('project_1')
+  const feedback = await deliveryOptimizationApi.submitObservatoryFeedback('project_1', run.id, 'accepted', 'reviewed', ['step.field'], 'feedback-key-1')
+
+  assert.equal(run.remoteWriteEnabled, false)
+  assert.equal(run.steps.at(-1)?.blockReason, 'PHASE_C_REMOTE_WRITE_PROHIBITED')
+  assert.equal(listed[0].binding.workflowCanonicalHash, 'e'.repeat(64))
+  assert.equal(feedback.disposition, 'accepted')
+  assert.equal(new Headers(calls[2].init?.headers).get('Idempotency-Key'), 'feedback-key-1')
+})
+
 test('platform recommendation endpoints preserve v2 snapshots and idempotency', async t => {
   const originalFetch = globalThis.fetch
   const calls: Array<{ url: string; init?: RequestInit }> = []
@@ -102,6 +124,16 @@ function selectionPayload() {
       steps: [{ id: 'submit', sequence: 1, page: 'review', action: 'submit', risk: 'remote_write', preconditions: [], fields: [], timeout_seconds: 0, recovery: 'not executable', blocked: true, block_reason: 'PHASE_C_REMOTE_WRITE_PROHIBITED' }], canonical_hash: 'f'.repeat(64), created_at: now,
     },
     final_approval_binding: { status: 'ready_for_final_approval', action: 'remote_write', plan_canonical_hash: 'a'.repeat(64), intent_canonical_hash: 'b'.repeat(64), decision_canonical_hash: 'e'.repeat(64), configuration_canonical_hash: 'a'.repeat(64), workflow_canonical_hash: 'f'.repeat(64) }, created_at: now,
+  }
+}
+
+function observatoryRunPayload() {
+  return {
+    schema_version: 'delivery-observatory-run/v1', id: 'observatory_1', organization_id: 'org_1', project_id: 'project_1', runner_version: 'mock-replay-observatory-runner/v1', source: 'replay', mode: 'observe_existing', input_hash: 'a'.repeat(64),
+    binding: { selection_id: 'selection_1', decision_id: 'decision_1', decision_canonical_hash: 'b'.repeat(64), configuration_id: 'configuration_1', configuration_version: 2, configuration_canonical_hash: 'c'.repeat(64), workflow_id: 'workflow_1', workflow_canonical_hash: 'e'.repeat(64), decision_schema_version: 'delivery-decision/v1', configuration_schema_version: 'delivery-platform-configuration/v2', workflow_schema_version: 'compiled-delivery-workflow/v1' },
+    data_state: 'ready', data_state_reason: '', observed_at: now, data_through: now, status: 'completed', outcome: 'drift_detected', remote_write_enabled: false,
+    steps: [{ step_id: 'remote-write-boundary', sequence: 1, page: 'review', workflow_action: 'submit_platform_configuration', executed_action: 'observe', status: 'blocked', selector_matches: [], evidence_refs: [], page_refs: [], diffs: [], block_reason: 'PHASE_C_REMOTE_WRITE_PROHIBITED' }],
+    evidence_refs: ['replay://fixture/1'], page_refs: [], canonical_hash: 'f'.repeat(64), created_by: 'user_1', created_at: now,
   }
 }
 
