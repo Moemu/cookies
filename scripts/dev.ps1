@@ -42,6 +42,22 @@ try {
         $env:COOKIES_MYSQL_DSN = "cookies:cookies_local_development_only@tcp(127.0.0.1:$mysqlPort)/cookies?parseTime=true&multiStatements=true"
     }
 
+    # Keep the local-only Miyun encryption key stable so sessions saved in the
+    # development database remain decryptable after an API restart. Every value
+    # can still be overridden by the caller's environment.
+    $miyunDefaults = [ordered]@{
+        "COOKIES_MIYUN_ENABLED"                = "true"
+        "COOKIES_MIYUN_ENDPOINT"               = "https://api.youshu.youcloud.com/graphql"
+        "COOKIES_MIYUN_MASTER_KEY"             = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+        "COOKIES_MIYUN_MASTER_KEY_VERSION"     = "v1"
+        "COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS" = "api.youshu.youcloud.com,creative-static-ag-v2.umcdn.cn"
+    }
+    foreach ($setting in $miyunDefaults.GetEnumerator()) {
+        if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($setting.Key, "Process"))) {
+            [Environment]::SetEnvironmentVariable($setting.Key, $setting.Value, "Process")
+        }
+    }
+
     Write-Host 'Starting MySQL and waiting for it to become healthy...'
     Invoke-Checked docker compose up -d --wait mysql
 
@@ -59,7 +75,7 @@ try {
     $env:COOKIES_LOCAL_PRINCIPAL_KIND = 'user'
     $env:COOKIES_LOCAL_PRINCIPAL_ID = 'user_local'
     $env:COOKIES_LOCAL_PROJECT_ID = 'project_local'
-    $env:COOKIES_LOCAL_SCOPES = 'project.read,project.write,assets.read,assets.write,provider.job.create,provider.text.generate,provider.vision.understand'
+    $env:COOKIES_LOCAL_SCOPES = 'project.read,project.write,assets.read,assets.write,insights.read,insights.write,insights.confirm,provider.job.create,provider.text.generate,provider.vision.understand'
     $env:COOKIES_BLOB_PROVIDER = 'filesystem'
     $env:COOKIES_FILESYSTEM_BLOB_ROOT = (Join-Path $repositoryRoot '.data\blobs')
     $env:COOKIES_SCANNER_MODE = 'noop'

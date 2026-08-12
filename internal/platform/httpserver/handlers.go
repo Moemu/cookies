@@ -1858,6 +1858,27 @@ func (s *Server) extractKnowledgeDocumentMedia(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+func (s *Server) openKnowledgeDocumentOriginal(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	stream, document, err := s.knowledge.OpenDocumentOriginal(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("document_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	defer stream.Close()
+	w.Header().Set("Content-Type", document.MIMEType)
+	w.Header().Set("Content-Length", strconv.FormatInt(document.SizeBytes, 10))
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": document.Filename}))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, stream)
+}
+
 func (s *Server) searchKnowledge(w http.ResponseWriter, r *http.Request) {
 	if s.knowledge == nil {
 		s.notImplemented(w, r)
@@ -2080,10 +2101,7 @@ func (s *Server) notImplemented(w http.ResponseWriter, r *http.Request) {
 func writerHeaderNoStore(w http.ResponseWriter) { w.Header().Set("Cache-Control", "private, no-store") }
 func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	status, code, message, retryable := http.StatusInternalServerError, "INTERNAL", "The service could not complete the request.", true
-	var assetUseDenied assets.AssetUseDeniedError
 	switch {
-	case errors.As(err, &assetUseDenied):
-		status, code, message, retryable = http.StatusForbidden, string(assetUseDenied.Code), "The asset rights do not allow this operation.", false
 	case errors.Is(err, identity.ErrMembershipForbidden):
 		status, code, message, retryable = http.StatusForbidden, "MEMBERSHIP_OPERATION_FORBIDDEN", "当前身份无权执行该成员操作。", false
 	case errors.Is(err, identity.ErrMembershipNotFound), errors.Is(err, identity.ErrUserNotFound):

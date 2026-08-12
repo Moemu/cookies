@@ -44,6 +44,9 @@ const AssetsPage = lazy(() => import('./insight/assets/AssetsPage').then(module 
 const ReviewPage = lazy(() => import('./insight/review/ReviewPage').then(module => ({ default: module.ReviewPage })))
 const ExperiencePage = lazy(() => import('./insight/experience/ExperiencePage').then(module => ({ default: module.ExperiencePage })))
 const SettingsPage = lazy(() => import('./insight/settings/SettingsPage').then(module => ({ default: module.SettingsPage })))
+// 米云素材（同步自上游）。上游是静态 import 的，这里跟其他洞察页一样改成 lazy：
+// 这一页两千多行，静态引会整块压进主包，而它不在主线上，日常多数人不会点进来。
+const MiyunMaterialsPage = lazy(() => import('./MiyunMaterialsPage').then(module => ({ default: module.MiyunMaterialsPage })))
 const TaskCenterPage = lazy(() => import('./BusinessTaskPages').then(module => ({ default: module.TaskCenterPage })))
 const TaskCreateDialog = lazy(() => import('./BusinessTaskPages').then(module => ({ default: module.TaskCreateDialog })))
 
@@ -1607,6 +1610,7 @@ export function ModulePage({
       onOpenAnalysis={() => onOpenProject(currentProject.id, 'insight', 'analysis')}/>
     : system.key === 'insight' && item.id === 'experience' ? <ExperiencePage state={dataState} view={experienceViews[activeView] ?? 'lookup'}/>
     : system.key === 'insight' && item.id === 'review' ? <ReviewPage state={dataState} view={reviewViews[activeView] ?? 'current'} objectId={objectId}/>
+    : system.key === 'insight' && item.id === 'miyun-materials' ? <MiyunMaterialsPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'experiments' ? <ExperimentCenterPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'settings' ? <SettingsPage state={dataState} view={settingsViews[activeView] ?? 'thresholds'}/>
     : system.key === 'delivery' && item.id === 'tour' ? <DeliveryTourPage projectId={currentProject.id} routeRunId={tourRunId}/>

@@ -90,6 +90,7 @@ func (s Service) HandleJob(ctx context.Context, claim jobruntime.Claim) (jobrunt
 	}
 	asset, err := s.Assets.Get(ctx, actor, artifact.ProjectID, artifact.AssetRef.AssetVersion)
 	if err == nil {
+		artifact.Classifications.MediaFormat = classifyMediaFormat(asset)
 		switch artifact.AssetKind {
 		case contract.AssetImage:
 			err = s.analyzeImage(ctx, actor, asset, &artifact)
@@ -126,7 +127,7 @@ func (s Service) analyzeImage(ctx context.Context, actor contract.ActorContext, 
 	response, err := s.Vision.UnderstandVision(ctx, provider.VisionUnderstandRequest{
 		Actor: actor, Project: projectContext, ModelAlias: s.modelAlias(),
 		Input: provider.VisionUnderstandingInput{
-			Instruction:  "分析广告创作素材。严格区分画面可见文字、直接观察、推断、风险和无法判断项；不要把推断写成事实。frame_index 对图片固定为 0。",
+			Instruction:  "分析广告创作素材。严格区分画面可见文字、直接观察、推断、风险和无法判断项；不要把推断写成事实。content_style 只能使用给定枚举，无法判断时返回 unknown；frame_index 对图片固定为 0。",
 			SourceAssets: []contract.ProjectAssetRef{artifact.AssetRef}, OutputJSONSchema: visionOutputSchema(),
 		},
 	})
@@ -189,7 +190,27 @@ func (s Service) analyzeVideo(ctx context.Context, actor contract.ActorContext, 
 		return fmt.Errorf("video has no analyzable frames")
 	}
 	artifact.Keyframes = keyframes
-	artifact.Warnings = append(artifact.Warnings, "uniform_time_sampling", "transcript_unavailable")
+	artifact.Warnings = append(artifact.Warnings, "uniform_time_sampling")
+	if s.Transcriber == nil {
+		artifact.Warnings = append(artifact.Warnings, "transcript_unavailable")
+	} else {
+		transcript, transcriptionErr := s.Transcriber.Transcribe(ctx, media.TranscriptionRequest{
+			Actor: actor, ProjectID: artifact.ProjectID, SourceVideo: artifact.AssetRef.AssetVersion,
+		})
+		if transcriptionErr != nil {
+			artifact.Warnings = append(artifact.Warnings, "transcript_unavailable")
+		} else if text := strings.TrimSpace(transcript.Text); text == "" {
+			artifact.Warnings = append(artifact.Warnings, "transcript_empty")
+		} else {
+			artifact.Transcript = []Evidence{{
+				ID: "transcript_01", Text: text, Confidence: 1,
+				Locator: Locator{Kind: "audio_transcript", AssetRef: artifact.AssetRef},
+			}}
+			artifact.TranscriptionLineage = &TranscriptionLineage{
+				ProviderCode: transcript.ProviderCode, ModelVersion: transcript.ModelVersion,
+			}
+		}
+	}
 	if s.Vision == nil {
 		applyTechnicalFallback(asset, artifact, "vision_provider_unavailable")
 		return nil
@@ -202,10 +223,16 @@ func (s Service) analyzeVideo(ctx context.Context, actor contract.ActorContext, 
 	for _, frame := range keyframes {
 		refs = append(refs, frame.FrameRef)
 	}
+	instruction := "这些图片按时间顺序来自同一条广告视频。分析叙事结构、镜头变化、画面可见文字、直接观察、推断、风险和无法判断项；content_style 只能使用给定枚举，frame_index 必须指向提供的帧序号（从 0 开始），不要把推断写成事实。"
+	if len(artifact.Transcript) > 0 {
+		instruction += "\nASR 转写：" + boundedInstructionText(artifact.Transcript[0].Text, 4000)
+	} else {
+		instruction += "\n没有可靠 ASR 转写；涉及口播、说话人数或商品旁白的分类必须返回 unknown。"
+	}
 	response, err := s.Vision.UnderstandVision(ctx, provider.VisionUnderstandRequest{
 		Actor: actor, Project: projectContext, ModelAlias: s.modelAlias(),
 		Input: provider.VisionUnderstandingInput{
-			Instruction:  "这些图片按时间顺序来自同一条广告视频。分析叙事结构、镜头变化、画面可见文字、直接观察、推断、风险和无法判断项；frame_index 必须指向提供的帧序号（从 0 开始），不要把推断写成事实。",
+			Instruction:  instruction,
 			SourceAssets: refs, OutputJSONSchema: visionOutputSchema(),
 		},
 	})
@@ -224,7 +251,9 @@ func (s Service) analyzeVideo(ctx context.Context, actor contract.ActorContext, 
 	if err := applyVisionResponse(artifact, response, keyframes); err != nil {
 		return err
 	}
-	artifact.Status = StatusPartial
+	if len(artifact.Transcript) == 0 {
+		artifact.Status = StatusPartial
+	}
 	return nil
 }
 
@@ -261,6 +290,23 @@ func applyVisionResponse(artifact *Artifact, response provider.SynchronousRespon
 	artifact.Unknowns, err = candidatesToEvidence(artifact, "unknown", output.Unknowns, keyframes)
 	if err != nil {
 		return err
+	}
+	style := output.ContentStyle
+	if !validContentStyleCode(style.Code) || style.Code == "" || style.Confidence < 0 || style.Confidence > 1 {
+		return fmt.Errorf("vision provider returned invalid content style")
+	}
+	if artifact.AssetKind == contract.AssetVideo && len(artifact.Transcript) == 0 && contentStyleNeedsTranscript(style.Code) {
+		artifact.Classifications.ContentStyle = Classification{Code: "unknown", EvidenceRefs: []string{}}
+		artifact.Warnings = append(artifact.Warnings, "content_style_requires_transcript")
+	} else {
+		if artifact.AssetKind == contract.AssetVideo && (style.FrameIndex < 0 || style.FrameIndex >= len(keyframes)) {
+			return fmt.Errorf("vision provider content style points outside sampled frames")
+		}
+		evidenceRef := "asset"
+		if artifact.AssetKind == contract.AssetVideo {
+			evidenceRef = fmt.Sprintf("frame:%d", style.FrameIndex)
+		}
+		artifact.Classifications.ContentStyle = Classification{Code: style.Code, Confidence: style.Confidence, EvidenceRefs: []string{evidenceRef}}
 	}
 	artifact.Lineage.ProviderCode = response.ProviderCode
 	artifact.Lineage.ModelVersion = response.ModelVersion
@@ -313,6 +359,43 @@ func applyTechnicalFallback(asset assets.ProjectAsset, artifact *Artifact, warni
 	}}
 	artifact.Warnings = append(artifact.Warnings, warning)
 	artifact.Status = StatusPartial
+}
+
+func classifyMediaFormat(asset assets.ProjectAsset) Classification {
+	code := "unknown"
+	switch asset.Version.MIMEType {
+	case "image/jpeg", "image/png":
+		code = "single_image"
+	case "image/gif":
+		code = "gif"
+	case "video/mp4":
+		code = "video"
+		if asset.Version.HeightPixels > asset.Version.WidthPixels && asset.Version.WidthPixels > 0 {
+			code = "vertical_video"
+		}
+	}
+	confidence := float64(0)
+	if code != "unknown" {
+		confidence = 1
+	}
+	return Classification{Code: code, Confidence: confidence, EvidenceRefs: []string{"asset:technical_metadata"}}
+}
+
+func contentStyleNeedsTranscript(code string) bool {
+	switch code {
+	case "single_speaker", "multiple_speakers", "product_voiceover":
+		return true
+	default:
+		return false
+	}
+}
+
+func boundedInstructionText(value string, limit int) string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) > limit {
+		runes = runes[:limit]
+	}
+	return string(runes)
 }
 
 func sampleTimestamps(durationMS int64) []int64 {

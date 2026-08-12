@@ -12,11 +12,41 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shikanon/cookies/internal/integrations/crawler"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/systems/insights"
 )
 
 type Application interface {
+	GetMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID) (insights.MiyunConnection, error)
+	UpdateMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID, insights.UpdateMiyunConnectionRequest) (insights.MiyunConnection, error)
+	VerifyMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID, insights.VerifyMiyunConnectionRequest) (insights.MiyunConnection, error)
+	GetMiyunProductSource(context.Context, contract.ActorContext, contract.ProjectID) (insights.MiyunProductSource, error)
+	AnalyzeMiyunProductProfile(context.Context, contract.ActorContext, contract.ProjectID, insights.AnalyzeMiyunProductProfileRequest) (insights.MiyunProductProfile, error)
+	ConfirmMiyunProductProfile(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ConfirmMiyunProductProfileRequest) (insights.MiyunProductProfile, error)
+	ListMiyunProductProfiles(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunProductProfile, error)
+	GetMiyunProductProfile(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunProductProfile, error)
+	ManualImportMiyunMaterial(context.Context, contract.ActorContext, contract.ProjectID, contract.IdempotencyKey, insights.ManualMiyunMaterialRequest) (insights.MiyunManualImportResult, error)
+	CreateMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, contract.IdempotencyKey, insights.CreateMiyunCrawlJobRequest) (insights.MiyunCrawlJob, error)
+	ListMiyunCrawlJobs(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunCrawlJob, error)
+	GetMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunCrawlJob, error)
+	CancelMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunCrawlJob, error)
+	RetryMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, string, contract.IdempotencyKey) (insights.MiyunCrawlJob, error)
+	ListMiyunMaterials(context.Context, contract.ActorContext, contract.ProjectID, insights.MiyunMaterialListOptions) (insights.MiyunMaterialListPage, error)
+	GetMiyunMaterialDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunMaterialDetail, error)
+	OpenMiyunMaterialPreview(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunMaterialPreview, error)
+	DecideMiyunMaterial(context.Context, contract.ActorContext, contract.ProjectID, string, bool, insights.MiyunMaterialDecisionRequest) (insights.MiyunMaterial, error)
+	RetryMiyunMaterialImport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunMaterial, error)
+	CreateMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateMiyunHandoffRequest) (insights.MiyunHandoff, error)
+	ListMiyunHandoffs(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunHandoff, error)
+	GetMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunHandoff, error)
+	MarkMiyunHandoffDelivered(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunHandoff, error)
+	ExportMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, string, insights.MiyunHandoffPackageKind, io.Writer) error
+	CreateMiyunHandoffReturn(context.Context, contract.ActorContext, contract.ProjectID, string, contract.IdempotencyKey, insights.CreateMiyunHandoffReturnRequest) (insights.MiyunHandoffReturn, error)
+	UploadMiyunHandoffReturn(context.Context, contract.ActorContext, contract.ProjectID, string, string, contract.IdempotencyKey, insights.UploadMiyunHandoffReturnRequest) (insights.MiyunHandoffReturn, error)
+	MarkMiyunHandoffReturned(context.Context, contract.ActorContext, contract.ProjectID, string, string, contract.IdempotencyKey, int64) (insights.MiyunHandoff, insights.MiyunHandoffReturn, error)
+	ImportMiyunHandoffReturnBundle(context.Context, contract.ActorContext, contract.ProjectID, string, contract.IdempotencyKey, insights.ImportMiyunHandoffReturnBundleRequest) (insights.MiyunHandoffReturnBundleResult, error)
+
 	CreateReport(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateReportRequest) (insights.InsightReport, error)
 	// 记一笔（分析页唯一的写操作）。判定不在入参里：能传的话页面上标的三档就是装饰。
 	PinFinding(context.Context, contract.ActorContext, contract.ProjectID, insights.PinFindingRequest) (insights.InsightReport, error)
@@ -148,6 +178,7 @@ func New(app Application) *Server {
 	server.registerAssetRoutes()
 	server.registerConnectorRoutes()
 	server.registerExperimentRoutes()
+	server.registerMiyunRoutes()
 	return server
 }
 
@@ -613,6 +644,7 @@ func detailOr(err error, sentinel error, fallback string) string {
 func writeError(writer http.ResponseWriter, request *http.Request, err error) {
 	status, code, message := http.StatusInternalServerError, "INTERNAL", "服务暂时不可用，请稍后重试"
 	retryable := true
+	var downloadErr *crawler.YouShuDownloadError
 	switch {
 	case errors.Is(err, insights.ErrInvalidRequest):
 		status, code, retryable = http.StatusBadRequest, "INVALID_REQUEST", false
@@ -631,8 +663,27 @@ func writeError(writer http.ResponseWriter, request *http.Request, err error) {
 	case errors.Is(err, insights.ErrVersionConflict):
 		status, code, retryable = http.StatusPreconditionFailed, "VERSION_CONFLICT", false
 		message = detailOr(err, insights.ErrVersionConflict, "资源已被更新，请刷新后重试")
+	case errors.Is(err, insights.ErrIdempotencyConflict):
+		status, code, retryable = http.StatusConflict, contract.ErrorIdempotencyConflict, false
+		message = "The idempotency key conflicts with an earlier Miyun request."
 	case strings.Contains(err.Error(), "scope is required"):
 		status, code, message, retryable = http.StatusForbidden, "SCOPE_REQUIRED", "缺少所需的洞察权限", false
+	case errors.As(err, &downloadErr):
+		status, code, message, retryable = http.StatusServiceUnavailable, "MIYUN_PREVIEW_UNAVAILABLE", "米云素材预览暂时不可用，请稍后重试", true
+		switch {
+		case downloadErr.Kind == crawler.YouShuDownloadForbiddenHost:
+			status, code, message, retryable = http.StatusServiceUnavailable, "MIYUN_PREVIEW_HOST_NOT_ALLOWED", "预览资源主机尚未获得服务端授权，请联系管理员更新米云下载白名单", false
+		case downloadErr.Status == http.StatusTooManyRequests:
+			status, code, message, retryable = http.StatusTooManyRequests, "MIYUN_PREVIEW_RATE_LIMITED", "米云预览请求过于频繁，请稍后再试", true
+		case downloadErr.Kind == crawler.YouShuDownloadExpiredURL:
+			status, code, message, retryable = http.StatusGone, "MIYUN_PREVIEW_EXPIRED", "该素材的预览地址已过期，请重新采集后再试", false
+		case downloadErr.Kind == crawler.YouShuDownloadTooLarge:
+			status, code, message, retryable = http.StatusRequestEntityTooLarge, "MIYUN_PREVIEW_TOO_LARGE", "该素材超过预览大小限制", false
+		case downloadErr.Kind == crawler.YouShuDownloadInvalidURL,
+			downloadErr.Kind == crawler.YouShuDownloadNotMP4,
+			downloadErr.Kind == crawler.YouShuDownloadLengthMismatch:
+			status, code, message, retryable = http.StatusUnprocessableEntity, "MIYUN_PREVIEW_INVALID_MEDIA", "该素材不是可安全预览的 MP4 文件", false
+		}
 	}
 	requestContext, _ := contract.RequestContextFrom(request.Context())
 	if status == http.StatusInternalServerError {

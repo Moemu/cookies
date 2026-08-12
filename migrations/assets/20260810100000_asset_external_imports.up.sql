@@ -1,0 +1,41 @@
+CREATE TABLE IF NOT EXISTS asset_external_imports (
+  id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+  organization_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  project_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+
+  source_provider VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  source_object_id VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  source_locator VARCHAR(1024) NOT NULL DEFAULT '',
+  idempotency_key VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  request_snapshot JSON NOT NULL,
+  request_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+
+  status VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'queued',
+  attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+  result_unknown_at DATETIME(6) NULL,
+  result_unknown_reason VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  recovery_attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+  last_error_code VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  last_error_message VARCHAR(1024) NULL,
+
+  committed_asset_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  committed_asset_version BIGINT NULL,
+  version BIGINT NOT NULL DEFAULT 1,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+
+  UNIQUE KEY uq_asset_external_imports_scope (organization_id, id),
+  UNIQUE KEY uq_asset_external_imports_project_scope (organization_id, project_id, id),
+  UNIQUE KEY uq_asset_external_imports_source (organization_id, project_id, source_provider, source_object_id),
+  UNIQUE KEY uq_asset_external_imports_idempotency (organization_id, project_id, idempotency_key),
+  KEY idx_asset_external_imports_claim (organization_id, project_id, status, created_at),
+  CONSTRAINT fk_asset_external_imports_project FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
+  CONSTRAINT fk_asset_external_imports_committed_asset FOREIGN KEY (organization_id, project_id, committed_asset_id, committed_asset_version) REFERENCES project_assets(organization_id, project_id, asset_id, asset_version),
+  CONSTRAINT chk_asset_external_imports_status CHECK (status IN ('queued', 'running', 'succeeded', 'failed')),
+  CONSTRAINT chk_asset_external_imports_version CHECK (version > 0),
+  CONSTRAINT chk_asset_external_imports_asset_pair CHECK ((committed_asset_id IS NULL AND committed_asset_version IS NULL) OR (committed_asset_id IS NOT NULL AND committed_asset_version IS NOT NULL)),
+  CONSTRAINT chk_asset_external_imports_attempts CHECK (attempt_count >= recovery_attempt_count),
+  CONSTRAINT chk_asset_external_imports_result_unknown CHECK ((result_unknown_at IS NULL AND result_unknown_reason IS NULL) OR (result_unknown_at IS NOT NULL AND result_unknown_reason IS NOT NULL)),
+  CONSTRAINT chk_asset_external_imports_succeeded CHECK (status <> 'succeeded' OR committed_asset_id IS NOT NULL),
+  CONSTRAINT chk_asset_external_imports_failed CHECK (status <> 'failed' OR last_error_code IS NOT NULL)
+);

@@ -20,10 +20,11 @@ const (
 )
 
 var (
-	ErrNotFound        = errors.New("insights resource not found")
-	ErrInvalidRequest  = errors.New("insights request is invalid")
-	ErrInvalidState    = errors.New("insights resource is not in a state that allows this action")
-	ErrVersionConflict = errors.New("insights resource version conflict")
+	ErrNotFound            = errors.New("insights resource not found")
+	ErrInvalidRequest      = errors.New("insights request is invalid")
+	ErrInvalidState        = errors.New("insights resource is not in a state that allows this action")
+	ErrVersionConflict     = errors.New("insights resource version conflict")
+	ErrIdempotencyConflict = errors.New("insights idempotency key conflicts with an existing request")
 
 	// ErrUnderstandingPending 是「模型正在看这条视频，还没看完」。
 	//
@@ -526,6 +527,24 @@ type Repository interface {
 
 type Service struct {
 	Repository Repository
+	// Miyun owns the product-profile and material intake state introduced by
+	// the Miyun MVP. The source readers are narrow, authorized projections;
+	// Insights never reaches into another module's tables.
+	Miyun               MiyunRepository
+	MiyunProjects       MiyunProjectSourceReader
+	MiyunAssets         MiyunAssetSourceReader
+	MiyunKnowledge      MiyunKnowledgeSourceReader
+	MiyunHandoffContent MiyunHandoffContentOpener
+	MiyunMedia          MiyunMediaEvidenceReader
+	MiyunCrawl          MiyunCrawlRepository
+	MiyunJobs           MiyunRuntimeJobs
+	MiyunPages          MiyunPageClient
+	MiyunImports        MiyunAuthorizedImporter
+	MiyunReturns        MiyunReturnAssetImporter
+	MiyunPreviews       MiyunAuthorizedPreviewer
+	MiyunSecrets        MiyunSecretCipher
+	MiyunVerifier       MiyunConnectionVerifier
+	MiyunCooldown       time.Duration
 	// Assets backs 分析素材库 and 内容分析. It is a separate interface from
 	// Repository because the two lifecycles share nothing but the module.
 	Assets AssetRepository
