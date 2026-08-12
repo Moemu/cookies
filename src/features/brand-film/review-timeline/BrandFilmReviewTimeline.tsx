@@ -170,7 +170,13 @@ export function BrandFilmReviewTimeline({ units, shots, masterDurationMs, finalP
     <section className="brand-generation-shot-timeline" aria-label="镜头时间轴">
       <header><div><h4>镜头时间轴</h4><span>点击镜头内部任意位置，可跳到该镜头对应时刻</span></div><time>{formatTimelineTime(playheadMs)} / {formatTimelineTime(durationMs)}</time></header>
       <div className="brand-generation-timeline-viewport" ref={viewportRef}>
-        <div className="brand-generation-timeline-canvas" style={{ width: `${canvasWidth}px` }} onClick={event => {
+        <div className="brand-generation-timeline-canvas" role="slider" tabIndex={0} aria-label="镜头时间轴播放位置" aria-valuemin={0} aria-valuemax={durationMs} aria-valuenow={playheadMs} style={{ width: `${canvasWidth}px` }} onKeyDown={event => {
+          const stepMs = event.shiftKey ? 5000 : 1000
+          if (event.key === 'ArrowLeft') { event.preventDefault(); seekTo(playheadMs - stepMs) }
+          if (event.key === 'ArrowRight') { event.preventDefault(); seekTo(playheadMs + stepMs) }
+          if (event.key === 'Home') { event.preventDefault(); seekTo(0) }
+          if (event.key === 'End') { event.preventDefault(); seekTo(durationMs) }
+        }} onClick={event => {
           if (event.target !== event.currentTarget) return
           const bounds = event.currentTarget.getBoundingClientRect()
           seekTo((event.clientX - bounds.left) / pixelsPerMs)

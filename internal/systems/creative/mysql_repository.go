@@ -417,7 +417,7 @@ func (r MySQLRepository) RenameTask(ctx context.Context, organizationID contract
 		}
 		return CreativeTask{}, ErrVersionConflict
 	}
-	const query = creativeTaskSelect + ` WHERE organization_id = ? AND project_id = ? AND id = ?`
+	const query = `SELECT id, display_name, organization_id, project_id, intake_id, creative_format, channel, COALESCE(video_purpose, ''), COALESCE(performance_mode, ''), COALESCE(lineage_key, ''), status, direction_payload, version, created_at, updated_at FROM creative_tasks WHERE organization_id = ? AND project_id = ? AND id = ?`
 	return scanTask(r.DB.QueryRowContext(ctx, query, organizationID, projectID, taskID))
 }
 
