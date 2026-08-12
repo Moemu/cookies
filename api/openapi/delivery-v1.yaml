@@ -218,6 +218,86 @@ paths:
         '201': { $ref: '#/components/responses/ChangeSet' }
         '412': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/operator-feedback/{feedback_id}:create-controlled-change-set:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: feedback_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+      - $ref: '#/components/parameters/IdempotencyKey'
+    post:
+      operationId: createControlledDeliveryChangeSet
+      summary: Freeze the latest accepted or modified feedback into a formal controlled ChangeSet
+      description: >-
+        This operation never writes an advertising platform. It freezes Plan, Intent, feedback,
+        Decision, final Configuration, Workflow, account, action, budget and Skill identities.
+        Rejected feedback, an older feedback record or any hash/version drift is rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateControlledChangeSetRequest' }
+      responses:
+        '201':
+          description: Formal controlled ChangeSet ready for remote-write approval.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlledChangeSet' }
+        '200':
+          description: Idempotent replay of the same frozen request.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlledChangeSet' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/controlled-change-sets/{controlled_change_set_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: controlled_change_set_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getControlledDeliveryChangeSet
+      summary: Read one formal controlled ChangeSet and its current approval validity
+      responses:
+        '200':
+          description: Controlled ChangeSet.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlledChangeSet' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/controlled-change-sets/{controlled_change_set_id}:approve:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: controlled_change_set_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: approveControlledDeliveryChangeSet
+      summary: Approve the exact controlled remote-write scope without upgrading execute_mock
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version]
+              properties:
+                expected_version: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Immutable formal remote-write Approval.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RemoteWriteApproval' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -1136,6 +1216,85 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    ControlledAuthorityBinding:
+      type: object
+      additionalProperties: false
+      required: [selection_id, observatory_run_id, observatory_run_canonical_hash, operator_feedback_id, operator_feedback_canonical_hash, operator_feedback_disposition, plan_id, plan_version, plan_canonical_hash, intent_id, intent_version, intent_canonical_hash, decision_id, decision_canonical_hash, configuration_id, configuration_version, configuration_canonical_hash, workflow_id, workflow_canonical_hash, account_reference_id, object_fingerprint, skill_id, skill_version]
+      properties:
+        selection_id: { type: string }
+        observatory_run_id: { type: string }
+        observatory_run_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        operator_feedback_id: { type: string }
+        operator_feedback_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        operator_feedback_disposition: { type: string, enum: [accepted, modified] }
+        plan_id: { type: string }
+        plan_version: { type: integer, minimum: 1 }
+        plan_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        intent_id: { type: string }
+        intent_version: { type: integer, minimum: 1 }
+        intent_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        decision_id: { type: string }
+        decision_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        configuration_id: { type: string }
+        configuration_version: { type: integer, minimum: 1 }
+        configuration_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        workflow_id: { type: string }
+        workflow_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        account_reference_id: { type: string }
+        object_fingerprint: { type: string }
+        skill_id: { type: string }
+        skill_version: { type: string }
+    CreateControlledChangeSetRequest:
+      type: object
+      additionalProperties: false
+      required: [action, budget_limit_minor, currency, object_fingerprint, skill_id, skill_version]
+      properties:
+        action: { type: string, const: create_project_and_promotions }
+        budget_limit_minor: { type: integer, minimum: 0 }
+        currency: { type: string, const: CNY }
+        object_fingerprint: { type: string, minLength: 1 }
+        skill_id: { type: string, const: oceanengine-ecommerce-manual }
+        skill_version: { type: string, minLength: 1 }
+    ControlledChangeSet:
+      type: object
+      additionalProperties: false
+      required: [schema_version, id, organization_id, project_id, binding, action, budget_limit_minor, currency, status, canonical_hash, version, created_by, created_at, updated_at]
+      properties:
+        schema_version: { type: string, const: delivery-controlled-change-set/v1 }
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        binding: { $ref: '#/components/schemas/ControlledAuthorityBinding' }
+        action: { type: string, const: create_project_and_promotions }
+        budget_limit_minor: { type: integer, minimum: 0 }
+        currency: { type: string, const: CNY }
+        status: { type: string, enum: [ready_for_approval, approved, rejected, executing, executed, invalidated] }
+        canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        approval: { $ref: '#/components/schemas/RemoteWriteApproval' }
+    RemoteWriteApproval:
+      type: object
+      additionalProperties: false
+      required: [schema_version, id, organization_id, project_id, controlled_change_set_id, controlled_change_set_hash, binding, action, scope, budget_limit_minor, currency, action_hash, approved_by, approved_at, expires_at]
+      properties:
+        schema_version: { type: string, const: delivery-remote-write-approval/v1 }
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        controlled_change_set_id: { type: string }
+        controlled_change_set_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        binding: { $ref: '#/components/schemas/ControlledAuthorityBinding' }
+        action: { type: string, const: create_project_and_promotions }
+        scope: { type: string, const: controlled_remote_write }
+        budget_limit_minor: { type: integer, minimum: 0 }
+        currency: { type: string, const: CNY }
+        action_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        approved_by: { type: string }
+        approved_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
     Principal:
       type: object
       additionalProperties: false

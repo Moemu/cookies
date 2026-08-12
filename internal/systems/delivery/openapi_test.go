@@ -16,6 +16,12 @@ func TestOpenAPIContractCoversPlanLifecyclePreflightAndErrors(t *testing.T) {
 	}
 	contract := string(contents)
 	required := []string{
+		"/operator-feedback/{feedback_id}:create-controlled-change-set:",
+		"/controlled-change-sets/{controlled_change_set_id}:approve:",
+		"ControlledChangeSet:",
+		"RemoteWriteApproval:",
+		"const: controlled_remote_write",
+		"const: create_project_and_promotions",
 		"/api/delivery/v1/projects/{project_id}/plans:",
 		"/api/delivery/v1/projects/{project_id}/plans/{plan_id}:",
 		"/api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions:",
