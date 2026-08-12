@@ -205,6 +205,32 @@ type PlatformEntityMapping struct {
 	CreatedAt           time.Time                   `json:"created_at"`
 }
 
+type ControlledExecution struct {
+	ID                    string                  `json:"id"`
+	OrganizationID        contract.OrganizationID `json:"organization_id"`
+	ProjectID             contract.ProjectID      `json:"project_id"`
+	ControlledChangeSetID string                  `json:"controlled_change_set_id"`
+	RemoteWriteApprovalID string                  `json:"remote_write_approval_id"`
+	ComputerUseRunID      string                  `json:"computer_use_run_id,omitempty"`
+	Status                string                  `json:"status"`
+	Version               int64                   `json:"version"`
+	CreatedBy             string                  `json:"created_by"`
+	CreatedAt             time.Time               `json:"created_at"`
+	UpdatedAt             time.Time               `json:"updated_at"`
+}
+
+func (e ControlledExecution) Validate() error {
+	if e.ID == "" || e.OrganizationID == "" || e.ProjectID == "" || e.ControlledChangeSetID == "" || e.RemoteWriteApprovalID == "" || e.Version < 1 || e.CreatedBy == "" || e.CreatedAt.IsZero() || e.UpdatedAt.IsZero() {
+		return ErrInvalidRequest
+	}
+	switch e.Status {
+	case "pending", "running", "succeeded", "failed", "partial", "result_unknown", "cancelled":
+		return nil
+	default:
+		return ErrInvalidState
+	}
+}
+
 func (m PlatformEntityMapping) Validate() error {
 	if m.SchemaVersion != PlatformEntityMappingV1 || m.ID == "" || m.OrganizationID == "" || m.ProjectID == "" || m.AccountReferenceID == "" || m.PlanID == "" || m.ConfigurationID == "" || m.BusinessExecutionID == "" || m.ComputerUseRunID == "" || m.InternalObjectKind == "" || m.InternalObjectID == "" || m.PlatformObjectKind == "" || m.Version < 1 {
 		return ErrInvalidRequest
