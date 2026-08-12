@@ -5,12 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/shikanon/cookies/internal/integrations/crawler"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/systems/insights"
 )
@@ -40,6 +43,211 @@ func TestInsightsHTTPExposesReportExperienceAndPreLaunchLoop(t *testing.T) {
 		if response.Code != test.status || !strings.Contains(response.Body.String(), test.want) {
 			t.Fatalf("%s status=%d body=%s", test.path, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestInsightsHTTPExposesMiyunProductProfileAndManualIntake(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{
+		miyunProfile: insights.MiyunProductProfile{ID: "miyunprofile_1", Version: 1},
+		miyunManual:  insights.MiyunManualImportResult{Material: insights.MiyunMaterial{ID: "miyunmaterial_1"}},
+	}
+	server := New(app)
+	tests := []struct {
+		method string
+		path   string
+		body   string
+		key    string
+		status int
+		want   string
+	}{
+		{http.MethodGet, "/api/insights/v1/projects/project_1/miyun/product-profiles", "", "", 200, "miyunprofile_1"},
+		{http.MethodGet, "/api/insights/v1/projects/project_1/miyun/product-profiles/miyunprofile_1", "", "", 200, "miyunprofile_1"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/miyun/product-profiles:analyze", `{"connection_id":"connection_1","product_id":"product_1","product_asset_refs":[],"knowledge_document_ids":[]}`, "", 201, "miyunprofile_1"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/miyun/product-profiles/miyunprofile_1:confirm", `{"expected_version":1,"query":{"product_name":"Cup","category_id":"cid","category_name":"Drinkware","keywords":["cup"],"material_content_types":[],"window_start":"2026-08-01","window_end":"2026-08-10"}}`, "", 200, "miyunprofile_1"},
+		{http.MethodPost, "/api/insights/v1/projects/project_1/miyun/materials:manual-import", `{"asset_ref":{"asset_id":"asset_1","version":1},"miyun_material_id":"remote_1","source_ref":"https://example.test/material/1","title":"Manual","data_card":{"schema_version":"miyun-data-card/v1","captured_at":"2026-08-10T12:00:00Z","delivery_days":0,"cumulative_impressions_raw":"0","cumulative_impressions":0,"related_ads":0,"related_creators":0,"material_score":0,"views":0,"likes":0,"comments":0,"shares":0,"saves":0}}`, "manual-key", 201, "miyunmaterial_1"},
+	}
+	for _, test := range tests {
+		request := authenticatedRequest(test.method, test.path, test.body)
+		if test.key != "" {
+			request.Header.Set("Idempotency-Key", test.key)
+		}
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		if response.Code != test.status || !strings.Contains(response.Body.String(), test.want) {
+			t.Fatalf("%s status=%d body=%s", test.path, response.Code, response.Body.String())
+		}
+	}
+	if app.miyunConfirmRequest.ExpectedVersion != 1 || app.miyunConfirmRequest.Query.WindowStart.Format("2006-01-02") != "2026-08-01" {
+		t.Fatalf("confirm request=%#v", app.miyunConfirmRequest)
+	}
+	if app.miyunIdempotencyKey != "manual-key" {
+		t.Fatalf("idempotency key=%q", app.miyunIdempotencyKey)
+	}
+}
+
+func TestMiyunVersionConflictUsesHTTP409(t *testing.T) {
+	t.Parallel()
+	app := &applicationStub{miyunErr: insights.ErrVersionConflict}
+	server := New(app)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost,
+		"/api/insights/v1/projects/project_1/miyun/product-profiles/profile_1:confirm",
+		`{"expected_version":1,"query":{"product_name":"Cup","keywords":["cup"],"material_content_types":[],"window_start":"2026-08-01","window_end":"2026-08-10"}}`))
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "VERSION_CONFLICT") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMiyunHandoffExportRequiresAndForwardsFlatPackageKind(t *testing.T) {
+	app := &applicationStub{miyunHandoff: insights.MiyunHandoff{ID: "handoff_1"}}
+	server := New(app)
+
+	missing := httptest.NewRecorder()
+	server.ServeHTTP(missing, authenticatedRequest(http.MethodGet,
+		"/api/insights/v1/projects/project_1/miyun/handoffs/handoff_1/export", ""))
+	if missing.Code != http.StatusBadRequest || !strings.Contains(missing.Body.String(), "INVALID_REQUEST") {
+		t.Fatalf("missing package status=%d body=%s", missing.Code, missing.Body.String())
+	}
+
+	for _, packageKind := range []insights.MiyunHandoffPackageKind{insights.MiyunHandoffPackageSources, insights.MiyunHandoffPackageProject} {
+		filenamePart := "source-materials"
+		if packageKind == insights.MiyunHandoffPackageProject {
+			filenamePart = "project-materials"
+		}
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, authenticatedRequest(http.MethodGet,
+			"/api/insights/v1/projects/project_1/miyun/handoffs/handoff_1/export?package="+string(packageKind), ""))
+		if response.Code != http.StatusOK || response.Body.String() != "zip" || response.Header().Get("Content-Length") != "3" || app.miyunExportPackage != packageKind || !strings.Contains(response.Header().Get("Content-Disposition"), filenamePart) {
+			t.Fatalf("package=%s status=%d forwarded=%s disposition=%q", packageKind, response.Code, app.miyunExportPackage, response.Header().Get("Content-Disposition"))
+		}
+	}
+	failingApp := &applicationStub{miyunHandoff: insights.MiyunHandoff{ID: "handoff_1"}, miyunExportErr: errors.New("export failed")}
+	failingResponse := httptest.NewRecorder()
+	New(failingApp).ServeHTTP(failingResponse, authenticatedRequest(http.MethodGet, "/api/insights/v1/projects/project_1/miyun/handoffs/handoff_1/export?package=sources", ""))
+	if failingResponse.Code != http.StatusInternalServerError || failingResponse.Body.String() == "zip" || failingResponse.Header().Get("Content-Disposition") != "" {
+		t.Fatalf("failed export status=%d body=%q disposition=%q", failingResponse.Code, failingResponse.Body.String(), failingResponse.Header().Get("Content-Disposition"))
+	}
+}
+
+func TestMiyunManualReturnUsesCreateUploadAndExplicitMark(t *testing.T) {
+	server := New(&applicationStub{})
+	create := authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/miyun/handoffs/handoff_1/returns", `{"expected_version":7}`)
+	create.Header.Set("Idempotency-Key", "return-create")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, create)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), "miyunreturn_1") {
+		t.Fatalf("create=%d %s", response.Code, response.Body.String())
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("expected_version", "7")
+	_ = writer.WriteField("idempotency_key", "return-upload")
+	part, err := writer.CreateFormFile("file", "final.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = part.Write([]byte("mp4"))
+	_ = writer.Close()
+	upload := httptest.NewRequest(http.MethodPost, "/api/insights/v1/projects/project_1/miyun/handoffs/handoff_1/returns/miyunreturn_1:upload", &body)
+	upload.Header.Set("Content-Type", writer.FormDataContentType())
+	upload = upload.WithContext(create.Context())
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, upload)
+	if response.Code != http.StatusOK {
+		t.Fatalf("upload=%d %s", response.Code, response.Body.String())
+	}
+	mark := authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/miyun/handoffs/handoff_1/returns/miyunreturn_1:mark-returned", `{"expected_version":7}`)
+	mark.Header.Set("Idempotency-Key", "return-mark")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, mark)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "returned") {
+		t.Fatalf("mark=%d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestMiyunCandidatePreviewStreamsOnlyAuthorizedBytes(t *testing.T) {
+	t.Parallel()
+	server := New(&applicationStub{miyunPreview: []byte("authorized-mp4")})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet,
+		"/api/insights/v1/projects/project_1/miyun/materials/miyunmaterial_1/preview", ""))
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "video/mp4" || response.Header().Get("Cache-Control") != "private, no-store" || response.Body.String() != "authorized-mp4" {
+		t.Fatalf("preview status=%d headers=%v body=%q", response.Code, response.Header(), response.Body.String())
+	}
+}
+
+func TestMiyunHandoffEligibleMaterialFilterIsExplicitAndForwarded(t *testing.T) {
+	app := &applicationStub{}
+	server := New(app)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet,
+		"/api/insights/v1/projects/project_1/miyun/materials?crawl_job_id=job_1&handoff_eligible=true", ""))
+	if response.Code != http.StatusOK || !app.miyunMaterialOptions.HandoffEligible || app.miyunMaterialOptions.CrawlJobID != "job_1" {
+		t.Fatalf("status=%d options=%#v", response.Code, app.miyunMaterialOptions)
+	}
+
+	invalid := httptest.NewRecorder()
+	server.ServeHTTP(invalid, authenticatedRequest(http.MethodGet,
+		"/api/insights/v1/projects/project_1/miyun/materials?handoff_eligible=maybe", ""))
+	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), "INVALID_REQUEST") {
+		t.Fatalf("invalid status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestMiyunCandidatePreviewMapsDownloadFailures(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "host allowlist", err: &crawler.YouShuDownloadError{Kind: crawler.YouShuDownloadForbiddenHost, Source: "host"}, status: http.StatusServiceUnavailable, code: "MIYUN_PREVIEW_HOST_NOT_ALLOWED"},
+		{name: "upstream rate limit", err: &crawler.YouShuDownloadError{Kind: crawler.YouShuDownloadHTTPError, Source: "http", Status: http.StatusTooManyRequests}, status: http.StatusTooManyRequests, code: "MIYUN_PREVIEW_RATE_LIMITED"},
+		{name: "expired url", err: &crawler.YouShuDownloadError{Kind: crawler.YouShuDownloadExpiredURL, Source: "http", Status: http.StatusForbidden}, status: http.StatusGone, code: "MIYUN_PREVIEW_EXPIRED"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := New(&applicationStub{miyunErr: test.err})
+			response := httptest.NewRecorder()
+			server.ServeHTTP(response, authenticatedRequest(http.MethodGet,
+				"/api/insights/v1/projects/project_1/miyun/materials/miyunmaterial_1/preview", ""))
+			if response.Code != test.status || !strings.Contains(response.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestMiyunProductSourceStaysProjectScoped(t *testing.T) {
+	t.Parallel()
+	server := New(&applicationStub{miyunProductSource: insights.MiyunProductSource{ProjectName: "Project", Products: []insights.MiyunProjectProduct{{ID: "product_1", Name: "Product"}}}})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet,
+		"/api/insights/v1/projects/project_1/miyun/product-source", ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"product_1"`) {
+		t.Fatalf("product source status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMiyunManualImportRequiresKeyAndMapsIdempotencyConflict(t *testing.T) {
+	t.Parallel()
+	body := `{"asset_ref":{"asset_id":"asset_1","version":1},"miyun_material_id":"remote_1","source_ref":"https://example.test/material/1","data_card":{"schema_version":"miyun-data-card/v1","captured_at":"2026-08-10T12:00:00Z","delivery_days":0,"cumulative_impressions_raw":"0","cumulative_impressions":0,"related_ads":0,"related_creators":0,"material_score":0,"views":0,"likes":0,"comments":0,"shares":0,"saves":0}}`
+	server := New(&applicationStub{})
+	missing := httptest.NewRecorder()
+	server.ServeHTTP(missing, authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/miyun/materials:manual-import", body))
+	if missing.Code != http.StatusBadRequest {
+		t.Fatalf("missing key status=%d body=%s", missing.Code, missing.Body.String())
+	}
+
+	server = New(&applicationStub{miyunErr: insights.ErrIdempotencyConflict})
+	request := authenticatedRequest(http.MethodPost, "/api/insights/v1/projects/project_1/miyun/materials:manual-import", body)
+	request.Header.Set("Idempotency-Key", "manual-key")
+	conflict := httptest.NewRecorder()
+	server.ServeHTTP(conflict, request)
+	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), contract.ErrorIdempotencyConflict) {
+		t.Fatalf("conflict status=%d body=%s", conflict.Code, conflict.Body.String())
 	}
 }
 
@@ -321,10 +529,21 @@ func authenticatedRequest(method, target, body string) *http.Request {
 }
 
 type applicationStub struct {
-	report          insights.InsightReport
-	experience      insights.Experience
-	listedStatus    insights.ExperienceStatus
-	preLaunchFilter insights.PreLaunchFilter
+	miyunProfile         insights.MiyunProductProfile
+	miyunManual          insights.MiyunManualImportResult
+	miyunConfirmRequest  insights.ConfirmMiyunProductProfileRequest
+	miyunIdempotencyKey  contract.IdempotencyKey
+	miyunPreview         []byte
+	miyunProductSource   insights.MiyunProductSource
+	miyunHandoff         insights.MiyunHandoff
+	miyunExportPackage   insights.MiyunHandoffPackageKind
+	miyunMaterialOptions insights.MiyunMaterialListOptions
+	miyunErr             error
+	miyunExportErr       error
+	report               insights.InsightReport
+	experience           insights.Experience
+	listedStatus         insights.ExperienceStatus
+	preLaunchFilter      insights.PreLaunchFilter
 
 	asset          insights.Asset
 	mapping        insights.AssetMapping
@@ -365,6 +584,112 @@ type applicationStub struct {
 	droppedFlag       bool
 
 	registerErr error
+}
+
+func (a *applicationStub) CreateMiyunHandoffReturn(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, handoffID string, _ contract.IdempotencyKey, _ insights.CreateMiyunHandoffReturnRequest) (insights.MiyunHandoffReturn, error) {
+	if a.miyunErr != nil {
+		return insights.MiyunHandoffReturn{}, a.miyunErr
+	}
+	return insights.MiyunHandoffReturn{ID: "miyunreturn_1", HandoffID: handoffID, Version: 1}, nil
+}
+func (a *applicationStub) UploadMiyunHandoffReturn(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, handoffID, returnID string, _ contract.IdempotencyKey, _ insights.UploadMiyunHandoffReturnRequest) (insights.MiyunHandoffReturn, error) {
+	if a.miyunErr != nil {
+		return insights.MiyunHandoffReturn{}, a.miyunErr
+	}
+	return insights.MiyunHandoffReturn{ID: returnID, HandoffID: handoffID, Version: 2}, nil
+}
+func (a *applicationStub) MarkMiyunHandoffReturned(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, handoffID, returnID string, _ contract.IdempotencyKey, _ int64) (insights.MiyunHandoff, insights.MiyunHandoffReturn, error) {
+	if a.miyunErr != nil {
+		return insights.MiyunHandoff{}, insights.MiyunHandoffReturn{}, a.miyunErr
+	}
+	return insights.MiyunHandoff{ID: handoffID, Status: insights.MiyunHandoffReturned, Version: 2}, insights.MiyunHandoffReturn{ID: returnID, HandoffID: handoffID, Status: insights.MiyunHandoffReturnReturned, Version: 3}, nil
+}
+func (a *applicationStub) ImportMiyunHandoffReturnBundle(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, handoffID string, _ contract.IdempotencyKey, _ insights.ImportMiyunHandoffReturnBundleRequest) (insights.MiyunHandoffReturnBundleResult, error) {
+	if a.miyunErr != nil {
+		return insights.MiyunHandoffReturnBundleResult{}, a.miyunErr
+	}
+	return insights.MiyunHandoffReturnBundleResult{Status: "succeeded", Returns: []insights.MiyunHandoffReturn{{ID: "miyunreturn_1", HandoffID: handoffID}}}, nil
+}
+
+func (s *applicationStub) AnalyzeMiyunProductProfile(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ insights.AnalyzeMiyunProductProfileRequest) (insights.MiyunProductProfile, error) {
+	return s.miyunProfile, s.miyunErr
+}
+func (s *applicationStub) ConfirmMiyunProductProfile(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request insights.ConfirmMiyunProductProfileRequest) (insights.MiyunProductProfile, error) {
+	s.miyunConfirmRequest = request
+	return s.miyunProfile, s.miyunErr
+}
+func (s *applicationStub) ListMiyunProductProfiles(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunProductProfile, error) {
+	return []insights.MiyunProductProfile{s.miyunProfile}, s.miyunErr
+}
+func (s *applicationStub) GetMiyunProductProfile(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunProductProfile, error) {
+	return s.miyunProfile, s.miyunErr
+}
+func (s *applicationStub) ManualImportMiyunMaterial(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, key contract.IdempotencyKey, _ insights.ManualMiyunMaterialRequest) (insights.MiyunManualImportResult, error) {
+	s.miyunIdempotencyKey = key
+	return s.miyunManual, s.miyunErr
+}
+func (s *applicationStub) GetMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID) (insights.MiyunConnection, error) {
+	return insights.MiyunConnection{ID: "miyunconnection_1"}, s.miyunErr
+}
+func (s *applicationStub) UpdateMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID, insights.UpdateMiyunConnectionRequest) (insights.MiyunConnection, error) {
+	return insights.MiyunConnection{ID: "miyunconnection_1"}, s.miyunErr
+}
+func (s *applicationStub) VerifyMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID, insights.VerifyMiyunConnectionRequest) (insights.MiyunConnection, error) {
+	return insights.MiyunConnection{ID: "miyunconnection_1"}, s.miyunErr
+}
+func (s *applicationStub) CreateMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, contract.IdempotencyKey, insights.CreateMiyunCrawlJobRequest) (insights.MiyunCrawlJob, error) {
+	return insights.MiyunCrawlJob{ID: "miyuncrawljob_1"}, s.miyunErr
+}
+func (s *applicationStub) ListMiyunCrawlJobs(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunCrawlJob, error) {
+	return []insights.MiyunCrawlJob{{ID: "miyuncrawljob_1"}}, s.miyunErr
+}
+func (s *applicationStub) GetMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunCrawlJob, error) {
+	return insights.MiyunCrawlJob{ID: "miyuncrawljob_1"}, s.miyunErr
+}
+func (s *applicationStub) CancelMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunCrawlJob, error) {
+	return insights.MiyunCrawlJob{ID: "miyuncrawljob_1"}, s.miyunErr
+}
+func (s *applicationStub) RetryMiyunCrawlJob(context.Context, contract.ActorContext, contract.ProjectID, string, contract.IdempotencyKey) (insights.MiyunCrawlJob, error) {
+	return insights.MiyunCrawlJob{ID: "miyuncrawljob_1"}, s.miyunErr
+}
+func (s *applicationStub) ListMiyunMaterials(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, options insights.MiyunMaterialListOptions) (insights.MiyunMaterialListPage, error) {
+	s.miyunMaterialOptions = options
+	return insights.MiyunMaterialListPage{Items: []insights.MiyunMaterial{{ID: "miyunmaterial_1"}}, Total: 1}, s.miyunErr
+}
+func (s *applicationStub) GetMiyunMaterialDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunMaterialDetail, error) {
+	return insights.MiyunMaterialDetail{Material: insights.MiyunMaterial{ID: "miyunmaterial_1"}}, s.miyunErr
+}
+func (s *applicationStub) GetMiyunProductSource(context.Context, contract.ActorContext, contract.ProjectID) (insights.MiyunProductSource, error) {
+	return s.miyunProductSource, s.miyunErr
+}
+func (s *applicationStub) OpenMiyunMaterialPreview(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunMaterialPreview, error) {
+	if s.miyunErr != nil {
+		return insights.MiyunMaterialPreview{}, s.miyunErr
+	}
+	return insights.MiyunMaterialPreview{Content: io.NopCloser(bytes.NewReader(s.miyunPreview)), SizeBytes: int64(len(s.miyunPreview)), MIMEType: "video/mp4"}, nil
+}
+func (s *applicationStub) DecideMiyunMaterial(context.Context, contract.ActorContext, contract.ProjectID, string, bool, insights.MiyunMaterialDecisionRequest) (insights.MiyunMaterial, error) {
+	return insights.MiyunMaterial{ID: "miyunmaterial_1"}, s.miyunErr
+}
+func (s *applicationStub) RetryMiyunMaterialImport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunMaterial, error) {
+	return insights.MiyunMaterial{ID: "miyunmaterial_1"}, s.miyunErr
+}
+func (s *applicationStub) CreateMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateMiyunHandoffRequest) (insights.MiyunHandoff, error) {
+	return s.miyunHandoff, s.miyunErr
+}
+func (s *applicationStub) ListMiyunHandoffs(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.MiyunHandoff, error) {
+	return []insights.MiyunHandoff{s.miyunHandoff}, s.miyunErr
+}
+func (s *applicationStub) GetMiyunHandoff(context.Context, contract.ActorContext, contract.ProjectID, string) (insights.MiyunHandoff, error) {
+	return s.miyunHandoff, s.miyunErr
+}
+func (s *applicationStub) MarkMiyunHandoffDelivered(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.MiyunHandoff, error) {
+	return s.miyunHandoff, s.miyunErr
+}
+func (s *applicationStub) ExportMiyunHandoff(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, packageKind insights.MiyunHandoffPackageKind, output io.Writer) error {
+	s.miyunExportPackage = packageKind
+	_, _ = output.Write([]byte("zip"))
+	return s.miyunExportErr
 }
 
 func (s *applicationStub) CreateReport(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request insights.CreateReportRequest) (insights.InsightReport, error) {

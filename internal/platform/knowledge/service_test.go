@@ -4,9 +4,12 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 
+	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
@@ -56,6 +59,39 @@ func TestHTMLDocumentsUseTheBoundedTikaTextPath(t *testing.T) {
 	}
 	if allowedMIME(".html", "image/svg+xml") {
 		t.Fatal("HTML extension accepted an unrelated active-content MIME")
+	}
+}
+
+func TestPDFContainerValidationRejectsRenamedContent(t *testing.T) {
+	t.Parallel()
+	if !validPDFContainer([]byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n")) {
+		t.Fatal("expected a bounded PDF container to pass admission")
+	}
+	for _, content := range [][]byte{[]byte("plain text renamed.pdf"), []byte("%PDF-1.7\nmissing eof")} {
+		if validPDFContainer(content) {
+			t.Fatalf("renamed or truncated PDF passed admission: %q", content)
+		}
+	}
+}
+
+func TestVerifyDocumentOriginalRejectsSubstitution(t *testing.T) {
+	t.Parallel()
+	content := []byte("original")
+	sum := sha256.Sum256(content)
+	location := assets.ObjectLocation{Provider: "memory", Bucket: "knowledge", Key: "doc/source.txt", ETag: "etag"}
+	document := Document{
+		MIMEType: "text/plain", SizeBytes: int64(len(content)), ContentSHA256: hex.EncodeToString(sum[:]), Blob: location,
+	}
+	info := assets.ObjectInfo{ObjectLocation: location, SizeBytes: int64(len(content)), MIMEType: "text/plain"}
+	if verified, err := verifyDocumentOriginal(bytes.NewReader(content), info, document); err != nil || !bytes.Equal(verified, content) {
+		t.Fatalf("verified=%q err=%v", verified, err)
+	}
+	if _, err := verifyDocumentOriginal(bytes.NewReader([]byte("changed!")), info, document); !errors.Is(err, ErrInvalidDocument) {
+		t.Fatalf("same-size substitution error=%v", err)
+	}
+	info.MIMEType = "application/pdf"
+	if _, err := verifyDocumentOriginal(bytes.NewReader(content), info, document); !errors.Is(err, ErrInvalidDocument) {
+		t.Fatalf("MIME substitution error=%v", err)
 	}
 }
 

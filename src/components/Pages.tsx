@@ -25,13 +25,14 @@ const ImageTextCreationPage = lazy(() => import('./SpecializedPages').then(modul
 const VideoCreationPage = lazy(() => import('./SpecializedPages').then(module => ({ default: module.VideoCreationPage })))
 const DeliveryMonitoringPage = lazy(() => import('./DeliveryMonitoringPage').then(module => ({ default: module.DeliveryMonitoringPage })))
 const DeliveryOptimizationPage = lazy(() => import('./DeliveryOptimizationPage').then(module => ({ default: module.DeliveryOptimizationPage })))
-const DeliveryThreeTierPage = lazy(() => import('./DeliveryThreeTierPage').then(module => ({ default: module.DeliveryThreeTierPage })))
+const DeliveryConfigurationPage = lazy(() => import('./DeliveryConfigurationPage').then(module => ({ default: module.DeliveryConfigurationPage })))
 const DeliveryMockEnvironmentBanner = lazy(() => import('./DeliveryTourPage').then(module => ({ default: module.DeliveryMockEnvironmentBanner })))
 const DeliveryTourContextBanner = lazy(() => import('./DeliveryTourPage').then(module => ({ default: module.DeliveryTourContextBanner })))
 const DeliveryTourPage = lazy(() => import('./DeliveryTourPage').then(module => ({ default: module.DeliveryTourPage })))
 const PreLaunchInsightPage = lazy(() => import('./PreLaunchInsightPage').then(module => ({ default: module.PreLaunchInsightPage })))
 const ReportCenterPage = lazy(() => import('./ReportCenterPage').then(module => ({ default: module.ReportCenterPage })))
 const AssetLibraryPage = lazy(() => import('./AssetLibraryPage').then(module => ({ default: module.AssetLibraryPage })))
+const MiyunMaterialsPage = lazy(() => import('./MiyunMaterialsPage').then(module => ({ default: module.MiyunMaterialsPage })))
 const ContentAnalysisPage = lazy(() => import('./ContentAnalysisPage').then(module => ({ default: module.ContentAnalysisPage })))
 const DataConnectionsPage = lazy(() => import('./DataConnectionsPage').then(module => ({ default: module.DataConnectionsPage })))
 const CapabilityOperationsPage = lazy(() => import('./CapabilityOperationsPage').then(module => ({ default: module.CapabilityOperationsPage })))
@@ -1529,6 +1530,7 @@ export function ModulePage({
     : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'connections' ? <DataConnectionsPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'assets' ? <AssetLibraryPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'miyun-materials' ? <MiyunMaterialsPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'content' ? <ContentAnalysisPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'knowledge' ? <ExperienceLibraryPage state={dataState} activeView={activeView}/>
     : system.key === 'insight' && item.id === 'quality' ? <DataQualityPage state={dataState} activeView={activeView}/>
@@ -1538,7 +1540,7 @@ export function ModulePage({
     : system.key === 'insight' && item.id === 'settings' ? <InsightSettingsPage state={dataState} activeView={activeView}/>
     : system.key === 'delivery' && item.id === 'tour' ? <DeliveryTourPage projectId={currentProject.id} routeRunId={tourRunId}/>
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
-    : system.key === 'delivery' && (item.id === 'configuration' || item.id === 'three-tier') ? <DeliveryThreeTierPage state={dataState} activeView={activeView} tourRunId={tourRunId} tourCase={tourCase}/>
+    : system.key === 'delivery' && item.id === 'configuration' ? <DeliveryConfigurationPage state={dataState} activeView={activeView} tourRunId={tourRunId} tourCase={tourCase}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState} tourCase={tourCase} tourRunId={tourRunId} selectedChangeSetId={objectId}/>
     : system.key === 'delivery' && item.id === 'monitoring' ? <DeliveryMonitoringPage tourCase={tourCase}/>
     : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryOptimizationPage state={dataState} activeView={activeView} tourRunId={tourRunId} tourCase={tourCase}/>

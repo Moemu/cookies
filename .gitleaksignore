@@ -9,3 +9,8 @@ ee5650e8ea7096c1d53fac097dba4d9d89538b13:server/provider.test.ts:generic-api-key
 
 # Versioned short-drama API test uses a deterministic idempotency token.
 4eaed0bba0ea0aa6400d2f3d14fb065284a865f9:internal/platform/httpserver/server_test.go:generic-api-key:1514
+
+# Miyun local development uses a deterministic, public AES key so encrypted
+# demo sessions remain readable across launcher restarts. Production requires
+# a deployment-managed key; only this historical example fingerprint is allowed.
+45b92f31b732906055fe4d570a10aab7944d8293:.env.example:generic-api-key:131

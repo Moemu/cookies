@@ -11,6 +11,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"path/filepath"
 	"strings"
@@ -395,7 +396,7 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 	filename = strings.TrimSpace(filepath.Base(filename))
 	extension := strings.ToLower(filepath.Ext(filename))
 	if filename == "" || len(filename) > 512 ||
-		(extension != ".md" && extension != ".txt" && extension != ".html" && extension != ".htm" && extension != ".docx" && extension != ".pdf" && extension != ".ppt" && extension != ".pptx") ||
+		!supportedDocumentExtension(extension) ||
 		size < 1 || size > MaxDocumentBytes {
 		return Document{}, ErrInvalidDocument
 	}
@@ -409,11 +410,19 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 	if declaredMIME != "" && !allowedMIME(extension, declaredMIME) {
 		return Document{}, ErrInvalidDocument
 	}
+	if extension == ".pdf" && !validPDFContainer(content) {
+		return Document{}, ErrInvalidDocument
+	}
 	mimeType := defaultDocumentMIME(extension)
 	parseStrategy := documentParseStrategy(extension)
 	asyncParse := parseStrategy != "text_native"
 	if asyncParse && (s.DocumentParser == nil || s.DocumentScheduler == nil) {
 		return Document{}, fmt.Errorf("document parser and scheduler are required for %s files", extension)
+	}
+	if extension == ".docx" && asyncParse {
+		if _, _, err := extractDocument(extension, content); err != nil {
+			return Document{}, err
+		}
 	}
 	contentSum := sha256.Sum256(content)
 	contentHash := hex.EncodeToString(contentSum[:])
@@ -483,8 +492,9 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 		 object_version_id, object_etag, status, parse_strategy, parse_phase, parse_progress,
 		 progress_kind, processed_pages, total_pages, quality_score, quality_tier,
 		 fallback_reason, preview_status, page_quality_summary, heartbeat_at,
+		 parser_code, parser_version, parse_error_code, parse_error_message,
 		 created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		document.ID, document.OrganizationID, document.ProjectID, document.Title, nil,
 		document.SourceType, document.ChunkCount, document.Filename, document.MIMEType,
 		document.SizeBytes, document.ContentSHA256, document.TextSHA256, document.ExtractedText,
@@ -492,6 +502,8 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 		document.ParseStrategy, document.ParsePhase, document.ParseProgress, document.ProgressKind,
 		document.ProcessedPages, document.TotalPages, document.QualityScore, document.QualityTier,
 		document.FallbackReason, document.PreviewStatus, nullableJSON(document.PageQualitySummary), document.HeartbeatAt,
+		nullable(document.ParserCode), nullable(document.ParserVersion),
+		nullable(document.ParseErrorCode), nullable(document.ParseErrorMessage),
 		document.CreatedBy, document.CreatedAt, document.UpdatedAt)
 	if err != nil {
 		_ = s.Blobs.Delete(ctx, object.ObjectLocation)
@@ -529,6 +541,26 @@ func (s Service) CreateDocument(ctx context.Context, actor contract.ActorContext
 		return Document{}, err
 	}
 	return s.GetDocument(ctx, actor, projectID, document.ID)
+}
+
+func supportedDocumentExtension(extension string) bool {
+	switch extension {
+	case ".md", ".txt", ".html", ".htm", ".docx", ".xlsx", ".pdf", ".ppt", ".pptx":
+		return true
+	default:
+		return false
+	}
+}
+
+func validPDFContainer(content []byte) bool {
+	if len(content) < 12 || !bytes.HasPrefix(content, []byte("%PDF-")) {
+		return false
+	}
+	tail := content
+	if len(tail) > 2048 {
+		tail = tail[len(tail)-2048:]
+	}
+	return bytes.Contains(tail, []byte("%%EOF"))
 }
 
 func (s Service) ImportDocument(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request ImportDocumentRequest) (Document, error) {
@@ -612,6 +644,100 @@ func (s Service) GetDocument(ctx context.Context, actor contract.ActorContext, p
 		return Document{}, ErrNotFound
 	}
 	return value, err
+}
+
+// OpenDocumentOriginal reopens the immutable source bytes for a document that
+// belongs to the caller's project. The returned stream is owned by the caller.
+// Object identity, metadata, byte length, and SHA-256 are checked before it is
+// handed off so a stale or substituted blob cannot be consumed as the original.
+func (s Service) OpenDocumentOriginal(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (io.ReadCloser, Document, error) {
+	if s.Blobs == nil {
+		return nil, Document{}, fmt.Errorf("knowledge blob store is unavailable")
+	}
+	document, err := s.GetDocument(ctx, actor, projectID, id)
+	if err != nil {
+		return nil, Document{}, err
+	}
+	stream, info, err := s.Blobs.Open(ctx, document.Blob)
+	if err != nil {
+		return nil, Document{}, err
+	}
+	content, verifyErr := verifyDocumentOriginal(stream, info, document)
+	closeErr := stream.Close()
+	if verifyErr != nil {
+		return nil, Document{}, ErrInvalidDocument
+	}
+	if closeErr != nil {
+		return nil, Document{}, closeErr
+	}
+	return io.NopCloser(bytes.NewReader(content)), document, nil
+}
+
+// OpenDocumentOriginalStream returns the authorized immutable object without
+// buffering it. Consumers that need an end-to-end hash check must verify the
+// returned bytes while copying; this boundary still validates Project scope,
+// object identity, length, and MIME type before exposing the stream.
+func (s Service) OpenDocumentOriginalStream(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (io.ReadCloser, Document, error) {
+	if s.Blobs == nil {
+		return nil, Document{}, fmt.Errorf("knowledge blob store is unavailable")
+	}
+	document, err := s.GetDocument(ctx, actor, projectID, id)
+	if err != nil {
+		return nil, Document{}, err
+	}
+	stream, info, err := s.Blobs.Open(ctx, document.Blob)
+	if err != nil {
+		return nil, Document{}, err
+	}
+	if info.SizeBytes != document.SizeBytes || info.ObjectLocation != document.Blob ||
+		(strings.TrimSpace(info.MIMEType) != "" && !strings.EqualFold(strings.TrimSpace(strings.Split(info.MIMEType, ";")[0]), strings.TrimSpace(strings.Split(document.MIMEType, ";")[0]))) {
+		_ = stream.Close()
+		return nil, Document{}, ErrInvalidDocument
+	}
+	return &verifiedDocumentStream{ReadCloser: stream, remaining: document.SizeBytes, expectedSHA256: document.ContentSHA256, hash: sha256.New()}, document, nil
+}
+
+type verifiedDocumentStream struct {
+	io.ReadCloser
+	remaining      int64
+	expectedSHA256 string
+	hash           hash.Hash
+	verified       bool
+}
+
+func (s *verifiedDocumentStream) Read(p []byte) (int, error) {
+	n, err := s.ReadCloser.Read(p)
+	if n > 0 {
+		s.remaining -= int64(n)
+		_, _ = s.hash.Write(p[:n])
+	}
+	if err == io.EOF {
+		s.verified = true
+		if s.remaining != 0 || !strings.EqualFold(hex.EncodeToString(s.hash.Sum(nil)), s.expectedSHA256) {
+			return n, ErrInvalidDocument
+		}
+	}
+	return n, err
+}
+
+func verifyDocumentOriginal(stream io.Reader, info assets.ObjectInfo, document Document) ([]byte, error) {
+	if info.SizeBytes != document.SizeBytes || info.ObjectLocation != document.Blob {
+		return nil, ErrInvalidDocument
+	}
+	openedMIME := strings.ToLower(strings.TrimSpace(strings.Split(info.MIMEType, ";")[0]))
+	recordedMIME := strings.ToLower(strings.TrimSpace(strings.Split(document.MIMEType, ";")[0]))
+	if openedMIME != "" && openedMIME != recordedMIME {
+		return nil, ErrInvalidDocument
+	}
+	content, err := io.ReadAll(io.LimitReader(stream, document.SizeBytes+1))
+	if err != nil || int64(len(content)) != document.SizeBytes {
+		return nil, ErrInvalidDocument
+	}
+	sum := sha256.Sum256(content)
+	if hex.EncodeToString(sum[:]) != document.ContentSHA256 {
+		return nil, ErrInvalidDocument
+	}
+	return content, nil
 }
 
 func (s Service) GetReference(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (Reference, error) {
@@ -1457,6 +1583,12 @@ func extractDocument(extension string, content []byte) (string, string, error) {
 			return "", "", ErrInvalidDocument
 		}
 		return strings.TrimSpace(string(content)), defaultDocumentMIME(extension), nil
+	case ".xlsx":
+		text, err := extractXLSX(content)
+		if err != nil || text == "" {
+			return "", "", ErrInvalidDocument
+		}
+		return text, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", nil
 	case ".docx":
 		reader, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
 		if err != nil {
@@ -1529,6 +1661,9 @@ func allowedMIME(extension, value string) bool {
 	case ".docx":
 		return value == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
 			value == "application/octet-stream"
+	case ".xlsx":
+		return value == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+			value == "application/octet-stream" || value == "application/zip"
 	case ".pdf":
 		return value == "application/pdf" || value == "application/octet-stream"
 	case ".pptx":
@@ -1551,6 +1686,8 @@ func defaultDocumentMIME(extension string) string {
 		return "text/html"
 	case ".docx":
 		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 	case ".pdf":
 		return "application/pdf"
 	case ".pptx":
@@ -1564,7 +1701,7 @@ func defaultDocumentMIME(extension string) string {
 
 func documentParseStrategy(extension string) string {
 	switch extension {
-	case ".md", ".txt":
+	case ".md", ".txt", ".xlsx":
 		return "text_native"
 	default:
 		return "tika_text"

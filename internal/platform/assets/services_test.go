@@ -146,6 +146,96 @@ func TestUploadKeepsCommittedAssetWhenQuarantineCleanupFails(t *testing.T) {
 	}
 }
 
+func TestUploadAcceptsWebPAndStoresDimensions(t *testing.T) {
+	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	repo := newFakeRepository()
+	service := UploadService{
+		Repository: repo, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 4},
+		Blobs: NewMemoryBlobStore(), Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+	}
+	data := testWebP()
+	rc := testRequestContext("org_1", "project_1")
+	created, err := service.Create(context.Background(), rc, "project_1", "webp-upload-key", CreateUploadRequest{Filename: "hero.webp", DeclaredMIMEType: "image/webp", DeclaredSizeBytes: int64(len(data))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PutContent(context.Background(), rc.Actor, "project_1", created.Session.ID, bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Finalize(context.Background(), rc, "project_1", created.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetProjectAsset(context.Background(), "org_1", "project_1", result.ProjectAssetRef.AssetVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Asset.Kind != contract.AssetImage || stored.Version.MIMEType != "image/webp" || stored.Version.WidthPixels != 1 || stored.Version.HeightPixels != 1 {
+		t.Fatalf("unexpected WebP asset: %#v", stored)
+	}
+}
+
+func TestUploadFormatMatrixDoesNotAdmitPostponedDesignFormats(t *testing.T) {
+	for _, mimeType := range []string{"image/vnd.adobe.photoshop", "application/illustrator", "application/x-sketch"} {
+		request := CreateUploadRequest{Filename: "design.bin", DeclaredMIMEType: mimeType, DeclaredSizeBytes: 1}
+		if err := request.Validate(); err == nil {
+			t.Errorf("postponed format %q was admitted", mimeType)
+		}
+	}
+}
+
+func TestUploadRejectsImageDeclaredDetectedMIMEMismatch(t *testing.T) {
+	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	repo := newFakeRepository()
+	service := UploadService{
+		Repository: repo, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 4},
+		Blobs: NewMemoryBlobStore(), Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+	}
+	data := testWebP()
+	rc := testRequestContext("org_1", "project_1")
+	created, err := service.Create(context.Background(), rc, "project_1", "image-mismatch-key", CreateUploadRequest{Filename: "hero.jpg", DeclaredMIMEType: "image/jpeg", DeclaredSizeBytes: int64(len(data))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PutContent(context.Background(), rc.Actor, "project_1", created.Session.ID, bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Finalize(context.Background(), rc, "project_1", created.Session.ID); !errors.Is(err, ErrInvalidAssetContent) {
+		t.Fatalf("Finalize error = %v, want ErrInvalidAssetContent", err)
+	}
+	stored, err := repo.GetUpload(context.Background(), "org_1", "project_1", created.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != UploadFailed {
+		t.Fatalf("upload status = %q, want %q", stored.Status, UploadFailed)
+	}
+}
+
+func TestUploadRejectsWebPDimensionsOverSafetyLimit(t *testing.T) {
+	now := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	repo := newFakeRepository()
+	service := UploadService{
+		Repository: repo, Projects: fakeProjects{organization: "org_1", project: "project_1", version: 4},
+		Blobs: NewMemoryBlobStore(), Scanner: NoopScanner{}, QuarantineBucket: "quarantine", AssetsBucket: "assets",
+		Now: func() time.Time { return now }, NewID: sequenceIDs(),
+	}
+	data := testOversizedWebP()
+	rc := testRequestContext("org_1", "project_1")
+	created, err := service.Create(context.Background(), rc, "project_1", "oversized-webp-key", CreateUploadRequest{Filename: "hero.webp", DeclaredMIMEType: "image/webp", DeclaredSizeBytes: int64(len(data))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.PutContent(context.Background(), rc.Actor, "project_1", created.Session.ID, bytes.NewReader(data), int64(len(data))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Finalize(context.Background(), rc, "project_1", created.Session.ID); !errors.Is(err, ErrInvalidAssetContent) {
+		t.Fatalf("Finalize error = %v, want ErrInvalidAssetContent", err)
+	}
+}
+
 func TestUploadPersistsVideoProbeMetadata(t *testing.T) {
 	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
 	repo := newFakeRepository()
@@ -1143,6 +1233,25 @@ func testMP4() []byte {
 		0x00, 0x00, 0x00, 0x18, 'f', 't', 'y', 'p', 'm', 'p', '4', '2',
 		0x00, 0x00, 0x00, 0x00, 'm', 'p', '4', '2', 'i', 's', 'o', 'm',
 		0x00, 0x00, 0x00, 0x08, 'm', 'd', 'a', 't',
+	}
+}
+
+func testWebP() []byte {
+	return []byte{
+		'R', 'I', 'F', 'F', 0x22, 0x00, 0x00, 0x00, 'W', 'E', 'B', 'P',
+		'V', 'P', '8', ' ', 0x16, 0x00, 0x00, 0x00, 0x70, 0x01, 0x00, 0x9d,
+		0x01, 0x2a, 0x01, 0x00, 0x01, 0x00, 0x01, 0x40, 0x26, 0x25, 0xa4,
+		0x00, 0x03, 0x70, 0x00, 0xfe, 0xff, 0x3d, 0x58, 0x00, 0x00, 0x00,
+	}
+}
+
+func testOversizedWebP() []byte {
+	// A valid VP8X header declaring a 16,385 by 1 image. DecodeConfig reads
+	// these dimensions without allocating image pixels.
+	return []byte{
+		'R', 'I', 'F', 'F', 0x16, 0x00, 0x00, 0x00, 'W', 'E', 'B', 'P',
+		'V', 'P', '8', 'X', 0x0a, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x00,
 	}
 }
 func sequenceIDs() func(string) (string, error) {

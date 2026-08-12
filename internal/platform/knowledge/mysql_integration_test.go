@@ -235,10 +235,9 @@ func TestKnowledgeCenterMySQLProjection(t *testing.T) {
 	}
 	service.Runner = researchRunner{}
 	service.Scheduler = nil
-
 	service.DocumentParser = parserStub{}
 	service.DocumentScheduler = parseSchedulerStub{}
-	pdfBytes := []byte("%PDF-1.7 fake integration payload")
+	pdfBytes := []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
 	pdf, err := service.CreateDocument(
 		ctx, actor, projectID, "market-report.pdf", "application/pdf",
 		bytes.NewReader(pdfBytes), int64(len(pdfBytes)),

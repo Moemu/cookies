@@ -391,7 +391,8 @@ func seedExperience(ctx context.Context, t *testing.T, repository insights.MySQL
 		LineageID: lineageID, Revision: revision, SupersedesID: supersedesID,
 		ReportID: reportID, SourceExecutionID: "deliveryexecution_it_" + id,
 		SourceEvidenceID: "evidence_it_" + id, SourceMetricSnapshotID: "metricsnapshot_it_" + id,
-		Conclusion: "本地集成测试结论", Conditions: []string{"小红书图文"}, Counterexamples: []string{"未覆盖视频"},
+		Conclusion: "本地集成测试结论", CardType: insights.CardHypothesis, Confidence: insights.ConfidenceDirectional,
+		Conditions: []string{"小红书图文"}, Counterexamples: []string{"未覆盖视频"},
 		Status: insights.ExperiencePending, StatusChangedBy: userID, StatusChangedAt: &now,
 		Version: 1, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
 	}
@@ -421,6 +422,7 @@ func cleanupInsightsIntegration(t *testing.T, db *sql.DB, organizationID contrac
 		"DELETE FROM insight_experience_audits WHERE organization_id=?",
 		"DELETE FROM insight_experiences WHERE organization_id=?",
 		"DELETE FROM insight_reports WHERE organization_id=?",
+		"DELETE FROM platform_project_runtimes WHERE organization_id=?",
 		"DELETE FROM project_context_versions WHERE organization_id=?",
 		"DELETE FROM project_products WHERE organization_id=?",
 		"DELETE FROM project_memberships WHERE organization_id=?",

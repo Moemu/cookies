@@ -14,6 +14,138 @@ import (
 
 type MySQLRepository struct{ DB *sql.DB }
 
+func (r MySQLRepository) CreateExternalImport(ctx context.Context, value ExternalImport) (ExternalImport, bool, error) {
+	if _, err := r.db(); err != nil {
+		return ExternalImport{}, false, err
+	}
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO asset_external_imports (id, organization_id, project_id, source_provider, source_object_id, source_locator, idempotency_key, request_snapshot, request_hash, status, attempt_count, recovery_attempt_count, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.OrganizationID, value.ProjectID, value.SourceProvider, value.SourceObjectID, value.SourceLocator, value.IdempotencyKey, value.RequestSnapshot, value.RequestHash, value.Status, value.AttemptCount, value.RecoveryAttemptCount, value.Version, value.CreatedAt, value.UpdatedAt)
+	if err == nil {
+		return value, true, nil
+	}
+	if !isDuplicate(err) {
+		return ExternalImport{}, false, err
+	}
+	existing, getErr := r.getExternalImportByIdentity(ctx, value)
+	if getErr != nil {
+		return ExternalImport{}, false, getErr
+	}
+	if existing.IdempotencyKey != value.IdempotencyKey || existing.RequestHash != value.RequestHash {
+		return ExternalImport{}, false, ErrIdempotencyConflict
+	}
+	return existing, false, nil
+}
+
+func (r MySQLRepository) getExternalImportByIdentity(ctx context.Context, value ExternalImport) (ExternalImport, error) {
+	return scanExternalImport(r.DB.QueryRowContext(ctx, externalImportSelect+` WHERE organization_id=? AND project_id=? AND ((source_provider=? AND source_object_id=?) OR idempotency_key=?) LIMIT 1`, value.OrganizationID, value.ProjectID, value.SourceProvider, value.SourceObjectID, value.IdempotencyKey))
+}
+func (r MySQLRepository) GetExternalImport(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (ExternalImport, error) {
+	if _, err := r.db(); err != nil {
+		return ExternalImport{}, err
+	}
+	return scanExternalImport(r.DB.QueryRowContext(ctx, externalImportSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
+}
+func (r MySQLRepository) GetExternalImportBySource(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, provider, objectID string) (ExternalImport, error) {
+	if _, err := r.db(); err != nil {
+		return ExternalImport{}, err
+	}
+	return scanExternalImport(r.DB.QueryRowContext(ctx, externalImportSelect+` WHERE organization_id=? AND project_id=? AND source_provider=? AND source_object_id=?`, org, project, provider, objectID))
+}
+func (r MySQLRepository) MarkExternalImportRunning(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string, now time.Time) error {
+	if _, err := r.db(); err != nil {
+		return err
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE asset_external_imports SET status='running', attempt_count=attempt_count+1,
+		last_error_code=NULL, last_error_message=NULL, version=version+1, updated_at=?
+		WHERE organization_id=? AND project_id=? AND id=? AND status IN ('queued','running','failed') AND result_unknown_at IS NULL`, now, org, project, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrInvalidState
+	}
+	return nil
+}
+func (r MySQLRepository) FailExternalImport(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id, code, message string, now time.Time) error {
+	if _, err := r.db(); err != nil {
+		return err
+	}
+	_, err := r.DB.ExecContext(ctx, `UPDATE asset_external_imports SET status='failed', last_error_code=?, last_error_message=?, version=version+1, updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND status IN ('queued','running')`, code, message, now, org, project, id)
+	return err
+}
+func (r MySQLRepository) MarkExternalImportResultUnknown(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id, reason string, now time.Time) error {
+	if _, err := r.db(); err != nil {
+		return err
+	}
+	_, err := r.DB.ExecContext(ctx, `UPDATE asset_external_imports SET result_unknown_at=COALESCE(result_unknown_at, ?), result_unknown_reason=COALESCE(result_unknown_reason, ?), recovery_attempt_count=recovery_attempt_count+1, version=version+1, updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND status='running'`, now, reason, now, org, project, id)
+	return err
+}
+func (r MySQLRepository) FindProjectAssetBySHA256(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, digest string) (contract.ProjectAssetRef, error) {
+	if _, err := r.db(); err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	var assetID contract.AssetID
+	var version int64
+	err := r.DB.QueryRowContext(ctx, `SELECT av.asset_id, av.version FROM project_assets pa JOIN asset_versions av ON av.organization_id=pa.organization_id AND av.asset_id=pa.asset_id AND av.version=pa.asset_version WHERE pa.organization_id=? AND pa.project_id=? AND pa.status='active' AND av.sha256=? ORDER BY pa.created_at ASC LIMIT 1`, org, project, digest).Scan(&assetID, &version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return contract.ProjectAssetRef{}, ErrNotFound
+	}
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	return contract.ProjectAssetRef{ProjectID: project, AssetVersion: contract.AssetVersionRef{AssetID: assetID, Version: version}}, nil
+}
+func (r MySQLRepository) CompleteExternalImport(ctx context.Context, id string, commit AssetCommit, now time.Time) (contract.ProjectAssetRef, error) {
+	db, err := r.db()
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	defer tx.Rollback()
+	var status string
+	var org contract.OrganizationID
+	var project contract.ProjectID
+	var currentID sql.NullString
+	var currentVersion sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT status, organization_id, project_id, committed_asset_id, committed_asset_version FROM asset_external_imports WHERE id=? FOR UPDATE`, id).Scan(&status, &org, &project, &currentID, &currentVersion); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return contract.ProjectAssetRef{}, ErrNotFound
+		}
+		return contract.ProjectAssetRef{}, err
+	}
+	if status == string(ExternalImportSucceeded) && currentID.Valid && currentVersion.Valid {
+		return contract.ProjectAssetRef{ProjectID: project, AssetVersion: contract.AssetVersionRef{AssetID: contract.AssetID(currentID.String), Version: currentVersion.Int64}}, nil
+	}
+	if status != string(ExternalImportRunning) || commit.OrganizationID != org || commit.ProjectID != project {
+		return contract.ProjectAssetRef{}, ErrInvalidState
+	}
+	if commit.BlobID != "" {
+		if err := insertAssetCommit(ctx, tx, commit, now); err != nil {
+			return contract.ProjectAssetRef{}, err
+		}
+	} else if commit.AssetID == "" || commit.Version < 1 {
+		return contract.ProjectAssetRef{}, ErrInvalidState
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE asset_external_imports SET status='succeeded', committed_asset_id=?, committed_asset_version=?, result_unknown_at=NULL, result_unknown_reason=NULL, last_error_code=NULL, last_error_message=NULL, version=version+1, updated_at=? WHERE id=?`, commit.AssetID, commit.Version, now, id)
+	if err != nil {
+		return contract.ProjectAssetRef{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		value, readErr := scanExternalImport(db.QueryRowContext(ctx, externalImportSelect+` WHERE id=?`, id))
+		if readErr == nil && value.Status == ExternalImportSucceeded {
+			return contract.ProjectAssetRef{ProjectID: value.ProjectID, AssetVersion: contract.AssetVersionRef{AssetID: value.CommittedAssetID, Version: value.CommittedAssetVersion}}, nil
+		}
+		return contract.ProjectAssetRef{}, err
+	}
+	return contract.ProjectAssetRef{ProjectID: project, AssetVersion: contract.AssetVersionRef{AssetID: commit.AssetID, Version: commit.Version}}, nil
+}
+
 func (r MySQLRepository) db() (*sql.DB, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("assets database is required")
@@ -606,6 +738,7 @@ func (r MySQLRepository) ListAssetFeatures(ctx context.Context, org contract.Org
 
 const uploadSelect = `SELECT id, organization_id, project_id, principal_kind, principal_id, status, original_filename, declared_mime_type, declared_size_bytes, declared_sha256, quarantine_provider, quarantine_bucket, quarantine_object_key, idempotency_key, request_hash, project_context_version, target_asset_id, target_blob_id, request_id, trace_id, asset_id, asset_version, error_code, expires_at, created_at, updated_at FROM upload_sessions`
 const intakeSelect = `SELECT id, organization_id, project_id, provider_job_id, output_id, provider_code, status, request_payload, idempotency_key, request_hash, target_asset_id, target_blob_id, asset_id, asset_version, error_code, error_message, retryable, attempt_count, max_attempts, available_at, lock_owner, request_id, trace_id, created_at, updated_at FROM generated_intakes`
+const externalImportSelect = `SELECT id, organization_id, project_id, source_provider, source_object_id, source_locator, idempotency_key, request_snapshot, request_hash, status, attempt_count, result_unknown_at, result_unknown_reason, recovery_attempt_count, last_error_code, last_error_message, committed_asset_id, committed_asset_version, version, created_at, updated_at FROM asset_external_imports`
 const projectAssetSelect = `SELECT pa.project_id, pa.created_at, a.id, a.organization_id, a.asset_kind, a.status, a.owner_system, a.latest_version, a.created_at, a.updated_at, av.version, av.status, av.source_type, av.mime_type, av.size_bytes, av.sha256, av.width_pixels, av.height_pixels, av.duration_ms, av.frame_rate, av.video_codec, av.audio_codec, av.render_job_id, av.derivation_id, av.duration_seconds, av.fps, av.codec, av.bitrate_bps, av.audio_codec, av.audio_channels, av.audio_sample_rate, av.poster_frame_ref, av.probe_status, av.probe_error, av.provider_job_id, av.provider_output_id, av.project_context_version, av.created_at, b.storage_provider, b.bucket_name, b.object_key, b.storage_version_id, b.etag FROM project_assets pa JOIN assets a ON a.organization_id=pa.organization_id AND a.id=pa.asset_id JOIN asset_versions av ON av.organization_id=pa.organization_id AND av.asset_id=pa.asset_id AND av.version=pa.asset_version JOIN asset_blobs b ON b.id=av.blob_id`
 const assetFeatureSelect = `SELECT organization_id, project_id, asset_id, asset_version, schema_version, feature_version, hook_strength, product_visibility, scene_tags, product_tags, person_tags, action_tags, emotion_tags, selling_points, cta_presence, similarity_group, similarity_risk, evidence, created_at, updated_at FROM asset_features`
 
@@ -657,6 +790,29 @@ func scanIntake(row scanner) (GeneratedIntake, error) {
 	}
 	if errorCode.Valid {
 		v.Error = &contract.JobError{Code: errorCode.String, Message: errorMessage.String, Retryable: retryable.Bool}
+	}
+	return v, nil
+}
+
+func scanExternalImport(row scanner) (ExternalImport, error) {
+	var v ExternalImport
+	var locator, unknownReason, errorCode, errorMessage, assetID sql.NullString
+	var unknownAt sql.NullTime
+	var assetVersion sql.NullInt64
+	err := row.Scan(&v.ID, &v.OrganizationID, &v.ProjectID, &v.SourceProvider, &v.SourceObjectID, &locator, &v.IdempotencyKey, &v.RequestSnapshot, &v.RequestHash, &v.Status, &v.AttemptCount, &unknownAt, &unknownReason, &v.RecoveryAttemptCount, &errorCode, &errorMessage, &assetID, &assetVersion, &v.Version, &v.CreatedAt, &v.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ExternalImport{}, ErrNotFound
+	}
+	if err != nil {
+		return ExternalImport{}, err
+	}
+	v.SourceLocator, v.ResultUnknownReason, v.LastErrorCode, v.LastErrorMessage = locator.String, unknownReason.String, errorCode.String, errorMessage.String
+	if unknownAt.Valid {
+		value := unknownAt.Time
+		v.ResultUnknownAt = &value
+	}
+	if assetID.Valid && assetVersion.Valid {
+		v.CommittedAssetID, v.CommittedAssetVersion = contract.AssetID(assetID.String), assetVersion.Int64
 	}
 	return v, nil
 }
