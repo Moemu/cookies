@@ -31,7 +31,7 @@ test('controlled execution center stays server-authoritative and safe on desktop
   await expect(workspace.getByText('redaction=computer-use-redaction/v1 · selector=fake-selector/v1')).toBeVisible()
   await expect(workspace.getByRole('button', { name: /重试提交/ })).toHaveCount(0)
   await expect(workspace.getByText('approval_fake_1')).toBeVisible()
-  await expect(workspace.getByText('未注册；真实执行不可用')).toBeVisible()
+  await expect(workspace.getByText('校准基线；实时 DOM 待复核')).toBeVisible()
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(workspace).toBeVisible()
@@ -48,7 +48,7 @@ function fakeRun() {
       business_execution_id: 'execution_fake_1', change_set_id: 'change_fake_1', approval_id: 'approval_fake_1', approval_action_hash: hash,
       account_reference_id: 'account_fake_1', object_fingerprint: hash, action: 'create_project_and_promotions', budget_limit_minor: 300000, currency: 'CNY',
       plan_canonical_hash: hash, intent_canonical_hash: hash, feedback_canonical_hash: hash, decision_canonical_hash: hash, configuration_canonical_hash: hash,
-      workflow_id: 'workflow_fake_1', workflow_canonical_hash: hash, workflow_step_id: 'step_fake_1',
+      workflow_id: 'workflow_fake_1', workflow_canonical_hash: hash, workflow_step_id: 'step_fake_1', skill_id: 'oceanengine-ecommerce-manual', skill_version: 'v0.1-calibration',
     },
     environment_id: 'environment_fake_1', profile_id: 'profile_fake_1', lease_id: 'lease_fake_1', policy_id: 'policy_fake_1',
     state: 'result_unknown', blocking_reason: 'RESULT_RECONCILIATION_REQUIRED', paused: false, takeover_active: false,

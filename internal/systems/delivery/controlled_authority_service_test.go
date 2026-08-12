@@ -129,8 +129,8 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	if change.Binding.OperatorFeedbackCanonicalHash != feedback.CanonicalHash || change.Binding.AccountReferenceID != selection.Workflow.AccountReference.ID {
 		t.Fatalf("binding=%#v", change.Binding)
 	}
-	if change.Binding.SkillID != "" || change.Binding.SkillVersion != "" {
-		t.Fatalf("unregistered Platform Skill was invented: %#v", change.Binding)
+	if change.Binding.SkillID != "oceanengine-ecommerce-manual" || change.Binding.SkillVersion != "v0.1-calibration" {
+		t.Fatalf("stage B Platform Skill calibration was not bound: %#v", change.Binding)
 	}
 	approved, approval, err := service.ApproveControlledChangeSet(context.Background(), actor, "project_a", change.ID, ApproveControlledChangeSetRequest{ExpectedVersion: 1})
 	if err != nil {

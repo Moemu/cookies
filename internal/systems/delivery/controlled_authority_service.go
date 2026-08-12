@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/systems/delivery/platformskills"
 )
 
 type controlledAuthorityRepository interface {
@@ -177,9 +178,14 @@ func (s Service) CompileControlledChangeSet(ctx context.Context, actor contract.
 	if err != nil {
 		return ControlledChangeSet{}, false, err
 	}
-	// No Platform Skill is registered for this path yet. Skill identity may be
-	// bound here only after a formal SkillDefinition exists in the registry.
-	binding := ControlledAuthorityBinding{SelectionID: selection.ID, ObservatoryRunID: run.ID, ObservatoryRunCanonicalHash: run.CanonicalHash, OperatorFeedbackID: feedback.ID, OperatorFeedbackCanonicalHash: feedback.CanonicalHash, OperatorFeedbackDisposition: feedback.Disposition, PlanID: decision.Inputs.PlanID, PlanVersion: decision.Inputs.PlanVersion, PlanCanonicalHash: decision.Inputs.PlanCanonicalHash, IntentID: decision.Inputs.IntentID, IntentVersion: decision.Inputs.IntentVersion, IntentCanonicalHash: decision.Inputs.IntentCanonicalHash, DecisionID: decision.ID, DecisionCanonicalHash: decision.CanonicalHash, ConfigurationID: configuration.ConfigurationID, ConfigurationVersion: configuration.VersionNumber, ConfigurationCanonicalHash: configuration.CanonicalHash, WorkflowID: selection.Workflow.ID, WorkflowCanonicalHash: selection.Workflow.CanonicalHash, AccountReferenceID: accountID, ObjectFingerprint: fingerprint}
+	skill, err := platformskills.Get(platformskills.OceanEngineEcommerceManualID, platformskills.OceanEngineEcommerceManualVersion)
+	if err != nil {
+		return ControlledChangeSet{}, false, err
+	}
+	// The immutable approval binds the stage B calibration definition. Its
+	// definition remains non-executable until gate one revalidates live DOM
+	// locators and a real Browser Driver is delivered.
+	binding := ControlledAuthorityBinding{SelectionID: selection.ID, ObservatoryRunID: run.ID, ObservatoryRunCanonicalHash: run.CanonicalHash, OperatorFeedbackID: feedback.ID, OperatorFeedbackCanonicalHash: feedback.CanonicalHash, OperatorFeedbackDisposition: feedback.Disposition, PlanID: decision.Inputs.PlanID, PlanVersion: decision.Inputs.PlanVersion, PlanCanonicalHash: decision.Inputs.PlanCanonicalHash, IntentID: decision.Inputs.IntentID, IntentVersion: decision.Inputs.IntentVersion, IntentCanonicalHash: decision.Inputs.IntentCanonicalHash, DecisionID: decision.ID, DecisionCanonicalHash: decision.CanonicalHash, ConfigurationID: configuration.ConfigurationID, ConfigurationVersion: configuration.VersionNumber, ConfigurationCanonicalHash: configuration.CanonicalHash, WorkflowID: selection.Workflow.ID, WorkflowCanonicalHash: selection.Workflow.CanonicalHash, AccountReferenceID: accountID, ObjectFingerprint: fingerprint, SkillID: skill.ID, SkillVersion: skill.Version}
 	id, err := s.idGenerator()("controlledchangeset")
 	if err != nil {
 		return ControlledChangeSet{}, false, err

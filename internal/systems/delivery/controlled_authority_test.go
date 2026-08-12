@@ -44,7 +44,7 @@ func TestConfirmedPlatformMappingRequiresTwoEvidenceReads(t *testing.T) {
 }
 
 func validControlledBinding() ControlledAuthorityBinding {
-	return ControlledAuthorityBinding{SelectionID: "selection_1", ObservatoryRunID: "run_1", ObservatoryRunCanonicalHash: testHash("a"), OperatorFeedbackID: "feedback_1", OperatorFeedbackCanonicalHash: testHash("b"), OperatorFeedbackDisposition: ObservatoryFeedbackAccepted, PlanID: "plan_1", PlanVersion: 2, PlanCanonicalHash: testHash("c"), IntentID: "intent_1", IntentVersion: 1, IntentCanonicalHash: testHash("d"), DecisionID: "decision_1", DecisionCanonicalHash: testHash("e"), ConfigurationID: "configuration_1", ConfigurationVersion: 3, ConfigurationCanonicalHash: testHash("f"), WorkflowID: "workflow_1", WorkflowCanonicalHash: testHash("1"), AccountReferenceID: "account_1", ObjectFingerprint: "fingerprint_1"}
+	return ControlledAuthorityBinding{SelectionID: "selection_1", ObservatoryRunID: "run_1", ObservatoryRunCanonicalHash: testHash("a"), OperatorFeedbackID: "feedback_1", OperatorFeedbackCanonicalHash: testHash("b"), OperatorFeedbackDisposition: ObservatoryFeedbackAccepted, PlanID: "plan_1", PlanVersion: 2, PlanCanonicalHash: testHash("c"), IntentID: "intent_1", IntentVersion: 1, IntentCanonicalHash: testHash("d"), DecisionID: "decision_1", DecisionCanonicalHash: testHash("e"), ConfigurationID: "configuration_1", ConfigurationVersion: 3, ConfigurationCanonicalHash: testHash("f"), WorkflowID: "workflow_1", WorkflowCanonicalHash: testHash("1"), AccountReferenceID: "account_1", ObjectFingerprint: "fingerprint_1", SkillID: "oceanengine-ecommerce-manual", SkillVersion: "v0.1-calibration"}
 }
 
 func testHash(character string) string {

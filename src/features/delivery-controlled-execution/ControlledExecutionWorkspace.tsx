@@ -130,7 +130,7 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
           <div><dt>正式 Approval</dt><dd title={run.authority.approval_id}>{run.authority.approval_id}</dd></div>
           <div><dt>预算上限</dt><dd>¥{formatMinor(run.authority.budget_limit_minor)} {run.authority.currency}</dd></div>
           <div><dt>Workflow</dt><dd title={run.authority.workflow_canonical_hash}>{shortHash(run.authority.workflow_canonical_hash)}</dd></div>
-          <div><dt>Platform Skill</dt><dd>{run.authority.skill_id && run.authority.skill_version ? `${run.authority.skill_id} · ${run.authority.skill_version}` : '未注册；真实执行不可用'}</dd></div>
+          <div><dt>Platform Skill</dt><dd>{run.authority.skill_id && run.authority.skill_version ? <>{run.authority.skill_id} · {run.authority.skill_version}<small>校准基线；实时 DOM 待复核</small></> : '未绑定；真实执行不可用'}</dd></div>
           <div><dt>租约</dt><dd title={run.lease_id}>{run.lease_id}</dd></div>
           <div><dt>策略</dt><dd title={run.policy_id}>{run.policy_id}</dd></div>
         </dl>
@@ -146,7 +146,7 @@ function AuthorityChain({ run }: { run: ComputerUseRun }) {
     && run.blocking_reason !== 'FINAL_CONFIRMATION_INVALID'
   return <ol className="controlled-execution-authority-chain" aria-label="受控写入授权链">
     <li className="complete"><span>1</span><div><b>接受优化方案</b><small>已接受/修改的反馈才可创建 ChangeSet；这不是写入批准。</small></div></li>
-    <li className={formalApproved ? 'complete' : 'blocked'}><span>2</span><div><b>批准平台写入</b><small>正式 Approval 绑定账户、预算、配置与 Workflow；当前没有注册的 Platform Skill。</small></div></li>
+    <li className={formalApproved ? 'complete' : 'blocked'}><span>2</span><div><b>批准平台写入</b><small>正式 Approval 绑定账户、预算、配置、Workflow 与阶段 B Skill 校准版本；这不代表实时 DOM 已复核。</small></div></li>
     <li className={confirmationReady ? 'complete' : 'waiting'}><span>3</span><div><b>一次性最终确认</b><small>仅对当前 Run 有效；签发或过期都不等于已经提交。</small></div></li>
   </ol>
 }

@@ -30,7 +30,7 @@ function run(patch: Partial<ComputerUseRun>): ComputerUseRun {
       schema_version: 'computer-use-authority/v1', business_execution_id: 'execution_1', change_set_id: 'change_1', approval_id: 'approval_1', approval_action_hash: hash,
       account_reference_id: 'account_1', object_fingerprint: 'object_1', action: 'create', budget_limit_minor: 100_00, currency: 'CNY',
       plan_canonical_hash: hash, intent_canonical_hash: hash, feedback_canonical_hash: hash, decision_canonical_hash: hash, configuration_canonical_hash: hash,
-      workflow_id: 'workflow_1', workflow_canonical_hash: hash, workflow_step_id: 'step_1',
+      workflow_id: 'workflow_1', workflow_canonical_hash: hash, workflow_step_id: 'step_1', skill_id: 'oceanengine-ecommerce-manual', skill_version: 'v0.1-calibration',
     },
     environment_id: 'environment_1', profile_id: 'profile_1', lease_id: 'lease_1', policy_id: 'policy_1', state: 'queued', paused: false, takeover_active: false,
     version: 1, idempotency_key: 'idempotency_1', request_hash: hash, created_by: 'user_1', created_at: '2026-08-12T00:00:00Z', updated_at: '2026-08-12T00:00:00Z',

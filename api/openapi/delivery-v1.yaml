@@ -230,8 +230,10 @@ paths:
       summary: Freeze the latest accepted or modified feedback into a formal controlled ChangeSet
       description: >-
         This operation never writes an advertising platform. It freezes Plan, Intent, feedback,
-        Decision, final Configuration, Workflow, account, action and budget identities.
-        A registered Platform Skill identity may be added later; PR #50 binds none.
+        Decision, final Configuration, Workflow, account, action, budget and the
+        oceanengine-ecommerce-manual@v0.1-calibration Skill identities. The Skill identity binds
+        the stage B calibration baseline; it does not claim executable DOM locators or a real
+        Browser Driver.
         The service selects the latest feedback for the run itself. Rejected feedback,
         an older feedback record or any hash/version drift is rejected.
       requestBody:

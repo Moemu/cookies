@@ -1,0 +1,60 @@
+{
+  "schema_version": "delivery-platform-skill-definition/v1",
+  "id": "oceanengine-ecommerce-manual",
+  "version": "v0.1-calibration",
+  "display_name": "巨量引擎·电商手动投放",
+  "platform": "ocean_engine",
+  "capability": "ecommerce_manual_delivery",
+  "status": "realtime_dom_validation_required",
+  "owner": "delivery",
+  "executable": false,
+  "real_browser_driver": false,
+  "submit_allowed": false,
+  "evidence_observed_at": "2026-08-06",
+  "last_reviewed_at": "2026-08-12",
+  "ui_baseline": {
+    "observed_at": "2026-08-06",
+    "platform_build": "unknown",
+    "locator_contract": "business_semantic_only",
+    "drift_check": "required_before_gate_one"
+  },
+  "schema_ref": "docs/delivery/schemas/oceanengine-bidding-schema-v0.1.json",
+  "evidence_refs": [
+    "docs/delivery/oceanengine-readonly-calibration.md",
+    "docs/delivery/read-only-calibration-closeout.md",
+    "docs/delivery/oceanengine-schema-calibration.md",
+    "docs/delivery/fixtures/oceanengine-promotion-selectors-v0.1-draft.json",
+    "docs/delivery/fixtures/oceanengine-promotion-create-v0.1-draft.json",
+    "docs/delivery/fixtures/oceanengine-promotion-edit-v0.1-draft.json",
+    "docs/delivery/fixtures/oceanengine-ecommerce-ubmax-v0.1-draft.json",
+    "docs/delivery/fixtures/oceanengine-leads-short-video-v0.1-draft.json",
+    "docs/delivery/fixtures/oceanengine-app-download-android-v0.1-draft.json"
+  ],
+  "page_types": [
+    { "kind": "account_context", "evidence_state": "observed" },
+    { "kind": "project_list", "evidence_state": "observed" },
+    { "kind": "project_create", "evidence_state": "operator_reviewed" },
+    { "kind": "promotion_list", "evidence_state": "observed" },
+    { "kind": "promotion_create", "evidence_state": "operator_reviewed" },
+    { "kind": "promotion_edit", "evidence_state": "observed" },
+    { "kind": "data_center", "evidence_state": "observed" },
+    { "kind": "account_project_promotion_reports", "evidence_state": "observed" },
+    { "kind": "material_report", "evidence_state": "observed" }
+  ],
+  "capabilities": {
+    "allowed": ["navigate", "identify_page", "identify_account", "identify_project", "fill_unsubmitted_form", "readback_field", "discard_local_draft", "verify_no_write"],
+    "forbidden": ["save", "create", "submit", "enable", "pause_remote_object", "modify_remote_object", "delete", "upload", "authorize"]
+  },
+  "dynamic_condition_keys": ["marketing_purpose", "marketing_scenario", "marketing_product_ref", "optimization_target_reference", "deep_optimization_mode", "delivery_mode", "schedule", "daily_budget", "bidding_strategy", "charging_mode", "bid", "roi_coefficient"],
+  "safety_exit": {
+    "method": "discard_unsubmitted_local_form",
+    "required_proof": "return_to_known_readonly_page_and_confirm_no_platform_object_or_status_change"
+  },
+  "write_validation_pending": ["save", "submit", "write_idempotency", "platform_object_id_readback", "server_validation", "post_write_status"],
+  "gate_one": {
+    "purpose": "revalidate_stage_b_evidence_and_calibrate_realtime_dom_locators",
+    "ready": false,
+    "required_scope": ["test_account_reference", "allowed_platform_project_ids", "action_fill_unsubmitted_form", "budget_ceiling_cny"],
+    "acceptance_checklist": ["reidentify_current_page_and_account", "confirm_ui_has_not_drifted", "establish_stable_dom_locators", "fill_only_unsubmitted_fields", "read_back_every_field", "discard_draft", "confirm_no_platform_write"]
+  }
+}

@@ -24,7 +24,9 @@
     "workflow_id": "workflow_test",
     "workflow_canonical_hash": "1111111111111111111111111111111111111111111111111111111111111111",
     "account_reference_id": "account_test",
-    "object_fingerprint": "oceanengine-project-fingerprint-test"
+    "object_fingerprint": "oceanengine-project-fingerprint-test",
+    "skill_id": "oceanengine-ecommerce-manual",
+    "skill_version": "v0.1-calibration"
   },
   "action": "create_project_and_promotions",
   "budget_limit_minor": 30000,
