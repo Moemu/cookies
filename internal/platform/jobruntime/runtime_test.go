@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
@@ -76,6 +77,33 @@ func TestWorkerClaimsAndCompletesAJob(t *testing.T) {
 	processed, err := worker.RunOnce(context.Background(), "worker_1")
 	if err != nil || !processed || !store.succeeded {
 		t.Fatalf("RunOnce() processed=%v succeeded=%v err=%v", processed, store.succeeded, err)
+	}
+}
+
+func TestWorkerLeavesTheClaimRecoverableWhenMySQLDeadlocksDuringTerminalWrite(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.August, 11, 8, 0, 0, 0, time.UTC)
+	deadlock := &mysql.MySQLError{Number: 1213, Message: "fault-injected deadlock"}
+	store := &memoryStore{
+		claim: Claim{Job: contract.Job{
+			ID: "job_deadlock", Kind: "strategy.generate", OrganizationID: "org_1",
+			Status: contract.JobRunning, CreatedAt: now, UpdatedAt: now,
+			Cancellable: true, AttemptCount: 1, MaxAttempts: 2, Version: 2,
+		}, LockOwner: "worker_1"},
+		succeedErr: deadlock,
+	}
+	worker := Worker{
+		Store: store, Now: func() time.Time { return now },
+		Handlers: map[string]Handler{
+			"strategy.generate": func(context.Context, Claim) (Result, error) { return Result{}, nil },
+		},
+	}
+	processed, err := worker.RunOnce(context.Background(), "worker_1")
+	if !processed || !errors.Is(err, deadlock) {
+		t.Fatalf("RunOnce() processed=%v err=%v", processed, err)
+	}
+	if !store.succeedAttempted || store.succeeded || store.failed || store.rescheduled {
+		t.Fatalf("deadlocked terminal write invented a state transition: %+v", store)
 	}
 }
 
@@ -169,15 +197,17 @@ func TestWorkerFailsDeferredJobAtAttemptLimit(t *testing.T) {
 }
 
 type memoryStore struct {
-	claim           Claim
-	claimed         bool
-	succeeded       bool
-	failed          bool
-	rescheduled     bool
-	availableAt     time.Time
-	problem         contract.JobError
-	cancelRequested bool
-	cancelled       bool
+	claim            Claim
+	claimed          bool
+	succeeded        bool
+	failed           bool
+	rescheduled      bool
+	availableAt      time.Time
+	problem          contract.JobError
+	cancelRequested  bool
+	cancelled        bool
+	succeedAttempted bool
+	succeedErr       error
 }
 
 func (s *memoryStore) Enqueue(context.Context, CreateRequest) (contract.Job, bool, error) {
@@ -191,6 +221,10 @@ func (s *memoryStore) Claim(context.Context, string, time.Time) (Claim, bool, er
 	return s.claim, true, nil
 }
 func (s *memoryStore) Succeed(context.Context, Claim, Result, time.Time) error {
+	s.succeedAttempted = true
+	if s.succeedErr != nil {
+		return s.succeedErr
+	}
 	s.succeeded = true
 	return nil
 }

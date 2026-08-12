@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "document-vision-evaluation-dataset-v1.schema.json",
+  "title": "Document vision evaluation dataset v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "dataset_id",
+    "label_policy_version",
+    "redaction_policy_version",
+    "cost_policy_version",
+    "collected_at",
+    "deidentified",
+    "cases"
+  ],
+  "properties": {
+    "contract_version": {"const": "document-vision-evaluation-dataset/v1"},
+    "dataset_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"},
+    "label_policy_version": {"type": "string", "minLength": 1, "maxLength": 96},
+    "redaction_policy_version": {"type": "string", "minLength": 1, "maxLength": 96},
+    "cost_policy_version": {"type": "string", "minLength": 1, "maxLength": 96},
+    "collected_at": {"type": "string", "format": "date-time"},
+    "deidentified": {"const": true},
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {"$ref": "#/$defs/case"}
+    }
+  },
+  "$defs": {
+    "boundedLineage": {"type": "string", "minLength": 1, "maxLength": 160},
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category",
+        "source_sha256",
+        "source_mime_type",
+        "page_numbers",
+        "gold_markdown",
+        "text_baseline_markdown",
+        "hybrid_markdown",
+        "baseline_parser_code",
+        "baseline_parser_version",
+        "hybrid_parser_code",
+        "hybrid_parser_version",
+        "hybrid_model_alias",
+        "hybrid_route_revision_id",
+        "hybrid_prompt_version",
+        "outputs_blinded",
+        "reviews",
+        "adjudicated",
+        "adjudicator_id",
+        "baseline_latency_ms",
+        "hybrid_latency_ms",
+        "hybrid_billable_pages",
+        "hybrid_cost_millicny"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"},
+        "category": {
+          "enum": ["text_pdf", "scanned_pdf", "two_column", "table_dense", "chinese_ppt", "broken_font_map", "header_footer_noise", "image_led"]
+        },
+        "source_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "source_mime_type": {
+          "enum": ["application/pdf", "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"]
+        },
+        "page_numbers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 24,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "gold_markdown": {"type": "string", "minLength": 1, "maxLength": 2097152},
+        "text_baseline_markdown": {"type": "string", "minLength": 1, "maxLength": 2097152},
+        "hybrid_markdown": {"type": "string", "minLength": 1, "maxLength": 2097152},
+        "baseline_parser_code": {"$ref": "#/$defs/boundedLineage"},
+        "baseline_parser_version": {"$ref": "#/$defs/boundedLineage"},
+        "hybrid_parser_code": {"$ref": "#/$defs/boundedLineage"},
+        "hybrid_parser_version": {"$ref": "#/$defs/boundedLineage"},
+        "hybrid_model_alias": {"$ref": "#/$defs/boundedLineage"},
+        "hybrid_route_revision_id": {"$ref": "#/$defs/boundedLineage"},
+        "hybrid_prompt_version": {"$ref": "#/$defs/boundedLineage"},
+        "converter_code": {"$ref": "#/$defs/boundedLineage"},
+        "converter_version": {"$ref": "#/$defs/boundedLineage"},
+        "outputs_blinded": {"const": true},
+        "reviews": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "items": {"$ref": "#/$defs/review"}
+        },
+        "adjudicated": {"const": true},
+        "adjudicator_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"},
+        "baseline_latency_ms": {"type": "integer", "minimum": 1},
+        "hybrid_latency_ms": {"type": "integer", "minimum": 1},
+        "hybrid_billable_pages": {"type": "integer", "minimum": 1, "maximum": 24},
+        "hybrid_cost_millicny": {"type": "integer", "minimum": 0}
+      },
+      "dependentRequired": {
+        "converter_code": ["converter_version"],
+        "converter_version": ["converter_code"]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"source_mime_type": {"not": {"const": "application/pdf"}}},
+            "required": ["source_mime_type"]
+          },
+          "then": {"required": ["converter_code", "converter_version"]}
+        }
+      ]
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "blind_label_id",
+        "reviewer_id",
+        "review_order",
+        "baseline_corrections",
+        "hybrid_corrections",
+        "baseline_review_and_correction_ms",
+        "hybrid_review_and_correction_ms"
+      ],
+      "properties": {
+        "blind_label_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"},
+        "reviewer_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$"},
+        "review_order": {"enum": ["baseline_first", "hybrid_first"]},
+        "baseline_corrections": {"type": "integer", "minimum": 0},
+        "hybrid_corrections": {"type": "integer", "minimum": 0},
+        "baseline_review_and_correction_ms": {"type": "integer", "minimum": 1},
+        "hybrid_review_and_correction_ms": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

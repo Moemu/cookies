@@ -197,7 +197,11 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	}
 	isBrandFilm := route.RouteType == CreativeRouteBrandVideo || route.RouteType == PerformanceModeBrandFilm
 	isManualBrandFilm := intake.Source == IntakeSourceManual && route.RouteID == ManualBrandFilmRouteID
+	isStrategyBrandFilm := intake.Source == IntakeSourceStrategyPackage && route.RouteType == CreativeRouteBrandVideo
 	if isBrandFilm && strings.TrimSpace(request.DirectionID) == "" {
+		if isStrategyBrandFilm {
+			return CreativeTask{}, ErrStrategyBrandDirectionRequired
+		}
 		if existing, existingErr := s.taskForIntake(ctx, actor, projectID, intake.ID); existingErr == nil {
 			return existing.Task, nil
 		} else if existingErr != ErrNotFound {
@@ -311,6 +315,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		}
 	}
 	lineageKey := ""
+	var emptyLegacyTask *TaskDetail
 	if confirmedDirection != nil {
 		lineageKey, err = creativeTaskLineageKey(intake, route, request.Channel, *confirmedDirection)
 		if err != nil {
@@ -323,6 +328,30 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		for _, candidate := range existing {
 			if candidate.LineageKey == lineageKey {
 				return candidate, nil
+			}
+		}
+		if isStrategyBrandFilm {
+			strategyTasks, ok := s.Repository.(StrategyBrandTaskRepository)
+			if !ok {
+				return CreativeTask{}, fmt.Errorf("Strategy brand task repository is unavailable")
+			}
+			intakeTasks, intakeTasksErr := strategyTasks.ListActiveTasksForIntake(ctx, actor.OrganizationID, projectID, intake.ID)
+			if intakeTasksErr != nil {
+				return CreativeTask{}, intakeTasksErr
+			}
+			for _, candidate := range intakeTasks {
+				if candidate.IntakeID != intake.ID || candidate.Status == TaskArchived || strings.TrimSpace(candidate.Direction.DirectionVersionID) != "" {
+					continue
+				}
+				detail, detailErr := s.Repository.GetTaskDetail(ctx, actor.OrganizationID, projectID, candidate.ID)
+				if detailErr != nil {
+					return CreativeTask{}, detailErr
+				}
+				if !isEmptyLegacyStrategyBrandTask(detail) {
+					return CreativeTask{}, ErrStrategyBrandLegacyTaskNeedsReview
+				}
+				value := detail
+				emptyLegacyTask = &value
 			}
 		}
 	}
@@ -536,6 +565,13 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	}
 	if err := draft.Validate(); err != nil {
 		return CreativeTask{}, err
+	}
+	if emptyLegacyTask != nil {
+		replacer, ok := s.Repository.(StrategyBrandTaskRepository)
+		if !ok {
+			return CreativeTask{}, ErrStrategyBrandLegacyTaskNeedsReview
+		}
+		return replacer.ReplaceEmptyLegacyStrategyBrandTask(ctx, *emptyLegacyTask, task, draft, now)
 	}
 	return s.Repository.CreateVideoTask(ctx, task, draft)
 }

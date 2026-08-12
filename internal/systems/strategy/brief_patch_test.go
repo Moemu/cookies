@@ -72,6 +72,30 @@ func TestApplyBriefPatchRejectsStaleAndUnknownFields(t *testing.T) {
 	}
 }
 
+func TestApplyBriefPatchAutosavePersistsWithoutConfirmingTheField(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{
+		ID: "draft_1", Status: "open", Version: 1,
+		Document: EmptyBriefDocument(), FieldStates: map[string]FieldState{},
+	}
+	updated, err := ApplyBriefPatch(draft, BriefPatch{
+		ExpectedVersion: 1,
+		Operations: []BriefPatchOperation{{
+			Op: "set", FieldPath: "campaign.objective", Value: json.RawMessage(`"提升新品认知"`),
+		}},
+	}, PatchFromUserDraft, "user_1", time.Date(2026, time.August, 11, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := updated.FieldStates["campaign.objective"]
+	if updated.Document.Campaign.Objective != "提升新品认知" || updated.Version != 2 {
+		t.Fatalf("autosaved draft = %#v", updated)
+	}
+	if state.Source.Type != "user_edit" || state.Confidence != "high" || state.Confirmation != "unconfirmed" {
+		t.Fatalf("autosaved field state = %#v", state)
+	}
+}
+
 func TestDeterministicBriefPatchSeparatesChineseLabeledFields(t *testing.T) {
 	t.Parallel()
 	draft := BriefDraft{Version: 1, Document: EmptyBriefDocument()}

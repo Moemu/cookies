@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/strategy-draft-v3.schema.json",
+  "title": "Strategy Draft v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "objective", "audience", "proposition", "channel_strategy", "creative_strategy", "constraints", "budget_and_cadence", "experiment_matrix", "measurement", "assumptions_and_gaps", "lineage", "executive_summary", "cross_platform_role", "platform_plans", "evidence_refs", "compliance"],
+  "properties": {
+    "contract_version": {"const": "strategy-draft/v3"},
+    "objective": {"type": "string", "minLength": 1},
+    "audience": {
+      "type": "object", "additionalProperties": false,
+      "required": ["primary", "insights"],
+      "properties": {
+        "primary": {"type": "string", "minLength": 1},
+        "insights": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "proposition": {"type": "string", "minLength": 1},
+    "channel_strategy": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/channel"}},
+    "creative_strategy": {"$ref": "#/$defs/creativeStrategy"},
+    "constraints": {"type": "array", "items": {"type": "string"}},
+    "budget_and_cadence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["budget", "cadence"],
+      "properties": {"budget": {"type": "string"}, "cadence": {"type": "string"}}
+    },
+    "experiment_matrix": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["hypothesis", "variable", "metric"],
+        "properties": {
+          "hypothesis": {"type": "string", "minLength": 1},
+          "variable": {"type": "string", "minLength": 1},
+          "metric": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "measurement": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "assumptions_and_gaps": {"type": "array", "items": {"type": "string"}},
+    "executive_summary": {"type": "string", "minLength": 1},
+    "cross_platform_role": {"type": "string", "minLength": 1},
+    "platform_plans": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/platformPlan"}},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "lineage": {"$ref": "#/$defs/lineage"},
+    "compliance": {"$ref": "#/$defs/compliance"}
+  },
+  "$defs": {
+    "channel": {
+      "type": "object", "additionalProperties": false,
+      "required": ["platform", "role", "formats"],
+      "properties": {
+        "platform": {"enum": ["xiaohongshu", "douyin", "taobao_tmall", "wechat_ecosystem"]},
+        "role": {"type": "string", "minLength": 1},
+        "formats": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "creativeStrategy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["objective", "message_hierarchy", "territories", "tone", "mandatories", "avoidances"],
+      "properties": {
+        "objective": {"type": "string", "minLength": 1},
+        "message_hierarchy": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "territories": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/creativeTerritory"}},
+        "tone": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "mandatories": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "avoidances": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "creativeTerritory": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "audience_tension", "core_idea", "proof", "channel_adaptations"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "audience_tension": {"type": "string", "minLength": 1},
+        "core_idea": {"type": "string", "minLength": 1},
+        "proof": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "channel_adaptations": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/channelAdaptation"}}
+      }
+    },
+    "channelAdaptation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["platform", "role", "adaptation"],
+      "properties": {
+        "platform": {"enum": ["xiaohongshu", "douyin", "taobao_tmall", "wechat_ecosystem"]},
+        "role": {"type": "string", "minLength": 1},
+        "adaptation": {"type": "string", "minLength": 1},
+        "formats": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "platformPlan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["platform", "role", "audience_angle", "content_pillars", "formats", "conversion_path", "cadence", "primary_kpi", "creative_ideas", "constraints"],
+      "properties": {
+        "platform": {"enum": ["xiaohongshu", "douyin", "taobao_tmall", "wechat_ecosystem"]},
+        "role": {"type": "string", "minLength": 1},
+        "audience_angle": {"type": "string"},
+        "content_pillars": {"type": "array", "items": {"type": "string"}},
+        "formats": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "conversion_path": {"type": "string", "minLength": 1},
+        "cadence": {"type": "string"},
+        "primary_kpi": {"type": "string"},
+        "creative_ideas": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "constraints": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "lineage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["brief_id", "brief_version", "project_context_version", "skill_versions"],
+      "properties": {
+        "brief_id": {"type": "string", "minLength": 1},
+        "brief_version": {"type": "integer", "minimum": 1},
+        "project_context_version": {"type": "integer", "minimum": 1},
+        "skill_versions": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}}
+      }
+    },
+    "compliance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "passed", "issues", "checked_at"],
+      "properties": {
+        "contract_version": {"const": "strategy-compliance-report/v1"},
+        "content_hash": {"type": "string"},
+        "passed": {"type": "boolean"},
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["rule_id", "severity", "message"],
+            "properties": {
+              "rule_id": {"type": "string"},
+              "severity": {"enum": ["warning", "blocker"]},
+              "message": {"type": "string"},
+              "evidence": {"type": "string"}
+            }
+          }
+        },
+        "checked_at": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}

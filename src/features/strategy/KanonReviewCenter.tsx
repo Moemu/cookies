@@ -1,5 +1,5 @@
 import { BadgeCheck, CircleAlert, Clock3, ShieldCheck, UserRoundCheck, UsersRound } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProject } from '../../context/ProjectContext'
 import { strategyApi } from './api'
 import type { Review, ReviewPolicy } from './types'
@@ -16,21 +16,16 @@ export function KanonReviewCenter({ activeView, onOpenReview }: {
   const [allowSelf, setAllowSelf] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
+  const policyFormDirty = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
     const filter = activeView === '待我评审' ? 'assigned_to_me'
       : activeView === '我发起的' ? 'requested_by_me'
       : 'all'
-    void Promise.all([
-      strategyApi.listReviews(currentProject.id, filter, '', controller.signal),
-      strategyApi.getReviewPolicy(currentProject.id, controller.signal),
-    ]).then(([reviewResult, reviewPolicy]) => {
+    setReviews([])
+    void strategyApi.listReviews(currentProject.id, filter, '', controller.signal).then(reviewResult => {
       setReviews(reviewResult.items)
-      setPolicy(reviewPolicy)
-      setMode(reviewPolicy.mode)
-      setApprovers(reviewPolicy.approver_user_ids.join(', '))
-      setAllowSelf(reviewPolicy.allow_self_approval)
     }).catch(cause => {
       if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
         setError(cause instanceof Error ? cause.message : '评审中心读取失败。')
@@ -38,6 +33,29 @@ export function KanonReviewCenter({ activeView, onOpenReview }: {
     })
     return () => controller.abort()
   }, [activeView, currentProject.id])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    policyFormDirty.current = false
+    setPolicy(null)
+    setMode('self_confirmation')
+    setApprovers('')
+    setAllowSelf(false)
+    void strategyApi.getReviewPolicy(currentProject.id, controller.signal).then(reviewPolicy => {
+      setPolicy(reviewPolicy)
+      // A slow initial read may finish after the user has started editing.
+      // Keep the newer local intent; only untouched forms are hydrated.
+      if (policyFormDirty.current) return
+      setMode(reviewPolicy.mode)
+      setApprovers(reviewPolicy.approver_user_ids.join(', '))
+      setAllowSelf(reviewPolicy.allow_self_approval)
+    }).catch(cause => {
+      if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
+        setError(cause instanceof Error ? cause.message : '评审策略读取失败。')
+      }
+    })
+    return () => controller.abort()
+  }, [currentProject.id])
 
   const visible = useMemo(() => {
     if (activeView === '已完成') return reviews.filter(review => review.status !== 'open')
@@ -60,6 +78,8 @@ export function KanonReviewCenter({ activeView, onOpenReview }: {
         version: policy.version,
       })
       setPolicy(value)
+      policyFormDirty.current = false
+      setMode(value.mode)
       setApprovers(value.approver_user_ids.join(', '))
       setAllowSelf(value.allow_self_approval)
     } catch (cause) {
@@ -90,14 +110,23 @@ export function KanonReviewCenter({ activeView, onOpenReview }: {
     </section>
     <aside>
       <div className="surface-toolbar"><h3>当前 Project 评审策略</h3><ShieldCheck size={16}/></div>
-      <label>评审模式<select value={mode} onChange={event => setMode(event.target.value as ReviewPolicy['mode'])}>
+      <label>评审模式<select disabled={Boolean(busy)} value={mode} onChange={event => {
+        policyFormDirty.current = true
+        setMode(event.target.value as ReviewPolicy['mode'])
+      }}>
         <option value="self_confirmation">个人确认</option>
         <option value="leader_approval">Leader 评审</option>
         <option value="designated_approvers">指定审批人</option>
       </select></label>
-      {mode !== 'self_confirmation' ? <label>审批人 User ID<textarea rows={4} value={approvers} onChange={event => setApprovers(event.target.value)} placeholder={mode === 'leader_approval' ? '留空自动使用组织 owner / admin' : '多个用户以逗号或换行分隔'}/></label> : null}
-      {mode !== 'self_confirmation' ? <label className="kanon-check"><input checked={allowSelf} type="checkbox" onChange={event => setAllowSelf(event.target.checked)}/><span>允许发起人同时作为指定审批人</span></label> : null}
-      <button className="primary-button full" disabled={Boolean(busy) || (mode === 'designated_approvers' && !approvers.trim())} onClick={() => void savePolicy()}><BadgeCheck size={15}/>{busy ? '保存中…' : '保存评审策略'}</button>
+      {mode !== 'self_confirmation' ? <label>审批人 User ID<textarea disabled={Boolean(busy)} rows={4} value={approvers} onChange={event => {
+        policyFormDirty.current = true
+        setApprovers(event.target.value)
+      }} placeholder={mode === 'leader_approval' ? '留空自动使用组织 owner / admin' : '多个用户以逗号或换行分隔'}/></label> : null}
+      {mode !== 'self_confirmation' ? <label className="kanon-check"><input checked={allowSelf} disabled={Boolean(busy)} type="checkbox" onChange={event => {
+        policyFormDirty.current = true
+        setAllowSelf(event.target.checked)
+      }}/><span>允许发起人同时作为指定审批人</span></label> : null}
+      <button className="primary-button full" disabled={!policy || Boolean(busy) || (mode === 'designated_approvers' && !approvers.trim())} onClick={() => void savePolicy()}><BadgeCheck size={15}/>{busy ? '保存中…' : !policy ? '正在加载评审策略…' : '保存评审策略'}</button>
       <div className="kanon-policy-summary">
         <Clock3 size={16}/><div><b>策略按提交时快照</b><p>修改设置不会改变已经打开的 Review Assignment。</p></div>
       </div>

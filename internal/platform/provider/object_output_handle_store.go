@@ -47,6 +47,9 @@ func (s ObjectOutputHandleStore) Put(ctx context.Context, project contract.Proje
 	if err != nil {
 		return err
 	}
+	if !providerOutputLocationInScope(info.ObjectLocation, s.Bucket, project, ref.ProviderJobID, ref.OutputID) {
+		return fmt.Errorf("provider output store returned an out-of-scope object location")
+	}
 	_, err = s.DB.ExecContext(ctx, `INSERT INTO provider_job_output_handles (
 		provider_job_id, output_id, organization_id, project_id, provider_code,
 		retrieval_expires_at, mime_type, size_bytes, sha256, contents,
@@ -95,6 +98,9 @@ func (s ObjectOutputHandleStore) Open(ctx context.Context, project contract.Proj
 	if mimeType != ref.DeclaredMIMEType || size != ref.DeclaredSizeBytes || (ref.DeclaredSHA256 != nil && sha != *ref.DeclaredSHA256) {
 		return nil, contract.OutputMetadata{}, fmt.Errorf("provider output handle metadata mismatch")
 	}
+	if !providerOutputLocationInScope(location, s.Bucket, project, ref.ProviderJobID, ref.OutputID) {
+		return nil, contract.OutputMetadata{}, fmt.Errorf("provider output object scope mismatch")
+	}
 	stream, info, err := s.Blobs.Open(ctx, location)
 	if err != nil {
 		return nil, contract.OutputMetadata{}, err
@@ -122,6 +128,10 @@ func (s ObjectOutputHandleStore) Delete(ctx context.Context, organizationID cont
 	if err != nil {
 		return err
 	}
+	project := contract.ProjectRef{OrganizationID: organizationID, ProjectID: projectID}
+	if !providerOutputLocationInScope(location, s.Bucket, project, providerJobID, outputID) {
+		return fmt.Errorf("provider output object scope mismatch")
+	}
 	if err := s.Blobs.Delete(ctx, location); err != nil {
 		return err
 	}
@@ -135,5 +145,16 @@ func providerOutputObjectKey(project contract.ProjectRef, ref contract.ProviderO
 	digest := sha256.Sum256([]byte(strings.Join([]string{
 		string(project.OrganizationID), string(project.ProjectID), ref.ProviderJobID, ref.OutputID,
 	}, "\x00")))
-	return "provider-output/" + hex.EncodeToString(digest[:])
+	return fmt.Sprintf("provider-output/%s/%s/%s", project.OrganizationID, project.ProjectID, hex.EncodeToString(digest[:]))
+}
+
+func providerOutputLocationInScope(
+	location assets.ObjectLocation,
+	bucket string,
+	project contract.ProjectRef,
+	providerJobID string,
+	outputID string,
+) bool {
+	expected := providerOutputObjectKey(project, contract.ProviderOutputRef{ProviderJobID: providerJobID, OutputID: outputID})
+	return strings.TrimSpace(bucket) != "" && location.Bucket == bucket && location.Key == expected
 }

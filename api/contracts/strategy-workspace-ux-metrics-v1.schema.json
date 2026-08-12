@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "strategy-workspace-ux-metrics-v1.schema.json",
+  "title": "Strategy Workspace UX Metrics v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "window", "assistant", "research", "documents", "recovery", "interpretation", "time_saving_measured", "time_saving_reason"],
+  "properties": {
+    "contract_version": {"const": "strategy-workspace-ux-metrics/v1"},
+    "window": {
+      "type": "object", "additionalProperties": false,
+      "required": ["days", "from", "to"],
+      "properties": {
+        "days": {"type": "integer", "minimum": 1, "maximum": 90},
+        "from": {"type": "string", "format": "date-time"},
+        "to": {"type": "string", "format": "date-time"}
+      }
+    },
+    "assistant": {
+      "type": "object", "additionalProperties": false,
+      "required": ["commands", "missing_acknowledgements", "missing_meaningful_updates", "first_acknowledgement", "first_meaningful_update"],
+      "properties": {
+        "commands": {"$ref": "#/$defs/count"},
+        "missing_acknowledgements": {"$ref": "#/$defs/count"},
+        "missing_meaningful_updates": {"$ref": "#/$defs/count"},
+        "first_acknowledgement": {"$ref": "#/$defs/latency"},
+        "first_meaningful_update": {"$ref": "#/$defs/latency"}
+      }
+    },
+    "research": {
+      "type": "object", "additionalProperties": false,
+      "required": ["runs", "completed", "partially_completed", "failed", "cancelled", "verified_findings", "conflicting_findings", "proposals_applied", "proposals_stale", "proposal_adoption_rate"],
+      "properties": {
+        "runs": {"$ref": "#/$defs/count"},
+        "completed": {"$ref": "#/$defs/count"},
+        "partially_completed": {"$ref": "#/$defs/count"},
+        "failed": {"$ref": "#/$defs/count"},
+        "cancelled": {"$ref": "#/$defs/count"},
+        "verified_findings": {"$ref": "#/$defs/count"},
+        "conflicting_findings": {"$ref": "#/$defs/count"},
+        "proposals_applied": {"$ref": "#/$defs/count"},
+        "proposals_stale": {"$ref": "#/$defs/count"},
+        "proposal_adoption_rate": {"oneOf": [{"type": "null"}, {"type": "number", "minimum": 0, "maximum": 1}]}
+      }
+    },
+    "documents": {
+      "type": "object", "additionalProperties": false,
+      "required": ["parse_started", "ready", "partial", "failed", "vision_attempts", "vision_succeeded", "vision_partial", "vision_failed", "billable_vision_pages", "terminal_parse_latency", "vision_latency"],
+      "properties": {
+        "parse_started": {"$ref": "#/$defs/count"},
+        "ready": {"$ref": "#/$defs/count"},
+        "partial": {"$ref": "#/$defs/count"},
+        "failed": {"$ref": "#/$defs/count"},
+        "vision_attempts": {"$ref": "#/$defs/count"},
+        "vision_succeeded": {"$ref": "#/$defs/count"},
+        "vision_partial": {"$ref": "#/$defs/count"},
+        "vision_failed": {"$ref": "#/$defs/count"},
+        "billable_vision_pages": {"$ref": "#/$defs/count"},
+        "terminal_parse_latency": {"$ref": "#/$defs/latency"},
+        "vision_latency": {"$ref": "#/$defs/latency"}
+      }
+    },
+    "recovery": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stalled", "retried"],
+      "properties": {
+        "stalled": {"$ref": "#/$defs/count"},
+        "retried": {"$ref": "#/$defs/count"}
+      }
+    },
+    "interpretation": {"const": "observed_workflow_evidence_not_causal_effect"},
+    "time_saving_measured": {"const": false},
+    "time_saving_reason": {"const": "human_correction_baseline_not_collected"}
+  },
+  "$defs": {
+    "count": {"type": "integer", "minimum": 0},
+    "latency": {
+      "type": "object", "additionalProperties": false,
+      "required": ["samples", "p50_ms", "p95_ms"],
+      "properties": {
+        "samples": {"type": "integer", "minimum": 0},
+        "p50_ms": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]},
+        "p95_ms": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]}
+      }
+    }
+  }
+}

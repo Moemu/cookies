@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "strategy-model-capabilities-v1.schema.json",
+  "title": "Strategy Model Capabilities v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "items"],
+  "properties": {
+    "contract_version": {"const": "strategy-model-capabilities/v1"},
+    "items": {
+      "type": "array", "minItems": 6, "maxItems": 6, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["capability", "model_alias", "available"],
+        "properties": {
+          "capability": {"enum": ["assistant.simple", "assistant.standard", "strategy.generate", "strategy.deep_review", "research.web", "document.vision"]},
+          "model_alias": {"type": "string", "minLength": 1, "maxLength": 160},
+          "available": {"type": "boolean"},
+          "reason_code": {"type": "string", "minLength": 1, "maxLength": 96},
+          "upstream_model": {"type": "string", "minLength": 1, "maxLength": 160},
+          "route_revision_id": {"type": "string", "minLength": 1, "maxLength": 96}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {"properties": {"items": {"type": "array", "contains": {"type": "object", "properties": {"capability": {"const": "assistant.simple"}}, "required": ["capability"]}, "minContains": 1, "maxContains": 1}}},
+    {"properties": {"items": {"type": "array", "contains": {"type": "object", "properties": {"capability": {"const": "assistant.standard"}}, "required": ["capability"]}, "minContains": 1, "maxContains": 1}}},
+    {"properties": {"items": {"type": "array", "contains": {"type": "object", "properties": {"capability": {"const": "strategy.generate"}}, "required": ["capability"]}, "minContains": 1, "maxContains": 1}}},
+    {"properties": {"items": {"type": "array", "contains": {"type": "object", "properties": {"capability": {"const": "strategy.deep_review"}}, "required": ["capability"]}, "minContains": 1, "maxContains": 1}}},
+    {"properties": {"items": {"type": "array", "contains": {"type": "object", "properties": {"capability": {"const": "research.web"}}, "required": ["capability"]}, "minContains": 1, "maxContains": 1}}},
+    {"properties": {"items": {"type": "array", "contains": {"type": "object", "properties": {"capability": {"const": "document.vision"}}, "required": ["capability"]}, "minContains": 1, "maxContains": 1}}}
+  ]
+}

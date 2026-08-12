@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "strategy-project-context-manifest-v1.schema.json",
+  "title": "Strategy Project Context Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "workspace_ref", "project_context_ref", "stage", "brief_ref", "strategy_ref", "selected_source_refs", "memory_version", "generated_at"],
+  "properties": {
+    "contract_version": {"const": "strategy-project-context-manifest/v1"},
+    "workspace_ref": {"$ref": "#/$defs/versionedRef"},
+    "project_context_ref": {"$ref": "#/$defs/versionedRef"},
+    "stage": {"enum": ["intake", "brief", "strategy", "review", "handoff"]},
+    "brief_ref": {"$ref": "#/$defs/nullableSnapshotRef"},
+    "strategy_ref": {"$ref": "#/$defs/nullableSnapshotRef"},
+    "selected_source_refs": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/snapshotRef"}},
+    "memory_version": {"type": "integer", "minimum": 0},
+    "generated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "versionedRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "version"],
+      "properties": {
+        "type": {"type": "string", "minLength": 1, "maxLength": 48},
+        "id": {"type": "string", "minLength": 1, "maxLength": 96},
+        "version": {"type": "integer", "minimum": 1}
+      }
+    },
+    "snapshotRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "content_hash"],
+      "properties": {
+        "type": {"type": "string", "minLength": 1, "maxLength": 48},
+        "id": {"type": "string", "minLength": 1, "maxLength": 96},
+        "version": {"type": "integer", "minimum": 1},
+        "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "nullableSnapshotRef": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/snapshotRef"}]}
+  }
+}

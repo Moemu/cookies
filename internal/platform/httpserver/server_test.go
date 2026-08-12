@@ -297,10 +297,18 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 		wantRetryable bool
 	}{
 		{name: "invalid state", err: creative.ErrInvalidState, wantStatus: http.StatusConflict, wantCode: "INVALID_STATE"},
+		{name: "strategy brand direction required", err: creative.ErrStrategyBrandDirectionRequired, wantStatus: http.StatusConflict, wantCode: "STRATEGY_BRAND_DIRECTION_REQUIRED"},
+		{name: "strategy brand lineage mismatch", err: creative.ErrStrategyBrandLineageMismatch, wantStatus: http.StatusConflict, wantCode: "STRATEGY_BRAND_LINEAGE_MISMATCH"},
+		{name: "strategy brand legacy review", err: creative.ErrStrategyBrandLegacyTaskNeedsReview, wantStatus: http.StatusConflict, wantCode: "STRATEGY_BRAND_LEGACY_TASK_REQUIRES_REVIEW"},
 		{name: "stale version", err: creative.ErrVersionConflict, wantStatus: http.StatusPreconditionFailed, wantCode: "CREATIVE_VERSION_CONFLICT"},
 		{name: "viral source unavailable", err: creative.ErrViralAnalysisSourceUnavailable, wantStatus: http.StatusUnprocessableEntity, wantCode: "VIRAL_ANALYSIS_SOURCE_UNAVAILABLE"},
 		{name: "viral provider unavailable", err: creative.ErrViralAnalysisProviderUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "VIRAL_ANALYSIS_PROVIDER_UNAVAILABLE", wantRetryable: true},
 		{name: "viral invalid response", err: creative.ErrViralAnalysisResponseInvalid, wantStatus: http.StatusBadGateway, wantCode: "VIRAL_ANALYSIS_RESPONSE_INVALID", wantRetryable: true},
+		{name: "document vision reconciliation", err: knowledge.ErrDocumentVisionReconciliationRequired, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_REQUIRED"},
+		{name: "document vision reconciliation forbidden", err: knowledge.ErrDocumentVisionReconciliationForbidden, wantStatus: http.StatusForbidden, wantCode: "DOCUMENT_VISION_RECONCILIATION_FORBIDDEN"},
+		{name: "invalid document vision reconciliation", err: knowledge.ErrDocumentVisionReconciliationInvalid, wantStatus: http.StatusBadRequest, wantCode: "INVALID_DOCUMENT_VISION_RECONCILIATION"},
+		{name: "same document vision operator", err: knowledge.ErrDocumentVisionReconciliationSameActor, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_SECOND_OPERATOR_REQUIRED"},
+		{name: "document vision reconciliation conflict", err: knowledge.ErrDocumentVisionReconciliationConflict, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_CONFLICT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -326,6 +334,87 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStrategyBrandWorkflowRoutesPreserveReadAndWriteSemantics(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead, creative.ScopeWrite},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{brandWorkflow: creative.StrategyBrandWorkflowResult{
+		ContractVersion: creative.StrategyBrandWorkflowV1,
+		Mode:            creative.StrategyBrandDirectionReady, IntakeID: "intake_1",
+		InputIdentityHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Issues:            []creative.StrategyBrandWorkflowIssue{}, NextAction: "generate_directions",
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Creative: manager,
+	})
+
+	read := httptest.NewRecorder()
+	server.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/api/creative/v1/projects/project_1/creative-intakes/intake_1/brand-workflow", nil))
+	if read.Code != http.StatusOK || manager.getBrandWorkflowCalls != 1 || manager.prepareBrandWorkflowCalls != 0 {
+		t.Fatalf("GET status/calls=%d/%d/%d body=%s", read.Code, manager.getBrandWorkflowCalls, manager.prepareBrandWorkflowCalls, read.Body.String())
+	}
+
+	body := `{"expected_input_identity_hash":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selected_route_id":"route_brand","accept_strategy_projection":true}`
+	missingKey := httptest.NewRecorder()
+	server.ServeHTTP(missingKey, httptest.NewRequest(http.MethodPost, "/api/creative/v1/projects/project_1/creative-intakes/intake_1/brand-workflow:prepare", strings.NewReader(body)))
+	if missingKey.Code != http.StatusBadRequest || manager.prepareBrandWorkflowCalls != 0 {
+		t.Fatalf("missing key status/calls=%d/%d body=%s", missingKey.Code, manager.prepareBrandWorkflowCalls, missingKey.Body.String())
+	}
+
+	prepared := httptest.NewRecorder()
+	prepareRequest := httptest.NewRequest(http.MethodPost, "/api/creative/v1/projects/project_1/creative-intakes/intake_1/brand-workflow:prepare", strings.NewReader(body))
+	prepareRequest.Header.Set("Idempotency-Key", "strategy-brand-prepare-sha256-aaaaaaaa")
+	server.ServeHTTP(prepared, prepareRequest)
+	if prepared.Code != http.StatusOK || manager.prepareBrandWorkflowCalls != 1 || manager.prepareBrandWorkflowRequest.SelectedRouteID != "route_brand" {
+		t.Fatalf("POST status/calls/request=%d/%d/%+v body=%s", prepared.Code, manager.prepareBrandWorkflowCalls, manager.prepareBrandWorkflowRequest, prepared.Body.String())
+	}
+}
+
+func TestDocumentVisionReconciliationConfirmationRequiresExplicitDecision(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "admin_2"},
+		Scopes:         []contract.Scope{knowledge.ScopeDocumentVisionReconcile},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &knowledge.Service{}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: allowingProjectAuthorizer{}, Knowledge: service,
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/platform/v1/projects/project_1/knowledge/document-vision-reconciliations/reconciliation_1/confirm",
+		strings.NewReader(`{}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_DOCUMENT_VISION_RECONCILIATION") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+type allowingProjectAuthorizer struct{}
+
+func (allowingProjectAuthorizer) AuthorizeProject(context.Context, contract.ActorContext, contract.ProjectID) error {
+	return nil
+}
+
+func (allowingProjectAuthorizer) AuthorizeProjectAction(context.Context, contract.ActorContext, contract.ProjectID, string) error {
+	return nil
 }
 
 func TestAuthenticatedDomainMountReceivesTrustedRequestContext(t *testing.T) {
@@ -2400,6 +2489,21 @@ type creativeManagerStub struct {
 	preparedImageOrder                 int
 	attachedImageProviderJobID         string
 	failedImageAttemptID               string
+	brandWorkflow                      creative.StrategyBrandWorkflowResult
+	getBrandWorkflowCalls              int
+	prepareBrandWorkflowCalls          int
+	prepareBrandWorkflowRequest        creative.PrepareStrategyBrandWorkflowRequest
+}
+
+func (s *creativeManagerStub) GetStrategyBrandWorkflow(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.StrategyBrandWorkflowResult, error) {
+	s.getBrandWorkflowCalls++
+	return s.brandWorkflow, nil
+}
+
+func (s *creativeManagerStub) PrepareStrategyBrandWorkflow(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request creative.PrepareStrategyBrandWorkflowRequest) (creative.StrategyBrandWorkflowResult, error) {
+	s.prepareBrandWorkflowCalls++
+	s.prepareBrandWorkflowRequest = request
+	return s.brandWorkflow, nil
 }
 
 func (s *creativeManagerStub) GetLatestAINativeRequirementWorkspace(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (creative.AINativeRequirementWorkspace, error) {

@@ -252,7 +252,7 @@ func BuildCreativeHandoff(value PackageVersion, productIDs []contract.ProductID)
 	}
 
 	messages := make([]CreativeMessage, 0)
-	if len(nonEmptyStrings(snapshot.Strategy.CreativeRecommendations)) > 0 {
+	if len(nonEmptyStrings(snapshot.Strategy.CreativeDirections())) > 0 {
 		warnings = append(warnings, HandoffIssue{
 			Code: "message_hierarchy_missing", Stage: "planning",
 			Path:    "creative_view.communication.message_hierarchy",
@@ -841,8 +841,61 @@ func creativeHandoffRoutes(snapshot PackageSnapshot, objectiveType string, objec
 	seen := map[string]bool{}
 	brandVideoChannels := make([]string, 0)
 	ambiguousImageRoutes := make([]HandoffIssue, 0)
+	legacyPerformanceChannels := map[string]bool{}
+	for _, route := range snapshot.CreativeRoutes {
+		if route.RouteType != "pre_roll" || route.VideoPurpose != "performance" {
+			continue
+		}
+		for _, channel := range route.Channels {
+			legacyPerformanceChannels[strings.ToLower(strings.TrimSpace(channel))] = true
+		}
+	}
 	for _, channel := range snapshot.Strategy.ChannelStrategy {
 		platform := strings.ToLower(strings.TrimSpace(channel.Platform))
+		if legacyPerformanceChannels[platform] && oneOf(platform, "douyin", "kuaishou") && containsVideoFormat(channel.Formats) {
+			purpose, known := creativeRoutePurpose(channel.Role)
+			if !known && objectiveTypeKnown && objectiveType == "performance" {
+				purpose, known = objectiveType, true
+			}
+			if known && purpose == "performance" && creativeCommerceObjective(snapshot) {
+				routeBlockers := make([]HandoffIssue, 0)
+				routeWarnings := []HandoffIssue{{
+					Code: "cta_missing", Stage: "production",
+					Path:    "routes.route_" + platform + "_commerce_preroll.cta_policy.cta_intent",
+					Message: "效果 Route 需要在任务计划中显式确认 CTA intent。", Source: "strategy", SourceRefIDs: []string{},
+				}}
+				if len(productRefs) == 0 {
+					routeBlockers = append(routeBlockers, HandoffIssue{
+						Code: "product_missing", Stage: "generation",
+						Path:    "creative_view.product_and_offer.product_ref_ids",
+						Message: "电商前贴 Route 需要明确产品引用。", Source: "strategy", SourceRefIDs: []string{},
+					})
+				}
+				routeStatus := "ready"
+				if len(routeBlockers) > 0 {
+					routeStatus = "blocked"
+					blockers = append(blockers, routeBlockers...)
+				}
+				warnings = append(warnings, routeWarnings...)
+				routes = append(routes, CreativeHandoffRoute{
+					RouteID: "route_" + platform + "_commerce_preroll", DeliverableType: "video",
+					Purpose: "performance", PerformanceMode: "commerce_preroll", Channels: []string{platform},
+					Reason: creativeRouteReason(snapshot.Strategy, platform),
+					Spec: CreativeRouteSpec{
+						TargetDurationSeconds: 6, AspectRatio: "9:16", Resolution: "720p",
+						HookDeadlineSeconds: 1, CompositionRequired: true,
+					},
+					CTAPolicy: CreativeCTAPolicy{RequiredForGeneration: false, RequiredForDelivery: true},
+					ClaimRefs: []string{}, AssetRequirements: []CreativeAssetRequirement{
+						{Role: "product_image", RequiredStage: "generation"},
+						{Role: "main_video", RequiredStage: "production"},
+					},
+					AssetRefs: []string{}, RouteReadiness: HandoffReadiness{
+						Status: routeStatus, Blockers: routeBlockers, Warnings: routeWarnings,
+					},
+				})
+			}
+		}
 		if supportsBrandVideoPlatform(platform) && containsVideoFormat(channel.Formats) {
 			purpose, known := creativeRoutePurpose(channel.Role)
 			if !known && objectiveTypeKnown && objectiveType != "mixed" {
@@ -1033,6 +1086,25 @@ func creativeHandoffHasBrandGoal(snapshot PackageSnapshot) bool {
 	}, " ")
 	return containsAny(strings.ToLower(objective),
 		"品牌", "品牌广告", "品牌认知", "品牌心智", "品牌资产", "产品认知", "种草", "brand", "awareness")
+}
+
+func creativeCommerceObjective(snapshot PackageSnapshot) bool {
+	objective := strings.Join(append([]string{
+		snapshot.Brief.Snapshot.Campaign.Objective,
+		snapshot.Brief.Snapshot.Product.Name,
+		snapshot.Brief.Snapshot.Product.Category,
+		snapshot.Strategy.Objective,
+		snapshot.Strategy.Proposition,
+	}, snapshot.Strategy.Measurement...), " ")
+	normalized := strings.ToLower(objective)
+	if containsAny(normalized,
+		"game", "gaming", "游戏", "安装", "预约", "召回",
+		"short drama", "短剧", "正片",
+		"viral remake", "remake", "爆款复刻", "内容复刻") {
+		return false
+	}
+	return containsAny(normalized,
+		"commerce", "conversion", "purchase", "sales", "电商", "购买", "成交", "销售", "转化")
 }
 
 func creativeBrandVideoReason(document StrategyDocument, channels []string) string {

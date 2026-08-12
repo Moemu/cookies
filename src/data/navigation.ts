@@ -15,11 +15,11 @@ export const systems: SystemDefinition[] = [
     statement: '把模糊需求转化为可追溯、可执行的广告策略。',
     nav: [
       { id: 'tasks', label: '策略任务', icon: ListChecks, group: '工作', layout: 'workspace', description: '创建真实持久化任务，串联 Brief、研究证据、策略版本与评审结果。', views: ['全部任务', '进行中', '待评审', '已完成', '已归档'] },
-      { id: 'workspaces', label: '策略工作区', icon: FolderKanban, group: '工作', layout: 'workspace', description: '在对话、Brief、研究、策略、创意任务策略、实验与评审之间保持同一上下文。', views: ['概览', '对话', 'Brief', '研究', '策略', '创意任务策略', '实验', '评审', '变更记录'] },
-      { id: 'briefs', label: '需求中心', icon: ClipboardCheck, group: '资产与方法', layout: 'table', description: '管理 Brief 完整度、来源、冲突、确认与版本。', views: ['Brief 列表', '待补充', '待确认', '版本库', '冲突队列'] },
-      { id: 'strategies', label: '策略中心', icon: Target, group: '资产与方法', layout: 'analysis', description: '沉淀方向、受众、主张、渠道预算与实验方案。', views: ['策略库', '渠道策略', '方案对比', '实验方案', '版本库'] },
-      { id: 'research', label: '研究洞察', icon: FileSearch, group: '资产与方法', layout: 'analysis', description: '组织受众、竞品、行业研究和可引用证据。', views: ['受众', '竞品', '行业', '资料来源', '研究任务'] },
-      { id: 'reviews', label: '评审中心', icon: BadgeCheck, group: '协作', layout: 'table', description: '集中处理待评审内容、评论、审批与变更。', views: ['待我评审', '我发起的', '评论与提及', '已完成', '变更记录'] },
+      { id: 'workspaces', label: '策略工作区', icon: FolderKanban, group: '工作', layout: 'workspace', description: '沿五个稳定阶段推进需求、策略确认与创意交接，研究、资料和历史按需打开。', views: ['理解需求', 'Brief', '策略', '确认 / 评审', '创意交接'] },
+      { id: 'briefs', label: '需求中心', icon: ClipboardCheck, group: '策略中枢', prominence: 'hub', navHint: 'Brief、版本与确认', layout: 'table', description: '管理 Brief 完整度、来源、冲突、确认与版本。', views: ['Brief 列表', '待补充', '待确认', '版本库', '冲突队列'] },
+      { id: 'research', label: '研究洞察', icon: FileSearch, group: '策略中枢', prominence: 'hub', navHint: '联网研究与证据', layout: 'analysis', description: '组织受众、竞品、行业研究和可引用证据。', views: ['受众', '竞品', '行业', '资料来源', '研究任务'] },
+      { id: 'strategies', label: '策略中心', icon: Target, group: '策略中枢', prominence: 'hub', navHint: '策略方案与版本', layout: 'analysis', description: '沉淀方向、受众、主张、渠道预算与实验方案。', views: ['策略库', '渠道策略', '方案对比', '实验方案', '版本库'] },
+      { id: 'reviews', label: '评审中心', icon: BadgeCheck, group: '策略中枢', prominence: 'hub', navHint: '确认、协作与变更', layout: 'table', description: '集中处理待评审内容、评论、审批与变更。', views: ['待我评审', '我发起的', '评论与提及', '已完成', '变更记录'] },
     ],
   },
   {

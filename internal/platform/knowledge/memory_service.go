@@ -180,6 +180,30 @@ func (s *MemoryService) ListResearchRuns(context.Context, contract.ActorContext,
 	return []ResearchRun{}, nil
 }
 
+func (s *MemoryService) ListResearchFindings(context.Context, contract.ActorContext, contract.ProjectID, string) ([]ResearchFinding, error) {
+	return []ResearchFinding{}, nil
+}
+
+func (s *MemoryService) GetResearchReport(context.Context, contract.ActorContext, contract.ProjectID, string) (ResearchArtifact, error) {
+	return ResearchArtifact{}, ErrNotFound
+}
+
+func (s *MemoryService) CancelDocumentParse(context.Context, contract.ActorContext, contract.ProjectID, string) (JobControl, error) {
+	return JobControl{}, ErrKnowledgeControlUnavailable
+}
+
+func (s *MemoryService) RetryDocumentParse(context.Context, contract.ActorContext, contract.ProjectID, string) (Document, error) {
+	return Document{}, ErrKnowledgeControlUnavailable
+}
+
+func (s *MemoryService) CancelResearch(context.Context, contract.ActorContext, contract.ProjectID, string) (JobControl, error) {
+	return JobControl{}, ErrKnowledgeControlUnavailable
+}
+
+func (s *MemoryService) RetryResearch(context.Context, contract.ActorContext, contract.ProjectID, string) (ResearchRun, error) {
+	return ResearchRun{}, ErrKnowledgeControlUnavailable
+}
+
 func (s *MemoryService) ListResearchArtifacts(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]ResearchArtifact, error) {
 	return []ResearchArtifact{}, nil
 }

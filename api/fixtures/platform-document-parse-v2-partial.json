@@ -1,0 +1,16 @@
+{
+  "contract_version": "platform-document-parse/v2",
+  "document_id": "document_01",
+  "parse_strategy": "hybrid",
+  "parse_phase": "partial",
+  "parse_progress": 100,
+  "progress_kind": "pages",
+  "processed_pages": 18,
+  "total_pages": 18,
+  "quality_score": 0.71,
+  "quality_tier": "medium",
+  "fallback_reason": "第 7 页表格阅读顺序未能可靠恢复",
+  "preview_status": "partial",
+  "heartbeat_at": "2026-08-10T00:05:00Z",
+  "updated_at": "2026-08-10T00:05:00Z"
+}

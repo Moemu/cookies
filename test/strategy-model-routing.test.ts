@@ -32,6 +32,14 @@ test('Strategy agent failures give stage-specific recovery guidance', () => {
     '文本模型不支持当前路由参数，请联系管理员检查模型配置后重试。',
   )
   assert.match(agentFailureMessage('CONVERSATION_WEB_SEARCH_FAILED'), /没有生成无来源回答/)
+  assert.equal(
+    agentFailureMessage('AGENT_EXECUTION_FAILED', 'Agent execution failed'),
+    'AI 助手本轮执行未完成，请重新发送。已填写的内容和历史对话不会丢失。',
+  )
+  assert.equal(
+    agentFailureMessage('JOB_EXECUTION_FAILED', 'Job execution failed'),
+    'AI 助手本轮执行未完成，请重新发送。已填写的内容和历史对话不会丢失。',
+  )
 })
 
 test('conversation web search answers only after grounded evidence returns', async () => {

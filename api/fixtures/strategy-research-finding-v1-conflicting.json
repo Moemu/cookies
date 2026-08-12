@@ -1,0 +1,18 @@
+{
+  "contract_version": "strategy-research-finding/v1",
+  "id": "finding_01",
+  "claim": "短视频是该受众当前最有效的首触达渠道。",
+  "status": "conflicting",
+  "time_scope": "2026-H1",
+  "confidence": "medium",
+  "supporting_source_ids": ["source_01", "source_02"],
+  "conflicting_source_ids": ["source_03"],
+  "target": {"artifact": "strategy", "field_path": "channel_strategy"},
+  "implication": "保留短视频测试，但不应在缺少项目数据时把它写成唯一主渠道。",
+  "proposed_value": {
+    "primary_channels": ["短视频"],
+    "validation_note": "在项目转化数据验证前保留替代渠道测试"
+  },
+  "round": 3,
+  "content_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+}

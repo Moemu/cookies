@@ -60,13 +60,15 @@ const localGoEnv = {
   COOKIES_CREATIVE_DIRECTION_PLANNING_ENABLED: 'false',
   COOKIES_PROVIDER_TEXT_ADAPTER: 'fake',
   COOKIES_BLOB_PROVIDER: 'filesystem',
+  COOKIES_DOCUMENT_VISION_ENABLED: 'false',
+  COOKIES_DOCUMENT_CONVERTER_ENABLED: 'false',
   COOKIES_FILESYSTEM_BLOB_ROOT: '.data/e2e-platform-blobs',
   COOKIES_SCANNER_MODE: 'noop',
 }
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: /(platform-go-demo|strategy-brand-video-foundation|delivery-plan-preflight|delivery-approval-content-hash|delivery-decision-workflow|delivery-execution-scenarios|delivery-monitoring-alerts|delivery-platform-configuration|delivery-mock-tour)\.spec\.ts/,
+  testMatch: /(platform-go-demo|strategy-brand-video-foundation|strategy-workspace-rearchitecture|delivery-plan-preflight|delivery-approval-content-hash|delivery-decision-workflow|delivery-execution-scenarios|delivery-monitoring-alerts|delivery-platform-configuration|delivery-mock-tour)\.spec\.ts/,
   fullyParallel: false,
   workers: 1,
   use: {

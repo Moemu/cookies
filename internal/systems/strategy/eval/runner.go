@@ -104,7 +104,7 @@ func Evaluate(testCase Case, document strategy.StrategyDocument) Score {
 	} else {
 		score.Failures = append(score.Failures, "proposition drift")
 	}
-	if len(document.Audience.Insights) >= 1 && len(document.CreativeRecommendations) >= 3 {
+	if len(document.Audience.Insights) >= 1 && len(document.CreativeDirections()) >= 1 {
 		score.Specificity = 2
 	} else {
 		score.Failures = append(score.Failures, "insufficient insights or creative recommendations")
@@ -181,11 +181,12 @@ func evaluateDecisionQuality(testCase Case, document strategy.StrategyDocument, 
 		failures = append(failures, "audience insight is missing")
 	}
 
-	if len(document.CreativeRecommendations) >= 3 {
+	directions := document.CreativeDirections()
+	if len(directions) >= 1 {
 		rubric.CreativeDistinctness += 5
 	}
 	structured := 0
-	for _, direction := range document.CreativeRecommendations {
+	for _, direction := range directions {
 		if directionHasAnatomy(direction) {
 			structured++
 		}
@@ -195,7 +196,7 @@ func evaluateDecisionQuality(testCase Case, document strategy.StrategyDocument, 
 	} else {
 		failures = append(failures, "creative directions are not decision-ready")
 	}
-	if creativeDirectionsAreDistinct(document.CreativeRecommendations) {
+	if creativeDirectionsAreDistinct(directions) {
 		rubric.CreativeDistinctness += 10
 	} else {
 		failures = append(failures, "creative directions are semantically duplicated")

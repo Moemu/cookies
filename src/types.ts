@@ -83,6 +83,8 @@ export interface NavItem {
   views: string[]
   description: string
   group: string
+  navHint?: string
+  prominence?: 'hub'
   layout?: 'dashboard' | 'workspace' | 'table' | 'editor' | 'analysis' | 'operations' | 'settings'
 }
 

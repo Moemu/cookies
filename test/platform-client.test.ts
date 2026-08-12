@@ -149,7 +149,6 @@ test("platform client uses project-scoped /platform/v1 endpoints", async () => {
   assert.deepEqual(calls.map(call => call.url), [
     "https://cookies.example/platform/v1/projects",
     "https://cookies.example/platform/v1/projects/project_demo",
-    "https://cookies.example/platform/v1/projects/project_demo",
     "https://cookies.example/platform/v1/projects/project_demo/artifacts",
     "https://cookies.example/platform/v1/projects/project_demo/artifacts",
     "https://cookies.example/platform/v1/projects/project_demo/artifacts/artifact_1",
@@ -157,21 +156,89 @@ test("platform client uses project-scoped /platform/v1 endpoints", async () => {
     "https://cookies.example/platform/v1/projects/project_demo/change-sets",
     "https://cookies.example/platform/v1/projects/project_demo/model/jobs",
   ]);
-  assert.equal(calls[4].init.method, "POST");
-  assert.equal(new Headers(calls[4].init.headers).get("Idempotency-Key"), "test-key");
-  assert.deepEqual(JSON.parse(calls[4].init.body as string), {
+  assert.equal(calls[3].init.method, "POST");
+  assert.equal(new Headers(calls[3].init.headers).get("Idempotency-Key"), "test-key");
+  assert.deepEqual(JSON.parse(calls[3].init.body as string), {
     kind: "brief", content: "首版策略 Brief", status: "draft",
   });
-  assert.deepEqual(JSON.parse(calls[5].init.body as string), {
+  assert.deepEqual(JSON.parse(calls[4].init.body as string), {
     content: "已确认策略 Brief", status: "ready", expected_version: 1,
   });
-  assert.equal(calls[6].init.method, "POST");
-  assert.equal(new Headers(calls[6].init.headers).get("Idempotency-Key"), "test-key");
-  assert.equal(JSON.parse(calls[6].init.body as string).source_task_ids.length, 0);
-  assert.deepEqual(JSON.parse(calls[7].init.body as string).artifact_refs, [
+  assert.equal(calls[5].init.method, "POST");
+  assert.equal(new Headers(calls[5].init.headers).get("Idempotency-Key"), "test-key");
+  assert.equal(JSON.parse(calls[5].init.body as string).source_task_ids.length, 0);
+  assert.deepEqual(JSON.parse(calls[6].init.body as string).artifact_refs, [
     { project_id: "project_demo", asset_version: { asset_id: "asset_1", version: 1 } },
   ]);
-  assert.equal(JSON.parse(calls[8].init.body as string).capability, "image.generate");
+  assert.equal(JSON.parse(calls[7].init.body as string).capability, "image.generate");
+});
+
+test("platform client ignores draft or unbound Projects when loading the workbench", async () => {
+  const detail = sampleProjectDetail();
+  const draft = {
+    ...detail.project,
+    id: "project_draft",
+    name: "Draft Project",
+    status: "draft" as const,
+    primary_brand_id: null,
+  };
+  const calls: string[] = [];
+  const client = createPlatformClient({
+    baseUrl: "https://cookies.example/platform/v1",
+    fetcher: async (url) => {
+      calls.push(String(url));
+      if (String(url).endsWith("/projects")) return jsonResponse({ items: [draft, detail.project] });
+      if (String(url).endsWith("/projects/project_demo")) return jsonResponse(detail);
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const projects = await client.listProjects();
+
+  assert.deepEqual(projects.map(project => project.id), ["project_demo"]);
+  assert.deepEqual(calls, [
+    "https://cookies.example/platform/v1/projects",
+  ]);
+});
+
+test("platform client creates an active Project bound to its new brand", async () => {
+  const detail = sampleProjectDetail();
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const client = createPlatformClient({
+    baseUrl: "https://cookies.example/platform/v1",
+    fetcher: async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith("/brands")) {
+        return jsonResponse({ id: "brand_demo", organization_id: "org_demo", name: "Seed Brand", status: "active", created_at: now, updated_at: now }, 201);
+      }
+      if (String(url).endsWith("/projects") && init.method === "POST") return jsonResponse(detail.project, 201);
+      if (String(url).endsWith("/projects/project_demo")) return jsonResponse(detail);
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const project = await client.createProject({
+    name: "Go Seed Demo",
+    brand: "Seed Brand",
+    objective: "Use Go platform data",
+    industry: "ecommerce",
+  });
+
+  assert.equal(project.id, "project_demo");
+  assert.deepEqual(calls.map(call => call.url), [
+    "https://cookies.example/platform/v1/brands",
+    "https://cookies.example/platform/v1/projects",
+    "https://cookies.example/platform/v1/projects/project_demo",
+  ]);
+  assert.deepEqual(JSON.parse(calls[1].init.body as string), {
+    name: "Go Seed Demo",
+    brand: "Seed Brand",
+    goal: "Use Go platform data",
+    industry: "ecommerce",
+    primary_brand_id: "brand_demo",
+    product_ids: [],
+    activate: true,
+  });
 });
 
 test("platform client updates a Project through the Go authority with its context version", async () => {

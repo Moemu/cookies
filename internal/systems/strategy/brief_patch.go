@@ -12,8 +12,9 @@ import (
 type PatchOrigin string
 
 const (
-	PatchFromUser  PatchOrigin = "user"
-	PatchFromModel PatchOrigin = "model"
+	PatchFromUser      PatchOrigin = "user"
+	PatchFromUserDraft PatchOrigin = "user_draft"
+	PatchFromModel     PatchOrigin = "model"
 )
 
 func ApplyBriefPatch(draft BriefDraft, patch BriefPatch, origin PatchOrigin, actorID string, now time.Time) (BriefDraft, error) {
@@ -50,10 +51,14 @@ func ApplyBriefPatch(draft BriefDraft, patch BriefPatch, origin PatchOrigin, act
 			FieldPath: operation.FieldPath, Source: operation.Source, Confidence: operation.Confidence,
 			Confirmation: operation.Confirmation, UpdatedBy: actorID, UpdatedAt: now.UTC(), Conflicts: []FieldSource{},
 		}
-		if origin == PatchFromUser {
+		if origin == PatchFromUser || origin == PatchFromUserDraft {
 			state.Source = FieldSource{Type: "user_edit", ID: actorID}
 			state.Confidence = "high"
-			state.Confirmation = "confirmed"
+			if origin == PatchFromUserDraft {
+				state.Confirmation = "unconfirmed"
+			} else {
+				state.Confirmation = "confirmed"
+			}
 		} else {
 			if state.Source.Type == "" || state.Source.ID == "" {
 				return BriefDraft{}, fmt.Errorf("%w: model patch source is required", ErrInvalidRequest)

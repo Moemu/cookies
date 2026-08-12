@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { Bell, CheckCircle2, ChevronDown, CircleHelp, Command, Home, KeyRound, LogOut, Menu, Plus, Search, UserRound, X } from 'lucide-react'
+import { Bell, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Command, Home, KeyRound, LogOut, Menu, Plus, Search, UserRound, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { useProject } from '../context/ProjectContext'
@@ -80,7 +80,14 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
 
   const withoutSidebar = isHome || isProjectHome || isProjectManagement || isGlobalSettings
   return <div className={`${withoutSidebar ? 'app-shell home-shell' : 'app-shell'}${collapsed && !withoutSidebar ? ' sidebar-collapsed' : ''}`}>
-    <a className="skip-link" href="#main-content">跳到主内容</a>
+    <a
+      className="skip-link"
+      href="#main-content"
+      onClick={event => {
+        event.preventDefault()
+        window.setTimeout(() => document.getElementById('main-content')?.focus(), 0)
+      }}
+    >跳到主内容</a>
     <header className="topbar">
       <button className="brand" onClick={onHome} aria-label="返回 Home 首页"><CookiesMark className="brand-mark"/><span>cookies</span></button>
       <nav className="system-nav" aria-label="业务系统">
@@ -135,10 +142,39 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
     </header>
     {!withoutSidebar ? <aside className="sidebar" aria-label={`${system.label}导航`}>
       <div className="side-title"><system.icon size={18}/><span>{system.label}</span></div>
-      <nav>{groups.map(group => <div className="nav-group" key={group}><div className="nav-group-label">{group}</div>{system.nav.filter(item => item.group === group).map(item => <button key={item.id} className={activeNav === item.id ? 'nav-item active' : 'nav-item'} onClick={() => onNavChange(item.id)} aria-label={collapsed ? item.label : undefined}><item.icon size={17}/><span>{item.label}</span></button>)}</div>)}</nav>
+      <nav>{groups.map(group => {
+        const hubGroup = system.nav.some(item => item.group === group && item.prominence === 'hub')
+        return <div className={hubGroup ? 'nav-group nav-hub-group' : 'nav-group'} key={group}>
+          <div className="nav-group-label">
+            {hubGroup ? <>
+              <span className="nav-hub-eyebrow"><b>核心</b> {group}</span>
+              <small>4 个独立中心 · 共享项目上下文</small>
+            </> : <span>{group}</span>}
+          </div>
+          {system.nav.filter(item => item.group === group).map(item => <button
+            key={item.id}
+            className={`${activeNav === item.id ? 'nav-item active' : 'nav-item'}${item.prominence === 'hub' ? ' nav-item-hub' : ''}`}
+            onClick={() => onNavChange(item.id)}
+            aria-current={activeNav === item.id ? 'page' : undefined}
+            aria-label={item.prominence === 'hub'
+              ? `${item.label}：${item.navHint ?? item.description}`
+              : collapsed ? item.label : undefined}
+            title={item.prominence === 'hub' ? `${item.label} · ${item.navHint ?? item.description}` : undefined}
+          >
+            <span className="nav-item-icon"><item.icon size={17}/></span>
+            <span className="nav-item-copy">
+              <b>{item.label}</b>
+              {item.navHint ? <small>{item.navHint}</small> : null}
+            </span>
+            {item.prominence === 'hub'
+              ? <ChevronRight className="nav-item-arrow" size={14} aria-hidden="true"/>
+              : null}
+          </button>)}
+        </div>
+      })}</nav>
       <button className="collapse-button" aria-label={collapsed ? '展开侧栏' : '收起侧栏'} onClick={() => setCollapsed(value => !value)}><Menu size={17}/><span>{collapsed ? '展开侧栏' : '收起侧栏'}</span></button>
     </aside> : null}
-    <main id="main-content" className="main-content">{children}</main>
+    <main id="main-content" className="main-content" tabIndex={-1}>{children}</main>
     {newProjectOpen ? <NewProjectDialog onClose={() => setNewProjectOpen(false)} onCreate={async input => {
       const created = await createProject(input)
       setNewProjectOpen(false)

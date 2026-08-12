@@ -22,6 +22,8 @@ import (
 	"github.com/shikanon/cookies/internal/integrations/crawler"
 	"github.com/shikanon/cookies/internal/integrations/creativeprovider"
 	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
+	"github.com/shikanon/cookies/internal/integrations/gotenberg"
+	"github.com/shikanon/cookies/internal/integrations/lasdocument"
 	"github.com/shikanon/cookies/internal/integrations/productsource"
 	"github.com/shikanon/cookies/internal/integrations/seedresearch"
 	"github.com/shikanon/cookies/internal/integrations/strategycreative"
@@ -297,6 +299,7 @@ func main() {
 	creativeService.DirectionScheduler = creative.JobRuntimeDirectionGenerationScheduler{Store: runtimeStore}
 	creativeService.AINativeOperationCanceller = creativeAINativeOperationCanceller{store: runtimeStore}
 	var researchRunner knowledge.ExternalResearchRunner
+	var researchRouteInspector strategysystem.ResearchRouteInspector
 	if cfg.Research.SeedEnabled {
 		cipher, cipherErr := provider.NewAESGCMCredentialCipher(
 			cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion,
@@ -307,17 +310,23 @@ func main() {
 		gatewayConfig := provider.MySQLGatewayConfigStore{
 			DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
 		}
-		researchRunner = &seedresearch.Client{
+		seedResearchClient := &seedresearch.Client{
 			Routes: gatewayConfig, Credentials: gatewayConfig,
 			ModelAlias: cfg.Research.SeedModelAlias, MaxConcurrent: cfg.Research.MaxConcurrent,
 			AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
 		}
+		researchRunner = seedResearchClient
+		researchRouteInspector = seedResearchClient
 		log.Printf("Knowledge research configured: transport=ark_responses tool=web_search model_alias=%s",
 			cfg.Research.SeedModelAlias)
 	}
 	knowledgeService := &knowledge.Service{
 		DB: db, Projects: projectService, Blobs: blobs, Scanner: scanner,
 		AssetsBucket: cfg.ObjectStorage.AssetsBucket, Runner: researchRunner,
+		JobProgress: runtimeStore, JobCanceller: runtimeStore,
+	}
+	if researchRunner != nil {
+		knowledgeService.SourceVerifier = knowledge.SafeHTTPResearchSourceVerifier{Timeout: 8 * time.Second}
 	}
 	if cfg.Research.TikaEnabled {
 		knowledgeService.DocumentParser = knowledge.TikaParser{
@@ -329,6 +338,37 @@ func main() {
 			Store: runtimeStore, NewID: func() (string, error) { return ids.New("documentparsejob") },
 		}
 		log.Printf("Knowledge document parsing configured: parser=tika version=%s", cfg.Research.TikaVersion)
+	}
+	if cfg.Research.DocumentVisionEnabled {
+		cipher, cipherErr := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
+		if cipherErr != nil {
+			log.Fatalf("configure LAS document vision credential encryption: %v", cipherErr)
+		}
+		gatewayConfig := provider.MySQLGatewayConfigStore{
+			DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+		}
+		knowledgeService.DocumentVision = &lasdocument.Client{
+			Routes: gatewayConfig, Credentials: gatewayConfig,
+			SourceURLs:   blobs,
+			OutputBucket: cfg.ObjectStorage.AssetsBucket, OutputPrefix: "provider-output/document-vision",
+			AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+		}
+		knowledgeService.VisionModelAlias = cfg.Research.DocumentVisionModelAlias
+		knowledgeService.VisionScheduler = knowledge.JobRuntimeDocumentVisionFallbackScheduler{
+			Store: runtimeStore, NewID: func() (string, error) { return ids.New("documentvisionjob") },
+		}
+		log.Printf("Knowledge document vision configured: provider=volcengine_las model_alias=%s input=tos output=tos",
+			cfg.Research.DocumentVisionModelAlias)
+	}
+	if cfg.Research.DocumentConverterEnabled {
+		knowledgeService.DocumentConverter = &gotenberg.Client{
+			BaseURL: cfg.Research.DocumentConverterBaseURL, Version: cfg.Research.DocumentConverterVersion,
+			Timeout:           time.Duration(cfg.Research.DocumentConverterTimeout) * time.Second,
+			MaxPDFBytes:       int64(cfg.Research.DocumentConverterMaxPDFBytes),
+			AllowInsecureHTTP: cfg.Research.DocumentConverterAllowHTTP,
+		}
+		log.Printf("Knowledge presentation conversion configured: converter=gotenberg_libreoffice version=%s",
+			cfg.Research.DocumentConverterVersion)
 	}
 	if researchRunner != nil {
 		knowledgeService.Scheduler = knowledge.JobRuntimeResearchScheduler{
@@ -480,6 +520,10 @@ func main() {
 		httpserver.DomainMount{Pattern: "/api/insights/v1/", Handler: insightshttp.New(insightsService)})
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
+	if knowledgeService.DocumentScheduler != nil || knowledgeService.Scheduler != nil || knowledgeService.VisionScheduler != nil {
+		knowledgeReconciler := knowledge.JobStateReconciler{Service: knowledgeService, Limit: 20}
+		startWorker(workerContext, "knowledge-job-reconcile", knowledgeReconciler.RunOnce)
+	}
 	agentStore := agent.MySQLStore{DB: db}
 	runtimeHandlers := map[string]jobruntime.Handler{}
 	if cfg.Miyun.Enabled {
@@ -497,6 +541,9 @@ func main() {
 	}
 	if knowledgeService.DocumentParser != nil {
 		runtimeHandlers[knowledge.DocumentParseJobKind] = knowledgeService.HandleDocumentParseJob
+	}
+	if knowledgeService.DocumentVision != nil {
+		runtimeHandlers[knowledge.DocumentVisionFallbackJobKind] = knowledgeService.HandleDocumentVisionFallbackJob
 	}
 	creativeService.RenderScheduler = creative.JobRuntimeRenderScheduler{
 		Store: runtimeStore, NewID: func() (string, error) { return ids.New("creativerenderexec") },
@@ -534,12 +581,17 @@ func main() {
 		runtimeHandlers["creative.editing.render"] = creative.EditingRenderRuntimeHandler(*creativeService)
 	}
 	if cfg.Strategy.Enabled {
+		productEventWriter := strategysystem.MySQLProductEventWriter{DB: db}
 		strategyService := strategysystem.Service{
 			DB: db, Projects: projectService, Knowledge: knowledgeService, ConversationKnowledge: knowledgeService,
-			ConversationResearch: knowledgeService,
+			ConversationResearch: knowledgeService, ResearchRoutes: researchRouteInspector,
+			DocumentVisionRoutes: knowledgeService.DocumentVision,
 			ConversationMedia:    mediaUnderstandingService,
-			CreativeAssets:       uploadService, Agents: agentStore, Text: textProvider,
-			TextModelAlias: cfg.Strategy.TextModelAlias, DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
+			CreativeAssets:       uploadService, Agents: agentStore,
+			ProductEvents: productEventWriter, Text: textProvider,
+			TextModelAlias: cfg.Strategy.TextModelAlias, LiteTextModelAlias: cfg.Strategy.LiteTextModelAlias,
+			DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
+			ResearchModelAlias:   cfg.Research.SeedModelAlias, DocumentVisionModelAlias: cfg.Research.DocumentVisionModelAlias,
 			PromptVersion:             cfg.Strategy.PromptVersion,
 			ConversationPromptVersion: cfg.Strategy.ConversationPromptVersion,
 			RevisePromptVersion:       cfg.Strategy.RevisePromptVersion,
@@ -554,6 +606,10 @@ func main() {
 			DisableApproval:              !cfg.Strategy.ApproveEnabled,
 			AllowedOrganizations:         strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
 		}
+		knowledgeService.DocumentEvents = strategysystem.KnowledgeDocumentProductEventSink{
+			Writer: productEventWriter, NewID: func() (string, error) { return ids.New("strategyproductevent") },
+		}
+		knowledgeService.ResearchCompletion = strategyService
 		if err := strategyService.EnsureCreativeBusinessCatalog(context.Background()); err != nil {
 			log.Fatalf("seed Strategy creative business catalog: %v", err)
 		}
