@@ -45,8 +45,8 @@ export type ComputerUseAuthorityBinding = {
   workflow_id: string
   workflow_canonical_hash: string
   workflow_step_id: string
-  skill_id: string
-  skill_version: string
+  skill_id?: string
+  skill_version?: string
 }
 
 export type ComputerUseRun = {
@@ -92,7 +92,7 @@ export type ComputerUseEvidence = {
   page_reference: string
   screenshot_reference?: string
   object_fingerprint: string
-  skill_version: string
+  skill_version?: string
   selector_version: string
   action_version: string
   redaction_version: string

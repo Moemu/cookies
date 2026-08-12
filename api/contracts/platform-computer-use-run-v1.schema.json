@@ -36,7 +36,11 @@
     "authority": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "organization_id", "project_id", "business_execution_id", "change_set_id", "approval_id", "approval_action_hash", "account_reference_id", "object_fingerprint", "action", "budget_limit_minor", "currency", "plan_canonical_hash", "intent_canonical_hash", "feedback_canonical_hash", "decision_canonical_hash", "configuration_canonical_hash", "workflow_id", "workflow_canonical_hash", "workflow_step_id", "skill_id", "skill_version"],
+      "required": ["schema_version", "organization_id", "project_id", "business_execution_id", "change_set_id", "approval_id", "approval_action_hash", "account_reference_id", "object_fingerprint", "action", "budget_limit_minor", "currency", "plan_canonical_hash", "intent_canonical_hash", "feedback_canonical_hash", "decision_canonical_hash", "configuration_canonical_hash", "workflow_id", "workflow_canonical_hash", "workflow_step_id"],
+      "dependentRequired": {
+        "skill_id": ["skill_version"],
+        "skill_version": ["skill_id"]
+      },
       "properties": {
         "schema_version": { "const": "computer-use-authority/v1" },
         "organization_id": { "type": "string", "minLength": 1 },

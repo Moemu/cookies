@@ -81,15 +81,15 @@ type AuthorityBinding struct {
 	WorkflowID                 string                  `json:"workflow_id"`
 	WorkflowCanonicalHash      string                  `json:"workflow_canonical_hash"`
 	WorkflowStepID             string                  `json:"workflow_step_id"`
-	SkillID                    string                  `json:"skill_id"`
-	SkillVersion               string                  `json:"skill_version"`
+	SkillID                    string                  `json:"skill_id,omitempty"`
+	SkillVersion               string                  `json:"skill_version,omitempty"`
 }
 
 func (b AuthorityBinding) Validate() error {
 	if b.SchemaVersion != AuthoritySchemaV1 || b.OrganizationID == "" || b.ProjectID == "" ||
 		b.BusinessExecutionID == "" || b.ChangeSetID == "" || b.ApprovalID == "" || b.AccountReferenceID == "" ||
 		b.ObjectFingerprint == "" || b.Action == "" || b.BudgetLimitMinor < 0 || b.Currency != "CNY" ||
-		b.WorkflowID == "" || b.WorkflowStepID == "" || b.SkillID == "" || b.SkillVersion == "" {
+		b.WorkflowID == "" || b.WorkflowStepID == "" || (b.SkillID == "") != (b.SkillVersion == "") {
 		return ErrInvalidContract
 	}
 	for _, hash := range []string{b.ApprovalActionHash, b.PlanCanonicalHash, b.IntentCanonicalHash, b.FeedbackCanonicalHash, b.DecisionCanonicalHash, b.ConfigurationCanonicalHash, b.WorkflowCanonicalHash} {
@@ -285,7 +285,7 @@ type Evidence struct {
 	PageReference       string                  `json:"page_reference"`
 	ScreenshotReference string                  `json:"screenshot_reference,omitempty"`
 	ObjectFingerprint   string                  `json:"object_fingerprint"`
-	SkillVersion        string                  `json:"skill_version"`
+	SkillVersion        string                  `json:"skill_version,omitempty"`
 	SelectorVersion     string                  `json:"selector_version"`
 	ActionVersion       string                  `json:"action_version"`
 	RedactionVersion    string                  `json:"redaction_version"`

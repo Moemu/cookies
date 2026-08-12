@@ -230,7 +230,8 @@ paths:
       summary: Freeze the latest accepted or modified feedback into a formal controlled ChangeSet
       description: >-
         This operation never writes an advertising platform. It freezes Plan, Intent, feedback,
-        Decision, final Configuration, Workflow, account, action, budget and Skill identities.
+        Decision, final Configuration, Workflow, account, action and budget identities.
+        A registered Platform Skill identity may be added later; PR #50 binds none.
         The service selects the latest feedback for the run itself. Rejected feedback,
         an older feedback record or any hash/version drift is rejected.
       requestBody:
@@ -1252,7 +1253,7 @@ components:
     ControlledAuthorityBinding:
       type: object
       additionalProperties: false
-      required: [selection_id, observatory_run_id, observatory_run_canonical_hash, operator_feedback_id, operator_feedback_canonical_hash, operator_feedback_disposition, plan_id, plan_version, plan_canonical_hash, intent_id, intent_version, intent_canonical_hash, decision_id, decision_canonical_hash, configuration_id, configuration_version, configuration_canonical_hash, workflow_id, workflow_canonical_hash, account_reference_id, object_fingerprint, skill_id, skill_version]
+      required: [selection_id, observatory_run_id, observatory_run_canonical_hash, operator_feedback_id, operator_feedback_canonical_hash, operator_feedback_disposition, plan_id, plan_version, plan_canonical_hash, intent_id, intent_version, intent_canonical_hash, decision_id, decision_canonical_hash, configuration_id, configuration_version, configuration_canonical_hash, workflow_id, workflow_canonical_hash, account_reference_id, object_fingerprint]
       properties:
         selection_id: { type: string }
         observatory_run_id: { type: string }
@@ -1280,10 +1281,9 @@ components:
     CreateControlledChangeSetRequest:
       type: object
       additionalProperties: false
-      required: [observatory_run_id, skill_version]
+      required: [observatory_run_id]
       properties:
         observatory_run_id: { type: string, minLength: 1 }
-        skill_version: { type: string, minLength: 1 }
     ControlledChangeSet:
       type: object
       additionalProperties: false

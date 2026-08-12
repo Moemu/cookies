@@ -2609,7 +2609,7 @@ components:
     ComputerUseAuthorityBinding:
       type: object
       additionalProperties: false
-      required: [schema_version, organization_id, project_id, business_execution_id, change_set_id, approval_id, approval_action_hash, account_reference_id, object_fingerprint, action, budget_limit_minor, currency, plan_canonical_hash, intent_canonical_hash, feedback_canonical_hash, decision_canonical_hash, configuration_canonical_hash, workflow_id, workflow_canonical_hash, workflow_step_id, skill_id, skill_version]
+      required: [schema_version, organization_id, project_id, business_execution_id, change_set_id, approval_id, approval_action_hash, account_reference_id, object_fingerprint, action, budget_limit_minor, currency, plan_canonical_hash, intent_canonical_hash, feedback_canonical_hash, decision_canonical_hash, configuration_canonical_hash, workflow_id, workflow_canonical_hash, workflow_step_id]
       properties:
         schema_version: {type: string, const: computer-use-authority/v1}
         organization_id: {type: string}
@@ -2688,7 +2688,7 @@ components:
     ComputerUseEvidence:
       type: object
       additionalProperties: false
-      required: [schema_version, id, organization_id, project_id, run_id, step_id, before_page_facts, after_page_facts, field_readback, diff_keys, page_reference, object_fingerprint, skill_version, selector_version, action_version, redaction_version, created_at]
+      required: [schema_version, id, organization_id, project_id, run_id, step_id, before_page_facts, after_page_facts, field_readback, diff_keys, page_reference, object_fingerprint, selector_version, action_version, redaction_version, created_at]
       properties:
         schema_version: {type: string, const: computer-use-evidence/v1}
         id: {type: string}

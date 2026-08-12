@@ -51,12 +51,12 @@ type ControlledAuthorityBinding struct {
 	WorkflowCanonicalHash         string                         `json:"workflow_canonical_hash"`
 	AccountReferenceID            string                         `json:"account_reference_id"`
 	ObjectFingerprint             string                         `json:"object_fingerprint"`
-	SkillID                       string                         `json:"skill_id"`
-	SkillVersion                  string                         `json:"skill_version"`
+	SkillID                       string                         `json:"skill_id,omitempty"`
+	SkillVersion                  string                         `json:"skill_version,omitempty"`
 }
 
 func (b ControlledAuthorityBinding) Validate() error {
-	if b.SelectionID == "" || b.ObservatoryRunID == "" || b.OperatorFeedbackID == "" || b.PlanID == "" || b.PlanVersion < 1 || b.IntentID == "" || b.IntentVersion < 1 || b.DecisionID == "" || b.ConfigurationID == "" || b.ConfigurationVersion < 1 || b.WorkflowID == "" || b.AccountReferenceID == "" || b.ObjectFingerprint == "" || b.SkillID == "" || b.SkillVersion == "" {
+	if b.SelectionID == "" || b.ObservatoryRunID == "" || b.OperatorFeedbackID == "" || b.PlanID == "" || b.PlanVersion < 1 || b.IntentID == "" || b.IntentVersion < 1 || b.DecisionID == "" || b.ConfigurationID == "" || b.ConfigurationVersion < 1 || b.WorkflowID == "" || b.AccountReferenceID == "" || b.ObjectFingerprint == "" || (b.SkillID == "") != (b.SkillVersion == "") {
 		return ErrInvalidRequest
 	}
 	if b.OperatorFeedbackDisposition != ObservatoryFeedbackAccepted && b.OperatorFeedbackDisposition != ObservatoryFeedbackModified {

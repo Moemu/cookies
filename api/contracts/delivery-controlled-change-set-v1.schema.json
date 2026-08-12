@@ -26,7 +26,11 @@
     "binding": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["selection_id", "observatory_run_id", "observatory_run_canonical_hash", "operator_feedback_id", "operator_feedback_canonical_hash", "operator_feedback_disposition", "plan_id", "plan_version", "plan_canonical_hash", "intent_id", "intent_version", "intent_canonical_hash", "decision_id", "decision_canonical_hash", "configuration_id", "configuration_version", "configuration_canonical_hash", "workflow_id", "workflow_canonical_hash", "account_reference_id", "object_fingerprint", "skill_id", "skill_version"],
+      "required": ["selection_id", "observatory_run_id", "observatory_run_canonical_hash", "operator_feedback_id", "operator_feedback_canonical_hash", "operator_feedback_disposition", "plan_id", "plan_version", "plan_canonical_hash", "intent_id", "intent_version", "intent_canonical_hash", "decision_id", "decision_canonical_hash", "configuration_id", "configuration_version", "configuration_canonical_hash", "workflow_id", "workflow_canonical_hash", "account_reference_id", "object_fingerprint"],
+      "dependentRequired": {
+        "skill_id": ["skill_version"],
+        "skill_version": ["skill_id"]
+      },
       "properties": {
         "selection_id": { "type": "string", "minLength": 1 },
         "observatory_run_id": { "type": "string", "minLength": 1 },

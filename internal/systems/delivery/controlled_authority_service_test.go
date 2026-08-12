@@ -122,12 +122,15 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	feedback := DeliveryObservatoryFeedback{SchemaVersion: ObservatoryFeedbackSchemaV1, ID: "feedback_1", OrganizationID: actor.OrganizationID, ProjectID: "project_a", RunID: run.ID, RunCanonicalHash: run.CanonicalHash, RunOutcome: run.Outcome, Disposition: ObservatoryFeedbackAccepted, Reason: "reviewed", DiffKeys: []string{}, CreatedBy: actor.Principal.ID, CreatedAt: now}
 	feedback.CanonicalHash, _ = feedback.ComputeCanonicalHash()
 	repo.observatoryFeedback[repositoryKey(actor.OrganizationID, "project_a", feedback.ID)] = feedback
-	change, replay, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID, SkillVersion: "2026-08-12"})
+	change, replay, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID})
 	if err != nil || replay {
 		t.Fatalf("compile replay=%t err=%v", replay, err)
 	}
 	if change.Binding.OperatorFeedbackCanonicalHash != feedback.CanonicalHash || change.Binding.AccountReferenceID != selection.Workflow.AccountReference.ID {
 		t.Fatalf("binding=%#v", change.Binding)
+	}
+	if change.Binding.SkillID != "" || change.Binding.SkillVersion != "" {
+		t.Fatalf("unregistered Platform Skill was invented: %#v", change.Binding)
 	}
 	approved, approval, err := service.ApproveControlledChangeSet(context.Background(), actor, "project_a", change.ID, ApproveControlledChangeSetRequest{ExpectedVersion: 1})
 	if err != nil {

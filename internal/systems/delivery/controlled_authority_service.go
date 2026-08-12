@@ -8,8 +8,6 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
-const ControlledExecutionSkillID = "oceanengine-ecommerce-manual"
-
 type controlledAuthorityRepository interface {
 	CreateControlledChangeSet(context.Context, ControlledChangeSet) (ControlledChangeSet, bool, error)
 	GetControlledChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string) (ControlledChangeSet, error)
@@ -113,14 +111,13 @@ func (s Service) GetControlledExecution(ctx context.Context, actor contract.Acto
 
 type CompileControlledChangeSetRequest struct {
 	ObservatoryRunID string `json:"observatory_run_id"`
-	SkillVersion     string `json:"skill_version"`
 }
 
 func (s Service) CompileControlledChangeSet(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CompileControlledChangeSetRequest) (ControlledChangeSet, bool, error) {
 	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
 		return ControlledChangeSet{}, false, err
 	}
-	if strings.TrimSpace(request.ObservatoryRunID) == "" || strings.TrimSpace(request.SkillVersion) == "" {
+	if strings.TrimSpace(request.ObservatoryRunID) == "" {
 		return ControlledChangeSet{}, false, ErrInvalidRequest
 	}
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
@@ -180,7 +177,9 @@ func (s Service) CompileControlledChangeSet(ctx context.Context, actor contract.
 	if err != nil {
 		return ControlledChangeSet{}, false, err
 	}
-	binding := ControlledAuthorityBinding{SelectionID: selection.ID, ObservatoryRunID: run.ID, ObservatoryRunCanonicalHash: run.CanonicalHash, OperatorFeedbackID: feedback.ID, OperatorFeedbackCanonicalHash: feedback.CanonicalHash, OperatorFeedbackDisposition: feedback.Disposition, PlanID: decision.Inputs.PlanID, PlanVersion: decision.Inputs.PlanVersion, PlanCanonicalHash: decision.Inputs.PlanCanonicalHash, IntentID: decision.Inputs.IntentID, IntentVersion: decision.Inputs.IntentVersion, IntentCanonicalHash: decision.Inputs.IntentCanonicalHash, DecisionID: decision.ID, DecisionCanonicalHash: decision.CanonicalHash, ConfigurationID: configuration.ConfigurationID, ConfigurationVersion: configuration.VersionNumber, ConfigurationCanonicalHash: configuration.CanonicalHash, WorkflowID: selection.Workflow.ID, WorkflowCanonicalHash: selection.Workflow.CanonicalHash, AccountReferenceID: accountID, ObjectFingerprint: fingerprint, SkillID: ControlledExecutionSkillID, SkillVersion: request.SkillVersion}
+	// No Platform Skill is registered for this path yet. Skill identity may be
+	// bound here only after a formal SkillDefinition exists in the registry.
+	binding := ControlledAuthorityBinding{SelectionID: selection.ID, ObservatoryRunID: run.ID, ObservatoryRunCanonicalHash: run.CanonicalHash, OperatorFeedbackID: feedback.ID, OperatorFeedbackCanonicalHash: feedback.CanonicalHash, OperatorFeedbackDisposition: feedback.Disposition, PlanID: decision.Inputs.PlanID, PlanVersion: decision.Inputs.PlanVersion, PlanCanonicalHash: decision.Inputs.PlanCanonicalHash, IntentID: decision.Inputs.IntentID, IntentVersion: decision.Inputs.IntentVersion, IntentCanonicalHash: decision.Inputs.IntentCanonicalHash, DecisionID: decision.ID, DecisionCanonicalHash: decision.CanonicalHash, ConfigurationID: configuration.ConfigurationID, ConfigurationVersion: configuration.VersionNumber, ConfigurationCanonicalHash: configuration.CanonicalHash, WorkflowID: selection.Workflow.ID, WorkflowCanonicalHash: selection.Workflow.CanonicalHash, AccountReferenceID: accountID, ObjectFingerprint: fingerprint}
 	id, err := s.idGenerator()("controlledchangeset")
 	if err != nil {
 		return ControlledChangeSet{}, false, err

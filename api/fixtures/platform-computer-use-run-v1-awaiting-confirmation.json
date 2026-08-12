@@ -25,9 +25,7 @@
     "configuration_canonical_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "workflow_id": "workflow_test",
     "workflow_canonical_hash": "1111111111111111111111111111111111111111111111111111111111111111",
-    "workflow_step_id": "submit-platform-configuration",
-    "skill_id": "oceanengine-ecommerce-manual",
-    "skill_version": "v1"
+    "workflow_step_id": "submit-platform-configuration"
   },
   "environment_id": "environment_test",
   "profile_id": "profile_test",
