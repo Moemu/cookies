@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -28,6 +29,184 @@ type Service struct {
 
 type CreateRunRequest struct {
 	Run ComputerUseRun
+}
+
+type CreateBoundRunRequest struct {
+	OrganizationID contract.OrganizationID
+	ProjectID      contract.ProjectID
+	Platform       Platform
+	AccountID      string
+	Authority      AuthorityBinding
+	EnvironmentID  string
+	ProfileID      string
+	PolicyID       string
+	IdempotencyKey string
+	CreatedBy      string
+}
+
+func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunRequest) (ComputerUseRun, bool, error) {
+	if s.Repository == nil || request.OrganizationID == "" || request.ProjectID == "" || request.Platform != PlatformOceanEngine || strings.TrimSpace(request.AccountID) == "" || strings.TrimSpace(request.EnvironmentID) == "" || strings.TrimSpace(request.ProfileID) == "" || strings.TrimSpace(request.PolicyID) == "" || strings.TrimSpace(request.IdempotencyKey) == "" || len(request.IdempotencyKey) > 160 || strings.TrimSpace(request.CreatedBy) == "" {
+		return ComputerUseRun{}, false, ErrInvalidContract
+	}
+	if err := request.Authority.Validate(); err != nil || request.Authority.OrganizationID != request.OrganizationID || request.Authority.ProjectID != request.ProjectID || request.Authority.AccountReferenceID != request.AccountID {
+		return ComputerUseRun{}, false, ErrInvalidContract
+	}
+	environment, err := s.Repository.GetEnvironment(ctx, request.OrganizationID, request.ProjectID, request.EnvironmentID)
+	if err != nil {
+		return ComputerUseRun{}, false, err
+	}
+	profile, err := s.Repository.GetBrowserProfile(ctx, request.OrganizationID, request.ProjectID, request.ProfileID)
+	if err != nil {
+		return ComputerUseRun{}, false, err
+	}
+	policy, err := s.Repository.GetSitePolicy(ctx, request.OrganizationID, request.ProjectID, request.PolicyID)
+	if err != nil {
+		return ComputerUseRun{}, false, err
+	}
+	if environment.Platform != request.Platform || environment.AccountID != request.AccountID || environment.Mode != "local_visible" || !environment.Healthy || environment.Version < 1 || profile.EnvironmentID != environment.ID || profile.Platform != request.Platform || profile.AccountID != request.AccountID || profile.State != "ready" || profile.Version < 1 || policy.Platform != request.Platform || policy.AccountID != request.AccountID || policy.Version < 1 {
+		return ComputerUseRun{}, false, ErrInvalidContract
+	}
+	hashInput, err := json.Marshal(struct {
+		OrganizationID contract.OrganizationID `json:"organization_id"`
+		ProjectID      contract.ProjectID      `json:"project_id"`
+		Platform       Platform                `json:"platform"`
+		AccountID      string                  `json:"account_id"`
+		Authority      AuthorityBinding        `json:"authority"`
+		EnvironmentID  string                  `json:"environment_id"`
+		ProfileID      string                  `json:"profile_id"`
+		PolicyID       string                  `json:"policy_id"`
+	}{OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, Platform: request.Platform, AccountID: request.AccountID, Authority: request.Authority, EnvironmentID: request.EnvironmentID, ProfileID: request.ProfileID, PolicyID: request.PolicyID})
+	if err != nil {
+		return ComputerUseRun{}, false, err
+	}
+	digest := sha256.Sum256(hashInput)
+	id, err := s.newID("curun")
+	if err != nil {
+		return ComputerUseRun{}, false, err
+	}
+	now := s.now()
+	run := ComputerUseRun{SchemaVersion: RunSchemaV1, ID: id, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, Platform: request.Platform, AccountID: request.AccountID, Authority: request.Authority, EnvironmentID: request.EnvironmentID, ProfileID: request.ProfileID, PolicyID: request.PolicyID, State: RunQueued, Version: 1, IdempotencyKey: request.IdempotencyKey, RequestHash: hex.EncodeToString(digest[:]), CreatedBy: request.CreatedBy, CreatedAt: now, UpdatedAt: now}
+	created, replayed, err := s.CreateRun(ctx, CreateRunRequest{Run: run})
+	if err != nil {
+		return ComputerUseRun{}, false, err
+	}
+	if !replayed {
+		if err := s.recordEvent(ctx, created, "run_created", "controlled visible-browser run created", request.CreatedBy); err != nil {
+			return ComputerUseRun{}, false, err
+		}
+	}
+	return created, replayed, nil
+}
+
+type RecordTakeoverEvidenceRequest struct {
+	OrganizationID    contract.OrganizationID
+	ProjectID         contract.ProjectID
+	RunID             string
+	ExpectedVersion   int64
+	LeaseID           string
+	FencingToken      int64
+	StepID            string
+	Sequence          int
+	Action            TakeoverEvidenceAction
+	Status            StepStatus
+	PageKind          string
+	PlatformProjectID string
+	BeforePageFacts   map[string]string
+	AfterPageFacts    map[string]string
+	FieldReadback     map[string]string
+	DiffKeys          []string
+	PageReference     string
+	SelectorVersion   string
+	ActionVersion     string
+	Actor             string
+}
+
+type TakeoverEvidenceResult struct {
+	Run      ComputerUseRun `json:"run"`
+	Step     RunStep        `json:"step"`
+	Evidence Evidence       `json:"evidence"`
+}
+
+type AcquireRunLeaseResult struct {
+	Run   ComputerUseRun `json:"run"`
+	Lease SessionLease   `json:"lease"`
+}
+
+func (s Service) AcquireRunLease(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, runID string, expectedVersion int64, holder string) (AcquireRunLeaseResult, error) {
+	if s.Repository == nil || expectedVersion < 1 || strings.TrimSpace(holder) == "" {
+		return AcquireRunLeaseResult{}, ErrInvalidContract
+	}
+	run, err := s.Repository.GetRun(ctx, organizationID, projectID, runID)
+	if err != nil {
+		return AcquireRunLeaseResult{}, err
+	}
+	if run.Version != expectedVersion {
+		return AcquireRunLeaseResult{}, ErrVersionConflict
+	}
+	if terminalState(run.State) || run.LeaseID != "" {
+		return AcquireRunLeaseResult{}, ErrInvalidTransition
+	}
+	id, err := s.newID("culease")
+	if err != nil {
+		return AcquireRunLeaseResult{}, err
+	}
+	now := s.now()
+	lease := SessionLease{ID: id, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, EnvironmentID: run.EnvironmentID, ProfileID: run.ProfileID, Platform: run.Platform, AccountID: run.AccountID, Holder: holder, FencingToken: 1, Version: 1, ExpiresAt: now.Add(SessionLeaseTTL), HeartbeatDeadline: now.Add(SessionHeartbeatTTL)}
+	updated, lease, err := s.Repository.AcquireRunLease(ctx, run, expectedVersion, lease, now)
+	if err != nil {
+		return AcquireRunLeaseResult{}, err
+	}
+	if err := s.recordEvent(ctx, updated, "lease_acquired", "exclusive visible-browser lease acquired", holder); err != nil {
+		return AcquireRunLeaseResult{}, err
+	}
+	return AcquireRunLeaseResult{Run: updated, Lease: lease}, nil
+}
+
+func (s Service) RecordTakeoverEvidence(ctx context.Context, request RecordTakeoverEvidenceRequest) (TakeoverEvidenceResult, error) {
+	if s.Repository == nil || request.ExpectedVersion < 1 || request.LeaseID == "" || request.FencingToken < 1 || request.StepID == "" || request.Sequence < 1 || !request.Action.Valid() || strings.TrimSpace(request.Actor) == "" || strings.TrimSpace(request.PageKind) == "" || strings.TrimSpace(request.PlatformProjectID) == "" || strings.TrimSpace(request.PageReference) == "" || strings.TrimSpace(request.SelectorVersion) == "" || strings.TrimSpace(request.ActionVersion) == "" {
+		return TakeoverEvidenceResult{}, ErrInvalidContract
+	}
+	if request.Status != StepRunning && request.Status != StepSucceeded && request.Status != StepFailed {
+		return TakeoverEvidenceResult{}, ErrInvalidContract
+	}
+	run, err := s.Repository.GetRun(ctx, request.OrganizationID, request.ProjectID, request.RunID)
+	if err != nil {
+		return TakeoverEvidenceResult{}, err
+	}
+	if run.Version != request.ExpectedVersion {
+		return TakeoverEvidenceResult{}, ErrVersionConflict
+	}
+	if run.State != RunAwaitingTakeover || !run.Paused || !run.TakeoverActive || run.LeaseID != request.LeaseID {
+		return TakeoverEvidenceResult{}, ErrInvalidTransition
+	}
+	now := s.now()
+	lease, err := s.Repository.GetLease(ctx, request.OrganizationID, request.ProjectID, request.LeaseID)
+	if err != nil || lease.RunID != run.ID || lease.EnvironmentID != run.EnvironmentID || lease.ProfileID != run.ProfileID || lease.Platform != run.Platform || lease.AccountID != run.AccountID || lease.FencingToken != request.FencingToken || !lease.ValidAt(now) {
+		return TakeoverEvidenceResult{}, ErrLeaseUnavailable
+	}
+	policy, err := s.Repository.GetSitePolicy(ctx, request.OrganizationID, request.ProjectID, run.PolicyID)
+	if err != nil {
+		return TakeoverEvidenceResult{}, err
+	}
+	if policy.Platform != run.Platform || policy.AccountID != run.AccountID || !policy.Allows(request.PageReference, request.PageKind, request.PlatformProjectID) {
+		return TakeoverEvidenceResult{}, ErrInvalidContract
+	}
+	step := RunStep{ID: request.StepID, RunID: run.ID, Sequence: request.Sequence, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(request.Action), Status: request.Status, Attempt: 1, Version: 1}
+	evidenceID, err := s.newID("cuevidence")
+	if err != nil {
+		return TakeoverEvidenceResult{}, err
+	}
+	evidence := RedactEvidence(Evidence{SchemaVersion: EvidenceSchemaV1, ID: evidenceID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, BeforePageFacts: request.BeforePageFacts, AfterPageFacts: request.AfterPageFacts, FieldReadback: request.FieldReadback, DiffKeys: request.DiffKeys, PageReference: request.PageReference, ObjectFingerprint: run.Authority.ObjectFingerprint, SkillVersion: run.Authority.SkillVersion, SelectorVersion: request.SelectorVersion, ActionVersion: request.ActionVersion, CreatedAt: now})
+	eventID, err := s.newID("cuevent")
+	if err != nil {
+		return TakeoverEvidenceResult{}, err
+	}
+	event := RunEvent{ID: eventID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, Sequence: run.Version + 1, Kind: "takeover_evidence", Summary: string(request.Action) + ":" + string(request.Status), Actor: request.Actor, CreatedAt: now}
+	updated, err := s.Repository.RecordTakeoverEvidence(ctx, run, request.ExpectedVersion, step, evidence, event, now)
+	if err != nil {
+		return TakeoverEvidenceResult{}, err
+	}
+	return TakeoverEvidenceResult{Run: updated, Step: step, Evidence: evidence}, nil
 }
 
 func (s Service) CreateRun(ctx context.Context, request CreateRunRequest) (ComputerUseRun, bool, error) {
@@ -156,6 +335,21 @@ func (s Service) HeartbeatLease(ctx context.Context, organizationID contract.Org
 	return s.Repository.HeartbeatLease(ctx, organizationID, projectID, leaseID, expectedVersion, fencingToken, now, now.Add(SessionLeaseTTL), now.Add(SessionHeartbeatTTL))
 }
 
+func (s Service) HeartbeatRunLease(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, runID, leaseID string, expectedVersion, fencingToken int64) (SessionLease, error) {
+	run, err := s.Repository.GetRun(ctx, organizationID, projectID, runID)
+	if err != nil {
+		return SessionLease{}, err
+	}
+	lease, err := s.Repository.GetLease(ctx, organizationID, projectID, leaseID)
+	if err != nil {
+		return SessionLease{}, err
+	}
+	if run.LeaseID != lease.ID || lease.RunID != run.ID {
+		return SessionLease{}, ErrLeaseUnavailable
+	}
+	return s.HeartbeatLease(ctx, organizationID, projectID, leaseID, expectedVersion, fencingToken)
+}
+
 func (s Service) ReleaseLease(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, leaseID string, expectedVersion, fencingToken int64) (SessionLease, error) {
 	lease, err := s.Repository.GetLease(ctx, organizationID, projectID, leaseID)
 	if err != nil {
@@ -165,6 +359,28 @@ func (s Service) ReleaseLease(ctx context.Context, organizationID contract.Organ
 		return SessionLease{}, ErrLeaseUnavailable
 	}
 	return s.Repository.ReleaseLease(ctx, organizationID, projectID, leaseID, expectedVersion, fencingToken, s.now())
+}
+
+func (s Service) ReleaseRunLease(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, runID, leaseID string, expectedRunVersion, expectedLeaseVersion, fencingToken int64) (AcquireRunLeaseResult, error) {
+	if expectedRunVersion < 1 || expectedLeaseVersion < 1 || fencingToken < 1 {
+		return AcquireRunLeaseResult{}, ErrInvalidContract
+	}
+	run, err := s.Repository.GetRun(ctx, organizationID, projectID, runID)
+	if err != nil {
+		return AcquireRunLeaseResult{}, err
+	}
+	lease, err := s.Repository.GetLease(ctx, organizationID, projectID, leaseID)
+	if err != nil {
+		return AcquireRunLeaseResult{}, err
+	}
+	if run.Version != expectedRunVersion || run.LeaseID != lease.ID || lease.RunID != run.ID || lease.Version != expectedLeaseVersion || lease.FencingToken != fencingToken || lease.ReleasedAt != nil {
+		return AcquireRunLeaseResult{}, ErrLeaseUnavailable
+	}
+	updatedRun, updatedLease, err := s.Repository.ReleaseRunLease(ctx, run, expectedRunVersion, lease, expectedLeaseVersion, fencingToken, s.now())
+	if err != nil {
+		return AcquireRunLeaseResult{}, err
+	}
+	return AcquireRunLeaseResult{Run: updatedRun, Lease: updatedLease}, nil
 }
 
 func (s Service) now() time.Time {

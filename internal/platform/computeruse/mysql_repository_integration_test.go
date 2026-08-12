@@ -126,4 +126,44 @@ func TestMySQLAuthorizeControlledActionIsAtomic(t *testing.T) {
 	if err != nil || lease.ReleasedAt == nil {
 		t.Fatalf("release lease=%#v err=%v", lease, err)
 	}
+
+	takeoverRun := validRun(now)
+	takeoverRun.ID = "cu_takeover_run_" + suffix
+	takeoverRun.OrganizationID = contract.OrganizationID(org)
+	takeoverRun.ProjectID = contract.ProjectID(project)
+	takeoverRun.Authority.OrganizationID = takeoverRun.OrganizationID
+	takeoverRun.Authority.ProjectID = takeoverRun.ProjectID
+	takeoverRun.EnvironmentID = env
+	takeoverRun.ProfileID = profile
+	takeoverRun.PolicyID = policy
+	takeoverRun.IdempotencyKey = "takeover_run_" + suffix
+	if _, _, err = service.CreateRun(ctx, CreateRunRequest{Run: takeoverRun}); err != nil {
+		t.Fatal(err)
+	}
+	takeoverRun, err = service.TransitionRun(ctx, takeoverRun.OrganizationID, takeoverRun.ProjectID, takeoverRun.ID, 1, RunEnvironmentCheck, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	takeoverRun, err = service.ControlRun(ctx, takeoverRun.OrganizationID, takeoverRun.ProjectID, takeoverRun.ID, takeoverRun.Version, ControlTakeover)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := service.AcquireRunLease(ctx, takeoverRun.OrganizationID, takeoverRun.ProjectID, takeoverRun.ID, takeoverRun.Version, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded, err := service.RecordTakeoverEvidence(ctx, RecordTakeoverEvidenceRequest{OrganizationID: takeoverRun.OrganizationID, ProjectID: takeoverRun.ProjectID, RunID: takeoverRun.ID, ExpectedVersion: acquired.Run.Version, LeaseID: acquired.Lease.ID, FencingToken: acquired.Lease.FencingToken, StepID: "cu_takeover_step_" + suffix, Sequence: 1, Action: TakeoverVerifyNoWrite, Status: StepSucceeded, PageKind: "review", PlatformProjectID: "platform_project_1", BeforePageFacts: map[string]string{"account_balance": "0.00"}, AfterPageFacts: map[string]string{"write_detected": "false"}, FieldReadback: map[string]string{"daily_budget": "300"}, PageReference: "https://example.test/review?account=secret", SelectorVersion: "live/v1", ActionVersion: "takeover/v1", Actor: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recorded.Run.Version != acquired.Run.Version+1 || recorded.Evidence.BeforePageFacts["account_balance"] != redactedValue || recorded.Evidence.PageReference != "https://example.test/review" {
+		t.Fatalf("recorded=%#v", recorded)
+	}
+	var takeoverEvidence, takeoverEvents, takeoverSteps int
+	if err = db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM computer_use_evidence WHERE organization_id=? AND run_id=?),(SELECT COUNT(*) FROM computer_use_events WHERE organization_id=? AND run_id=?),(SELECT COUNT(*) FROM computer_use_run_steps WHERE organization_id=? AND run_id=?)`, org, takeoverRun.ID, org, takeoverRun.ID, org, takeoverRun.ID).Scan(&takeoverEvidence, &takeoverEvents, &takeoverSteps); err != nil {
+		t.Fatal(err)
+	}
+	if takeoverEvidence != 1 || takeoverEvents != 4 || takeoverSteps != 1 {
+		t.Fatalf("evidence=%d events=%d steps=%d", takeoverEvidence, takeoverEvents, takeoverSteps)
+	}
 }

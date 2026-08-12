@@ -38,6 +38,42 @@ func (r MySQLRepository) GetRun(ctx context.Context, org contract.OrganizationID
 	return scanRun(r.DB.QueryRowContext(ctx, runSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
 }
 
+func (r MySQLRepository) GetEnvironment(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (ExecutionEnvironment, error) {
+	var value ExecutionEnvironment
+	err := r.DB.QueryRowContext(ctx, `SELECT id,organization_id,project_id,platform,account_id,mode,browser_version,region,healthy,version FROM computer_use_environments WHERE organization_id=? AND project_id=? AND id=?`, org, project, id).Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.Platform, &value.AccountID, &value.Mode, &value.BrowserVersion, &value.Region, &value.Healthy, &value.Version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ExecutionEnvironment{}, ErrNotFound
+	}
+	return value, err
+}
+
+func (r MySQLRepository) GetBrowserProfile(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (BrowserProfile, error) {
+	var value BrowserProfile
+	err := r.DB.QueryRowContext(ctx, `SELECT id,organization_id,project_id,environment_id,platform,account_id,state,version FROM computer_use_browser_profiles WHERE organization_id=? AND project_id=? AND id=?`, org, project, id).Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.EnvironmentID, &value.Platform, &value.AccountID, &value.State, &value.Version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return BrowserProfile{}, ErrNotFound
+	}
+	return value, err
+}
+
+func (r MySQLRepository) GetSitePolicy(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (SitePolicy, error) {
+	var value SitePolicy
+	var protocols, hosts, pageKinds, platformProjects []byte
+	err := r.DB.QueryRowContext(ctx, `SELECT id,organization_id,project_id,platform,account_id,allowed_protocols,allowed_hosts,allowed_page_kinds,allowed_platform_project_ids,version FROM computer_use_site_policies WHERE organization_id=? AND project_id=? AND id=?`, org, project, id).Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.Platform, &value.AccountID, &protocols, &hosts, &pageKinds, &platformProjects, &value.Version)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SitePolicy{}, ErrNotFound
+	}
+	if err != nil {
+		return SitePolicy{}, err
+	}
+	for payload, target := range map[*[]byte]*[]string{&protocols: &value.AllowedProtocols, &hosts: &value.AllowedHosts, &pageKinds: &value.AllowedPageKinds, &platformProjects: &value.AllowedPlatformProjects} {
+		if err := json.Unmarshal(*payload, target); err != nil {
+			return SitePolicy{}, fmt.Errorf("decode computer-use site policy: %w", err)
+		}
+	}
+	return value, nil
+}
+
 func (r MySQLRepository) getRunByIdempotency(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, key string) (ComputerUseRun, error) {
 	return scanRun(r.DB.QueryRowContext(ctx, runSelect+` WHERE organization_id=? AND project_id=? AND idempotency_key=?`, org, project, key))
 }
@@ -99,6 +135,41 @@ func (r MySQLRepository) AcquireLease(ctx context.Context, value SessionLease) (
 	return value, nil
 }
 
+func (r MySQLRepository) AcquireRunLease(ctx context.Context, run ComputerUseRun, expected int64, lease SessionLease, now time.Time) (ComputerUseRun, SessionLease, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	defer tx.Rollback()
+	activeKey := string(lease.OrganizationID) + ":" + string(lease.ProjectID) + ":" + string(lease.Platform) + ":" + lease.AccountID + ":" + lease.ProfileID
+	var lastFencingToken int64
+	err = tx.QueryRowContext(ctx, `SELECT fencing_token FROM computer_use_session_leases WHERE organization_id=? AND project_id=? AND profile_id=? ORDER BY fencing_token DESC LIMIT 1 FOR UPDATE`, lease.OrganizationID, lease.ProjectID, lease.ProfileID).Scan(&lastFencingToken)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	lease.FencingToken = lastFencingToken + 1
+	_, err = tx.ExecContext(ctx, `INSERT INTO computer_use_session_leases (id,organization_id,project_id,run_id,environment_id,profile_id,platform,account_id,holder,active_lock_key,fencing_token,version,expires_at,heartbeat_deadline,released_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lease.ID, lease.OrganizationID, lease.ProjectID, lease.RunID, lease.EnvironmentID, lease.ProfileID, lease.Platform, lease.AccountID, lease.Holder, activeKey, lease.FencingToken, lease.Version, lease.ExpiresAt, lease.HeartbeatDeadline, lease.ReleasedAt)
+	if err != nil {
+		return ComputerUseRun{}, SessionLease{}, ErrLeaseUnavailable
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE computer_use_runs SET lease_id=?,version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND lease_id IS NULL`, lease.ID, now, run.OrganizationID, run.ProjectID, run.ID, expected)
+	if err != nil {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	if affected != 1 {
+		return ComputerUseRun{}, SessionLease{}, ErrVersionConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	updated, err := r.GetRun(ctx, run.OrganizationID, run.ProjectID, run.ID)
+	return updated, lease, err
+}
+
 func (r MySQLRepository) GetLease(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (SessionLease, error) {
 	return scanLease(r.DB.QueryRowContext(ctx, leaseSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
 }
@@ -125,6 +196,45 @@ func (r MySQLRepository) ReleaseLease(ctx context.Context, org contract.Organiza
 		return SessionLease{}, ErrVersionConflict
 	}
 	return r.GetLease(ctx, org, project, id)
+}
+
+func (r MySQLRepository) ReleaseRunLease(ctx context.Context, run ComputerUseRun, expectedRunVersion int64, lease SessionLease, expectedLeaseVersion, fencingToken int64, now time.Time) (ComputerUseRun, SessionLease, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE computer_use_session_leases SET active_lock_key=NULL,released_at=?,version=version+1 WHERE organization_id=? AND project_id=? AND id=? AND run_id=? AND version=? AND fencing_token=? AND released_at IS NULL`, now, lease.OrganizationID, lease.ProjectID, lease.ID, run.ID, expectedLeaseVersion, fencingToken)
+	if err != nil {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	if affected != 1 {
+		return ComputerUseRun{}, SessionLease{}, ErrVersionConflict
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE computer_use_runs SET lease_id=NULL,version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND lease_id=?`, now, run.OrganizationID, run.ProjectID, run.ID, expectedRunVersion, lease.ID)
+	if err != nil {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	affected, err = result.RowsAffected()
+	if err != nil {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	if affected != 1 {
+		return ComputerUseRun{}, SessionLease{}, ErrVersionConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	updatedRun, err := r.GetRun(ctx, run.OrganizationID, run.ProjectID, run.ID)
+	if err != nil {
+		return ComputerUseRun{}, SessionLease{}, err
+	}
+	updatedLease, err := r.GetLease(ctx, lease.OrganizationID, lease.ProjectID, lease.ID)
+	return updatedRun, updatedLease, err
 }
 
 func (r MySQLRepository) PutKillSwitch(ctx context.Context, value KillSwitch, expected int64) (KillSwitch, error) {
@@ -252,6 +362,45 @@ func (r MySQLRepository) AppendEvidence(ctx context.Context, value Evidence) err
 	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO computer_use_evidence (id,organization_id,project_id,run_id,step_id,evidence_json,object_fingerprint,skill_version,selector_version,action_version,redaction_version,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, value.ID, value.OrganizationID, value.ProjectID, value.RunID, value.StepID, payload, value.ObjectFingerprint, value.SkillVersion, value.SelectorVersion, value.ActionVersion, value.RedactionVersion, value.CreatedAt)
 	return err
+}
+
+func (r MySQLRepository) RecordTakeoverEvidence(ctx context.Context, run ComputerUseRun, expected int64, step RunStep, evidence Evidence, event RunEvent, now time.Time) (ComputerUseRun, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE computer_use_runs SET version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND state='awaiting_takeover' AND paused=TRUE AND takeover_active=TRUE`, now, run.OrganizationID, run.ProjectID, run.ID, expected)
+	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	if affected != 1 {
+		return ComputerUseRun{}, ErrVersionConflict
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO computer_use_run_steps (id,organization_id,project_id,run_id,sequence_number,workflow_step_id,action,status,blocking_reason,attempt,version) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, step.ID, run.OrganizationID, run.ProjectID, run.ID, step.Sequence, step.WorkflowStepID, step.Action, step.Status, nullableString(string(step.BlockingReason)), step.Attempt, step.Version)
+	if err != nil {
+		return ComputerUseRun{}, ErrIdempotencyConflict
+	}
+	payload, err := json.Marshal(evidence)
+	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO computer_use_evidence (id,organization_id,project_id,run_id,step_id,evidence_json,object_fingerprint,skill_version,selector_version,action_version,redaction_version,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, evidence.ID, evidence.OrganizationID, evidence.ProjectID, evidence.RunID, evidence.StepID, payload, evidence.ObjectFingerprint, evidence.SkillVersion, evidence.SelectorVersion, evidence.ActionVersion, evidence.RedactionVersion, evidence.CreatedAt)
+	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO computer_use_events (id,organization_id,project_id,run_id,sequence_number,kind,summary,actor,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, event.ID, event.OrganizationID, event.ProjectID, event.RunID, event.Sequence, event.Kind, event.Summary, event.Actor, event.CreatedAt)
+	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ComputerUseRun{}, err
+	}
+	return r.GetRun(ctx, run.OrganizationID, run.ProjectID, run.ID)
 }
 func (r MySQLRepository) ListEvents(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) ([]RunEvent, error) {
 	rows, err := r.DB.QueryContext(ctx, `SELECT id,organization_id,project_id,run_id,sequence_number,kind,summary,actor,created_at FROM computer_use_events WHERE organization_id=? AND project_id=? AND run_id=? ORDER BY sequence_number`, org, project, runID)

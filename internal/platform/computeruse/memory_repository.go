@@ -9,21 +9,24 @@ import (
 )
 
 type MemoryRepository struct {
-	mu             sync.Mutex
-	runs           map[string]ComputerUseRun
-	runKeys        map[string]string
-	leases         map[string]SessionLease
-	activeProfiles map[string]string
-	killSwitches   map[string]KillSwitch
-	confirmations  map[string]FinalConfirmation
-	attempts       map[string]ControlledActionAttempt
-	events         []RunEvent
-	evidence       []Evidence
-	steps          []RunStep
+	mu              sync.Mutex
+	runs            map[string]ComputerUseRun
+	runKeys         map[string]string
+	leases          map[string]SessionLease
+	activeProfiles  map[string]string
+	environments    map[string]ExecutionEnvironment
+	browserProfiles map[string]BrowserProfile
+	policies        map[string]SitePolicy
+	killSwitches    map[string]KillSwitch
+	confirmations   map[string]FinalConfirmation
+	attempts        map[string]ControlledActionAttempt
+	events          []RunEvent
+	evidence        []Evidence
+	steps           []RunStep
 }
 
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{runs: map[string]ComputerUseRun{}, runKeys: map[string]string{}, leases: map[string]SessionLease{}, activeProfiles: map[string]string{}, killSwitches: map[string]KillSwitch{}, confirmations: map[string]FinalConfirmation{}, attempts: map[string]ControlledActionAttempt{}}
+	return &MemoryRepository{runs: map[string]ComputerUseRun{}, runKeys: map[string]string{}, leases: map[string]SessionLease{}, activeProfiles: map[string]string{}, environments: map[string]ExecutionEnvironment{}, browserProfiles: map[string]BrowserProfile{}, policies: map[string]SitePolicy{}, killSwitches: map[string]KillSwitch{}, confirmations: map[string]FinalConfirmation{}, attempts: map[string]ControlledActionAttempt{}}
 }
 
 func scopeKey(org contract.OrganizationID, project contract.ProjectID, id string) string {
@@ -89,6 +92,54 @@ func (r *MemoryRepository) SetRunControl(_ context.Context, org contract.Organiz
 	return value, nil
 }
 
+func (r *MemoryRepository) PutSitePolicy(value SitePolicy) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.policies[scopeKey(value.OrganizationID, value.ProjectID, value.ID)] = value
+}
+
+func (r *MemoryRepository) PutEnvironment(value ExecutionEnvironment) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.environments[scopeKey(value.OrganizationID, value.ProjectID, value.ID)] = value
+}
+
+func (r *MemoryRepository) GetEnvironment(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (ExecutionEnvironment, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	value, ok := r.environments[scopeKey(org, project, id)]
+	if !ok {
+		return ExecutionEnvironment{}, ErrNotFound
+	}
+	return value, nil
+}
+
+func (r *MemoryRepository) PutBrowserProfile(value BrowserProfile) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.browserProfiles[scopeKey(value.OrganizationID, value.ProjectID, value.ID)] = value
+}
+
+func (r *MemoryRepository) GetBrowserProfile(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (BrowserProfile, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	value, ok := r.browserProfiles[scopeKey(org, project, id)]
+	if !ok {
+		return BrowserProfile{}, ErrNotFound
+	}
+	return value, nil
+}
+
+func (r *MemoryRepository) GetSitePolicy(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (SitePolicy, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	value, ok := r.policies[scopeKey(org, project, id)]
+	if !ok {
+		return SitePolicy{}, ErrNotFound
+	}
+	return value, nil
+}
+
 func (r *MemoryRepository) PutStep(_ context.Context, org contract.OrganizationID, project contract.ProjectID, value RunStep) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -132,6 +183,37 @@ func (r *MemoryRepository) AcquireLease(_ context.Context, value SessionLease) (
 	r.leases[scopeKey(value.OrganizationID, value.ProjectID, value.ID)] = value
 	r.activeProfiles[profileKey] = value.ID
 	return value, nil
+}
+
+func (r *MemoryRepository) AcquireRunLease(_ context.Context, run ComputerUseRun, expected int64, lease SessionLease, now time.Time) (ComputerUseRun, SessionLease, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	runKey := scopeKey(run.OrganizationID, run.ProjectID, run.ID)
+	current, ok := r.runs[runKey]
+	if !ok {
+		return ComputerUseRun{}, SessionLease{}, ErrNotFound
+	}
+	if current.Version != expected || current.Version != run.Version || current.LeaseID != "" {
+		return ComputerUseRun{}, SessionLease{}, ErrVersionConflict
+	}
+	profileKey := scopeKey(lease.OrganizationID, lease.ProjectID, lease.ProfileID)
+	if id, ok := r.activeProfiles[profileKey]; ok {
+		if active := r.leases[scopeKey(lease.OrganizationID, lease.ProjectID, id)]; active.ReleasedAt == nil {
+			return ComputerUseRun{}, SessionLease{}, ErrLeaseUnavailable
+		}
+	}
+	for _, existing := range r.leases {
+		if existing.OrganizationID == lease.OrganizationID && existing.ProjectID == lease.ProjectID && existing.ProfileID == lease.ProfileID && existing.FencingToken >= lease.FencingToken {
+			lease.FencingToken = existing.FencingToken + 1
+		}
+	}
+	r.leases[scopeKey(lease.OrganizationID, lease.ProjectID, lease.ID)] = lease
+	r.activeProfiles[profileKey] = lease.ID
+	current.LeaseID = lease.ID
+	current.Version++
+	current.UpdatedAt = now
+	r.runs[runKey] = current
+	return current, lease, nil
 }
 
 func (r *MemoryRepository) GetLease(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (SessionLease, error) {
@@ -178,6 +260,36 @@ func (r *MemoryRepository) ReleaseLease(_ context.Context, org contract.Organiza
 	r.leases[key] = value
 	delete(r.activeProfiles, scopeKey(org, project, value.ProfileID))
 	return value, nil
+}
+
+func (r *MemoryRepository) ReleaseRunLease(_ context.Context, run ComputerUseRun, expectedRunVersion int64, lease SessionLease, expectedLeaseVersion, fencingToken int64, now time.Time) (ComputerUseRun, SessionLease, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	runKey := scopeKey(run.OrganizationID, run.ProjectID, run.ID)
+	currentRun, ok := r.runs[runKey]
+	if !ok {
+		return ComputerUseRun{}, SessionLease{}, ErrNotFound
+	}
+	leaseKey := scopeKey(lease.OrganizationID, lease.ProjectID, lease.ID)
+	currentLease, ok := r.leases[leaseKey]
+	if !ok {
+		return ComputerUseRun{}, SessionLease{}, ErrNotFound
+	}
+	if currentRun.Version != expectedRunVersion || currentRun.LeaseID != currentLease.ID || currentLease.RunID != currentRun.ID || currentLease.Version != expectedLeaseVersion || currentLease.FencingToken != fencingToken || currentLease.ReleasedAt != nil {
+		return ComputerUseRun{}, SessionLease{}, ErrVersionConflict
+	}
+	currentLease.ReleasedAt = &now
+	currentLease.Version++
+	currentRun.LeaseID = ""
+	currentRun.Version++
+	currentRun.UpdatedAt = now
+	r.leases[leaseKey] = currentLease
+	r.runs[runKey] = currentRun
+	profileKey := scopeKey(currentLease.OrganizationID, currentLease.ProjectID, currentLease.ProfileID)
+	if r.activeProfiles[profileKey] == currentLease.ID {
+		delete(r.activeProfiles, profileKey)
+	}
+	return currentRun, currentLease, nil
 }
 
 func (r *MemoryRepository) PutKillSwitch(_ context.Context, value KillSwitch, expected int64) (KillSwitch, error) {
@@ -265,6 +377,31 @@ func (r *MemoryRepository) AppendEvidence(_ context.Context, value Evidence) err
 	defer r.mu.Unlock()
 	r.evidence = append(r.evidence, value)
 	return nil
+}
+
+func (r *MemoryRepository) RecordTakeoverEvidence(_ context.Context, run ComputerUseRun, expected int64, step RunStep, evidence Evidence, event RunEvent, now time.Time) (ComputerUseRun, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := scopeKey(run.OrganizationID, run.ProjectID, run.ID)
+	current, ok := r.runs[key]
+	if !ok {
+		return ComputerUseRun{}, ErrNotFound
+	}
+	if current.Version != expected || current.Version != run.Version {
+		return ComputerUseRun{}, ErrVersionConflict
+	}
+	for _, existing := range r.steps {
+		if existing.RunID == run.ID && (existing.ID == step.ID || existing.Sequence == step.Sequence) {
+			return ComputerUseRun{}, ErrIdempotencyConflict
+		}
+	}
+	current.Version++
+	current.UpdatedAt = now
+	r.runs[key] = current
+	r.steps = append(r.steps, step)
+	r.evidence = append(r.evidence, evidence)
+	r.events = append(r.events, event)
+	return current, nil
 }
 func (r *MemoryRepository) ListEvents(_ context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) ([]RunEvent, error) {
 	r.mu.Lock()

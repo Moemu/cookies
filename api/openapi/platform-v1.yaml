@@ -91,6 +91,81 @@ paths:
                 properties:
                   items: {type: array, items: {$ref: '#/components/schemas/ComputerUseEvidence'}}
                 additionalProperties: false
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-evidence:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: recordComputerUseTakeoverEvidence
+      summary: Record one fenced non-write browser observation or form-readback step during an active takeover.
+      description: Only observe_page, begin_form_fill, field_readback, discard_draft, and verify_no_write are accepted. The run must be paused in awaiting_takeover with a valid lease and exact site-policy match. This endpoint cannot authorize or perform save, create, submit, enable, or any other remote write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RecordComputerUseTakeoverEvidenceRequest'}
+      responses:
+        '200':
+          description: Atomically recorded Run version, Step, Event and redacted Evidence.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecordedComputerUseTakeoverEvidence'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: acquireComputerUseRunLease
+      summary: Atomically acquire the one exclusive visible-browser lease and attach it to the run.
+      requestBody: {$ref: '#/components/requestBodies/ComputerUseExpectedVersion'}
+      responses:
+        '200':
+          description: Fenced lease and incremented authoritative Run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AcquiredComputerUseRunLease'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases/{lease_id}:heartbeat:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/ComputerUseLeaseID'
+    post:
+      operationId: heartbeatComputerUseRunLease
+      summary: Renew the fenced exclusive lease attached to this run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HeartbeatComputerUseRunLeaseRequest'}
+      responses:
+        '200':
+          description: Renewed lease.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ComputerUseSessionLease'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases/{lease_id}:release:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/ComputerUseLeaseID'
+    post:
+      operationId: releaseComputerUseRunLease
+      summary: Atomically release the fenced lease and detach it from the run for safe recovery.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReleaseComputerUseRunLeaseRequest'}
+      responses:
+        '200':
+          description: Released lease and incremented authoritative Run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AcquiredComputerUseRunLease'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:pause:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
@@ -2458,6 +2533,11 @@ paths:
           $ref: '#/components/responses/Conflict'
 components:
   parameters:
+    ComputerUseLeaseID:
+      name: lease_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 96}
     ComputerUseRunID:
       name: run_id
       in: path
@@ -2600,6 +2680,21 @@ components:
             properties:
               expected_version: {type: integer, minimum: 1}
   schemas:
+    HeartbeatComputerUseRunLeaseRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, fencing_token]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        fencing_token: {type: integer, minimum: 1}
+    ReleaseComputerUseRunLeaseRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_run_version, expected_lease_version, fencing_token]
+      properties:
+        expected_run_version: {type: integer, minimum: 1}
+        expected_lease_version: {type: integer, minimum: 1}
+        fencing_token: {type: integer, minimum: 1}
     ComputerUseBlockingReason:
       type: string
       enum: [FINAL_CONFIRMATION_REQUIRED, FINAL_CONFIRMATION_INVALID, APPROVAL_INVALID, LEASE_INVALID, KILL_SWITCH_ACTIVE, ACCOUNT_MISMATCH, PROJECT_NOT_ALLOWED, SITE_NOT_ALLOWED, PAGE_DRIFT, WORKFLOW_DRIFT, SKILL_DRIFT, RESULT_RECONCILIATION_REQUIRED]
@@ -2708,6 +2803,75 @@ components:
         action_version: {type: string}
         redaction_version: {type: string}
         created_at: {type: string, format: date-time}
+    ComputerUseStep:
+      type: object
+      additionalProperties: false
+      required: [id, run_id, sequence, workflow_step_id, action, status, attempt, version]
+      properties:
+        id: {type: string, minLength: 1}
+        run_id: {type: string, minLength: 1}
+        sequence: {type: integer, minimum: 1}
+        workflow_step_id: {type: string, minLength: 1}
+        action: {type: string, enum: [observe_page, begin_form_fill, field_readback, discard_draft, verify_no_write]}
+        status: {type: string, enum: [running, succeeded, failed]}
+        blocking_reason: {$ref: '#/components/schemas/ComputerUseBlockingReason'}
+        attempt: {type: integer, minimum: 1}
+        version: {type: integer, minimum: 1}
+    ComputerUseSessionLease:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, run_id, environment_id, profile_id, platform, account_id, holder, fencing_token, version, expires_at, heartbeat_deadline]
+      properties:
+        id: {type: string, minLength: 1}
+        organization_id: {type: string, minLength: 1}
+        project_id: {type: string, minLength: 1}
+        run_id: {type: string, minLength: 1}
+        environment_id: {type: string, minLength: 1}
+        profile_id: {type: string, minLength: 1}
+        platform: {type: string, const: ocean_engine}
+        account_id: {type: string, minLength: 1}
+        holder: {type: string, minLength: 1}
+        fencing_token: {type: integer, minimum: 1}
+        version: {type: integer, minimum: 1}
+        expires_at: {type: string, format: date-time}
+        heartbeat_deadline: {type: string, format: date-time}
+        released_at: {type: string, format: date-time}
+    AcquiredComputerUseRunLease:
+      type: object
+      additionalProperties: false
+      required: [run, lease]
+      properties:
+        run: {$ref: '#/components/schemas/ComputerUseRun'}
+        lease: {$ref: '#/components/schemas/ComputerUseSessionLease'}
+    RecordComputerUseTakeoverEvidenceRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, lease_id, fencing_token, step_id, sequence, action, status, page_kind, platform_project_id, before_page_facts, after_page_facts, field_readback, diff_keys, page_reference, selector_version, action_version]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        lease_id: {type: string, minLength: 1}
+        fencing_token: {type: integer, minimum: 1}
+        step_id: {type: string, minLength: 1}
+        sequence: {type: integer, minimum: 1}
+        action: {type: string, enum: [observe_page, begin_form_fill, field_readback, discard_draft, verify_no_write]}
+        status: {type: string, enum: [running, succeeded, failed]}
+        page_kind: {type: string, minLength: 1}
+        platform_project_id: {type: string, minLength: 1}
+        before_page_facts: {type: object, additionalProperties: {type: string}}
+        after_page_facts: {type: object, additionalProperties: {type: string}}
+        field_readback: {type: object, additionalProperties: {type: string}}
+        diff_keys: {type: array, items: {type: string}}
+        page_reference: {type: string, format: uri}
+        selector_version: {type: string, minLength: 1}
+        action_version: {type: string, minLength: 1}
+    RecordedComputerUseTakeoverEvidence:
+      type: object
+      additionalProperties: false
+      required: [run, step, evidence]
+      properties:
+        run: {$ref: '#/components/schemas/ComputerUseRun'}
+        step: {$ref: '#/components/schemas/ComputerUseStep'}
+        evidence: {$ref: '#/components/schemas/ComputerUseEvidence'}
     IssueComputerUseConfirmationRequest:
       type: object
       additionalProperties: false

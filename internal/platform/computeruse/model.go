@@ -292,6 +292,20 @@ type Evidence struct {
 	CreatedAt           time.Time               `json:"created_at"`
 }
 
+type TakeoverEvidenceAction string
+
+const (
+	TakeoverObservePage   TakeoverEvidenceAction = "observe_page"
+	TakeoverBeginFormFill TakeoverEvidenceAction = "begin_form_fill"
+	TakeoverFieldReadback TakeoverEvidenceAction = "field_readback"
+	TakeoverDiscardDraft  TakeoverEvidenceAction = "discard_draft"
+	TakeoverVerifyNoWrite TakeoverEvidenceAction = "verify_no_write"
+)
+
+func (a TakeoverEvidenceAction) Valid() bool {
+	return slices.Contains([]TakeoverEvidenceAction{TakeoverObservePage, TakeoverBeginFormFill, TakeoverFieldReadback, TakeoverDiscardDraft, TakeoverVerifyNoWrite}, a)
+}
+
 type FinalConfirmation struct {
 	SchemaVersion  string                  `json:"schema_version"`
 	ID             string                  `json:"id"`
