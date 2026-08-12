@@ -5,6 +5,9 @@ import {
   deliveryOptimizationApi,
   deliveryPlanApi,
   type DeliveryControlChangeSet,
+  type DeliveryDecision,
+  type DeliveryDecisionCandidate,
+  type DeliveryDecisionSelection,
   type DeliveryPlan,
   type DeliveryRecommendation,
 } from '../api/delivery'
@@ -131,7 +134,103 @@ function RecommendationCard({
   </article>
 }
 
-export function DeliveryOptimizationPage({ state, activeView, tourRunId, tourCase }: { state: DataState; activeView: string; tourRunId?: string; tourCase?: string }) {
+export function DeliveryOptimizationPage(props: { state: DataState; activeView: string; tourRunId?: string; tourCase?: string }) {
+  if (props.tourRunId) return <LegacyDeliveryOptimizationPage {...props}/>
+  return <DeliveryDecisionWorkspace {...props}/>
+}
+
+function DeliveryDecisionWorkspace({ state }: { state: DataState; activeView: string; tourRunId?: string; tourCase?: string }) {
+  const { currentProject } = useProject()
+  const projectId = currentProject.id
+  const [plans, setPlans] = useState<DeliveryPlan[]>([])
+  const [decisions, setDecisions] = useState<DeliveryDecision[]>([])
+  const [selectedPlanId, setSelectedPlanId] = useState('')
+  const [selection, setSelection] = useState<DeliveryDecisionSelection>()
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+
+  const refresh = useCallback(async () => {
+    setBusy(true)
+    try {
+      const [nextPlans, nextDecisions] = await Promise.all([deliveryPlanApi.list(projectId), deliveryOptimizationApi.listDecisions(projectId)])
+      setPlans(nextPlans)
+      setDecisions(nextDecisions)
+      setSelectedPlanId(current => nextPlans.some(plan => plan.id === current) ? current : nextPlans[0]?.id ?? '')
+    } catch (error) {
+      setNotice(errorMessage(error, '读取投放决策失败。'))
+    } finally {
+      setBusy(false)
+    }
+  }, [projectId])
+
+  useEffect(() => { void refresh() }, [refresh])
+  const selectedPlan = plans.find(plan => plan.id === selectedPlanId)
+  const planDecisions = decisions.filter(decision => decision.inputs.planId === selectedPlanId)
+
+  const generate = async () => {
+    if (!selectedPlan) return
+    setBusy(true)
+    setNotice('')
+    try {
+      const decision = await deliveryOptimizationApi.generateDecision(projectId, selectedPlan.id, selectedPlan.currentVersionNumber)
+      setDecisions(current => [decision, ...current.filter(item => item.id !== decision.id)])
+      setNotice('已生成不可变决策；请选择候选方案以编译本地工作流。')
+    } catch (error) {
+      setNotice(errorMessage(error, '生成投放决策失败。'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const selectCandidate = async (decision: DeliveryDecision, candidate: DeliveryDecisionCandidate) => {
+    setBusy(true)
+    setNotice('')
+    try {
+      const result = await deliveryOptimizationApi.selectDecision(projectId, decision.id, candidate.id, decision.inputs.planVersion, `decision-${decision.id}-${candidate.id}`)
+      setSelection(result)
+      setNotice('候选已冻结并编译；当前仅到达“等待最终审批”，没有执行任何平台写入。')
+    } catch (error) {
+      setNotice(errorMessage(error, '选择候选并编译工作流失败。'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <StateBoundary state={state} contextLabel="智能投放 / 决策与编排" errorDetail="当前 Project 的决策链无法读取，请确认 Delivery 服务可用后刷新。">
+    <div className="delivery-optimization-workspace">
+      <section className="delivery-optimization-toolbar">
+        <label>投放计划<select value={selectedPlanId} onChange={event => setSelectedPlanId(event.target.value)}>{plans.map(plan => <option key={plan.id} value={plan.id}>{plan.currentVersion.name} · V{plan.currentVersionNumber}</option>)}</select></label>
+        <div className="delivery-optimization-toolbar-actions">
+          <button className="secondary-button" onClick={() => void refresh()} disabled={busy}><RefreshCw size={14}/>刷新</button>
+          <button className="primary-button" onClick={() => void generate()} disabled={busy || !selectedPlan?.currentVersion.platformConfiguration}><Send size={14}/>生成解释型决策</button>
+        </div>
+      </section>
+      <section className="delivery-optimization-context">
+        <div><span>阶段 C 权限边界</span><b>Decision → CompiledWorkflow</b><small>选择与编译不是正式审批；远程写入在服务端和工作流中双重禁用。</small></div>
+        <div><CheckCircle2 size={17}/><span><b>最终状态：ready_for_final_approval</b><small>正式审批与真实平台写入属于阶段 D。</small></span></div>
+      </section>
+      <div className="delivery-config-recommendations delivery-optimization-list">
+        {planDecisions.map(decision => <article className="delivery-recommendation-card delivery-optimization-card" key={decision.id}>
+          <header><div><span>{decision.policyVersion} · V{decision.inputs.planVersion}</span><h3>解释型投放决策</h3></div><strong className={`delivery-recommendation-status ${decision.diagnostic.code === 'ready' ? 'proposed' : 'stale'}`}>{decision.diagnostic.code}</strong></header>
+          {decision.diagnostic.code !== 'ready' ? <div className="delivery-optimization-stale"><CircleAlert size={17}/><span><b>{decision.diagnostic.explanation}</b><small>{decision.diagnostic.nextAction}</small></span></div> : null}
+          <section className="delivery-optimization-evidence"><header><div><span>输入绑定</span><b>{decision.evidence.length} 条证据</b></div><code>{decision.canonicalHash.slice(0, 12)}</code></header></section>
+          <div className="delivery-config-recommendations">
+            {decision.candidates.map(candidate => <article className="delivery-recommendation-card" key={candidate.id}>
+              <header><div><span>{candidate.uncertainty} uncertainty</span><h3>{candidate.kind}</h3></div>{candidate.id === decision.recommendedCandidateId ? <strong className="delivery-recommendation-status accepted">推荐</strong> : null}</header>
+              <dl className="delivery-recommendation-summary"><div><dt>预算变化</dt><dd>{candidate.budgetChangePercent}%</dd></div><div><dt>硬约束</dt><dd>{candidate.constraints.filter(item => item.passed).length}/{candidate.constraints.length} 通过</dd></div><div className="wide"><dt>理由</dt><dd>{candidate.rationale.join('；')}</dd></div></dl>
+              <footer><span>配置哈希 {candidate.targetConfiguration.canonical_hash?.slice(0, 12)}</span><button className="primary-button" disabled={busy} onClick={() => void selectCandidate(decision, candidate)}>选择并编译</button></footer>
+            </article>)}
+          </div>
+        </article>)}
+        {!planDecisions.length ? <div className="panel-empty"><CircleAlert size={18}/>完成模拟与指标采集后，可为当前计划生成三个受硬约束的候选决策。</div> : null}
+      </div>
+      {selection ? <section className="delivery-optimization-context"><div><span>已编译工作流</span><b>{selection.workflow.status}</b><small>{selection.workflow.steps.length} 个步骤；remote_write_enabled = false</small></div><div><CircleAlert size={17}/><span><b>远程写入已阻断</b><small>{selection.workflow.steps.find(step => step.risk === 'remote_write')?.blockReason}</small></span></div></section> : null}
+      {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+    </div>
+  </StateBoundary>
+}
+
+function LegacyDeliveryOptimizationPage({ state, activeView, tourRunId, tourCase }: { state: DataState; activeView: string; tourRunId?: string; tourCase?: string }) {
   const { currentProject } = useProject()
   const projectId = currentProject.id
   const [plans, setPlans] = useState<DeliveryPlan[]>([])

@@ -154,7 +154,8 @@ paths:
       - $ref: '#/components/parameters/PlanID'
     post:
       operationId: generateDeliveryRecommendation
-      summary: Generate one deterministic optimization recommendation from post-launch simulation evidence
+      deprecated: true
+      summary: Generate one historical Tour-only optimization recommendation
       description: >-
         Requires a succeeded platform-operation rehearsal, two persisted metric windows, and
         monitoring alerts for the same execution. The recommendation freezes those exact evidence
@@ -166,6 +167,27 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeliveryRecommendation' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/plans/{plan_id}/decisions:generate:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/PlanID'
+    post:
+      operationId: generateDeliveryDecision
+      summary: Generate an immutable explainable decision with three policy candidates
+      description: >-
+        Binds the current DeliveryIntent and PlatformConfiguration to exact simulation and metric
+        facts. This Phase C operation is deterministic and cannot write to an advertising platform.
+      requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
+      responses:
+        '201':
+          description: Immutable DeliveryDecision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryDecision' }
         '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
@@ -217,7 +239,8 @@ paths:
       - $ref: '#/components/parameters/ProjectID'
     get:
       operationId: listDeliveryRecommendations
-      summary: List project-scoped deterministic delivery recommendations
+      deprecated: true
+      summary: List project-scoped historical Tour recommendations
       parameters:
         - $ref: '#/components/parameters/Limit'
       responses:
@@ -234,6 +257,7 @@ paths:
       - $ref: '#/components/parameters/RecommendationID'
     get:
       operationId: getDeliveryRecommendation
+      deprecated: true
       summary: Get one project-scoped immutable recommendation
       responses:
         '200':
@@ -250,6 +274,7 @@ paths:
       - $ref: '#/components/parameters/IdempotencyKey'
     post:
       operationId: acceptDeliveryRecommendation
+      deprecated: true
       summary: Accept a recommendation and create only one new draft ChangeSet
       description: >-
         Acceptance does not mutate the Plan, preflight or approve the ChangeSet,
@@ -278,6 +303,7 @@ paths:
       - $ref: '#/components/parameters/RecommendationID'
     post:
       operationId: rejectDeliveryRecommendation
+      deprecated: true
       summary: Reject a proposed recommendation without modifying a Plan or ChangeSet
       requestBody: { $ref: '#/components/requestBodies/ExpectedVersion' }
       responses:
@@ -288,6 +314,91 @@ paths:
               schema: { $ref: '#/components/schemas/DeliveryRecommendation' }
         '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/decisions:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      operationId: listDeliveryDecisions
+      summary: List immutable project-scoped DeliveryDecisions
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Immutable decisions ordered newest first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryDecisionList' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/decisions/{decision_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: decision_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getDeliveryDecision
+      summary: Get one immutable DeliveryDecision
+      responses:
+        '200':
+          description: DeliveryDecision and its exact input bindings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeliveryDecision' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/decisions/{decision_id}:select:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: decision_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+      - $ref: '#/components/parameters/IdempotencyKey'
+    post:
+      operationId: selectDeliveryDecisionCandidate
+      summary: Select one candidate and compile a write-disabled workflow
+      description: >-
+        Creates a new immutable PlatformConfiguration version and deterministic workflow. It does
+        not create a formal approval. The result stops at ready_for_final_approval, and every
+        remote_write step is blocked by PHASE_C_REMOTE_WRITE_PROHIBITED.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SelectDecisionRequest' }
+      responses:
+        '201':
+          description: Immutable selection and compiled workflow.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DecisionSelection' }
+        '200':
+          description: Idempotent replay.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DecisionSelection' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/decision-selections/{selection_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: selection_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getDeliveryDecisionSelection
+      summary: Get an immutable candidate selection and compiled workflow
+      responses:
+        '200':
+          description: Selection frozen at the final-approval boundary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DecisionSelection' }
         '404': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets/{change_set_id}:
@@ -1364,6 +1475,187 @@ components:
           type: array
           minItems: 1
           items: { $ref: '#/components/schemas/DeliveryGroupConfiguration' }
+    DecisionInputBindings:
+      type: object
+      additionalProperties: false
+      required: [plan_id, plan_version, plan_canonical_hash, intent_id, intent_version, intent_canonical_hash, configuration_id, configuration_version, configuration_canonical_hash, fact_snapshot_ref]
+      properties:
+        plan_id: { type: string }
+        plan_version: { type: integer, minimum: 1 }
+        plan_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        intent_id: { type: string }
+        intent_version: { type: integer, minimum: 1 }
+        intent_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        configuration_id: { type: string }
+        configuration_version: { type: integer, minimum: 1 }
+        configuration_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        fact_snapshot_ref: { type: string }
+        simulation_run_id: { type: string }
+        simulation_input_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        baseline_metric_id: { type: string }
+        baseline_metric_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        current_metric_id: { type: string }
+        current_metric_hash: { $ref: '#/components/schemas/CanonicalHash' }
+    DecisionConstraint:
+      type: object
+      additionalProperties: false
+      required: [code, passed, explanation]
+      properties:
+        code: { type: string }
+        passed: { type: boolean }
+        explanation: { type: string }
+    DeliveryDecisionCandidate:
+      type: object
+      additionalProperties: false
+      required: [id, kind, target_configuration, budget_change_percent, rationale, constraints, risks, uncertainty]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [conservative, balanced, exploratory] }
+        target_configuration: { $ref: '#/components/schemas/PlatformConfiguration' }
+        budget_change_percent: { type: integer, maximum: 0 }
+        rationale:
+          type: array
+          items: { type: string }
+        constraints:
+          type: array
+          items: { $ref: '#/components/schemas/DecisionConstraint' }
+        risks:
+          type: array
+          items: { type: string }
+        uncertainty: { type: string, enum: [low, medium, high] }
+    DeliveryDecision:
+      type: object
+      additionalProperties: false
+      required: [schema_version, id, organization_id, project_id, policy_version, diagnostic, inputs, candidates, recommended_candidate_id, evidence, canonical_hash, created_by, created_at]
+      properties:
+        schema_version: { type: string, const: delivery-decision/v1 }
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        policy_version: { type: string, const: delivery-decision-policy/v1 }
+        diagnostic:
+          type: object
+          additionalProperties: false
+          required: [code, explanation, next_action]
+          properties:
+            code: { type: string, enum: [ready, insufficient_data, stale_data, blocked_by_asset, platform_pending] }
+            explanation: { type: string }
+            next_action: { type: string }
+        inputs: { $ref: '#/components/schemas/DecisionInputBindings' }
+        candidates:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/DeliveryDecisionCandidate' }
+        recommended_candidate_id: { type: string }
+        evidence:
+          type: array
+          items: { type: string }
+        canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+    DeliveryDecisionList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DeliveryDecision' }
+    SelectDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [candidate_id, expected_plan_version]
+      properties:
+        candidate_id: { type: string, minLength: 1 }
+        expected_plan_version: { type: integer, minimum: 1 }
+    WorkflowField:
+      type: object
+      additionalProperties: false
+      required: [key, value, expected_readback, evidence_ref]
+      properties:
+        key: { type: string }
+        value: {}
+        expected_readback: {}
+        evidence_ref: { type: string }
+    CompiledWorkflowStep:
+      type: object
+      additionalProperties: false
+      required: [id, sequence, page, action, risk, preconditions, fields, timeout_seconds, recovery, blocked]
+      properties:
+        id: { type: string }
+        sequence: { type: integer, minimum: 1 }
+        page: { type: string }
+        action: { type: string }
+        risk: { type: string, enum: [observe, prepare_local_form, remote_write] }
+        preconditions:
+          type: array
+          items: { type: string }
+        fields:
+          type: array
+          items: { $ref: '#/components/schemas/WorkflowField' }
+        timeout_seconds: { type: integer, minimum: 0 }
+        recovery: { type: string }
+        blocked: { type: boolean }
+        block_reason: { type: string, enum: [PHASE_C_REMOTE_WRITE_PROHIBITED] }
+    CompiledDeliveryWorkflow:
+      type: object
+      additionalProperties: false
+      required: [schema_version, id, organization_id, project_id, decision_id, decision_canonical_hash, selected_candidate_id, configuration_canonical_hash, configuration_id, configuration_version, platform, profile_version, account_reference, capability_contract_version, selector_contract_version, action_contract_version, compiler_version, status, remote_write_enabled, steps, canonical_hash, created_by, created_at]
+      properties:
+        schema_version: { type: string, const: compiled-delivery-workflow/v1 }
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        decision_id: { type: string }
+        decision_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        selected_candidate_id: { type: string }
+        configuration_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        configuration_id: { type: string }
+        configuration_version: { type: integer, minimum: 1 }
+        platform: { type: string, const: ocean_engine }
+        profile_version: { type: string, const: oceanengine-configuration/v1 }
+        account_reference: { $ref: '#/components/schemas/StableReference' }
+        capability_contract_version: { type: string, const: oceanengine-capability/v0.1 }
+        selector_contract_version: { type: string, const: oceanengine-selector-contract/v0.1 }
+        action_contract_version: { type: string, const: oceanengine-action-contract/v0.1 }
+        compiler_version: { type: string, const: oceanengine-workflow-compiler/v1 }
+        status: { type: string, const: ready_for_final_approval }
+        remote_write_enabled: { type: boolean, const: false }
+        steps:
+          type: array
+          minItems: 3
+          items: { $ref: '#/components/schemas/CompiledWorkflowStep' }
+        canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+    FinalApprovalBinding:
+      type: object
+      additionalProperties: false
+      required: [status, action, plan_canonical_hash, intent_canonical_hash, decision_canonical_hash, configuration_canonical_hash, workflow_canonical_hash]
+      properties:
+        status: { type: string, const: ready_for_final_approval }
+        action: { type: string, const: remote_write }
+        plan_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        intent_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        decision_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        configuration_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        workflow_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+    DecisionSelection:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, decision_id, decision_canonical_hash, candidate_id, configuration, workflow, final_approval_binding, created_by, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        decision_id: { type: string }
+        decision_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        candidate_id: { type: string }
+        configuration: { $ref: '#/components/schemas/PlatformConfiguration' }
+        workflow: { $ref: '#/components/schemas/CompiledDeliveryWorkflow' }
+        final_approval_binding: { $ref: '#/components/schemas/FinalApprovalBinding' }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
     RecommendationStatus:
       type: string
       enum: [proposed, accepted, rejected]

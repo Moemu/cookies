@@ -4,6 +4,31 @@ import { deliveryOptimizationApi } from '../src/api/delivery.ts'
 
 const now = '2026-08-11T08:00:00.000Z'
 
+test('decision workflow client freezes candidate selection at the Phase C write boundary', async t => {
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ url: string; init?: RequestInit }> = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init })
+    if (String(url).endsWith('/decisions')) return jsonResponse({ items: [decisionPayload()] })
+    if (String(url).endsWith(':select')) return jsonResponse(selectionPayload())
+    return jsonResponse(decisionPayload())
+  }
+  t.after(() => { globalThis.fetch = originalFetch })
+
+  const generated = await deliveryOptimizationApi.generateDecision('project_1', 'plan_1', 2)
+  const listed = await deliveryOptimizationApi.listDecisions('project_1')
+  const selection = await deliveryOptimizationApi.selectDecision('project_1', generated.id, 'balanced', 2, 'decision-selection-1')
+
+  assert.equal(generated.diagnostic.code, 'ready')
+  assert.equal(generated.candidates.length, 3)
+  assert.equal(listed[0].recommendedCandidateId, 'balanced')
+  assert.equal(selection.workflow.status, 'ready_for_final_approval')
+  assert.equal(selection.workflow.remoteWriteEnabled, false)
+  assert.equal(selection.workflow.steps.at(-1)?.blockReason, 'PHASE_C_REMOTE_WRITE_PROHIBITED')
+  assert.equal(new Headers(calls[2].init?.headers).get('Idempotency-Key'), 'decision-selection-1')
+  assert.deepEqual(JSON.parse(calls[2].init?.body as string), { candidate_id: 'balanced', expected_plan_version: 2 })
+})
+
 test('platform recommendation endpoints preserve v2 snapshots and idempotency', async t => {
   const originalFetch = globalThis.fetch
   const calls: Array<{ url: string; init?: RequestInit }> = []
@@ -52,6 +77,31 @@ function recommendationPayload() {
     base_configuration: configuration(), target_configuration: configuration(), runtime_status: 'active', read_only: false,
     evidence: ['simulation://run/1'], action: 'reduce_budget_10_percent', impact: 'reviewed budget reduction', risks: [], observation: 'measured evidence',
     provenance: 'post-launch-simulator/v1', status: 'proposed', version: 1, created_by: 'user_1', created_at: now, updated_at: now,
+  }
+}
+
+function decisionPayload() {
+  const candidate = (kind: 'conservative' | 'balanced' | 'exploratory') => ({
+    id: kind, kind, target_configuration: configuration(), budget_change_percent: -10, rationale: ['policy'], constraints: [{ code: 'SAFE', passed: true, explanation: 'safe' }], risks: [], uncertainty: kind === 'conservative' ? 'low' : kind === 'balanced' ? 'medium' : 'high',
+  })
+  return {
+    schema_version: 'delivery-decision/v1', id: 'decision_1', organization_id: 'org_1', project_id: 'project_1', policy_version: 'delivery-decision-policy/v1',
+    diagnostic: { code: 'ready', explanation: 'facts ready', next_action: 'select' },
+    inputs: { plan_id: 'plan_1', plan_version: 2, plan_canonical_hash: 'a'.repeat(64), intent_canonical_hash: 'b'.repeat(64), configuration_canonical_hash: 'c'.repeat(64), fact_snapshot_ref: 'mock://facts/1', simulation_run_id: 'simulation_1', simulation_input_hash: 'd'.repeat(64) },
+    candidates: [candidate('conservative'), candidate('balanced'), candidate('exploratory')], recommended_candidate_id: 'balanced', evidence: ['simulation://run/1'], canonical_hash: 'e'.repeat(64), created_by: 'user_1', created_at: now,
+  }
+}
+
+function selectionPayload() {
+  return {
+    id: 'selection_1', decision_id: 'decision_1', decision_canonical_hash: 'e'.repeat(64), candidate_id: 'balanced', configuration: configuration(),
+    workflow: {
+      schema_version: 'compiled-delivery-workflow/v1', id: 'workflow_1', decision_id: 'decision_1', decision_canonical_hash: 'e'.repeat(64), selected_candidate_id: 'balanced', configuration_canonical_hash: 'a'.repeat(64),
+      configuration_id: 'configuration_1', configuration_version: 2, platform: 'ocean_engine', profile_version: 'oceanengine-configuration/v1', account_reference: { namespace: 'cookies', object_kind: 'advertiser_account', scope: 'project:project_1', id: 'account_1', state: 'resolved' },
+      capability_contract_version: 'oceanengine-capability/v0.1', selector_contract_version: 'oceanengine-selector-contract/v0.1', action_contract_version: 'oceanengine-action-contract/v0.1', compiler_version: 'oceanengine-workflow-compiler/v1', status: 'ready_for_final_approval', remote_write_enabled: false,
+      steps: [{ id: 'submit', sequence: 1, page: 'review', action: 'submit', risk: 'remote_write', preconditions: [], fields: [], timeout_seconds: 0, recovery: 'not executable', blocked: true, block_reason: 'PHASE_C_REMOTE_WRITE_PROHIBITED' }], canonical_hash: 'f'.repeat(64), created_at: now,
+    },
+    final_approval_binding: { status: 'ready_for_final_approval', action: 'remote_write', plan_canonical_hash: 'a'.repeat(64), intent_canonical_hash: 'b'.repeat(64), decision_canonical_hash: 'e'.repeat(64), configuration_canonical_hash: 'a'.repeat(64), workflow_canonical_hash: 'f'.repeat(64) }, created_at: now,
   }
 }
 

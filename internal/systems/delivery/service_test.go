@@ -84,6 +84,38 @@ func TestChangeSetGoldenFlowAndMetricProvenance(t *testing.T) {
 	}
 }
 
+func TestDecisionWorkflowServiceDiagnosesThenCompilesWithoutAuthority(t *testing.T) {
+	service, actor := newTestService()
+	ctx := context.Background()
+	plan, err := service.CreatePlan(ctx, actor, "project_a", testPlatformCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := service.GenerateDecision(ctx, actor, "project_a", plan.ID, plan.CurrentVersionNumber)
+	if err != nil || blocked.Diagnostic.Code != "insufficient_data" || len(blocked.Candidates) != 0 {
+		t.Fatalf("blocked decision=%#v err=%v", blocked, err)
+	}
+	repository := service.Repository.(*memoryRepository)
+	repository.executions = append(repository.executions, ExecutionResult{ChangeSet: ChangeSet{PlanID: plan.ID}, Execution: Execution{ID: "execution-decision", OrganizationID: actor.OrganizationID, ProjectID: "project_a", Status: ExecutionSucceeded}})
+	repository.simulations = append(repository.simulations, OutcomeSimulationRun{ID: "simulation-decision", OrganizationID: actor.OrganizationID, ProjectID: "project_a", ExecutionID: "execution-decision", PlanID: plan.ID, PlanVersion: plan.CurrentVersionNumber, InputHash: strings.Repeat("a", 64)})
+	repository.metrics = append(repository.metrics,
+		DeliveryMetricSnapshot{ID: "decision-baseline", OrganizationID: actor.OrganizationID, ProjectID: "project_a", ExecutionID: "execution-decision", SimulationRunID: "simulation-decision", WindowSequence: 1, RawMetrics: RawMetrics{SpendCents: 10000, Conversions: 10}},
+		DeliveryMetricSnapshot{ID: "decision-current", OrganizationID: actor.OrganizationID, ProjectID: "project_a", ExecutionID: "execution-decision", SimulationRunID: "simulation-decision", WindowSequence: 2, RawMetrics: RawMetrics{SpendCents: 15000, Conversions: 10}},
+	)
+	decision, err := service.GenerateDecision(ctx, actor, "project_a", plan.ID, plan.CurrentVersionNumber)
+	if err != nil || decision.Diagnostic.Code != "ready" || len(decision.Candidates) != 3 {
+		t.Fatalf("ready decision=%#v err=%v", decision, err)
+	}
+	selection, replay, err := service.SelectDecision(ctx, actor, "project_a", decision.ID, "selection-key", SelectDecisionRequest{CandidateID: decision.RecommendedCandidateID, ExpectedVersion: plan.CurrentVersionNumber})
+	if err != nil || replay || selection.Workflow.RemoteWriteEnabled || selection.Workflow.Status != "ready_for_final_approval" {
+		t.Fatalf("selection=%#v replay=%t err=%v", selection, replay, err)
+	}
+	replayed, replay, err := service.SelectDecision(ctx, actor, "project_a", decision.ID, "selection-key", SelectDecisionRequest{CandidateID: decision.RecommendedCandidateID, ExpectedVersion: plan.CurrentVersionNumber})
+	if err != nil || !replay || replayed.ID != selection.ID {
+		t.Fatalf("selection replay=%#v replay=%t err=%v", replayed, replay, err)
+	}
+}
+
 func TestAlertsAreDeterministicAndUseCAS(t *testing.T) {
 	service, actor := newTestService()
 	plan, err := service.CreatePlan(context.Background(), actor, "project_a", testPlatformCreateRequest())
@@ -805,20 +837,82 @@ func (a *observingAdapter) ExecuteStep(ctx context.Context, request PlatformStep
 }
 
 type memoryRepository struct {
-	plans       map[string]DeliveryPlan
-	changeSets  map[string]ChangeSet
-	approvals   map[string][]DeliveryApproval
-	executions  []ExecutionResult
-	metrics     []DeliveryMetricSnapshot
-	simulations []OutcomeSimulationRun
-	alerts      map[string]DeliveryAlert
+	plans             map[string]DeliveryPlan
+	changeSets        map[string]ChangeSet
+	approvals         map[string][]DeliveryApproval
+	executions        []ExecutionResult
+	metrics           []DeliveryMetricSnapshot
+	simulations       []OutcomeSimulationRun
+	alerts            map[string]DeliveryAlert
+	decisions         map[string]DeliveryDecision
+	selections        map[string]DecisionSelection
+	selectionRequests map[string]string
 }
 
 func newMemoryRepository() *memoryRepository {
 	return &memoryRepository{
 		plans: map[string]DeliveryPlan{}, changeSets: map[string]ChangeSet{},
 		approvals: map[string][]DeliveryApproval{},
+		decisions: map[string]DeliveryDecision{}, selections: map[string]DecisionSelection{}, selectionRequests: map[string]string{},
 	}
+}
+
+func (r *memoryRepository) CreateDecision(_ context.Context, value DeliveryDecision) (DeliveryDecision, error) {
+	for _, existing := range r.decisions {
+		if existing.OrganizationID == value.OrganizationID && existing.ProjectID == value.ProjectID && existing.CanonicalHash == value.CanonicalHash {
+			return existing, nil
+		}
+	}
+	r.decisions[repositoryKey(value.OrganizationID, value.ProjectID, value.ID)] = value
+	return value, nil
+}
+
+func (r *memoryRepository) ListDecisions(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, _ int) ([]DeliveryDecision, error) {
+	values := []DeliveryDecision{}
+	for _, value := range r.decisions {
+		if value.OrganizationID == organizationID && value.ProjectID == projectID {
+			values = append(values, value)
+		}
+	}
+	return values, nil
+}
+
+func (r *memoryRepository) GetDecision(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (DeliveryDecision, error) {
+	value, ok := r.decisions[repositoryKey(organizationID, projectID, id)]
+	if !ok {
+		return DeliveryDecision{}, ErrNotFound
+	}
+	return value, nil
+}
+
+func (r *memoryRepository) CreateDecisionSelection(_ context.Context, value DecisionSelection, key, requestHash string) (DecisionSelection, bool, error) {
+	scope := repositoryKey(value.OrganizationID, value.ProjectID, key)
+	if existingHash, ok := r.selectionRequests[scope]; ok {
+		if existingHash != requestHash {
+			return DecisionSelection{}, false, ErrIdempotencyConflict
+		}
+		for _, existing := range r.selections {
+			if existing.OrganizationID == value.OrganizationID && existing.ProjectID == value.ProjectID && existing.DecisionID == value.DecisionID {
+				return existing, true, nil
+			}
+		}
+	}
+	for _, existing := range r.selections {
+		if existing.OrganizationID == value.OrganizationID && existing.ProjectID == value.ProjectID && existing.DecisionID == value.DecisionID {
+			return DecisionSelection{}, false, ErrIdempotencyConflict
+		}
+	}
+	r.selectionRequests[scope] = requestHash
+	r.selections[repositoryKey(value.OrganizationID, value.ProjectID, value.ID)] = value
+	return value, false, nil
+}
+
+func (r *memoryRepository) GetDecisionSelection(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (DecisionSelection, error) {
+	value, ok := r.selections[repositoryKey(organizationID, projectID, id)]
+	if !ok {
+		return DecisionSelection{}, ErrNotFound
+	}
+	return value, nil
 }
 
 func repositoryKey(organizationID contract.OrganizationID, projectID contract.ProjectID, id string) string {

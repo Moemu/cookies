@@ -200,6 +200,28 @@ func TestDeliveryTourHTTPMapsOwnerMismatch(t *testing.T) {
 	}
 }
 
+func TestDecisionWorkflowHTTPStopsAtReadyForFinalApproval(t *testing.T) {
+	app := &applicationStub{
+		decision:  delivery.DeliveryDecision{ID: "decision_1", SchemaVersion: delivery.DeliveryDecisionSchemaV1},
+		selection: delivery.DecisionSelection{ID: "selection_1", Workflow: delivery.CompiledDeliveryWorkflow{Status: "ready_for_final_approval", RemoteWriteEnabled: false}},
+	}
+	server := New(app)
+
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/plans/plan_1/decisions:generate", `{"expected_version":1}`))
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"schema_version":"delivery-decision/v1"`) {
+		t.Fatalf("generate status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request := authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/decisions/decision_1:select", `{"candidate_id":"decision_1-balanced","expected_plan_version":1}`)
+	request.Header.Set("Idempotency-Key", "decision-selection-1")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"status":"ready_for_final_approval"`) || !strings.Contains(response.Body.String(), `"remote_write_enabled":false`) {
+		t.Fatalf("select status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func authenticatedRequest(method, target, body string) *http.Request {
 	request := httptest.NewRequest(method, target, bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -220,6 +242,24 @@ type applicationStub struct {
 	tourRun       delivery.DeliveryTourRun
 	tourRunID     string
 	tourReplay    bool
+	decision      delivery.DeliveryDecision
+	selection     delivery.DecisionSelection
+}
+
+func (s *applicationStub) GenerateDecision(context.Context, contract.ActorContext, contract.ProjectID, string, int) (delivery.DeliveryDecision, error) {
+	return s.decision, nil
+}
+func (s *applicationStub) ListDecisions(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.DeliveryDecision, error) {
+	return []delivery.DeliveryDecision{s.decision}, nil
+}
+func (s *applicationStub) GetDecision(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DeliveryDecision, error) {
+	return s.decision, nil
+}
+func (s *applicationStub) SelectDecision(context.Context, contract.ActorContext, contract.ProjectID, string, string, delivery.SelectDecisionRequest) (delivery.DecisionSelection, bool, error) {
+	return s.selection, false, nil
+}
+func (s *applicationStub) GetDecisionSelection(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.DecisionSelection, error) {
+	return s.selection, nil
 }
 
 func (s *applicationStub) CreatePlan(context.Context, contract.ActorContext, contract.ProjectID, delivery.CreatePlanRequest) (delivery.DeliveryPlan, error) {

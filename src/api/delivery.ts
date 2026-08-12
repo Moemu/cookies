@@ -211,6 +211,67 @@ export type DeliveryRecommendation = {
   updatedAt?: string
 }
 
+export type DeliveryDecisionCandidate = {
+  id: string
+  kind: 'conservative' | 'balanced' | 'exploratory'
+  targetConfiguration: PlatformConfiguration
+  budgetChangePercent: number
+  rationale: string[]
+  constraints: Array<{ code: string; passed: boolean; explanation: string }>
+  risks: string[]
+  uncertainty: 'low' | 'medium' | 'high'
+}
+
+export type DeliveryDecision = {
+  schemaVersion: 'delivery-decision/v1'
+  id: string
+  organizationId: string
+  projectId: string
+  policyVersion: 'delivery-decision-policy/v1'
+  diagnostic: { code: 'ready' | 'insufficient_data' | 'stale_data' | 'blocked_by_asset' | 'platform_pending'; explanation: string; nextAction: string }
+  inputs: { planId: string; planVersion: number; planCanonicalHash: string; intentCanonicalHash: string; configurationCanonicalHash: string; factSnapshotRef: string; simulationRunId?: string; simulationInputHash?: string }
+  candidates: DeliveryDecisionCandidate[]
+  recommendedCandidateId: string
+  evidence: string[]
+  canonicalHash: string
+  createdBy: string
+  createdAt: string
+}
+
+export type CompiledDeliveryWorkflow = {
+  schemaVersion: 'compiled-delivery-workflow/v1'
+  id: string
+  decisionId: string
+  decisionCanonicalHash: string
+  selectedCandidateId: string
+  configurationCanonicalHash: string
+  configurationId: string
+  configurationVersion: number
+  platform: 'ocean_engine'
+  profileVersion: 'oceanengine-configuration/v1'
+  accountReference: StableReference
+  capabilityContractVersion: 'oceanengine-capability/v0.1'
+  selectorContractVersion: 'oceanengine-selector-contract/v0.1'
+  actionContractVersion: 'oceanengine-action-contract/v0.1'
+  compilerVersion: 'oceanengine-workflow-compiler/v1'
+  status: 'ready_for_final_approval'
+  remoteWriteEnabled: false
+  steps: Array<{ id: string; sequence: number; page: string; action: string; risk: 'observe' | 'prepare_local_form' | 'remote_write'; preconditions: string[]; fields: Array<{ key: string; value: unknown; expectedReadback: unknown; evidenceRef: string }>; timeoutSeconds: number; recovery: string; blocked: boolean; blockReason?: 'PHASE_C_REMOTE_WRITE_PROHIBITED' }>
+  canonicalHash: string
+  createdAt: string
+}
+
+export type DeliveryDecisionSelection = {
+  id: string
+  decisionId: string
+  decisionCanonicalHash: string
+  candidateId: string
+  configuration: PlatformConfiguration
+  workflow: CompiledDeliveryWorkflow
+  finalApprovalBinding: { status: 'ready_for_final_approval'; action: 'remote_write'; planCanonicalHash: string; intentCanonicalHash: string; decisionCanonicalHash: string; configurationCanonicalHash: string; workflowCanonicalHash: string }
+  createdAt: string
+}
+
 export type DeliveryPlan = {
   id: string
   organizationId: string
@@ -539,6 +600,37 @@ type WireDeliveryRecommendation = {
   updated_at?: string
 }
 
+type WireDeliveryDecision = {
+  schema_version: 'delivery-decision/v1'
+  id: string
+  organization_id: string
+  project_id: string
+  policy_version: 'delivery-decision-policy/v1'
+  diagnostic: { code: DeliveryDecision['diagnostic']['code']; explanation: string; next_action: string }
+  inputs: { plan_id: string; plan_version: number; plan_canonical_hash: string; intent_canonical_hash: string; configuration_canonical_hash: string; fact_snapshot_ref: string; simulation_run_id?: string; simulation_input_hash?: string }
+  candidates: Array<{ id: string; kind: DeliveryDecisionCandidate['kind']; target_configuration: PlatformConfiguration; budget_change_percent: number; rationale: string[]; constraints: DeliveryDecisionCandidate['constraints']; risks: string[]; uncertainty: DeliveryDecisionCandidate['uncertainty'] }>
+  recommended_candidate_id: string
+  evidence: string[]
+  canonical_hash: string
+  created_by: string
+  created_at: string
+}
+
+type WireDecisionSelection = {
+  id: string
+  decision_id: string
+  decision_canonical_hash: string
+  candidate_id: string
+  configuration: PlatformConfiguration
+  workflow: {
+    schema_version: 'compiled-delivery-workflow/v1'; id: string; decision_id: string; decision_canonical_hash: string; selected_candidate_id: string; configuration_canonical_hash: string; configuration_id: string; configuration_version: number; platform: 'ocean_engine'; profile_version: 'oceanengine-configuration/v1'; account_reference: StableReference; capability_contract_version: 'oceanengine-capability/v0.1'; selector_contract_version: 'oceanengine-selector-contract/v0.1'; action_contract_version: 'oceanengine-action-contract/v0.1'; compiler_version: 'oceanengine-workflow-compiler/v1'; status: 'ready_for_final_approval'; remote_write_enabled: false
+    steps: Array<{ id: string; sequence: number; page: string; action: string; risk: 'observe' | 'prepare_local_form' | 'remote_write'; preconditions: string[]; fields: Array<{ key: string; value: unknown; expected_readback: unknown; evidence_ref: string }>; timeout_seconds: number; recovery: string; blocked: boolean; block_reason?: 'PHASE_C_REMOTE_WRITE_PROHIBITED' }>
+    canonical_hash: string; created_at: string
+  }
+  final_approval_binding: { status: 'ready_for_final_approval'; action: 'remote_write'; plan_canonical_hash: string; intent_canonical_hash: string; decision_canonical_hash: string; configuration_canonical_hash: string; workflow_canonical_hash: string }
+  created_at: string
+}
+
 type WireDeliveryPlan = {
   id: string
   organization_id: string
@@ -760,8 +852,29 @@ export const deliveryPlanApi = {
   },
 }
 
-/** Recommendation lifecycle for the authoritative platform configuration runtime. */
+/** Phase C Decision -> CompiledWorkflow authority spine. Recommendation methods below remain historical-tour compatibility only. */
 export const deliveryOptimizationApi = {
+  async generateDecision(projectId: string, planId: string, expectedVersion: number): Promise<DeliveryDecision> {
+    return toDeliveryDecision(await deliveryPlanRequest<WireDeliveryDecision>(
+      projectId,
+      `/plans/${encodeURIComponent(planId)}/decisions:generate`,
+      { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) },
+    ))
+  },
+  async listDecisions(projectId: string): Promise<DeliveryDecision[]> {
+    const response = await deliveryPlanRequest<{ items?: WireDeliveryDecision[] | null }>(projectId, '/decisions')
+    return (response.items ?? []).map(toDeliveryDecision)
+  },
+  async getDecision(projectId: string, decisionId: string): Promise<DeliveryDecision> {
+    return toDeliveryDecision(await deliveryPlanRequest<WireDeliveryDecision>(projectId, `/decisions/${encodeURIComponent(decisionId)}`))
+  },
+  async selectDecision(projectId: string, decisionId: string, candidateId: string, expectedPlanVersion: number, idempotencyKey: string): Promise<DeliveryDecisionSelection> {
+    return toDecisionSelection(await deliveryPlanRequest<WireDecisionSelection>(
+      projectId,
+      `/decisions/${encodeURIComponent(decisionId)}:select`,
+      { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ candidate_id: candidateId, expected_plan_version: expectedPlanVersion }) },
+    ))
+  },
   async generateRecommendations(projectId: string, planId: string, expectedVersion: number): Promise<DeliveryRecommendation> {
     const response = await deliveryPlanRequest<WireDeliveryRecommendation>(
       projectId,
@@ -1463,6 +1576,44 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
     legacyConfiguration: version.three_tier_configuration ? true : undefined,
     deliveryIntent: intent,
     platformConfiguration: configuration,
+  }
+}
+
+function toDeliveryDecision(value: WireDeliveryDecision): DeliveryDecision {
+  return {
+    schemaVersion: value.schema_version, id: value.id, organizationId: value.organization_id, projectId: value.project_id, policyVersion: value.policy_version,
+    diagnostic: { code: value.diagnostic.code, explanation: value.diagnostic.explanation, nextAction: value.diagnostic.next_action },
+    inputs: {
+      planId: value.inputs.plan_id, planVersion: value.inputs.plan_version, planCanonicalHash: value.inputs.plan_canonical_hash,
+      intentCanonicalHash: value.inputs.intent_canonical_hash, configurationCanonicalHash: value.inputs.configuration_canonical_hash,
+      factSnapshotRef: value.inputs.fact_snapshot_ref, simulationRunId: value.inputs.simulation_run_id, simulationInputHash: value.inputs.simulation_input_hash,
+    },
+    candidates: value.candidates.map(candidate => ({
+      id: candidate.id, kind: candidate.kind, targetConfiguration: candidate.target_configuration, budgetChangePercent: candidate.budget_change_percent,
+      rationale: candidate.rationale ?? [], constraints: candidate.constraints ?? [], risks: candidate.risks ?? [], uncertainty: candidate.uncertainty,
+    })),
+    recommendedCandidateId: value.recommended_candidate_id, evidence: value.evidence ?? [], canonicalHash: value.canonical_hash, createdBy: value.created_by, createdAt: value.created_at,
+  }
+}
+
+function toDecisionSelection(value: WireDecisionSelection): DeliveryDecisionSelection {
+  return {
+    id: value.id, decisionId: value.decision_id, decisionCanonicalHash: value.decision_canonical_hash, candidateId: value.candidate_id, configuration: value.configuration,
+    workflow: {
+      schemaVersion: value.workflow.schema_version, id: value.workflow.id, decisionId: value.workflow.decision_id, decisionCanonicalHash: value.workflow.decision_canonical_hash,
+      selectedCandidateId: value.workflow.selected_candidate_id, configurationCanonicalHash: value.workflow.configuration_canonical_hash, compilerVersion: value.workflow.compiler_version,
+      configurationId: value.workflow.configuration_id, configurationVersion: value.workflow.configuration_version, platform: value.workflow.platform, profileVersion: value.workflow.profile_version,
+      accountReference: value.workflow.account_reference, capabilityContractVersion: value.workflow.capability_contract_version, selectorContractVersion: value.workflow.selector_contract_version, actionContractVersion: value.workflow.action_contract_version,
+      status: value.workflow.status, remoteWriteEnabled: value.workflow.remote_write_enabled,
+      steps: value.workflow.steps.map(step => ({ id: step.id, sequence: step.sequence, page: step.page, action: step.action, risk: step.risk, preconditions: step.preconditions ?? [], fields: step.fields.map(field => ({ key: field.key, value: field.value, expectedReadback: field.expected_readback, evidenceRef: field.evidence_ref })), timeoutSeconds: step.timeout_seconds, recovery: step.recovery, blocked: step.blocked, blockReason: step.block_reason })),
+      canonicalHash: value.workflow.canonical_hash, createdAt: value.workflow.created_at,
+    },
+    finalApprovalBinding: {
+      status: value.final_approval_binding.status, action: value.final_approval_binding.action, planCanonicalHash: value.final_approval_binding.plan_canonical_hash,
+      intentCanonicalHash: value.final_approval_binding.intent_canonical_hash, decisionCanonicalHash: value.final_approval_binding.decision_canonical_hash,
+      configurationCanonicalHash: value.final_approval_binding.configuration_canonical_hash, workflowCanonicalHash: value.final_approval_binding.workflow_canonical_hash,
+    },
+    createdAt: value.created_at,
   }
 }
 

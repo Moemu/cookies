@@ -10,7 +10,7 @@ Delivery 的新写入只有一条配置路径：不可变 `DeliveryIntent` 绑�
 - 磁力引擎当前确定性返回 `CAPABILITY_PENDING`，不猜测未经校准的字段。
 - PlanVersion 的 canonical hash 等于其平台配置 canonical hash；Approval 继续绑定计划、配置、意图和 ChangeSet 的不可变身份。
 
-当前实现不包含 DecisionEngine、CompiledWorkflow、Computer Use、真实平台 API 写入或 Connector。审批优化配置只形成审计记录，不代表已经编译行为工作流，也不代表广告平台已执行。
+当前实现已包含 `DeliveryDecisionEngine` 与 `CompiledDeliveryWorkflow` 的 Phase C 权威主线，但不包含 Computer Use、真实平台 API 写入或 Connector。Decision 选择会生成新的不可变平台配置版本和工作流，并严格停在 `ready_for_final_approval`；它不创建正式 Approval，也不代表广告平台已执行。
 
 ## 写入边界
 
@@ -21,9 +21,10 @@ Delivery 的新写入只有一条配置路径：不可变 `DeliveryIntent` 绑�
 3. 运行计划或 ChangeSet 检查；
 4. 批准、打回或执行 ChangeSet；
 5. 创建 OutcomeSimulation；
-6. 生成、采纳或拒绝 Recommendation。
+6. 生成不可变 DeliveryDecision；
+7. 选择候选并编译 write-disabled workflow。
 
-任何历史配置进入这些路径都返回稳定错误 `LEGACY_CONFIGURATION_UNSUPPORTED`。仓储层不会写入新的历史 PlanVersion、历史 ChangeSet 或历史 Recommendation。
+任何历史配置进入这些路径都返回稳定错误 `LEGACY_CONFIGURATION_UNSUPPORTED`。仓储层不会写入新的历史 PlanVersion、历史 ChangeSet 或历史 Recommendation。旧 Recommendation 的生成、采纳与拒绝只允许带 owner-scoped `tour_run_id` 的历史演示链；普通项目以 Decision 为唯一优化主路径。
 
 旧 `configuration:compile`、`configuration:override` 与操作包 POST 只保留为 deprecated 兼容墓碑。它们不解析业务请求，不依赖 Service，也不产生副作用。
 
@@ -49,11 +50,13 @@ Delivery 的新写入只有一条配置路径：不可变 `DeliveryIntent` 绑�
 - MagneticEngine 返回 `CAPABILITY_PENDING`；
 - 未验证的平台写入证据继续保持 pending，不被描述为成功。
 
-ChangeSet 冻结完整 `PlatformConfiguration` 目标快照与 hash。Recommendation 也只生成 v2 base/target configuration；采纳建议只创建新的 draft ChangeSet，仍需检查与人工审批。
+ChangeSet 冻结完整 `PlatformConfiguration` 目标快照与 hash。Decision 冻结 Plan、Intent、当前配置、事实快照、SimulationRun 与指标内容 hash，并确定性生成 conservative、balanced、exploratory 三类候选。候选选择不是正式审批，而是生成独立 `DecisionSelection`、新配置版本和工作流，同时冻结 Phase D 所需的 Plan/Intent/Decision/Configuration/Workflow 五元 hash 绑定。
+
+CompiledWorkflow 显式绑定平台、账户引用、配置身份与 hash，以及 capability/selector/action/compiler 四类版本契约，并按页面组织 `observe`、`prepare_local_form` 与 `remote_write` 步骤。Phase C 的 `remote_write_enabled` 永远为 false；最终提交步骤必须带 `PHASE_C_REMOTE_WRITE_PROHIBITED` 阻断原因。MySQL 表同时用 CHECK 约束禁止远程写入状态和非 `ready_for_final_approval` 状态入库。
 
 ## OutcomeSimulation 与监控
 
-OutcomeSimulation 只接受已成功平台操作演练所绑定的 v2 PlanVersion 和 ChangeSet。相同输入、情景与稳定 seed 产生确定性指标窗口和事件。监控与 Recommendation 必须引用同一 SimulationRun、Execution、指标窗口和告警证据。
+OutcomeSimulation 只接受已成功平台操作演练所绑定的 v2 PlanVersion 和 ChangeSet。相同输入、情景与稳定 seed 产生确定性指标窗口和事件。Decision 必须引用同一 SimulationRun、Execution 和指标窗口，并把指标业务内容纳入 canonical hash；旧 Recommendation 仅供 Tour 历史演示。
 
 ## Tour
 
@@ -80,12 +83,14 @@ Tour 不生成操作包。最终页面明确说明行为工作流编译和真实
 
 ## 数据与迁移
 
-迁移保持严格增量。`delivery_intents` 与 `delivery_platform_configurations` 保存独立不可变 envelope；现有表只增加判别器与绑定列。禁止修改或删除旧迁移，禁止 UPDATE 历史 payload，禁止重算历史 hash。
+迁移保持严格增量。`delivery_intents`、`delivery_platform_configurations`、`delivery_decisions`、`delivery_decision_selections` 与 `delivery_compiled_workflows` 保存独立不可变 envelope；现有表只增加判别器与绑定列。禁止修改或删除旧迁移，禁止 UPDATE 历史 payload，禁止重算历史 hash。
 
 完整机器契约见：
 
 - [`schemas/delivery-intent-v1.json`](./schemas/delivery-intent-v1.json)
 - [`schemas/delivery-platform-configuration-v2.json`](./schemas/delivery-platform-configuration-v2.json)
+- [`schemas/delivery-decision-v1.json`](./schemas/delivery-decision-v1.json)
+- [`schemas/compiled-delivery-workflow-v1.json`](./schemas/compiled-delivery-workflow-v1.json)
 - [`platform-configuration-contracts.md`](./platform-configuration-contracts.md)
 - [`read-only-calibration-closeout.md`](./read-only-calibration-closeout.md)
 - [`oceanengine-schema-calibration.md`](./oceanengine-schema-calibration.md)

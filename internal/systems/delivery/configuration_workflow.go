@@ -164,6 +164,9 @@ func (s Service) GenerateRecommendation(ctx context.Context, actor contract.Acto
 	if plan.Version != int64(expectedVersion) {
 		return DeliveryRecommendation{}, ErrVersionConflict
 	}
+	if strings.TrimSpace(plan.TourRunID) == "" {
+		return DeliveryRecommendation{}, ErrInvalidState
+	}
 	if plan.CurrentVersion.ReadOnly || !plan.CurrentVersion.IsPlatformConfigurationV2() {
 		return DeliveryRecommendation{}, ErrLegacyConfigurationUnsupported
 	}
@@ -337,6 +340,9 @@ func (s Service) AcceptRecommendation(ctx context.Context, actor contract.ActorC
 		if !recommendationMatchesCurrentPlan(recommendation, plan) || !plan.CurrentVersion.IsPlatformConfigurationV2() {
 			return RecommendationAcceptance{}, false, ErrVersionConflict
 		}
+		if strings.TrimSpace(plan.TourRunID) == "" {
+			return RecommendationAcceptance{}, false, ErrInvalidState
+		}
 	}
 	if recommendation.BaseConfiguration.CanonicalHash != recommendation.BaseSnapshotHash || recommendation.TargetConfiguration.CanonicalHash != recommendation.TargetSnapshotHash {
 		return RecommendationAcceptance{}, false, ErrApprovalContentMismatch
@@ -398,6 +404,13 @@ func (s Service) RejectRecommendation(ctx context.Context, actor contract.ActorC
 	}
 	if recommendation.ReadOnly || recommendation.BaseConfiguration == nil || recommendation.TargetConfiguration == nil {
 		return DeliveryRecommendation{}, ErrLegacyConfigurationUnsupported
+	}
+	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, recommendation.PlanID)
+	if err != nil {
+		return DeliveryRecommendation{}, err
+	}
+	if strings.TrimSpace(plan.TourRunID) == "" {
+		return DeliveryRecommendation{}, ErrInvalidState
 	}
 	return repository.RejectRecommendation(ctx, actor.OrganizationID, projectID, id, expected, actor.Principal.ID, s.now())
 }

@@ -1,5 +1,19 @@
 # Delivery migrations
 
+`20260811120000_delivery_decision_workflows.up.sql` adds the immutable Phase C
+Decision -> Selection -> CompiledWorkflow authority spine. It reuses the
+existing immutable platform-configuration store and adds no executable
+credentials or remote runtime. Database CHECK constraints require
+`ready_for_final_approval` and reject `remote_write_enabled=true`.
+
+`20260811121000_delivery_contract_hash_algorithm_width.up.sql` and
+`20260811122000_delivery_contract_hash_identity_compat.up.sql`, together with
+`20260811123000_delivery_alert_provenance_width_compat.up.sql`, are forward-only
+compatibility corrections for environments that applied an early draft of the
+v2 configuration migration. They restore the frozen 64-character algorithm
+column, the intended `(id, version)` immutable identity, and the complete
+simulator provenance width without rewriting any payload or canonical hash.
+
 Owner: Delivery team.
 
 `20260810120000_delivery_platform_configuration_runtime.up.sql` 是 DeliveryIntent/PlatformConfiguration 的增量切换迁移。它创建不可变 Intent 与判别式配置存储，为 Plan/ChangeSet 增加 schema 判别器，并为 Approval 增加显式 Intent/配置绑定。迁移不对旧 `config_json`、`target_snapshot`、canonical hash 或 approval action hash 执行 `UPDATE`。

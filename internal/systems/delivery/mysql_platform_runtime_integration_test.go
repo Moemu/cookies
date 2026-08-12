@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,6 +196,48 @@ func TestMySQLPlatformRuntimeRoundTripAndLegacyUpgradeCompatibility(t *testing.T
 	if _, err = repository.UpdatePlan(ctx, organizationID, projectID, plan.ID, 1, reusedIntentVersion); err != nil {
 		t.Fatalf("reuse immutable intent in a later platform configuration version: %v", err)
 	}
+	decisionPlan, err := repository.GetPlan(ctx, organizationID, projectID, plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := BuildDeliveryDecision(DecisionEngineInput{
+		DecisionID: "decision-" + suffix, OrganizationID: organizationID, ProjectID: projectID, Plan: decisionPlan,
+		Simulation: OutcomeSimulationRun{ID: "simulation-" + suffix, PlanID: plan.ID, PlanVersion: decisionPlan.CurrentVersionNumber, InputHash: strings.Repeat("a", 64)},
+		Baseline:   DeliveryMetricSnapshot{ID: "baseline-" + suffix, RawMetrics: RawMetrics{SpendCents: 10000, Conversions: 10}},
+		Current:    DeliveryMetricSnapshot{ID: "current-" + suffix, RawMetrics: RawMetrics{SpendCents: 15000, Conversions: 10}},
+		Evidence:   []string{"simulation://metric/current-" + suffix}, CreatedBy: actor.Principal.ID, CreatedAt: service.now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err = repository.CreateDecision(ctx, decision)
+	if err != nil {
+		t.Fatalf("persist decision: %v", err)
+	}
+	candidate := decision.Candidates[1]
+	workflow, err := CompileDeliveryWorkflow("workflow-"+suffix, decision, candidate, actor.Principal.ID, service.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := DecisionSelection{
+		ID: "selection-" + suffix, OrganizationID: organizationID, ProjectID: projectID, DecisionID: decision.ID, DecisionCanonicalHash: decision.CanonicalHash,
+		CandidateID: candidate.ID, Configuration: candidate.TargetConfiguration, Workflow: workflow,
+		FinalApprovalBinding: FinalApprovalBinding{Status: "ready_for_final_approval", Action: "remote_write", PlanCanonicalHash: decision.Inputs.PlanCanonicalHash, IntentCanonicalHash: decision.Inputs.IntentCanonicalHash, DecisionCanonicalHash: decision.CanonicalHash, ConfigurationCanonicalHash: candidate.TargetConfiguration.CanonicalHash, WorkflowCanonicalHash: workflow.CanonicalHash},
+		CreatedBy:            actor.Principal.ID, CreatedAt: service.now(),
+	}
+	selection, replay, err := repository.CreateDecisionSelection(ctx, selection, "selection-key-"+suffix, strings.Repeat("b", 64))
+	if err != nil || replay || selection.Workflow.RemoteWriteEnabled || selection.Workflow.Status != "ready_for_final_approval" {
+		t.Fatalf("persist selection replay=%t err=%v value=%#v", replay, err, selection)
+	}
+	_, replay, err = repository.CreateDecisionSelection(ctx, selection, "selection-key-"+suffix, strings.Repeat("b", 64))
+	if err != nil || !replay {
+		t.Fatalf("replay selection replay=%t err=%v", replay, err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(ctx, `DELETE FROM delivery_decision_selections WHERE organization_id=? AND project_id=? AND decision_id=?`, organizationID, projectID, decision.ID)
+		_, _ = db.ExecContext(ctx, `DELETE FROM delivery_compiled_workflows WHERE organization_id=? AND project_id=? AND decision_id=?`, organizationID, projectID, decision.ID)
+		_, _ = db.ExecContext(ctx, `DELETE FROM delivery_decisions WHERE organization_id=? AND project_id=? AND decision_id=?`, organizationID, projectID, decision.ID)
+	})
 }
 
 func jsonMarshal(value any) ([]byte, error) { return json.Marshal(value) }

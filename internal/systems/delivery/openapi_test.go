@@ -56,6 +56,31 @@ func TestOpenAPIContractCoversPlanLifecyclePreflightAndErrors(t *testing.T) {
 	}
 }
 
+func TestOpenAPIContractCoversDecisionWorkflowAuthorityBoundary(t *testing.T) {
+	t.Parallel()
+	contents, err := os.ReadFile(filepath.Join("..", "..", "..", "api", "openapi", "delivery-v1.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := string(contents)
+	required := []string{
+		"/plans/{plan_id}/decisions:generate:",
+		"/decisions/{decision_id}:select:",
+		"DeliveryDecision:",
+		"DecisionSelection:",
+		"CompiledDeliveryWorkflow:",
+		"FinalApprovalBinding:",
+		"const: ready_for_final_approval",
+		"const: false",
+		"PHASE_C_REMOTE_WRITE_PROHIBITED",
+	}
+	for _, expected := range required {
+		if !strings.Contains(contract, expected) {
+			t.Errorf("Delivery OpenAPI is missing %q", expected)
+		}
+	}
+}
+
 func TestOpenAPIContractCoversProjectScopedMonitoringAlerts(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "..", "api", "openapi", "delivery-v1.yaml")
