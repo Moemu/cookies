@@ -46,6 +46,7 @@ func BackfillPlanCanonicalHashes(ctx context.Context, db *sql.DB) (int, error) {
 		FROM delivery_plan_versions v
 		JOIN delivery_plans p
 		  ON p.organization_id = v.organization_id AND p.id = v.plan_id
+		WHERE v.canonical_hash IS NULL OR v.canonical_hash = ''
 		ORDER BY v.organization_id, v.plan_id, v.version_number`)
 	if err != nil {
 		return 0, err
@@ -104,14 +105,6 @@ func BackfillPlanCanonicalHashes(ctx context.Context, db *sql.DB) (int, error) {
 		return 0, err
 	}
 
-	var missing int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM delivery_plan_versions
-		WHERE canonical_hash IS NULL OR canonical_hash = ''`).Scan(&missing); err != nil {
-		return 0, err
-	}
-	if missing != 0 {
-		return 0, fmt.Errorf("%d delivery plan versions remain without canonical hashes", missing)
-	}
 	var nullable string
 	err = db.QueryRowContext(ctx, `SELECT IS_NULLABLE
 		FROM information_schema.COLUMNS
@@ -128,6 +121,52 @@ func BackfillPlanCanonicalHashes(ctx context.Context, db *sql.DB) (int, error) {
 		}
 	}
 	return updated, nil
+}
+
+// VerifyPlanCanonicalHashes is the explicit, potentially expensive integrity
+// audit for immutable DeliveryPlan snapshots. Routine startup backfills must
+// not call it: verification reads and canonicalizes every stored config_json.
+func VerifyPlanCanonicalHashes(ctx context.Context, db *sql.DB) (int, error) {
+	if db == nil {
+		return 0, fmt.Errorf("delivery verification database is required")
+	}
+	rows, err := db.QueryContext(ctx, `SELECT
+		v.organization_id, v.project_id, v.plan_id, v.version_number,
+		p.platform, v.config_json, v.canonical_hash
+		FROM delivery_plan_versions v
+		JOIN delivery_plans p
+		  ON p.organization_id = v.organization_id AND p.id = v.plan_id
+		ORDER BY v.organization_id, v.plan_id, v.version_number`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	verified := 0
+	for rows.Next() {
+		var row planVersionBackfillRow
+		if err := rows.Scan(
+			&row.OrganizationID, &row.ProjectID, &row.PlanID, &row.VersionNumber,
+			&row.Platform, &row.ConfigJSON, &row.CanonicalHash,
+		); err != nil {
+			return 0, err
+		}
+		if !row.CanonicalHash.Valid || row.CanonicalHash.String == "" {
+			return 0, fmt.Errorf("delivery plan version %s V%d has no canonical hash", row.PlanID, row.VersionNumber)
+		}
+		_, calculated, err := backfillPlanVersionPayload(row)
+		if err != nil {
+			return 0, err
+		}
+		if err := validateExistingCanonicalHash(row, calculated); err != nil {
+			return 0, err
+		}
+		verified++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	return verified, nil
 }
 
 func validateExistingCanonicalHash(row planVersionBackfillRow, calculated string) error {
