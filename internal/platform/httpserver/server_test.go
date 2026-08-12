@@ -297,6 +297,8 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 		wantRetryable bool
 	}{
 		{name: "invalid state", err: creative.ErrInvalidState, wantStatus: http.StatusConflict, wantCode: "INVALID_STATE"},
+		{name: "edit timeline conflict", err: creative.ErrEditTimelineVersionConflict, wantStatus: http.StatusConflict, wantCode: "EDIT_TIMELINE_VERSION_CONFLICT"},
+		{name: "edit operation conflict", err: creative.ErrOperationVersionConflict, wantStatus: http.StatusConflict, wantCode: "EDIT_OPERATION_VERSION_CONFLICT"},
 		{name: "strategy brand direction required", err: creative.ErrStrategyBrandDirectionRequired, wantStatus: http.StatusConflict, wantCode: "STRATEGY_BRAND_DIRECTION_REQUIRED"},
 		{name: "strategy brand lineage mismatch", err: creative.ErrStrategyBrandLineageMismatch, wantStatus: http.StatusConflict, wantCode: "STRATEGY_BRAND_LINEAGE_MISMATCH"},
 		{name: "strategy brand legacy review", err: creative.ErrStrategyBrandLegacyTaskNeedsReview, wantStatus: http.StatusConflict, wantCode: "STRATEGY_BRAND_LEGACY_TASK_REQUIRES_REVIEW"},
@@ -2687,6 +2689,9 @@ func (s *creativeManagerStub) GamePrerollProviderInput(context.Context, contract
 }
 func (s *creativeManagerStub) ListTasks(context.Context, contract.ActorContext, contract.ProjectID, int) ([]creative.CreativeTask, error) {
 	return nil, nil
+}
+func (s *creativeManagerStub) RenameTask(context.Context, contract.ActorContext, contract.ProjectID, string, creative.RenameTaskRequest) (creative.CreativeTask, error) {
+	return creative.CreativeTask{}, nil
 }
 func (s *creativeManagerStub) GetTaskDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.TaskDetail, error) {
 	return s.detail, nil

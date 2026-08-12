@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -126,16 +127,24 @@ func main() {
 	scanner := buildScanner(cfg)
 	projectService := &project.Service{Store: projectStore, Authorizer: projectStore}
 	assetRepository := assets.MySQLRepository{DB: db}
-	uploadService := &assets.UploadService{Repository: assetRepository, Projects: projectService, Blobs: blobs, Scanner: scanner, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket, AssetsBucket: cfg.ObjectStorage.AssetsBucket}
+	uploadService := &assets.UploadService{Repository: assetRepository, Projects: projectService, Blobs: blobs, Scanner: scanner, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket, AssetsBucket: cfg.ObjectStorage.AssetsBucket, UsePolicy: assets.AssetUsePolicy{Rights: assetRepository}}
 	if ffprobePath != "" {
 		uploadService.VideoProbe = assets.FFprobeVideoProbe{Path: ffprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
 		uploadService.AudioProbe = assets.FFprobeAudioProbe{Path: ffprobePath, WorkRoot: cfg.Media.VideoWorkRoot}
 	}
 	intakeService := &assets.GeneratedIntakeService{Repository: assetRepository, Projects: projectService}
 	creativeRepository := creative.MySQLRepository{DB: db}
+	productionCenter := &creative.ProductionCenterService{
+		Projects: projectService,
+		Sources: []creative.ProductionRunSource{
+			creative.CreativeRenderRunAdapter{Jobs: creativeRepository},
+			creative.EditingRenderRunAdapter{Jobs: creativeRepository},
+		},
+		Assets: creative.AssetReadAdapter{Assets: uploadService},
+	}
 	creativeService := &creative.Service{
 		Repository: creativeRepository, ViralRemakes: creativeRepository, EditTasks: creativeRepository, EditingRenders: creativeRepository,
-		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService},
+		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService}, AssetUses: assets.AssetUsePolicy{Rights: assetRepository},
 		AudioAssets:        creativeAudioAssetWriter{uploads: uploadService},
 		CommerceWorkspaces: creativeRepository, BrandBriefs: creativeRepository, Directions: creativeRepository,
 		AINativeProducts:             creativeProductResolver{resolver: productsource.NewDouyinResolver()},
@@ -143,6 +152,14 @@ func main() {
 		AINativeScripts:              creativeRepository,
 		AINativeScriptProfiles:       creative.NewChannelCreativeProfileRegistry(),
 		AINativeProductMediaImporter: creativeProductMediaImporter{uploads: uploadService},
+	}
+	productionRetryAdapters := []creative.ProductionRetryAdapter{
+		creative.EditingRenderProductionRetryAdapter{Renders: creativeService},
+	}
+	productionCenter.RetryAdapters = productionRetryAdapters
+	productionRetry := &creative.ProductionRetryService{
+		Projects: projectService, Sources: productionCenter.Sources, Adapters: productionRetryAdapters,
+		Ledger: creativeRepository, Audit: productionRetryAuditAdapter{store: projectStore},
 	}
 	if cfg.Creative.DirectionPlanningEnabled {
 		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
@@ -293,6 +310,11 @@ func main() {
 			log.Fatalf("configure short drama V2 analyzer: %v", shortDramaAnalyzerErr)
 		}
 		creativeService.ShortDramaV2Analyzer = shortDramaAnalyzer
+		commerceAnalyzer, commerceAnalyzerErr := creativeprovider.NewCommercePrerollV2Analyzer(analysisConfig)
+		if commerceAnalyzerErr != nil {
+			log.Fatalf("configure commerce preroll V2 analyzer: %v", commerceAnalyzerErr)
+		}
+		creativeService.CommercePrerollV2Analyzer = commerceAnalyzer
 		log.Printf("Creative viral analysis configured: model_alias=%s prompt_version=%s asr=%s", "cookies.text.standard", "viral.analyze.v1", cfg.Provider.VolcengineASR.ResourceID)
 	}
 	runtimeStore := jobruntime.MySQLStore{DB: db}
@@ -417,7 +439,7 @@ func main() {
 		ProjectAuthorizer: projectStore,
 		Readiness:         database.Readiness{DB: db},
 		Identities:        identityStore, Accounts: identityStore, Projects: projectService, ProjectMembers: projectStore,
-		Uploads: uploadService, Intakes: intakeService, Creative: creativeService,
+		Uploads: uploadService, Intakes: intakeService, Creative: creativeService, ProductionCenter: productionCenter, ProductionAssets: productionCenter, ProductionRetry: productionRetry,
 		Sessions: sessionService, Knowledge: knowledgeService,
 		RemixPlans: remixService, Evals: remixService, AgentRuns: agentService,
 		ProviderConfig: provider.MySQLGatewayConfigStore{DB: db},
@@ -487,7 +509,22 @@ func main() {
 			cfg.Miyun.MaxConcurrent, cfg.Miyun.RequestsPerSecond, cfg.Miyun.CooldownSeconds, len(cfg.Miyun.DownloadAllowedHosts))
 	}
 	insightsService := &insights.Service{
-		Repository:          insights.MySQLRepository{DB: db},
+		Repository:     insights.MySQLRepository{DB: db},
+		Assets:         insights.MySQLRepository{DB: db},
+		ExternalAssets: insights.MySQLRepository{DB: db},
+		Connectors:     insights.MySQLRepository{DB: db},
+		Runs:           insights.MySQLRepository{DB: db},
+		Experiments:    insights.MySQLRepository{DB: db},
+		Thresholds:     insights.MySQLRepository{DB: db},
+		Projects:       projectService,
+		Delivery:       deliveryinsights.Reader{Service: deliveryService},
+		Media:          insightMediaReader{uploads: uploadService},
+		// 视频类提取走多模态。为 nil 时视频类退回人填画面描述那条路——
+		// 这里永远不为 nil（媒体理解服务总是构造出来的），但它内部的视觉链路
+		// 可能没接通，那种情况由 UnderstandMedia 自己识别并回落。
+		Understanding: insightMediaUnderstander{service: mediaUnderstandingService},
+
+		// 米云素材（来自上游 shikanon/cookies）。
 		Miyun:               insights.MySQLRepository{DB: db},
 		MiyunProjects:       miyunProjectSourceAdapter{projects: projectService},
 		MiyunAssets:         miyunAssetSourceAdapter{uploads: uploadService},
@@ -503,12 +540,6 @@ func main() {
 		MiyunSecrets:        miyunCipher,
 		MiyunVerifier:       miyunVerifier,
 		MiyunCooldown:       time.Duration(cfg.Miyun.CooldownSeconds) * time.Second,
-		Assets:              insights.MySQLRepository{DB: db},
-		Connectors:          insights.MySQLRepository{DB: db},
-		Runs:                insights.MySQLRepository{DB: db},
-		Experiments:         insights.MySQLRepository{DB: db},
-		Projects:            projectService,
-		Delivery:            deliveryinsights.Reader{Service: deliveryService},
 	}
 	// Text 为 nil 时提取会直接失败，不会退化成模板产出——
 	// 库里一条编造的特征，代价远大于一次失败的提取。
@@ -561,6 +592,7 @@ func main() {
 			Sources: creativeMediaSource{repository: assetRepository, blobs: blobs}, Probe: probe,
 		}
 		creativeService.ShortDramaV2OutputNormalizer = composer
+		creativeService.CommercePrerollV2OutputNormalizer = composer
 		creativeService.Composer = composer
 		creativeService.BrandFilmComposer = composer
 		creativeService.RenderedAssets = creativeRenderedAssetWriter{uploads: uploadService}
@@ -571,8 +603,9 @@ func main() {
 		}
 		creativeService.AINativeTimelineRenderer = media.FFmpegTimelineRenderer{
 			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
-			Videos: creativeMediaSource{repository: assetRepository, blobs: blobs},
-			Audio:  creativeMediaSource{repository: assetRepository, blobs: blobs}, Probe: probe,
+			Videos:  creativeMediaSource{repository: assetRepository, blobs: blobs},
+			Visuals: creativeMediaSource{repository: assetRepository, blobs: blobs},
+			Audio:   creativeMediaSource{repository: assetRepository, blobs: blobs}, Probe: probe,
 		}
 		runtimeHandlers[creative.AudioMixRenderJobKind] = creative.AudioMixRenderRuntimeHandler(*creativeService)
 		for kind, handler := range creative.NewRenderRuntimeWorker(runtimeStore, *creativeService).Handlers {
@@ -658,8 +691,10 @@ func main() {
 		if err != nil {
 			log.Fatalf("configure Provider video adapter: %v", err)
 		}
+		providerStore := provider.MySQLStore{DB: db, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP}
 		providerService := provider.Service{
-			Store:         provider.MySQLStore{DB: db, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP},
+			Store:         providerStore,
+			JobQueryStore: providerStore,
 			Scheduler:     provider.JobRuntimeScheduler{Store: runtimeStore, NewID: func() (string, error) { return ids.New("providerexec") }},
 			ImageAdapter:  adapter,
 			VideoAdapter:  videoAdapter,
@@ -690,7 +725,14 @@ func main() {
 			}
 		}
 		dependencies.ProviderJobs = providerService
+		productionCenter.Sources = append(productionCenter.Sources, creative.ProviderRunAdapter{Jobs: &providerService})
+		imageRetryAdapter := creativeprovider.ImageSlotProductionRetryAdapter{Creative: creativeService, Attempts: creativeRepository, Provider: &providerService, Projects: projectService}
+		productionRetryAdapters = append(productionRetryAdapters, imageRetryAdapter)
+		productionCenter.RetryAdapters = productionRetryAdapters
+		productionRetry.Adapters = productionRetryAdapters
+		productionRetry.Sources = productionCenter.Sources
 		creativeService.ShortDramaV2Images = creativeShortDramaV2ImageJobs{provider: &providerService}
+		creativeService.CommercePrerollV2Images = creativeCommercePrerollV2ImageJobs{provider: &providerService}
 		creativeService.AINativeStoryboards = creativeRepository
 		creativeService.AINativeStoryboardAssetPreparer = creativeAINativeStoryboardAssetPreparer{provider: &providerService}
 		creativeService.AINativeStoryboardScheduler = creative.JobRuntimeAINativeStoryboardScheduler{Store: runtimeStore}
@@ -1083,6 +1125,30 @@ func (s creativeMediaSource) OpenVideo(ctx context.Context, organizationID contr
 	return value.Version, reader, nil
 }
 
+func (s creativeMediaSource) OpenVisual(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, ref contract.AssetVersionRef) (assets.AssetVersion, io.ReadCloser, error) {
+	if s.repository == nil || s.blobs == nil {
+		return assets.AssetVersion{}, nil, fmt.Errorf("creative visual source is unavailable")
+	}
+	value, err := s.repository.GetProjectAsset(ctx, organizationID, projectID, ref)
+	if err != nil {
+		return assets.AssetVersion{}, nil, err
+	}
+	readyVideo := value.Asset.Kind == contract.AssetVideo && value.Version.MIMEType == "video/mp4"
+	readyImage := value.Asset.Kind == contract.AssetImage && (value.Version.MIMEType == "image/jpeg" || value.Version.MIMEType == "image/png" || value.Version.MIMEType == "image/webp")
+	if value.Asset.Status != assets.AssetReady || value.Version.Status != assets.AssetReady || !readyVideo && !readyImage {
+		return assets.AssetVersion{}, nil, fmt.Errorf("creative visual source is not a ready supported video or image")
+	}
+	reader, info, err := s.blobs.Open(ctx, value.Version.Blob)
+	if err != nil {
+		return assets.AssetVersion{}, nil, err
+	}
+	if info.SizeBytes != value.Version.SizeBytes {
+		reader.Close()
+		return assets.AssetVersion{}, nil, assets.ErrOutputMetadataMismatch
+	}
+	return value.Version, reader, nil
+}
+
 func (s creativeMediaSource) OpenAudio(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, ref contract.AssetVersionRef) (assets.AssetVersion, io.ReadCloser, error) {
 	if s.repository == nil || s.blobs == nil {
 		return assets.AssetVersion{}, nil, fmt.Errorf("creative media source is unavailable")
@@ -1179,6 +1245,119 @@ func (r creativeAssetReader) ReadForCreative(ctx context.Context, actor contract
 		DurationMS: value.Version.DurationMS, FrameRate: value.Version.FrameRate,
 		VideoCodec: value.Version.VideoCodec, AudioCodec: value.Version.AudioCodec,
 	}, nil
+}
+
+// insightMediaReader 把素材库上传时探测到的元数据递给洞察的客观可测层。
+//
+// 只读，而且只读已经落库的探测结果——洞察不再跑一遍 ffprobe。两处各自量出的时长
+// 对不上的时候，没人说得清该信谁，而这一层的全部价值就在于「同一个文件量两遍
+// 结果一样」。
+type insightMediaReader struct{ uploads *assets.UploadService }
+
+func (r insightMediaReader) ReadMediaFacts(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID,
+	platformAssetID string, platformAssetVersion int64) (insights.MediaFacts, error) {
+	if r.uploads == nil {
+		return insights.MediaFacts{}, fmt.Errorf("asset upload service is required")
+	}
+	value, err := r.uploads.Get(ctx, actor, projectID, contract.AssetVersionRef{
+		AssetID: contract.AssetID(platformAssetID), Version: platformAssetVersion,
+	})
+	if err != nil {
+		return insights.MediaFacts{}, err
+	}
+	// 探测没成功就如实说没有。这几个字段在失败时是零值，当成「时长 0 秒」写进
+	// 客观可测层，就是把一个探测故障伪装成一条测量结论。
+	if value.Version.Media.ProbeStatus != assets.MediaProbeSucceeded {
+		reason := "素材库还没探测过这个文件"
+		switch value.Version.Media.ProbeStatus {
+		case assets.MediaProbeFailed:
+			reason = "素材库探测这个文件失败了"
+		case assets.MediaProbeNotRequired:
+			reason = "这个文件不是音视频，没有可探测的时长"
+		}
+		return insights.MediaFacts{Unavailable: reason}, nil
+	}
+	return insights.MediaFacts{
+		Measured:        true,
+		DurationSeconds: value.Version.Media.DurationSeconds,
+		WidthPixels:     value.Version.WidthPixels,
+		HeightPixels:    value.Version.HeightPixels,
+	}, nil
+}
+
+// insightMediaUnderstander 把平台的「媒体理解」接到洞察的视频语义提取上。
+//
+// 一次 Request 同时管排队和读结果：媒体理解按 (文件 SHA256, profile, prompt 版本,
+// 模型别名) 算输入指纹去重，同一条视频重复请求拿回的是同一份产出，不会重复排队，
+// 也不会重复花钱。所以洞察那边只有一个方法，不用自己判断该 Request 还是该 Get。
+type insightMediaUnderstander struct{ service *mediaunderstanding.Service }
+
+func (u insightMediaUnderstander) UnderstandMedia(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, platformAssetID string, platformAssetVersion int64) (insights.MediaUnderstanding, error) {
+	if u.service == nil {
+		return insights.MediaUnderstanding{Unavailable: "这个环境没接多模态"}, nil
+	}
+	artifact, _, err := u.service.Request(ctx, actor, projectID, mediaunderstanding.CreateRequest{
+		AssetID: platformAssetID, Version: platformAssetVersion,
+	})
+	if errors.Is(err, mediaunderstanding.ErrUnsupportedProfile) {
+		return insights.MediaUnderstanding{
+			Unavailable: "这条视频不在多模态能看的范围内（只看 15–90 秒的 mp4）",
+		}, nil
+	}
+	if err != nil {
+		return insights.MediaUnderstanding{}, err
+	}
+
+	switch artifact.Status {
+	case mediaunderstanding.StatusRunning:
+		return insights.MediaUnderstanding{Pending: true, ArtifactID: artifact.ID}, nil
+	case mediaunderstanding.StatusFailed:
+		return insights.MediaUnderstanding{
+			ArtifactID: artifact.ID, Unavailable: understandingFailureReason(artifact),
+		}, nil
+	}
+	// 视觉链路没配好时，媒体理解仍然会落一条 partial，里面只有一句技术校验
+	// （applyTechnicalFallback）。那句话喂给特征模型只会让它照着编，所以这里当成
+	// 「没看成」，让洞察回落到人填正文——它自己在 Warnings 里说了这件事。
+	for _, warning := range artifact.Warnings {
+		switch warning {
+		case "vision_provider_unavailable", "vision_route_unavailable", "fake_vision_no_semantic_claims":
+			return insights.MediaUnderstanding{
+				ArtifactID: artifact.ID, Unavailable: "这个环境的视觉模型没接通，模型没真看画面",
+			}, nil
+		}
+	}
+	return insights.MediaUnderstanding{
+		Ready: true, ArtifactID: artifact.ID, Summary: artifact.Summary,
+		Observations: evidenceTexts(artifact.Observations), Inferences: evidenceTexts(artifact.Inferences),
+		VisibleText: evidenceTexts(artifact.VisibleText), Transcript: evidenceTexts(artifact.Transcript),
+		KeyframeCount: len(artifact.Keyframes), ProviderCode: artifact.Lineage.ProviderCode,
+		ModelAlias: artifact.Lineage.ModelAlias, ModelVersion: artifact.Lineage.ModelVersion,
+		ContentHash: artifact.ContentHash,
+	}, nil
+}
+
+func understandingFailureReason(artifact mediaunderstanding.Artifact) string {
+	if message := strings.TrimSpace(artifact.ErrorMessage); message != "" {
+		return message
+	}
+	return "多模态没能看完这条视频"
+}
+
+// evidenceTexts 只取正文，丢掉帧号和置信度。
+//
+// 丢掉是有意的：这段字是要发给特征模型的，带上「frame_index: 2, confidence: 0.7」
+// 只会让它把这些数字也当成待提取的内容。帧号和置信度仍然完整留在媒体理解的产出上，
+// 想看证据链去那边看——那边有帧图，这边只有文字。
+func evidenceTexts(items []mediaunderstanding.Evidence) []string {
+	texts := make([]string, 0, len(items))
+	for _, item := range items {
+		if value := strings.TrimSpace(item.Text); value != "" {
+			texts = append(texts, value)
+		}
+	}
+	return texts
 }
 
 func (r assetVisionSourceResolver) ResolveVisionSources(ctx context.Context, actor contract.ActorContext, projectContext contract.ProjectContext, refs []contract.ProjectAssetRef) ([]provider.VisionSource, error) {

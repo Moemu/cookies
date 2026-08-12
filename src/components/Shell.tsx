@@ -36,7 +36,9 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
   const [collapsed, setCollapsed] = useState(false)
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(() => readRecentProjectIds())
   const [newProjectOpen, setNewProjectOpen] = useState(false)
-  const groups = [...new Set(system.nav.map(item => item.group))]
+  // hidden 的入口不进侧栏，但路由还在——它们从别的页面上跳进去。
+  const visibleNav = system.nav.filter(item => !item.hidden)
+  const groups = [...new Set(visibleNav.map(item => item.group))]
   const projectMenuItems = useMemo(() => buildProjectMenuItems(projects, agencyWorkbench), [projects, agencyWorkbench])
   const currentContext = projectMenuItems.find(item => item.project.id === currentProject.id)
   const projectMenuQuery = projectMenuSearch.trim().toLowerCase()
@@ -54,7 +56,7 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
     if (!query) return []
     return projectMenuItems.flatMap(item => [
       { id: `${item.project.id}-project`, projectId: item.project.id, title: item.project.name, meta: `${item.clientName} · ${item.brandName} · ${item.project.owner}`, projectHome: true as const },
-      ...Object.values(item.project.artifacts).map(artifact => ({ id: `${item.project.id}-${artifact.key}`, projectId: item.project.id, objectId: artifact.key, title: `${artifact.label} ${artifact.version}`, meta: `${item.project.name} · ${artifact.status}`, system: artifact.key === 'creative' ? 'creative' as const : artifact.key === 'insight' ? 'insight' as const : artifact.key === 'delivery' ? 'delivery' as const : 'strategy' as const, navId: artifact.key === 'brief' ? 'briefs' : artifact.key === 'strategy' ? 'strategies' : artifact.key === 'creative' ? 'tasks' : artifact.key === 'insight' ? 'knowledge' : 'plans' })),
+      ...Object.values(item.project.artifacts).map(artifact => ({ id: `${item.project.id}-${artifact.key}`, projectId: item.project.id, objectId: artifact.key, title: `${artifact.label} ${artifact.version}`, meta: `${item.project.name} · ${artifact.status}`, system: artifact.key === 'creative' ? 'creative' as const : artifact.key === 'insight' ? 'insight' as const : artifact.key === 'delivery' ? 'delivery' as const : 'strategy' as const, navId: artifact.key === 'brief' ? 'briefs' : artifact.key === 'strategy' ? 'strategies' : artifact.key === 'creative' ? 'tasks' : artifact.key === 'insight' ? 'experience' : 'plans' })),
     ]).filter(result => {
       const item = projectMenuItems.find(candidate => candidate.project.id === result.projectId)
       return `${result.title} ${result.meta} ${item?.searchText ?? ''}`.toLowerCase().includes(query)
@@ -143,7 +145,7 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
     {!withoutSidebar ? <aside className="sidebar" aria-label={`${system.label}导航`}>
       <div className="side-title"><system.icon size={18}/><span>{system.label}</span></div>
       <nav>{groups.map(group => {
-        const hubGroup = system.nav.some(item => item.group === group && item.prominence === 'hub')
+        const hubGroup = visibleNav.some(item => item.group === group && item.prominence === 'hub')
         return <div className={hubGroup ? 'nav-group nav-hub-group' : 'nav-group'} key={group}>
           <div className="nav-group-label">
             {hubGroup ? <>
@@ -151,7 +153,7 @@ export function Shell({ system, activeNav, isHome, isProjectHome, isProjectManag
               <small>4 个独立中心 · 共享项目上下文</small>
             </> : <span>{group}</span>}
           </div>
-          {system.nav.filter(item => item.group === group).map(item => <button
+          {visibleNav.filter(item => item.group === group).map(item => <button
             key={item.id}
             className={`${activeNav === item.id ? 'nav-item active' : 'nav-item'}${item.prominence === 'hub' ? ' nav-item-hub' : ''}`}
             onClick={() => onNavChange(item.id)}

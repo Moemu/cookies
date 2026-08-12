@@ -265,6 +265,30 @@ func TestRepeatedExtractionReusesTheSameInvocationKey(t *testing.T) {
 	}
 }
 
+// 调用人本来就有发文本请求的权限时，不能再给他加一遍——重复的 scope 会被
+// ActorContext.Validate 拒掉，请求根本发不出去。线上管理员正是这种账号，
+// 而 testActor 不带这个 scope，所以别的用例都绕开了这条路。
+func TestExtractionDoesNotDuplicateAScopeTheCallerAlreadyHas(t *testing.T) {
+	t.Parallel()
+	service, generator, _ := testExtractionService(t, extractionAnswer(map[string]any{
+		"article_type": map[string]any{"terms": []string{"知识"}, "confidence": "high", "evidence": "科普结构"},
+	}))
+	actor := testActor()
+	actor.Scopes = append(actor.Scopes, provider.ScopeTextGenerate)
+	article := indexedAsset(t, service, actor, AssetTypeWechatArticle)
+	if _, err := service.AnalyzeAsset(context.Background(), actor, "project_1", article.ID, AnalyzeAssetRequest{
+		ExpectedVersion: article.Version, Content: "正文。",
+	}); err != nil {
+		t.Fatalf("已经带着 provider.text.generate 的人也应当能提取：%v", err)
+	}
+	if len(generator.requests) != 1 {
+		t.Fatalf("requests=%d", len(generator.requests))
+	}
+	if err := generator.requests[0].Actor.Validate(); err != nil {
+		t.Fatalf("发给模型的身份必须是合法的：%v", err)
+	}
+}
+
 // 没配模型时不退化成模板产出——库里一条编造的特征，
 // 代价远大于一次失败的提取。
 func TestExtractionFailsInsteadOfFabricatingWhenNoModelIsConfigured(t *testing.T) {
@@ -464,8 +488,13 @@ type fakeTextGenerator struct {
 	requests []provider.TextGenerateRequest
 }
 
+// 先校验再作答，跟真实的 provider.Service.GenerateText 一样。假生成器什么都收的话，
+// 一个组不出合法请求的 bug 在这里全绿，到线上才被供应商层拒掉。
 func (g *fakeTextGenerator) GenerateText(_ context.Context, request provider.TextGenerateRequest) (provider.SynchronousResponse, error) {
 	g.requests = append(g.requests, request)
+	if err := request.Validate(); err != nil {
+		return provider.SynchronousResponse{}, err
+	}
 	if g.response.err != nil {
 		return provider.SynchronousResponse{}, g.response.err
 	}

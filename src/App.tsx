@@ -4,11 +4,12 @@ import { ProjectFlowDashboard } from './components/ProjectWorkflow'
 import { ProjectManagementPage } from './components/ProjectManagementPage'
 import { ModelSettingsPage } from './components/ModelSettingsPage'
 import { LoginPage } from './components/LoginPage'
+import { RenderErrorBoundary } from './components/RenderErrorBoundary'
 import { StateBoundary } from './components/StateBoundary'
 import { useAuth } from './context/AuthContext'
 import { useProject } from './context/ProjectContext'
 import { systems } from './data/navigation'
-import { projectHomePath, projectManagePath, projectPath, useAppRoute } from './lib/router'
+import { projectHomePath, projectManagePath, projectPath, useAppRoute, videoEditingPath } from './lib/router'
 import {
   strategyWorkspacePath,
   type StrategyWorkspaceLocation,
@@ -64,6 +65,11 @@ export default function App() {
   }, [navigate, route.navId, route.objectId, route.projectId, route.strategyNeedsCanonicalRedirect, route.strategyPanel, route.strategyResource, route.strategyStage, route.systemKey])
 
   useEffect(() => {
+    if (!route.isLegacyVideoEditingRoute || !route.projectId) return
+    navigate(videoEditingPath(route.projectId, route.contextId), true)
+  }, [navigate, route.contextId, route.isLegacyVideoEditingRoute, route.projectId])
+
+  useEffect(() => {
     if (!route.projectId || route.isHome || route.isProjectHome || route.isProjectManagement || route.isModelSettings) return
     const path = route.systemKey === 'strategy' && route.navId === 'workspaces' && route.objectId && route.strategyStage
       ? strategyWorkspacePath(route.projectId, route.objectId, {
@@ -78,11 +84,15 @@ export default function App() {
   if (isAuthLoading) return <div className="login-page"><div className="page-notice">正在检查登录状态…</div></div>
   if (!session.authenticated) return <LoginPage/>
 
-  const systemLanding: Record<SystemKey, string> = { strategy: 'tasks', creative: 'tasks', insight: 'prelaunch', delivery: 'plans' }
+  const systemLanding: Record<SystemKey, string> = { strategy: 'tasks', creative: 'tasks', insight: 'analysis', delivery: 'plans' }
   const activeProjectId = route.projectId ?? currentProject.id
   const changeSystem = (next: SystemKey) => navigate(projectPath(activeProjectId, next, systemLanding[next]))
   const openProject = (projectId: string, next?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string, tourRunId?: string, tourCase?: string) => {
     selectProject(projectId)
+    if (next === 'creative' && navId === 'video' && view === '素材剪辑') {
+      navigate(videoEditingPath(projectId, contextId))
+      return
+    }
     const rememberedPath = next && !navId ? getRememberedProjectSystemPath(projectId, next) : undefined
     navigate(next ? rememberedPath ?? projectPath(projectId, next, navId ?? systemLanding[next], objectId, view, contextId, tourRunId, tourCase) : projectHomePath(projectId))
   }
@@ -127,9 +137,15 @@ export default function App() {
   }
 
   return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isProjectHome={route.isProjectHome} isProjectManagement={route.isProjectManagement} isGlobalSettings={route.isModelSettings} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings')} onSystemChange={changeSystem} onProjectChange={openProject} onProjectManage={manageProject} onNavChange={changeNavigation}>
-    <Suspense fallback={<div className="page-notice" role="status">正在加载当前工作区…</div>}>
-      {content}
-    </Suspense>
+    {/* 页面级错误边界：某一页渲染炸了，只让它那一块显示成错误，Shell 的导航、
+        Project 切换、系统切换都还能用。切换路由时 resetKey 变化会自动清掉错误。
+        它套在 Suspense 外面：这样懒加载本身失败（chunk 拉不下来）也归它管，
+        而不是把整个 App 白屏。 */}
+    <RenderErrorBoundary contextLabel={navItem.label} resetKey={`${activeProjectId}-${system.key}-${navItem.id}-${route.view ?? ''}`}>
+      <Suspense fallback={<div className="page-notice" role="status">正在加载当前工作区…</div>}>
+        {content}
+      </Suspense>
+    </RenderErrorBoundary>
   </Shell>
 }
 

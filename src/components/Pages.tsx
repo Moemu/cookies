@@ -8,6 +8,14 @@ import type { BusinessTaskRecord, BusinessTaskType, DataState, NavItem, ProjectR
 import { calculateProjectProgress, progressPercentLabel, progressReasonLabel, progressStatusLabel } from '../lib/project-progress'
 import { TrendChart } from './Icons'
 import { shortId } from '../data/shortId'
+// 洞察各入口的页面本身在下面跟着其他页面一起 lazy，这里只静态引它们的视图类型
+// ——类型在编译期就消掉了，不会把 chunk 拽回主包。
+import type { PreLaunchView } from './insight/prelaunch'
+import type { AnalysisView } from './insight/analysis'
+import type { AssetsView } from './insight/assets'
+import type { ReviewView } from './insight/review'
+import type { ExperienceView } from './insight/experience'
+import type { SettingsView } from './insight/settings'
 import { StateBoundary, StatePreview } from './StateBoundary'
 import { KanonStrategyTaskCenter, KanonStrategyTaskDialog } from '../features/strategy/KanonStrategyTaskCenter'
 import { KanonBriefCenter, KanonResearchEvidenceCenter, KanonStrategyLibrary } from '../features/strategy/KanonStrategyCenters'
@@ -29,23 +37,24 @@ const DeliveryConfigurationPage = lazy(() => import('./DeliveryConfigurationPage
 const DeliveryMockEnvironmentBanner = lazy(() => import('./DeliveryTourPage').then(module => ({ default: module.DeliveryMockEnvironmentBanner })))
 const DeliveryTourContextBanner = lazy(() => import('./DeliveryTourPage').then(module => ({ default: module.DeliveryTourContextBanner })))
 const DeliveryTourPage = lazy(() => import('./DeliveryTourPage').then(module => ({ default: module.DeliveryTourPage })))
-const PreLaunchInsightPage = lazy(() => import('./PreLaunchInsightPage').then(module => ({ default: module.PreLaunchInsightPage })))
-const ReportCenterPage = lazy(() => import('./ReportCenterPage').then(module => ({ default: module.ReportCenterPage })))
-const AssetLibraryPage = lazy(() => import('./AssetLibraryPage').then(module => ({ default: module.AssetLibraryPage })))
-const MiyunMaterialsPage = lazy(() => import('./MiyunMaterialsPage').then(module => ({ default: module.MiyunMaterialsPage })))
-const ContentAnalysisPage = lazy(() => import('./ContentAnalysisPage').then(module => ({ default: module.ContentAnalysisPage })))
-const DataConnectionsPage = lazy(() => import('./DataConnectionsPage').then(module => ({ default: module.DataConnectionsPage })))
-const CapabilityOperationsPage = lazy(() => import('./CapabilityOperationsPage').then(module => ({ default: module.CapabilityOperationsPage })))
 const ExperimentCenterPage = lazy(() => import('./ExperimentCenterPage').then(module => ({ default: module.ExperimentCenterPage })))
-const InsightSettingsPage = lazy(() => import('./InsightSettingsPage').then(module => ({ default: module.InsightSettingsPage })))
-const DataQualityPage = lazy(() => import('./DataQualityPage').then(module => ({ default: module.DataQualityPage })))
-const PostLaunchAnalysisPage = lazy(() => import('./PostLaunchAnalysisPage').then(module => ({ default: module.PostLaunchAnalysisPage })))
-const ExperienceLibraryPage = lazy(() => import('./ExperienceLibraryPage').then(module => ({ default: module.ExperienceLibraryPage })))
+const PreLaunchPage = lazy(() => import('./insight/prelaunch/PreLaunchPage').then(module => ({ default: module.PreLaunchPage })))
+const AnalysisPage = lazy(() => import('./insight/analysis/AnalysisPage').then(module => ({ default: module.AnalysisPage })))
+const AssetsPage = lazy(() => import('./insight/assets/AssetsPage').then(module => ({ default: module.AssetsPage })))
+const ReviewPage = lazy(() => import('./insight/review/ReviewPage').then(module => ({ default: module.ReviewPage })))
+const ExperiencePage = lazy(() => import('./insight/experience/ExperiencePage').then(module => ({ default: module.ExperiencePage })))
+const SettingsPage = lazy(() => import('./insight/settings/SettingsPage').then(module => ({ default: module.SettingsPage })))
+// 米云素材（同步自上游）。上游是静态 import 的，这里跟其他洞察页一样改成 lazy：
+// 这一页两千多行，静态引会整块压进主包，而它不在主线上，日常多数人不会点进来。
+const MiyunMaterialsPage = lazy(() => import('./MiyunMaterialsPage').then(module => ({ default: module.MiyunMaterialsPage })))
 const TaskCenterPage = lazy(() => import('./BusinessTaskPages').then(module => ({ default: module.TaskCenterPage })))
 const TaskCreateDialog = lazy(() => import('./BusinessTaskPages').then(module => ({ default: module.TaskCreateDialog })))
 
 const StrategyWorkspaceRoute = lazy(() => import('../features/strategy/workspace/StrategyWorkspaceRoute').then(module => ({
   default: module.StrategyWorkspaceRoute,
+})))
+const ProductionCenterPage = lazy(() => import('../features/production-center/ProductionCenterPage').then(module => ({
+  default: module.ProductionCenterPage,
 })))
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string, tourRunId?: string, tourCase?: string) => void
@@ -72,10 +81,10 @@ const dashboardJourneys: Record<SystemKey, Array<{ label: string; detail: string
     { label: '生产与评审', detail: '跟踪生成、失败恢复和交付版本', navId: 'production' },
   ],
   insight: [
-    { label: '投前洞察', detail: '为 Brief、策略与创意引用证据', navId: 'prelaunch' },
-    { label: '投后分析', detail: '查看消耗、CTR、转化与素材驱动因素', navId: 'performance' },
-    { label: '素材管理', detail: '统一管理视频、图片与授权来源', navId: 'assets' },
-    { label: '经验沉淀', detail: '把验证结论转成可复用策略证据', navId: 'knowledge' },
+    { label: '分析', detail: '一轮投放跑完，为什么是这个结果', navId: 'analysis' },
+    { label: '复盘', detail: '这一轮收尾，决定留下什么', navId: 'review' },
+    { label: '经验', detail: '以前什么有效、在什么条件下成立', navId: 'experience' },
+    { label: '素材', detail: '能拿来分析的素材有哪些、还差什么', navId: 'assets' },
   ],
   delivery: [
     { label: '投放计划', detail: '选择创意组合、预算和排期', navId: 'plans' },
@@ -928,7 +937,7 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
   const dashboardAction = system.key === 'strategy' ? '新建策略任务' : system.key === 'creative' ? '新建创意任务' : system.key === 'insight' ? '查看广告数据' : '配置投放计划'
   const runDashboardAction = () => {
     if (system.key === 'strategy' || system.key === 'creative') setTaskDomain(system.key)
-    else onOpenProject(currentProject.id, system.key, system.key === 'insight' ? 'performance' : 'plans')
+    else onOpenProject(currentProject.id, system.key, system.key === 'insight' ? 'analysis' : 'plans')
   }
   const taskCreated = (task: BusinessTaskRecord) => {
     setTaskDomain(null)
@@ -949,7 +958,7 @@ export function DashboardPage({ system, onSystemChange, onOpenProject }: { syste
     <section className="focus-band">
       <div className="focus-number">01</div>
       <div className="focus-main"><span className="section-label">现在需要关注</span><h2>{currentProject.name}</h2><p>{projectProgress.available ? `${projectProgress.stageLabel}已推进至 ${progressPercentLabel(projectProgress)}，下一步需要确认关键决策与证据边界。` : progressReasonLabel(projectProgress)}</p><div className="focus-meta">{currentItem ? <><Status value={currentItem.status} /><span>负责人 {operationField(currentItem, 'owner')}</span></> : <span>暂无服务端工作项</span>}<span>更新于 {currentProject.updatedAt}</span></div></div>
-      <div className="focus-progress"><div className="progress-ring" style={{'--progress': `${projectProgress.available && projectProgress.taskPercent !== null ? projectProgress.taskPercent * 3.6 : 0}deg`} as CSSProperties}><span>{projectProgress.available && projectProgress.taskPercent !== null ? <>{projectProgress.taskPercent}<small>%</small></> : <small>无法计算</small>}</span></div><button className="text-button" onClick={() => onOpenProject(currentProject.id, system.key, system.key === 'strategy' ? 'workspaces' : system.key === 'creative' ? 'tasks' : system.key === 'insight' ? 'knowledge' : 'approvals')}>继续工作<ArrowRight size={15} /></button></div>
+      <div className="focus-progress"><div className="progress-ring" style={{'--progress': `${projectProgress.available && projectProgress.taskPercent !== null ? projectProgress.taskPercent * 3.6 : 0}deg`} as CSSProperties}><span>{projectProgress.available && projectProgress.taskPercent !== null ? <>{projectProgress.taskPercent}<small>%</small></> : <small>无法计算</small>}</span></div><button className="text-button" onClick={() => onOpenProject(currentProject.id, system.key, system.key === 'strategy' ? 'workspaces' : system.key === 'creative' ? 'tasks' : system.key === 'insight' ? 'experience' : 'approvals')}>继续工作<ArrowRight size={15} /></button></div>
     </section>
     <div className="dashboard-grid">
       <section className="open-section workstream">
@@ -1439,6 +1448,58 @@ function ObjectDetail({ system, item, objectId, onOpenProject }: { system: Syste
   return <aside className="object-detail" aria-label={`${name}详情`}><div><span className="section-label">服务端对象详情</span><h2>{name}</h2><p>{record ? `${operationField(record, 'kind')} · ${record.status} · ${operationField(record, 'owner')}` : `当前 Project：${currentProject.name}`}</p></div><div className="detail-kv"><span>对象 ID</span><b>{objectId}</b></div><div className="detail-kv"><span>来源版本</span><b>{currentProject.artifacts.strategy.version} → {currentProject.artifacts.creative.version}</b></div><button className="primary-button full" onClick={() => onOpenProject(currentProject.id, next[0], next[1], next[2])}>{next[3]}<ArrowRight size={15}/></button><button className="secondary-button full" onClick={() => onOpenProject(currentProject.id, system.key, item.id)}>返回{item.label}列表</button></aside>
 }
 
+// 侧栏的二级视图名 → 分析页的视图键。认不出来的名字落到总览，
+// 不留空白页：视图名改错了应该看到总览，而不是一片空。
+// 投前入口的两个视图。认不出来的落到「结论」——那是开工前真正要读的一屏，
+// 「历史模式」是回头看统计，不该在人没主动要求时先出现。
+const preLaunchViews: Record<string, PreLaunchView> = {
+  结论: 'conclusions',
+  历史模式: 'patterns',
+}
+
+const analysisViews: Record<string, AnalysisView> = {
+  指标总览: 'overview',
+  素材对比: 'comparisons',
+  趋势: 'trends',
+  疲劳: 'fatigue',
+  异常: 'anomalies',
+  驱动因素: 'drivers',
+}
+
+// 素材入口的五个视图。数据接入和变量这两段是整页委托过去的，它们自己还有分段
+// （数据源/导入任务/…、按素材类型），那些分段名不在这张表里——落到默认值即可，
+// 委托过去的页面认得它们。
+const assetsViews: Record<string, AssetsView> = {
+  总览: 'overview',
+  数据接入: 'intake',
+  变量: 'features',
+  找相似: 'similar',
+  外部素材: 'external',
+}
+
+// 同理，认不出来的名字落到「本轮」——日常最常进的那一屏。
+const reviewViews: Record<string, ReviewView> = {
+  本轮: 'current',
+  全部复盘: 'all',
+  已沉淀经验: 'harvest',
+}
+
+// 经验入口的两个模式。认不出来的落到「查」：那是高频的一屏，
+// 而「管」会摆出一排能改状态的按钮，不该在人没主动要求时出现。
+const experienceViews: Record<string, ExperienceView> = {
+  查经验: 'lookup',
+  管经验: 'manage',
+}
+
+// 设置入口的四组。认不出来的落到「判定阈值」——那是这一版唯一新增的能力，
+// 也是四组里唯一能改东西的一屏。
+const settingsViews: Record<string, SettingsView> = {
+  判定阈值: 'thresholds',
+  数据体检: 'health',
+  变量字典: 'dictionary',
+  确认权限: 'permission',
+}
+
 export function ModulePage({
   system,
   item,
@@ -1525,19 +1586,33 @@ export function ModulePage({
         onBack={() => onOpenProject(currentProject.id, 'creative', 'image-text', undefined, activeView)}
       />
     : system.key === 'creative' && item.id === 'video' ? <VideoCreationPage state={dataState} activeView={activeView} activeTaskId={contextId ?? objectId} onOpenTask={id => onOpenProject(currentProject.id, 'creative', 'tasks', id)} onOpenBrandIntake={id => onOpenProject(currentProject.id, 'creative', 'video', undefined, '品牌广告', `intake:${id}`)} onOpenBrandTask={id => onOpenProject(currentProject.id, 'creative', 'video', undefined, '品牌广告', `task:${id}`)} onOpenEditTask={id => onOpenProject(currentProject.id, 'creative', 'video', undefined, '素材剪辑', id)}/>
+    : system.key === 'creative' && item.id === 'production' ? <Suspense fallback={<div className="pc-state" role="status">正在加载制作中心…</div>}>
+      <ProductionCenterPage
+        activeView={activeView}
+        objectId={objectId}
+        onOpenRun={ref => onOpenProject(currentProject.id, 'creative', 'production', `${ref.source}~${ref.id}`, activeView)}
+        onCloseRun={() => onOpenProject(currentProject.id, 'creative', 'production', undefined, activeView)}
+        onOpenSource={run => {
+          if (!run.source_task) return
+          if (run.source_task.object_type === 'edit_task') onOpenProject(currentProject.id, 'creative', 'video', undefined, '素材剪辑', run.source_task.object_id)
+          else onOpenProject(currentProject.id, 'creative', 'tasks', run.source_task.object_id)
+        }}
+      />
+    </Suspense>
     : system.key === 'creative' && item.id === 'reviews' ? <MaterialCheckWorkspace state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchInsightPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'performance' ? <PostLaunchAnalysisPage state={dataState} activeView={activeView} onOpenProject={onOpenProject}/>
-    : system.key === 'insight' && item.id === 'connections' ? <DataConnectionsPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'assets' ? <AssetLibraryPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'prelaunch' ? <PreLaunchPage state={dataState} view={preLaunchViews[activeView] ?? 'conclusions'}/>
+    : system.key === 'insight' && item.id === 'analysis' ? <AnalysisPage state={dataState} view={analysisViews[activeView] ?? 'overview'} onOpenExperiments={() => onOpenProject(currentProject.id, 'insight', 'experiments')}/>
+    : system.key === 'insight' && item.id === 'assets' ? <AssetsPage
+      state={dataState}
+      view={assetsViews[activeView] ?? 'overview'}
+      onOpenView={setActiveView}
+      onOpenLibrary={() => onOpenProject(currentProject.id, 'creative', 'production', undefined, '源素材')}
+      onOpenAnalysis={() => onOpenProject(currentProject.id, 'insight', 'analysis')}/>
+    : system.key === 'insight' && item.id === 'experience' ? <ExperiencePage state={dataState} view={experienceViews[activeView] ?? 'lookup'}/>
+    : system.key === 'insight' && item.id === 'review' ? <ReviewPage state={dataState} view={reviewViews[activeView] ?? 'current'} objectId={objectId}/>
     : system.key === 'insight' && item.id === 'miyun-materials' ? <MiyunMaterialsPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'content' ? <ContentAnalysisPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'knowledge' ? <ExperienceLibraryPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'quality' ? <DataQualityPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'operations' ? <CapabilityOperationsPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'reports' ? <ReportCenterPage state={dataState} activeView={activeView} objectId={objectId} onOpenProject={onOpenProject}/>
     : system.key === 'insight' && item.id === 'experiments' ? <ExperimentCenterPage state={dataState} activeView={activeView}/>
-    : system.key === 'insight' && item.id === 'settings' ? <InsightSettingsPage state={dataState} activeView={activeView}/>
+    : system.key === 'insight' && item.id === 'settings' ? <SettingsPage state={dataState} view={settingsViews[activeView] ?? 'thresholds'}/>
     : system.key === 'delivery' && item.id === 'tour' ? <DeliveryTourPage projectId={currentProject.id} routeRunId={tourRunId}/>
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'configuration' ? <DeliveryConfigurationPage state={dataState} activeView={activeView} tourRunId={tourRunId} tourCase={tourCase}/>
@@ -1579,7 +1654,7 @@ export function ModulePage({
   }
 
   const projectProgress = calculateProjectProgress(currentProject)
-  const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && item.id === 'reviews') && !(system.key === 'strategy' && item.id === 'workspaces') && !(system.key === 'delivery' && item.id === 'approvals'))
+  const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && (item.id === 'reviews' || item.id === 'production')) && !(system.key === 'strategy' && item.id === 'workspaces') && !(system.key === 'delivery' && item.id === 'approvals'))
   const isStrategyWorkspace = system.key === 'strategy' && item.id === 'workspaces'
   const hasImplementedHeaderViews = !(system.key === 'delivery' && (item.id === 'tour' || item.id === 'plans' || item.id === 'approvals' || item.id === 'monitoring'))
   const changeView = (view: string) => {

@@ -7,10 +7,12 @@ import {
   type ApiCapabilityOperations,
   type ApiConfidenceLevel,
   type ApiFeatureFieldUsage,
+  type ApiFeatureSource,
   type ApiFeatureSystemHealth,
   type ApiMetricDictionaryEntry,
   type ApiSkillEvaluation,
 } from '../data/api'
+import { admissibleForAttribution, featureSourceLabel } from '../data/featureSource'
 import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
 
@@ -227,7 +229,10 @@ function FeatureSystemView({ report, rows, selected, onSelect }: {
       {used.map(row => <button role="listitem" key={row.id}
         className={`prelaunch-row insight-issue-row${row.id === selected ? ' active' : ''}${row.field.merge_candidates?.length ? ' warning' : ''}`}
         onClick={() => onSelect(row.id)}>
-        <span><b>{row.field.label}</b><small>{row.system.label} · {row.field.group}</small></span>
+        <span>
+          <b>{row.field.label}</b>
+          <small>{row.system.label} · {row.field.group} · {describeSources(row.field.source_counts)}</small>
+        </span>
         <span>{row.field.governed ? '已发布' : '未发布'}</span>
         <span>{row.field.asset_count} / {row.system.asset_count} 条素材</span>
         <span>
@@ -256,6 +261,15 @@ function FieldDetail({ system, field }: { system: ApiFeatureSystemHealth; field:
 
     <div className="prelaunch-fact"><Ruler size={17}/><span><small>覆盖</small><b>
       {system.asset_count} 条{system.label}里有 {field.asset_count} 条填了这个字段，写出了 {field.distinct_values} 种不同的取值。
+    </b></span></div>
+
+    {/* 「谁写的」和「填了多少」必须并排看。归因只认量出来的和人标的，一个几乎全是
+        模型猜的字段，填得再满也不能拿去分组比较——只看覆盖率看不出这一点。 */}
+    <div className="prelaunch-fact"><Sparkles size={17}/><span><small>这些取值是谁写的</small><b>
+      {describeSources(field.source_counts)}。
+      {admissibleShare(field.source_counts) < 0.5
+        ? '一半以上是模型猜的：这个字段现在不适合拿去做驱动因素分组，先让人复核。'
+        : '归因只认量出来的和人标的，模型猜的那部分不参与分组比较。'}
     </b></span></div>
 
     {head ? <div className="prelaunch-fact"><Sparkles size={17}/><span><small>最常见的写法</small><b>
@@ -595,6 +609,24 @@ function DashboardAside({ report }: { report: ApiCapabilityOperations }) {
 
 // 金额（含千次曝光成本）后端存的是分；比率类派生指标按百分比读；
 // 投产比是倍数——写成百分比会被读成「回本 190%」这种模棱两可的说法。
+/** 「量出来的 3 · 人标的 1 · 模型猜的 8」。缺省时说清是没人填过，不是数出来都是 0。 */
+function describeSources(counts?: Partial<Record<ApiFeatureSource, number>>): string {
+  const entries = (Object.keys(featureSourceLabel) as ApiFeatureSource[])
+    .filter(source => (counts?.[source] ?? 0) > 0)
+    .map(source => `${featureSourceLabel[source]} ${counts?.[source]}`)
+  return entries.length ? entries.join(' · ') : '还没人填过'
+}
+
+/** 能进归因的那部分占比。没人填过时算 1：没有数据不等于「都是模型猜的」。 */
+function admissibleShare(counts?: Partial<Record<ApiFeatureSource, number>>): number {
+  const total = (Object.values(counts ?? {}) as number[]).reduce((sum, value) => sum + value, 0)
+  if (!total) return 1
+  const admissible = (Object.keys(counts ?? {}) as ApiFeatureSource[])
+    .filter(admissibleForAttribution)
+    .reduce((sum, source) => sum + (counts?.[source] ?? 0), 0)
+  return admissible / total
+}
+
 function formatMetric(metric: ApiMetricDictionaryEntry): string {
   if (metric.unit === '分') return formatMoney(metric.total)
   if (metric.key === 'roi') return `${metric.total.toFixed(2)} 倍`

@@ -570,8 +570,11 @@ export function MiyunMaterialsPage({
       setMediaCapabilities(capabilities);
       if (productIdentityProjectRef.current !== currentProject.id) {
         productIdentityProjectRef.current = currentProject.id;
-        const singleProduct = source.products.length === 1 ? source.products[0] : null;
-        setProductIdentityMode(source.products.length ? "registered" : "manual");
+        // 契约把 products 声明成必填数组，但真跑起来遇到过后端把空列表序列化成
+        // null。这里兜一层：一个字段的空值不该让整页停在「读取失败」上。
+        const products = source.products ?? [];
+        const singleProduct = products.length === 1 ? products[0] : null;
+        setProductIdentityMode(products.length ? "registered" : "manual");
         setProductId(singleProduct?.id ?? "");
         setManualProductName("");
       }

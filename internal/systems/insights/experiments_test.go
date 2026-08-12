@@ -49,7 +49,7 @@ func TestExperimentBelowThresholdShowsNoComparisonNumbers(t *testing.T) {
 		variantOf("var_test", "露脸", "露脸", false, "asset_a"),
 	)
 
-	readout := buildExperimentReadout(experiment, facts)
+	readout := buildExperimentReadout(experiment, facts, ResolvedThresholds{})
 	comparison := comparisonFor(t, readout, "var_test")
 
 	if !comparison.Blocked {
@@ -86,7 +86,7 @@ func TestExperimentPreRegisteredWordingReachesCausal(t *testing.T) {
 		variantOf("var_test", "露脸", "露脸", false, "asset_a"),
 	)
 
-	readout := buildExperimentReadout(experiment, facts)
+	readout := buildExperimentReadout(experiment, facts, ResolvedThresholds{})
 	comparison := comparisonFor(t, readout, "var_test")
 
 	if comparison.Blocked {
@@ -125,7 +125,7 @@ func TestExperimentRefutedWhenVariantIsWorse(t *testing.T) {
 		variantOf("var_test", "露脸", "露脸", false, "asset_a"),
 	)
 
-	comparison := comparisonFor(t, buildExperimentReadout(experiment, facts), "var_test")
+	comparison := comparisonFor(t, buildExperimentReadout(experiment, facts, ResolvedThresholds{}), "var_test")
 	if comparison.Verdict != VerdictRefuted {
 		t.Fatalf("变体更差时应判为被推翻，实际 %q", comparison.Verdict)
 	}
@@ -142,7 +142,7 @@ func TestExperimentInconclusiveWhenIntervalsOverlap(t *testing.T) {
 		variantOf("var_test", "露脸", "露脸", false, "asset_a"),
 	)
 
-	comparison := comparisonFor(t, buildExperimentReadout(experiment, facts), "var_test")
+	comparison := comparisonFor(t, buildExperimentReadout(experiment, facts, ResolvedThresholds{}), "var_test")
 	if comparison.Verdict != VerdictInconclusive {
 		t.Fatalf("区间重叠时应判为分不出来，实际 %q", comparison.Verdict)
 	}
@@ -161,7 +161,7 @@ func TestExperimentBaselineShortfallBlocksEveryComparison(t *testing.T) {
 		variantOf("var_c", "字幕开场", "字幕", false, "asset_c"),
 	)
 
-	readout := buildExperimentReadout(experiment, facts)
+	readout := buildExperimentReadout(experiment, facts, ResolvedThresholds{})
 	for _, id := range []string{"var_a", "var_c"} {
 		comparison := comparisonFor(t, readout, id)
 		if !comparison.Blocked || comparison.Result != nil {
@@ -188,7 +188,7 @@ func TestConcludedExperimentKeepsTheVerdictItWasConcludedWith(t *testing.T) {
 	experiment.Verdict = VerdictInconclusive
 	experiment.Interpretation = "当时样本刚够，没看出差别"
 
-	readout := buildExperimentReadout(experiment, facts)
+	readout := buildExperimentReadout(experiment, facts, ResolvedThresholds{})
 	if readout.Verdict != VerdictInconclusive {
 		t.Fatalf("已下结论的实验应保留当时的判定，实际 %q", readout.Verdict)
 	}
@@ -201,7 +201,7 @@ func TestExperimentWithoutBaselineProducesNoComparisons(t *testing.T) {
 		variantOf("var_a", "露脸", "露脸", false, "asset_a"),
 		variantOf("var_b", "不露脸", "不露脸", false, "asset_b"),
 	)
-	readout := buildExperimentReadout(experiment, nil)
+	readout := buildExperimentReadout(experiment, nil, ResolvedThresholds{})
 	if len(readout.Comparisons) != 0 {
 		t.Fatalf("没有基线组时不该有对比行，实际 %d 行", len(readout.Comparisons))
 	}

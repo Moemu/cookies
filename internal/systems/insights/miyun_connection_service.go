@@ -137,7 +137,13 @@ func (s Service) VerifyMiyunConnection(ctx context.Context, actor contract.Actor
 	if err := s.miyunReady(actor, projectID, ScopeWrite); err != nil {
 		return MiyunConnection{}, err
 	}
-	if s.MiyunSecrets == nil || s.MiyunVerifier == nil || request.ExpectedVersion < 1 {
+	// 服务端没启用米云和「传了个不合法的版本号」是两回事，但原来都回同一个裸
+	// ErrInvalidState。前者人怎么重试都没用，得说清楚是环境没配，跟保存会话那条
+	// 保持同一句话。
+	if s.MiyunSecrets == nil || s.MiyunVerifier == nil {
+		return MiyunConnection{}, fmt.Errorf("%w: 米云会话加密尚未在服务端启用，请联系管理员配置 COOKIES_MIYUN_ENABLED 和会话加密密钥", ErrInvalidState)
+	}
+	if request.ExpectedVersion < 1 {
 		return MiyunConnection{}, ErrInvalidState
 	}
 	current, err := s.Miyun.GetProjectMiyunConnection(ctx, actor.OrganizationID, projectID)

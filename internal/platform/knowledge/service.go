@@ -650,6 +650,28 @@ func (s Service) GetDocument(ctx context.Context, actor contract.ActorContext, p
 // belongs to the caller's project. The returned stream is owned by the caller.
 // Object identity, metadata, byte length, and SHA-256 are checked before it is
 // handed off so a stale or substituted blob cannot be consumed as the original.
+func (s Service) ExtractDocumentMedia(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) ([]ExtractedDocumentMedia, error) {
+	document, err := s.GetDocument(ctx, actor, projectID, id)
+	if err != nil {
+		return nil, err
+	}
+	if document.MIMEType != "application/pdf" || s.Blobs == nil {
+		return nil, ErrInvalidDocument
+	}
+	extractor, ok := s.DocumentParser.(DocumentMediaExtractor)
+	if !ok {
+		return nil, fmt.Errorf("document media extractor is unavailable")
+	}
+	stream, info, err := s.Blobs.Open(ctx, document.Blob)
+	if err != nil {
+		return nil, err
+	}
+	defer stream.Close()
+	return extractor.ExtractMedia(ctx, DocumentParseRequest{
+		Filename: document.Filename, MIMEType: document.MIMEType, Size: info.SizeBytes, Source: stream,
+	})
+}
+
 func (s Service) OpenDocumentOriginal(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (io.ReadCloser, Document, error) {
 	if s.Blobs == nil {
 		return nil, Document{}, fmt.Errorf("knowledge blob store is unavailable")
@@ -1701,6 +1723,7 @@ func defaultDocumentMIME(extension string) string {
 
 func documentParseStrategy(extension string) string {
 	switch extension {
+	// xlsx 跟 md/txt 一样能本地解出文本（extractXLSX），不必绕 Tika。
 	case ".md", ".txt", ".xlsx":
 		return "text_native"
 	default:

@@ -246,6 +246,16 @@ const (
 	ConfidenceConfounded  ConfidenceLevel = "confounded"  // 存在混杂
 )
 
+// allConfidenceLevels 是这个枚举的完整清单。verdict.go 把四个档位收敛成三个，
+// 收敛表写在测试里；有了这份清单，新增档位却忘了给它三档归属会直接测试失败，
+// 而不是静默落进默认分支。
+var allConfidenceLevels = []ConfidenceLevel{
+	ConfidenceSufficient,
+	ConfidenceDirectional,
+	ConfidenceLowSample,
+	ConfidenceConfounded,
+}
+
 func (c ConfidenceLevel) Label() string {
 	switch c {
 	case ConfidenceSufficient:
@@ -260,8 +270,11 @@ func (c ConfidenceLevel) Label() string {
 	return string(c)
 }
 
-// 样本门槛。03 §17.3 把「最低样本由全局规则还是行业模板配置」列为待确认，
-// 所以这里先给一个写死的保守值，等那条定了再挪到 系统设置 · 样本门槛。
+// 样本门槛的**出厂设定**。判定不再直接读这两个常量——它们经由
+// defaultThresholds() 进入 ResolvedThresholds，人在设置里调过的格子会盖掉它们。
+//
+// 常量仍然是默认值的唯一来源：落库的只有「有人调过的那些」，
+// 所以改这里的数，那些从没调过阈值的部署会跟着走，而调过的保持人当初的决定。
 // 改动这两个数会改变页面上「充分/方向性/样本不足」的判定，不要顺手调。
 const (
 	sufficientSampleImpressions  = 10000
@@ -693,8 +706,9 @@ type MetricOverview struct {
 	// CTRInterval 是主图表旁边要显示的置信范围。
 	CTRInterval *RateInterval `json:"ctr_interval,omitempty"`
 
-	Confidence     ConfidenceLevel `json:"confidence"`
-	ConfidenceNote string          `json:"confidence_note"`
+	// 内嵌而不是摆两个字段：以前这里叫 confidence_note，别处叫 note，
+	// 同一个意思两个键名，前端就得写两套渲染。
+	Judgement
 
 	Series []PerformancePoint `json:"series"`
 	Assets []AssetPerformance `json:"assets"`
@@ -724,8 +738,8 @@ type AssetPerformance struct {
 	Rates      MetricRates  `json:"rates"`
 	// Attributable 为 false 表示这一行是未匹配对象的汇总，doc10 §5 明确
 	// 「未匹配记录不参与需要创意级归因的强结论」。
-	Attributable bool            `json:"attributable"`
-	Confidence   ConfidenceLevel `json:"confidence"`
+	Attributable bool `json:"attributable"`
+	Judgement
 }
 
 type PlatformTotal struct {
@@ -1131,13 +1145,29 @@ func (s Service) GetMetricOverview(ctx context.Context, actor contract.ActorCont
 	if err != nil {
 		return MetricOverview{}, err
 	}
-	return buildMetricOverview(window, facts, sources, s.now()), nil
+	return buildMetricOverview(window, facts, sources, s.now(),
+		s.currentThresholds(ctx, actor.OrganizationID)), nil
 }
 
 const maxWindowDays = 400
 
-func buildMetricOverview(window MetricWindow, facts []MetricFactWithMapping, sources []DataSource, now time.Time) MetricOverview {
-	overview := MetricOverview{Window: window, Comparable: true}
+// thresholds 从服务层传下来，一次请求只读一次。在每个判定点各读一次的话，
+// 一次请求里如果有人正好保存了新阈值，同一份分析结果里会有两套标准判出来的
+// 结论，而页面上只会盖一个版本号。零值时逐格退回出厂设定（orDefaults）。
+func buildMetricOverview(window MetricWindow, facts []MetricFactWithMapping, sources []DataSource,
+	now time.Time, thresholds ResolvedThresholds) MetricOverview {
+	thresholds = thresholds.orDefaults()
+	// insights-v1.yaml 把这四个字段列为 required 的数组。nil slice 会序列化成
+	// null，而前端按契约当数组用（overview.sources.length）——空窗口下就会崩在
+	// 渲染里。「这个窗口里没有数据源」的正确表达是 []，不是 null。
+	overview := MetricOverview{
+		Window:     window,
+		Comparable: true,
+		Series:     []PerformancePoint{},
+		Assets:     []AssetPerformance{},
+		Sources:    []SourceHealth{},
+		Platforms:  []PlatformTotal{},
+	}
 
 	byDate := map[string]MetricCounts{}
 	byAsset := map[string]*AssetPerformance{}
@@ -1217,7 +1247,8 @@ func buildMetricOverview(window MetricWindow, facts []MetricFactWithMapping, sou
 	for key, row := range byAsset {
 		row.Objects = len(assetObjects[key])
 		row.Rates = RatesOf(row.Counts)
-		row.Confidence = confidenceOf(row.Counts, row.Attributable, row.Objects)
+		row.Judgement = judgeAt(thresholds, confidenceOf(row.Counts, row.Attributable, row.Objects, thresholds),
+			assetRowNote(*row, thresholds))
 		overview.Assets = append(overview.Assets, *row)
 	}
 	// 花得多的排前面；未匹配那一行永远垫底，它不是一个可比较的素材。
@@ -1268,41 +1299,66 @@ func buildMetricOverview(window MetricWindow, facts []MetricFactWithMapping, sou
 			fmt.Sprintf("有 %d 个平台对象还没匹配到素材，其花费已计入总盘但不参与素材级结论", overview.UnmatchedObjects))
 	}
 
-	overview.Confidence, overview.ConfidenceNote = overallConfidence(overview)
+	level, note := overallConfidence(overview, thresholds)
+	overview.Judgement = judgeAt(thresholds, level, note)
 	return overview
 }
 
-func confidenceOf(counts MetricCounts, attributable bool, objects int) ConfidenceLevel {
+// 样本门槛一律从传进来的阈值取，不再读常量。三处判定（单行、总览、行内理由）
+// 必须拿同一份阈值：其中一处还读着常量的话，人在设置页把门槛调低之后，
+// 矩阵里会出现「档位说充分、理由说样本还不够」这种自相矛盾的行。
+func confidenceOf(counts MetricCounts, attributable bool, objects int, thresholds ResolvedThresholds) ConfidenceLevel {
 	if !attributable {
 		// 归不到素材就谈不上素材结论，无论样本多大（doc10 §5）。
 		return ConfidenceConfounded
 	}
+	thresholds = thresholds.orDefaults()
 	switch {
-	case counts.Impressions >= sufficientSampleImpressions && objects <= 1:
+	case counts.Impressions >= int64(thresholds.SufficientImpressions) && objects <= 1:
 		return ConfidenceSufficient
-	case counts.Impressions >= sufficientSampleImpressions:
+	case counts.Impressions >= int64(thresholds.SufficientImpressions):
 		// 同一素材投在多个平台对象上，预算与受众差异会混进来（03 §9「存在混杂」）。
 		return ConfidenceConfounded
-	case counts.Impressions >= directionalSampleImpressions:
+	case counts.Impressions >= int64(thresholds.DirectionalImpressions):
 		return ConfidenceDirectional
 	default:
 		return ConfidenceLowSample
 	}
 }
 
-func overallConfidence(overview MetricOverview) (ConfidenceLevel, string) {
+func overallConfidence(overview MetricOverview, thresholds ResolvedThresholds) (ConfidenceLevel, string) {
+	thresholds = thresholds.orDefaults()
 	switch {
-	case overview.Totals.Impressions < directionalSampleImpressions:
+	case overview.Totals.Impressions < int64(thresholds.DirectionalImpressions):
 		return ConfidenceLowSample, fmt.Sprintf("窗口内仅 %s 次展示，不足以支撑结论，只能当作观察。", countText(overview.Totals.Impressions))
 	case len(overview.Warnings) > 0:
 		return ConfidenceConfounded, "数据存在未匹配、延迟或质量问题，结论只能是方向性的，且不应据此自动优化。"
 	case !overview.Comparable:
 		return ConfidenceConfounded, "窗口内口径不一致：" + overview.ComparableReason + "。"
-	case overview.Totals.Impressions < sufficientSampleImpressions:
+	case overview.Totals.Impressions < int64(thresholds.SufficientImpressions):
 		return ConfidenceDirectional, "样本达到方向性门槛，可作参考，但不足以下确定结论。"
 	default:
 		return ConfidenceSufficient, "样本充分且口径一致，可作为结论依据。"
 	}
+}
+
+// assetRowNote 给素材矩阵的每一行配一句理由。以前这一行只有档位没有理由，
+// 前端只能显示一个「置信存在混杂」，人看不出混杂在哪。
+func assetRowNote(row AssetPerformance, thresholds ResolvedThresholds) string {
+	if !row.Attributable {
+		return "这一行是未匹配对象的汇总，归不到具体素材上。"
+	}
+	if row.Objects > 1 {
+		return fmt.Sprintf("这个素材投在 %d 个平台对象上，预算与受众差异会混进来。", row.Objects)
+	}
+	thresholds = thresholds.orDefaults()
+	if row.Counts.Impressions < int64(thresholds.DirectionalImpressions) {
+		return fmt.Sprintf("只有 %s 次展示，这一行还比不出东西。", countText(row.Counts.Impressions))
+	}
+	if row.Counts.Impressions < int64(thresholds.SufficientImpressions) {
+		return "样本到了方向性门槛，可作参考，但还不够下确定结论。"
+	}
+	return "样本充分、归因到单一素材，这一行可以当结论用。"
 }
 
 func sourceLabel(source DataSource) string {
