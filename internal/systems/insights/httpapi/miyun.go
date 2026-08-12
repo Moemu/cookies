@@ -351,6 +351,7 @@ func (s *Server) miyunProductProfileAction(writer http.ResponseWriter, request *
 			CategoryID           string   `json:"category_id"`
 			CategoryName         string   `json:"category_name"`
 			Keywords             []string `json:"keywords"`
+			MaterialTypes        []string `json:"material_types"`
 			MaterialContentTypes []string `json:"material_content_types"`
 			WindowStart          string   `json:"window_start"`
 			WindowEnd            string   `json:"window_end"`
@@ -371,7 +372,8 @@ func (s *Server) miyunProductProfileAction(writer http.ResponseWriter, request *
 			Query: insights.MiyunProfileQuery{
 				ProductName: body.Query.ProductName, CategoryID: body.Query.CategoryID,
 				CategoryName: body.Query.CategoryName, Keywords: body.Query.Keywords,
-				MaterialContentTypes: body.Query.MaterialContentTypes, WindowStart: start, WindowEnd: end,
+				MaterialTypes: body.Query.MaterialTypes, MaterialContentTypes: body.Query.MaterialContentTypes,
+				WindowStart: start, WindowEnd: end,
 			},
 		})
 	if err != nil {

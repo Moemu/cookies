@@ -88,7 +88,7 @@ func TestMiyunCrawlCreateIsConfirmedAndIdempotent(t *testing.T) {
 		t.Fatalf("idempotent create duplicated state: first=%s second=%s jobs=%d runtime=%d", first.ID, second.ID, len(repository.jobs), len(runtime.byKey))
 	}
 	var snapshot MiyunQuerySnapshot
-	if json.Unmarshal(first.QuerySnapshot, &snapshot) != nil || snapshot.ProfileID != profile.ID || snapshot.Query.Page != 1 || snapshot.SchemaVersion != MiyunQuerySchemaV1 || snapshot.MaxPages != DefaultMiyunCrawlMaxPages || len(snapshot.Query.ProductID) != 0 || snapshot.Query.Order != "_score_desc" {
+	if json.Unmarshal(first.QuerySnapshot, &snapshot) != nil || snapshot.ProfileID != profile.ID || snapshot.Query.Page != 1 || snapshot.SchemaVersion != MiyunQuerySchemaV1 || snapshot.FilterCatalogVersion != MiyunMaterialFilterCatalogVersion || snapshot.MaxPages != DefaultMiyunCrawlMaxPages || len(snapshot.Query.ProductID) != 0 || snapshot.Query.Order != "_score_desc" || snapshot.Query.MType == nil || *snapshot.Query.MType != "201,202" || snapshot.Query.MaterialTag == nil || *snapshot.Query.MaterialTag != "5" {
 		t.Fatalf("query snapshot was not frozen: %#v", snapshot)
 	}
 	if _, err := service.CreateMiyunCrawlJob(context.Background(), miyunTestActor(), "project_1", "crawl-key-too-many-pages", CreateMiyunCrawlJobRequest{ProductProfileID: profile.ID, Operation: "product", MaxPages: DefaultMiyunCrawlMaxPages + 1}); !errors.Is(err, ErrInvalidRequest) {
@@ -465,7 +465,7 @@ func confirmedMiyunCrawlTestProfile(t *testing.T, service *Service) MiyunProduct
 		t.Fatal(err)
 	}
 	profile, err := service.ConfirmMiyunProductProfile(context.Background(), miyunTestActor(), "project_1", draft.ID, ConfirmMiyunProductProfileRequest{ExpectedVersion: draft.Version, Query: MiyunProfileQuery{
-		ProductName: "Test product", CategoryID: "category-1", CategoryName: "Category", Keywords: []string{"test"}, MaterialContentTypes: []string{"product_demo"}, WindowStart: service.now().AddDate(0, 0, -7), WindowEnd: service.now(),
+		ProductName: "Test product", CategoryID: "category-1", CategoryName: "Category", Keywords: []string{"test"}, MaterialTypes: []string{"视频", "vertical_video"}, MaterialContentTypes: []string{"product_demo"}, WindowStart: service.now().AddDate(0, 0, -7), WindowEnd: service.now(),
 	}})
 	if err != nil {
 		t.Fatal(err)

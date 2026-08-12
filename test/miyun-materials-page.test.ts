@@ -5,6 +5,7 @@ import {
   latestMiyunCard,
   miyunCrawlErrorCopy,
   miyunJobMaxPages,
+  miyunProfileSelectLabel,
   miyunStateCopy,
   profileQuery,
   sortMiyunMaterials,
@@ -32,6 +33,7 @@ test("密云 API 使用位置 expected_version 且候选预览为本域代理", 
     await api.confirmMiyunProductProfile("p", "profile", 4, {
       product_name: "x",
       keywords: ["x"],
+      material_types: ["201"],
       material_content_types: ["video"],
       window_start: "2026-01-01",
       window_end: "2026-01-02",
@@ -169,6 +171,22 @@ test("确认画像后提供采集引导，并用关键词和素材类型区分�
   assert.match(page, /miyun-job-profile-summary/);
 });
 
+test("创建采集任务限制产品画像选项长度并让选择框保持在加宽卡片内", () => {
+  const profile = {
+    product_name: "娇兰第三代黄金复原蜜",
+    keywords: Array.from({ length: 8 }, (_, index) => `非常漫长且需要被截断的检索关键词${index + 1}`.repeat(2)),
+    material_types: ["201"],
+    material_content_types: ["2"],
+  } as any;
+  const label = miyunProfileSelectLabel(profile);
+  const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.ok(label.length <= 64);
+  assert.match(label, /…$/);
+  assert.match(styles, /grid-template-columns: minmax\(380px, \.9fr\) minmax\(520px, 1\.35fr\)/);
+  assert.match(styles, /\.miyun-job-create-card select[\s\S]*?max-width: 100%/);
+  assert.match(styles, /\.miyun-job-create-card select[\s\S]*?text-overflow: ellipsis/);
+});
+
 test("创建采集任务限制为 1–50 页，取消动作覆盖冷却任务", () => {
   const page = readFileSync(
     new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
@@ -224,6 +242,20 @@ test("米云确认查询把后端 RFC3339 窗口转换为日期条件", () => {
   } as any);
   assert.equal(query.window_start, "2026-08-01");
   assert.equal(query.window_end, "2026-08-10");
+});
+
+test("米云素材载体与内容类型使用固定目录多选框而非自由文本", () => {
+  const page = readFileSync(
+    new URL("../src/components/MiyunMaterialsPage.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /miyun-filter-option-grid/);
+  assert.match(page, /type="checkbox"/);
+  assert.match(page, /mtype \{option\.value\}/);
+  assert.match(page, /materialTag \{option\.value\}/);
+  assert.match(page, /toggleFilterValue/);
+  assert.doesNotMatch(page, /mtype，逗号分隔/);
+  assert.doesNotMatch(page, /materialTag，逗号分隔/);
 });
 
 test("米云采集失败仅展示安全分类和代码", () => {

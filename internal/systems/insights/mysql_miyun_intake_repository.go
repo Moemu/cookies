@@ -70,16 +70,16 @@ func (r MySQLRepository) ConfirmMiyunProductProfile(ctx context.Context, value M
 	if err := value.Validate(); err != nil {
 		return MiyunProductProfile{}, err
 	}
-	keywords, contentTypes, _, _, fieldSources, _, err := encodeMiyunProfileJSON(value)
+	keywords, materialTypes, contentTypes, _, _, fieldSources, _, err := encodeMiyunProfileJSON(value)
 	if err != nil {
 		return MiyunProductProfile{}, err
 	}
 	result, err := r.DB.ExecContext(ctx, `UPDATE insight_miyun_product_profiles SET
-		product_name = ?, category_id = ?, category_name = ?, keywords = ?, material_content_types = ?,
+		product_name = ?, category_id = ?, category_name = ?, keywords = ?, material_types = ?, material_content_types = ?,
 		window_start = ?, window_end = ?, field_sources = ?, status = 'confirmed', confirmed_by = ?,
 		confirmed_at = ?, version = version + 1, updated_at = ?
 		WHERE organization_id = ? AND project_id = ? AND id = ? AND status = 'draft' AND version = ?`,
-		value.ProductName, value.CategoryID, value.CategoryName, keywords, contentTypes,
+		value.ProductName, value.CategoryID, value.CategoryName, keywords, materialTypes, contentTypes,
 		value.WindowStart.Format("2006-01-02"), value.WindowEnd.Format("2006-01-02"), fieldSources,
 		value.ConfirmedBy, value.ConfirmedAt, value.UpdatedAt,
 		value.OrganizationID, value.ProjectID, value.ID, expectedVersion)
@@ -188,19 +188,19 @@ type miyunSQLExecer interface {
 }
 
 func insertMiyunProductProfile(ctx context.Context, execer miyunSQLExecer, value MiyunProductProfile) error {
-	keywords, contentTypes, assetRefs, documentIDs, fieldSources, warnings, err := encodeMiyunProfileJSON(value)
+	keywords, materialTypes, contentTypes, assetRefs, documentIDs, fieldSources, warnings, err := encodeMiyunProfileJSON(value)
 	if err != nil {
 		return err
 	}
 	_, err = execer.ExecContext(ctx, `INSERT INTO insight_miyun_product_profiles (
 		id, organization_id, project_id, connection_id, status, product_id, product_name, brand_name, category_id, category_name,
-		keywords, material_content_types, window_start, window_end, project_context_version,
+		keywords, material_types, material_content_types, window_start, window_end, project_context_version,
 		product_asset_refs, knowledge_document_ids, rule_version, model_version, analysis_method, input_hash,
 		input_snapshot, field_sources, analysis_warnings, confirmed_by, confirmed_at,
 		version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.ConnectionID, value.Status, value.ProductID,
-		value.ProductName, value.BrandName, value.CategoryID, value.CategoryName, keywords, contentTypes,
+		value.ProductName, value.BrandName, value.CategoryID, value.CategoryName, keywords, materialTypes, contentTypes,
 		value.WindowStart.Format("2006-01-02"), value.WindowEnd.Format("2006-01-02"), value.ProjectContextVersion,
 		assetRefs, documentIDs, value.RuleVersion, nullableString(value.ModelVersion), value.AnalysisMethod,
 		value.InputHash, value.InputSnapshot, fieldSources, warnings, nullableString(value.ConfirmedBy), value.ConfirmedAt,
@@ -208,17 +208,17 @@ func insertMiyunProductProfile(ctx context.Context, execer miyunSQLExecer, value
 	return err
 }
 
-func encodeMiyunProfileJSON(value MiyunProductProfile) ([]byte, []byte, []byte, []byte, []byte, []byte, error) {
-	values := []any{value.Keywords, value.MaterialContentTypes, value.ProductAssetRefs, value.KnowledgeDocumentIDs, value.FieldSources, value.AnalysisWarnings}
+func encodeMiyunProfileJSON(value MiyunProductProfile) ([]byte, []byte, []byte, []byte, []byte, []byte, []byte, error) {
+	values := []any{value.Keywords, value.MaterialTypes, value.MaterialContentTypes, value.ProductAssetRefs, value.KnowledgeDocumentIDs, value.FieldSources, value.AnalysisWarnings}
 	encoded := make([][]byte, len(values))
 	for index, item := range values {
 		data, err := json.Marshal(item)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, nil, err
 		}
 		encoded[index] = data
 	}
-	return encoded[0], encoded[1], encoded[2], encoded[3], encoded[4], encoded[5], nil
+	return encoded[0], encoded[1], encoded[2], encoded[3], encoded[4], encoded[5], encoded[6], nil
 }
 
 func insertMiyunInsightAsset(ctx context.Context, execer miyunSQLExecer, value Asset) error {

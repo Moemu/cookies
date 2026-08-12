@@ -59,6 +59,9 @@ func main() {
 	}
 	ffmpegPath := localExecutablePath(cfg.Environment, cfg.Media.FFmpegPath, "ffmpeg")
 	ffprobePath := localExecutablePath(cfg.Environment, cfg.Media.FFprobePath, "ffprobe")
+	if cfg.MediaUnderstanding.ASREnabled && ffmpegPath == "" {
+		log.Fatal("invalid configuration: COOKIES_MEDIA_UNDERSTANDING_ASR_ENABLED requires an available ffmpeg executable")
+	}
 
 	db, err := database.Open(context.Background(), cfg.MySQL)
 	if err != nil {
@@ -342,9 +345,11 @@ func main() {
 	if visionAdapter != nil {
 		visionProvider = &provider.Service{VisionAdapter: visionAdapter, VisionSources: assetVisionSourceResolver{uploads: uploadService}}
 	}
+	log.Printf("Media understanding configured: real_provider=%t vision_model_alias=%s asr=%t", cfg.MediaUnderstanding.RealProviderEnabled, cfg.MediaUnderstanding.VisionModelAlias, cfg.MediaUnderstanding.ASREnabled)
 	mediaUnderstandingService := &mediaunderstanding.Service{
 		Store: mediaunderstanding.MySQLStore{DB: db}, Projects: projectService, Assets: uploadService,
-		DerivedImages: uploadService, Vision: visionProvider, ModelAlias: "cookies.vision.standard",
+		DerivedImages: uploadService, Vision: visionProvider, RealVision: cfg.MediaUnderstanding.RealProviderEnabled,
+		ModelAlias: cfg.MediaUnderstanding.VisionModelAlias,
 		Scheduler: mediaunderstanding.JobRuntimeScheduler{
 			Store: runtimeStore, NewID: func() (string, error) { return ids.New("mediaunderstandingjob") },
 		},
@@ -354,6 +359,18 @@ func main() {
 			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
 			Sources: creativeMediaSource{repository: assetRepository, blobs: blobs},
 		}
+	}
+	if cfg.MediaUnderstanding.ASREnabled && ffmpegPath != "" {
+		mediaUnderstandingService.Transcriber = creativeprovider.AssetTranscriber{
+			Assets: uploadService, FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			ASR: creativeprovider.VolcengineASR{Config: creativeprovider.ASRConfig{
+				Endpoint: cfg.Provider.VolcengineASR.Endpoint, AuthMode: cfg.Provider.VolcengineASR.AuthMode,
+				AppID: cfg.Provider.VolcengineASR.AppID, AccessToken: cfg.Provider.VolcengineASR.AccessToken,
+				APIKey: cfg.Provider.VolcengineASR.APIKey, ResourceID: cfg.Provider.VolcengineASR.ResourceID,
+				Model: cfg.Provider.VolcengineASR.Model,
+			}},
+		}
+		log.Printf("Media understanding ASR configured: adapter=volcengine_asr model=%s", cfg.Provider.VolcengineASR.Model)
 	}
 	remixService := remix.NewMemoryService(func() (string, error) { return ids.New("remixplan") })
 	agentService := agent.NewMemoryService(remixService, func(prefix string) (string, error) { return ids.New(prefix) })
@@ -797,6 +814,9 @@ func buildTextAdapter(cfg config.Config, db *sql.DB) (provider.TextProviderAdapt
 }
 
 func buildVisionAdapter(cfg config.Config, db *sql.DB) (provider.VisionProviderAdapter, error) {
+	if !cfg.MediaUnderstanding.RealProviderEnabled {
+		return provider.FakeSyncAdapter{}, nil
+	}
 	switch cfg.Provider.TextAdapter {
 	case "fake":
 		return provider.FakeSyncAdapter{}, nil
@@ -936,8 +956,19 @@ func (a miyunMediaEvidenceAdapter) ReadLatestMiyunMediaEvidence(ctx context.Cont
 			evidence = append(evidence, item.Text)
 		}
 	}
+	asrProviderCode, asrModelVersion := "", ""
+	if value.TranscriptionLineage != nil {
+		asrProviderCode, asrModelVersion = value.TranscriptionLineage.ProviderCode, value.TranscriptionLineage.ModelVersion
+	}
 	return insights.MiyunMediaEvidence{
 		ArtifactID: value.ID, Status: string(value.Status), ContentHash: value.ContentHash, Evidence: evidence,
+		MediaFormatCode:        value.Classifications.MediaFormat.Code,
+		ContentStyleCode:       value.Classifications.ContentStyle.Code,
+		ContentStyleConfidence: value.Classifications.ContentStyle.Confidence,
+		VisionProviderCode:     value.Lineage.ProviderCode,
+		VisionModelVersion:     value.Lineage.ModelVersion,
+		ASRProviderCode:        asrProviderCode,
+		ASRModelVersion:        asrModelVersion,
 	}, true, nil
 }
 

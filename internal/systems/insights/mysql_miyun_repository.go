@@ -150,7 +150,7 @@ func scanMiyunConnection(row rowScanner) (MiyunConnection, error) {
 }
 
 const miyunProductProfileSelect = `SELECT id, organization_id, project_id, connection_id, status,
-	product_id, product_name, brand_name, category_id, category_name, keywords, material_content_types, window_start, window_end,
+	product_id, product_name, brand_name, category_id, category_name, keywords, material_types, material_content_types, window_start, window_end,
 	project_context_version, product_asset_refs, knowledge_document_ids, rule_version,
 	COALESCE(model_version, ''), analysis_method, input_hash, input_snapshot, field_sources, analysis_warnings,
 	confirmed_by, confirmed_at, version, created_by, created_at, updated_at FROM insight_miyun_product_profiles`
@@ -160,6 +160,10 @@ func (r MySQLRepository) CreateMiyunProductProfile(ctx context.Context, value Mi
 		return MiyunProductProfile{}, err
 	}
 	keywords, err := json.Marshal(value.Keywords)
+	if err != nil {
+		return MiyunProductProfile{}, err
+	}
+	materialTypes, err := json.Marshal(value.MaterialTypes)
 	if err != nil {
 		return MiyunProductProfile{}, err
 	}
@@ -185,13 +189,13 @@ func (r MySQLRepository) CreateMiyunProductProfile(ctx context.Context, value Mi
 	}
 	_, err = r.DB.ExecContext(ctx, `INSERT INTO insight_miyun_product_profiles (
 		id, organization_id, project_id, connection_id, status, product_id, product_name, brand_name, category_id, category_name,
-		keywords, material_content_types, window_start, window_end, project_context_version,
+		keywords, material_types, material_content_types, window_start, window_end, project_context_version,
 		product_asset_refs, knowledge_document_ids, rule_version, model_version, analysis_method, input_hash,
 		input_snapshot, field_sources, analysis_warnings, confirmed_by, confirmed_at,
 		version, created_by, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.OrganizationID, value.ProjectID, value.ConnectionID, value.Status, value.ProductID, value.ProductName, value.BrandName,
-		value.CategoryID, value.CategoryName, keywords, contentTypes, value.WindowStart.Format("2006-01-02"),
+		value.CategoryID, value.CategoryName, keywords, materialTypes, contentTypes, value.WindowStart.Format("2006-01-02"),
 		value.WindowEnd.Format("2006-01-02"), value.ProjectContextVersion, assetRefs, documentIDs,
 		value.RuleVersion, nullableString(value.ModelVersion), value.AnalysisMethod, value.InputHash,
 		value.InputSnapshot, fieldSources, warnings, nullableString(value.ConfirmedBy), value.ConfirmedAt,
@@ -214,11 +218,11 @@ func (r MySQLRepository) GetMiyunProductProfile(ctx context.Context, organizatio
 
 func scanMiyunProductProfile(row rowScanner) (MiyunProductProfile, error) {
 	var value MiyunProductProfile
-	var keywords, contentTypes, assetRefs, documentIDs, inputSnapshot, fieldSources, warnings []byte
+	var keywords, materialTypes, contentTypes, assetRefs, documentIDs, inputSnapshot, fieldSources, warnings []byte
 	var confirmedBy sql.NullString
 	var confirmedAt sql.NullTime
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ConnectionID, &value.Status,
-		&value.ProductID, &value.ProductName, &value.BrandName, &value.CategoryID, &value.CategoryName, &keywords, &contentTypes,
+		&value.ProductID, &value.ProductName, &value.BrandName, &value.CategoryID, &value.CategoryName, &keywords, &materialTypes, &contentTypes,
 		&value.WindowStart, &value.WindowEnd, &value.ProjectContextVersion, &assetRefs, &documentIDs,
 		&value.RuleVersion, &value.ModelVersion, &value.AnalysisMethod, &value.InputHash,
 		&inputSnapshot, &fieldSources, &warnings, &confirmedBy, &confirmedAt, &value.Version,
@@ -227,6 +231,9 @@ func scanMiyunProductProfile(row rowScanner) (MiyunProductProfile, error) {
 		return MiyunProductProfile{}, err
 	}
 	if err := json.Unmarshal(keywords, &value.Keywords); err != nil {
+		return MiyunProductProfile{}, err
+	}
+	if err := json.Unmarshal(materialTypes, &value.MaterialTypes); err != nil {
 		return MiyunProductProfile{}, err
 	}
 	if err := json.Unmarshal(contentTypes, &value.MaterialContentTypes); err != nil {

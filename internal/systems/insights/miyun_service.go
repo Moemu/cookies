@@ -15,7 +15,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
-const MiyunProductProfileRuleVersion = "miyun-product-profile-rules/v1"
+const MiyunProductProfileRuleVersion = "miyun-product-profile-rules/v2"
 const MiyunDataCardSchemaV1 = "miyun-data-card/v1"
 
 const maxMiyunAnalysisSources = 32
@@ -75,10 +75,17 @@ type MiyunKnowledgeSourceReader interface {
 }
 
 type MiyunMediaEvidence struct {
-	ArtifactID  string   `json:"artifact_id"`
-	Status      string   `json:"status"`
-	ContentHash string   `json:"content_hash"`
-	Evidence    []string `json:"evidence"`
+	ArtifactID             string   `json:"artifact_id"`
+	Status                 string   `json:"status"`
+	ContentHash            string   `json:"content_hash"`
+	Evidence               []string `json:"evidence"`
+	MediaFormatCode        string   `json:"media_format_code,omitempty"`
+	ContentStyleCode       string   `json:"content_style_code,omitempty"`
+	ContentStyleConfidence float64  `json:"content_style_confidence,omitempty"`
+	VisionProviderCode     string   `json:"vision_provider_code,omitempty"`
+	VisionModelVersion     string   `json:"vision_model_version,omitempty"`
+	ASRProviderCode        string   `json:"asr_provider_code,omitempty"`
+	ASRModelVersion        string   `json:"asr_model_version,omitempty"`
 }
 
 type MiyunMediaEvidenceReader interface {
@@ -99,6 +106,7 @@ type MiyunProfileQuery struct {
 	CategoryID           string    `json:"category_id,omitempty"`
 	CategoryName         string    `json:"category_name,omitempty"`
 	Keywords             []string  `json:"keywords"`
+	MaterialTypes        []string  `json:"material_types"`
 	MaterialContentTypes []string  `json:"material_content_types"`
 	WindowStart          time.Time `json:"window_start"`
 	WindowEnd            time.Time `json:"window_end"`
@@ -257,14 +265,15 @@ func (s Service) AnalyzeMiyunProductProfile(ctx context.Context, actor contract.
 
 	analysisTime := s.now()
 	input := struct {
-		RuleVersion  string                 `json:"rule_version"`
-		AnalysisDate string                 `json:"analysis_date"`
-		Project      MiyunProjectSource     `json:"project"`
-		ProductID    contract.ProductID     `json:"product_id"`
-		Assets       []MiyunAssetSource     `json:"assets"`
-		Documents    []MiyunKnowledgeSource `json:"documents"`
-		Media        []MiyunMediaEvidence   `json:"media_evidence"`
-	}{MiyunProductProfileRuleVersion, dateOnly(analysisTime).Format("2006-01-02"), projectSource, request.ProductID, assets, documents, mediaEvidence}
+		RuleVersion          string                 `json:"rule_version"`
+		FilterCatalogVersion string                 `json:"filter_catalog_version"`
+		AnalysisDate         string                 `json:"analysis_date"`
+		Project              MiyunProjectSource     `json:"project"`
+		ProductID            contract.ProductID     `json:"product_id"`
+		Assets               []MiyunAssetSource     `json:"assets"`
+		Documents            []MiyunKnowledgeSource `json:"documents"`
+		Media                []MiyunMediaEvidence   `json:"media_evidence"`
+	}{MiyunProductProfileRuleVersion, MiyunMaterialFilterCatalogVersion, dateOnly(analysisTime).Format("2006-01-02"), projectSource, request.ProductID, assets, documents, mediaEvidence}
 	inputSnapshot, err := json.Marshal(input)
 	if err != nil {
 		return MiyunProductProfile{}, err
@@ -274,7 +283,7 @@ func (s Service) AnalyzeMiyunProductProfile(ctx context.Context, actor contract.
 		return MiyunProductProfile{}, err
 	}
 	boundedCorpus, corpusTruncated := boundedMiyunCorpus(corpus)
-	query, sources, warnings := deriveMiyunProfileQuery(productName, projectSource.BrandName, categoryName, boundedCorpus, analysisTime)
+	query, sources, warnings := deriveMiyunProfileQuery(productName, projectSource.BrandName, categoryName, boundedCorpus, mediaEvidence, analysisTime)
 	if pendingProductIdentity {
 		warnings = append(warnings, "product_identity_pending_confirmation")
 	}
@@ -291,7 +300,7 @@ func (s Service) AnalyzeMiyunProductProfile(ctx context.Context, actor contract.
 		ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID,
 		ConnectionID: request.ConnectionID, Status: MiyunProfileDraft,
 		ProductID: request.ProductID, ProductName: query.ProductName, BrandName: strings.TrimSpace(projectSource.BrandName),
-		CategoryID: query.CategoryID, CategoryName: query.CategoryName, Keywords: query.Keywords,
+		CategoryID: query.CategoryID, CategoryName: query.CategoryName, Keywords: query.Keywords, MaterialTypes: query.MaterialTypes,
 		MaterialContentTypes: query.MaterialContentTypes, WindowStart: query.WindowStart, WindowEnd: query.WindowEnd,
 		ProjectContextVersion: projectSource.Context.ProjectContextVersion, ProductAssetRefs: assetRefs,
 		KnowledgeDocumentIDs: documentIDs, RuleVersion: MiyunProductProfileRuleVersion,
@@ -354,7 +363,8 @@ func (s Service) ConfirmMiyunProductProfile(ctx context.Context, actor contract.
 	current.CategoryID = strings.TrimSpace(request.Query.CategoryID)
 	current.CategoryName = strings.TrimSpace(request.Query.CategoryName)
 	current.Keywords, _ = normalizeMiyunStrings("keyword", request.Query.Keywords, 100)
-	current.MaterialContentTypes, _ = normalizeMiyunStrings("material content type", request.Query.MaterialContentTypes, 100)
+	current.MaterialTypes, _ = normalizeMiyunMTypes(request.Query.MaterialTypes)
+	current.MaterialContentTypes, _ = normalizeMiyunMaterialTags(request.Query.MaterialContentTypes)
 	current.WindowStart, current.WindowEnd = dateOnly(request.Query.WindowStart), dateOnly(request.Query.WindowEnd)
 	current.Status, current.ConfirmedBy, current.ConfirmedAt = MiyunProfileConfirmed, actor.Principal.ID, &now
 	current.FieldSources = confirmedMiyunFieldSources(current.FieldSources)
@@ -519,7 +529,10 @@ func validateMiyunProfileQuery(query MiyunProfileQuery) error {
 	if _, err := normalizeMiyunStrings("keyword", query.Keywords, 100); err != nil || len(query.Keywords) == 0 {
 		return fmt.Errorf("%w: at least one valid keyword is required", ErrInvalidRequest)
 	}
-	if _, err := normalizeMiyunStrings("material content type", query.MaterialContentTypes, 100); err != nil {
+	if _, err := normalizeMiyunMTypes(query.MaterialTypes); err != nil {
+		return err
+	}
+	if _, err := normalizeMiyunMaterialTags(query.MaterialContentTypes); err != nil {
 		return err
 	}
 	if query.WindowStart.IsZero() || query.WindowEnd.IsZero() || dateOnly(query.WindowEnd).Before(dateOnly(query.WindowStart)) {
@@ -528,7 +541,7 @@ func validateMiyunProfileQuery(query MiyunProfileQuery) error {
 	return nil
 }
 
-func deriveMiyunProfileQuery(productName, brandName, categoryName string, corpus []string, now time.Time) (MiyunProfileQuery, []MiyunProfileFieldSource, []string) {
+func deriveMiyunProfileQuery(productName, brandName, categoryName string, corpus []string, media []MiyunMediaEvidence, now time.Time) (MiyunProfileQuery, []MiyunProfileFieldSource, []string) {
 	keywords := []string{strings.TrimSpace(productName)}
 	if value := strings.TrimSpace(brandName); value != "" && value != strings.TrimSpace(productName) {
 		keywords = append(keywords, value)
@@ -541,18 +554,19 @@ func deriveMiyunProfileQuery(productName, brandName, categoryName string, corpus
 	if len(keywords) > 20 {
 		keywords = keywords[:20]
 	}
-	contentTypes := inferMiyunContentTypes(corpus...)
+	materialTypes, contentTypes := inferMiyunMaterialFilters(media, corpus...)
 	end := dateOnly(now)
 	query := MiyunProfileQuery{
 		ProductName: strings.TrimSpace(productName), CategoryName: strings.TrimSpace(categoryName),
-		Keywords: keywords, MaterialContentTypes: contentTypes,
+		Keywords: keywords, MaterialTypes: materialTypes, MaterialContentTypes: contentTypes,
 		WindowStart: end.AddDate(0, 0, -29), WindowEnd: end,
 	}
 	sources := []MiyunProfileFieldSource{
 		{Field: "product_name", SourceKind: "project_product", SourceRefs: []string{}, Confidence: "high", ReviewState: "suggested", Explanation: "Copied from the selected Project product."},
 		{Field: "category", SourceKind: "project_workbench", SourceRefs: []string{}, Confidence: confidenceForValue(categoryName), ReviewState: reviewForValue(categoryName), Explanation: explanationForValue(categoryName, "Suggested from the Project workbench category.")},
 		{Field: "keywords", SourceKind: "deterministic_rules", SourceRefs: []string{}, Confidence: "medium", ReviewState: "suggested", Explanation: "Derived deterministically from Project identity and selected ready evidence."},
-		{Field: "material_content_types", SourceKind: "deterministic_rules", SourceRefs: []string{}, Confidence: confidenceForList(contentTypes), ReviewState: reviewForList(contentTypes), Explanation: explanationForList(contentTypes, "Matched an explicit content-type phrase in selected evidence.")},
+		{Field: "material_types", SourceKind: "versioned_miyun_catalog", SourceRefs: []string{}, Confidence: confidenceForList(materialTypes), ReviewState: reviewForList(materialTypes), Explanation: explanationForList(materialTypes, "Mapped technical media format to the versioned Miyun mtype catalog.")},
+		{Field: "material_content_types", SourceKind: "versioned_miyun_catalog", SourceRefs: []string{}, Confidence: confidenceForList(contentTypes), ReviewState: reviewForList(contentTypes), Explanation: explanationForList(contentTypes, "Mapped multimodal evidence to the versioned Miyun materialTag catalog.")},
 		{Field: "date_window", SourceKind: "deterministic_rules", SourceRefs: []string{}, Confidence: "medium", ReviewState: "suggested", Explanation: "Defaults to the latest 30 calendar days and requires human confirmation."},
 	}
 	warnings := []string{"model_not_used:deterministic_rules"}
@@ -561,6 +575,9 @@ func deriveMiyunProfileQuery(productName, brandName, categoryName string, corpus
 	}
 	if len(contentTypes) == 0 {
 		warnings = append(warnings, "material_content_types_unknown")
+	}
+	if len(materialTypes) == 0 {
+		warnings = append(warnings, "material_types_unknown")
 	}
 	return query, sources, warnings
 }
@@ -584,16 +601,35 @@ func extractMiyunKeywords(values ...string) []string {
 	return result
 }
 
+func inferMiyunMaterialFilters(media []MiyunMediaEvidence, values ...string) ([]string, []string) {
+	mtypes := []string{}
+	tags := []string{}
+	for _, evidence := range media {
+		if value := miyunMTypeFromMediaFormat(evidence.MediaFormatCode); value != "" {
+			mtypes = append(mtypes, value)
+		}
+		if evidence.ContentStyleConfidence >= 0.6 {
+			if value := miyunMaterialTagFromContentStyle(evidence.ContentStyleCode); value != "" {
+				tags = append(tags, value)
+			}
+		}
+	}
+	legacyTags := inferMiyunContentTypes(values...)
+	tags = append(tags, legacyTags...)
+	mtypes, _ = normalizeMiyunMTypes(mtypes)
+	tags, _ = normalizeMiyunMaterialTags(tags)
+	return mtypes, tags
+}
+
 func inferMiyunContentTypes(values ...string) []string {
 	joined := strings.ToLower(strings.Join(values, "\n"))
 	rules := []struct {
 		Value string
 		Terms []string
 	}{
-		{"单人口播", []string{"口播", "talking head"}},
-		{"商品展示", []string{"商品展示", "产品展示", "product demo"}},
-		{"剧情演绎", []string{"剧情", "情景剧", "story"}},
-		{"测评", []string{"测评", "评测", "review"}},
+		{"1", []string{"单人口播", "talking head"}},
+		{"5", []string{"商品展示", "产品展示", "product demo"}},
+		{"3", []string{"剧情演绎", "剧情", "情景剧", "story"}},
 	}
 	result := []string{}
 	for _, rule := range rules {

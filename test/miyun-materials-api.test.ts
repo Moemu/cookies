@@ -75,6 +75,36 @@ test('Miyun product source and analysis permit a manual product name without pro
   })
 })
 
+test('media understanding routes use the product API prefix exactly once', async () => {
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ url: string; init: RequestInit }> = []
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init })
+    return jsonResponse({})
+  }
+  try {
+    await api.getMediaUnderstandingCapabilities()
+    await api.requestMediaUnderstanding('project / one', { asset_id: 'asset / one', version: 2 })
+    await api.getMediaUnderstanding('project / one', 'artifact / one')
+  } finally { globalThis.fetch = originalFetch }
+  assert.equal(calls[0].url, '/api/media/v1/capabilities')
+  assert.equal(calls[1].url, '/api/media/v1/projects/project%20%2F%20one/understandings')
+  assert.equal(calls[1].init.method, 'POST')
+  assert.deepEqual(JSON.parse(String(calls[1].init.body)), { asset_id: 'asset / one', version: 2 })
+  assert.equal(calls[2].url, '/api/media/v1/projects/project%20%2F%20one/understandings/artifact%20%2F%20one')
+})
+
+test('empty API error responses retain the HTTP status in the user-visible message', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(null, { status: 500 })
+  try {
+    await assert.rejects(
+      api.getMediaUnderstandingCapabilities(),
+      (error: unknown) => error instanceof ApiRequestError && error.message === 'API 请求失败（HTTP 500）',
+    )
+  } finally { globalThis.fetch = originalFetch }
+})
+
 test('Miyun conflict preserves HTTP problem details for UI decisions', async () => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => jsonResponse({ error: { code: 'VERSION_CONFLICT', message: 'refresh' } }, 409)

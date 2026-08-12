@@ -3676,7 +3676,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown, headers?
   }
   if (!response.ok) {
     const error = (payload ?? {}) as { error?: { message?: string; code?: string } }
-    throw new ApiRequestError(error.error?.message ?? 'API 请求失败', response.status, error.error?.code ?? '')
+    throw new ApiRequestError(error.error?.message ?? `API 请求失败（HTTP ${response.status}）`, response.status, error.error?.code ?? '')
   }
   return payload as T
 }
@@ -5318,18 +5318,30 @@ export type ApiMiyunConnection = {
   last_error_kind?: string; last_error_code?: string; last_error_at?: string; version: number; created_by: string; created_at: string; updated_at: string
 }
 export type ApiMiyunAssetVersionRef = { asset_id: string; version: number }
+export type ApiMediaUnderstandingArtifact = {
+  id: string
+  status: 'running' | 'ready' | 'partial' | 'failed'
+  error_message?: string
+  warnings: string[]
+}
+export type ApiMediaUnderstandingCapabilities = {
+  vision_semantic_enabled: boolean
+  asr_enabled: boolean
+  vision_model_alias: string
+  profile_version: string
+}
 export type ApiMiyunProductSource = {
   project_name: string
   brand_name: string
   category_name: string
   products: Array<{ id: string; name: string }>
 }
-export type ApiMiyunProfileQuery = { product_name: string; category_id?: string; category_name?: string; keywords: string[]; material_content_types: string[]; window_start: string; window_end: string }
+export type ApiMiyunProfileQuery = { product_name: string; category_id?: string; category_name?: string; keywords: string[]; material_types: string[]; material_content_types: string[]; window_start: string; window_end: string }
 export type ApiMiyunProfileFieldSource = { field: string; source_kind: string; source_refs: string[]; confidence: 'high' | 'medium' | 'low' | 'unknown'; review_state: 'suggested' | 'unknown' | 'human_confirmed'; explanation: string }
 export type ApiMiyunProductProfile = {
   id: string; organization_id: string; project_id: string; connection_id: string; status: 'draft' | 'confirmed' | 'superseded'; product_id: string; product_name: string; brand_name?: string; category_id?: string; category_name?: string
-  keywords: string[]; material_content_types: string[]; window_start: string; window_end: string; project_context_version: number; product_asset_refs: ApiMiyunAssetVersionRef[]; knowledge_document_ids: string[]
-  rule_version: 'miyun-product-profile-rules/v1'; model_version?: string; analysis_method: 'rules'; input_hash: string; input_snapshot: Record<string, unknown>; field_sources: ApiMiyunProfileFieldSource[]; analysis_warnings: string[]
+  keywords: string[]; material_types?: string[]; material_content_types: string[]; window_start: string; window_end: string; project_context_version: number; product_asset_refs: ApiMiyunAssetVersionRef[]; knowledge_document_ids: string[]
+  rule_version: 'miyun-product-profile-rules/v1' | 'miyun-product-profile-rules/v2'; model_version?: string; analysis_method: 'rules'; input_hash: string; input_snapshot: Record<string, unknown>; field_sources: ApiMiyunProfileFieldSource[]; analysis_warnings: string[]
   confirmed_by?: string; confirmed_at?: string; version: number; created_by: string; created_at: string; updated_at: string
 }
 export type ApiMiyunCrawlJob = {
@@ -6089,6 +6101,9 @@ export const api = {
   verifyMiyunConnection: (projectId: string, expectedVersion: number) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection:verify`, 'POST', { expected_version: expectedVersion }),
   listMiyunProductProfiles: (projectId: string, limit = 50) => request<{ items: ApiMiyunProductProfile[] }>(`${miyunProjectPath(projectId)}/product-profiles?limit=${limit}`),
   getMiyunProductSource: (projectId: string) => request<ApiMiyunProductSource>(`${miyunProjectPath(projectId)}/product-source`),
+  getMediaUnderstandingCapabilities: () => request<ApiMediaUnderstandingCapabilities>('/media/v1/capabilities'),
+  requestMediaUnderstanding: (projectId: string, asset: ApiMiyunAssetVersionRef) => request<ApiMediaUnderstandingArtifact>(`/media/v1/projects/${encodeURIComponent(projectId)}/understandings`, 'POST', { asset_id: asset.asset_id, version: asset.version }),
+  getMediaUnderstanding: (projectId: string, artifactId: string) => request<ApiMediaUnderstandingArtifact>(`/media/v1/projects/${encodeURIComponent(projectId)}/understandings/${encodeURIComponent(artifactId)}`),
   analyzeMiyunProductProfile: (projectId: string, body: { connection_id: string; product_id?: string; product_name?: string; category_name?: string; product_asset_refs: ApiMiyunAssetVersionRef[]; knowledge_document_ids: string[] }) => request<ApiMiyunProductProfile>(`${miyunProjectPath(projectId)}/product-profiles:analyze`, 'POST', body),
   getMiyunProductProfile: (projectId: string, profileId: string) => request<ApiMiyunProductProfile>(`${miyunProjectPath(projectId)}/product-profiles/${encodeURIComponent(profileId)}`),
   confirmMiyunProductProfile: (projectId: string, profileId: string, expectedVersion: number, query: ApiMiyunProfileQuery) => request<ApiMiyunProductProfile>(`${miyunProjectPath(projectId)}/product-profiles/${encodeURIComponent(profileId)}:confirm`, 'POST', { expected_version: expectedVersion, query }),

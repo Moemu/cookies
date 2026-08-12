@@ -14,6 +14,8 @@ import {
   type ApiMiyunProductProfile,
   type ApiMiyunProductSource,
   type ApiMiyunProfileQuery,
+  type ApiMediaUnderstandingArtifact,
+  type ApiMediaUnderstandingCapabilities,
   type ApiProjectMediaAsset,
 } from "../data/api";
 import type { DataState } from "../types";
@@ -110,11 +112,68 @@ const importStatusLabel = {
   failed: "入库失败",
   skipped: "已跳过",
 } satisfies Record<ApiMiyunMaterial["import_status"], string>;
+type MiyunFilterOption = { value: string; label: string };
+const materialTypeOptions: readonly MiyunFilterOption[] = [
+  { value: "100", label: "纯文案" },
+  { value: "102", label: "单图" },
+  { value: "103", label: "GIF" },
+  { value: "104", label: "组图" },
+  { value: "201", label: "视频" },
+  { value: "202", label: "竖视频" },
+];
+const materialContentTypeOptions: readonly MiyunFilterOption[] = [
+  { value: "1", label: "单人口播" },
+  { value: "2", label: "多人口播" },
+  { value: "6", label: "真人展示" },
+  { value: "4", label: "商品口播" },
+  { value: "5", label: "商品展示" },
+  { value: "3", label: "剧情演绎" },
+];
+const buildFilterLookup = (
+  options: readonly MiyunFilterOption[],
+  aliases: Record<string, string>,
+) => ({
+  ...Object.fromEntries(options.flatMap((option) => [
+    [option.value, option.value],
+    [option.label.toLocaleLowerCase("zh-CN"), option.value],
+  ])),
+  ...aliases,
+});
+const materialTypeValue = buildFilterLookup(materialTypeOptions, {
+  text: "100", pure_text: "100", image: "102", single_image: "102",
+  gif: "103", gallery: "104", image_group: "104", video: "201", vertical_video: "202",
+});
+const materialContentTypeValue = buildFilterLookup(materialContentTypeOptions, {
+  single_speaker: "1", talking_head: "1", multiple_speakers: "2", multi_speaker: "2",
+  human_product_demo_no_voice: "6", human_demo: "6", product_voiceover: "4", product_narration: "4",
+  product_demo_no_voice: "5", product_demo: "5", product: "5", story: "3", story_drama: "3",
+});
+const canonicalFilterValues = (values: string[], lookup: Record<string, string>) => {
+  const selected = new Set<string>();
+  values.forEach((value) => {
+    const canonical = lookup[value.trim().toLocaleLowerCase("zh-CN")];
+    if (canonical) selected.add(canonical);
+  });
+  return selected;
+};
+const toggleFilterValue = (
+  values: string[],
+  value: string,
+  options: readonly MiyunFilterOption[],
+  lookup: Record<string, string>,
+) => {
+  const selected = canonicalFilterValues(values, lookup);
+  if (selected.has(value)) selected.delete(value);
+  else selected.add(value);
+  return options.filter((option) => selected.has(option.value)).map((option) => option.value);
+};
 const materialTypeLabel: Record<string, string> = {
-  product: "产品素材",
-  video: "视频",
-  image: "图片",
-  text: "图文",
+  ...Object.fromEntries(materialTypeOptions.map((option) => [option.value, option.label])),
+  product: "商品展示", video: "视频", image: "单图", text: "纯文案",
+};
+const materialContentTypeLabel: Record<string, string> = {
+  ...Object.fromEntries(materialContentTypeOptions.map((option) => [option.value, option.label])),
+  product: "商品展示",
 };
 const listPreview = (values: string[], limit = 3) => {
   const visible = values.slice(0, limit);
@@ -124,7 +183,16 @@ const listPreview = (values: string[], limit = 3) => {
 const profileKeywordPreview = (profile: ApiMiyunProductProfile) =>
   listPreview(profile.keywords);
 const profileMaterialTypePreview = (profile: ApiMiyunProductProfile) =>
-  listPreview(profile.material_content_types.map((value) => materialTypeLabel[value] ?? value));
+  [
+    (profile.material_types ?? []).map((value) => materialTypeLabel[value] ?? value),
+    profile.material_content_types.map((value) => materialContentTypeLabel[value] ?? value),
+  ].filter((values) => values.length).map((values) => listPreview(values)).join(" · ") || "未设置";
+const profileSelectionSummary = (profile: ApiMiyunProductProfile) =>
+  `${profile.product_name} · ${listPreview(profile.keywords, 2)} · ${profileMaterialTypePreview(profile)}`;
+export function miyunProfileSelectLabel(profile: ApiMiyunProductProfile, maxLength = 64) {
+  const summary = profileSelectionSummary(profile);
+  return summary.length > maxLength ? `${summary.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…` : summary;
+}
 export function miyunJobMaxPages(job: ApiMiyunCrawlJob): number | null {
   const value = (job.query_snapshot as { max_pages?: unknown } | null)?.max_pages;
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 50
@@ -136,6 +204,44 @@ const idempotencyKey = () =>
 const miyunDocumentFile = /\.(pdf|docx|md)$/i;
 const miyunProjectMediaFile = /\.(png|jpe?g|webp|mp4)$/i;
 const miyunReturnFile = /\.(mp4|zip)$/i;
+
+const waitForMediaUnderstanding = async (
+  projectId: string,
+  initial: ApiMediaUnderstandingArtifact,
+) => {
+  let artifact = initial;
+  for (let attempt = 0; artifact.status === "running" && attempt < 90; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    artifact = await api.getMediaUnderstanding(projectId, artifact.id);
+  }
+  if (artifact.status === "failed") {
+    throw new Error(artifact.error_message || "素材理解失败，请稍后重试。");
+  }
+  if (artifact.status === "running") {
+    throw new Error("素材理解仍在运行，请稍后再次分析。");
+  }
+  return artifact;
+};
+
+const prepareMiyunMediaUnderstanding = async (
+  projectId: string,
+  assets: ApiProjectMediaAsset[],
+  onProgress: (message: string) => void,
+) => {
+  const supported = assets.filter((asset) =>
+    asset.mimeType === "image/jpeg" ||
+    asset.mimeType === "image/png" ||
+    (asset.mimeType === "video/mp4" && (asset.durationSeconds ?? 0) >= 15 && (asset.durationSeconds ?? 0) <= 90),
+  );
+  for (let offset = 0; offset < supported.length; offset += 2) {
+    const batch = supported.slice(offset, offset + 2);
+    onProgress(`正在理解多模态素材 ${offset + 1}–${offset + batch.length} / ${supported.length}…`);
+    await Promise.all(batch.map(async (asset) => {
+      const created = await api.requestMediaUnderstanding(projectId, { asset_id: asset.id, version: asset.version });
+      await waitForMediaUnderstanding(projectId, created);
+    }));
+  }
+};
 
 function crawlContextStorageKey(projectId: string) {
   return `cookies:miyun-crawl-context:v${crawlContextVersion}:${projectId}`;
@@ -360,6 +466,8 @@ export function MiyunMaterialsPage({
   const [documents, setDocuments] = useState<ApiKnowledgeDocument[]>([]);
   const [productSource, setProductSource] =
     useState<ApiMiyunProductSource | null>(null);
+  const [mediaCapabilities, setMediaCapabilities] =
+    useState<ApiMediaUnderstandingCapabilities | null>(null);
   const [assetRefs, setAssetRefs] = useState<string[]>([]);
   const [documentIds, setDocumentIds] = useState<string[]>([]);
   const [assetPickerMode, setAssetPickerMode] = useState<"import" | null>(null);
@@ -412,6 +520,7 @@ export function MiyunMaterialsPage({
         if (!(error instanceof ApiRequestError && error.status === 404))
           throw error;
       }
+      const capabilitiesPromise = api.getMediaUnderstandingCapabilities().catch(() => null);
       const [
         profilePage,
         jobPage,
@@ -427,6 +536,7 @@ export function MiyunMaterialsPage({
         api.getMiyunProductSource(currentProject.id),
         api.listMiyunHandoffs(currentProject.id),
       ]);
+      const capabilities = await capabilitiesPromise;
       const crawlJobId = resolveCrawlContext(currentProject.id, jobPage.items);
       const materialResult = crawlJobId
         ? await api.listMiyunMaterials(currentProject.id, {
@@ -457,6 +567,7 @@ export function MiyunMaterialsPage({
       setAssets(mediaAssets);
       setDocuments(documentPage.items);
       setProductSource(source);
+      setMediaCapabilities(capabilities);
       if (productIdentityProjectRef.current !== currentProject.id) {
         productIdentityProjectRef.current = currentProject.id;
         const singleProduct = source.products.length === 1 ? source.products[0] : null;
@@ -913,6 +1024,18 @@ export function MiyunMaterialsPage({
                   </div>
                   <a className="secondary-button" href="/settings">前往系统设置</a>
                 </section>
+                <section className="miyun-connection-banner" role="status" aria-label="多模态理解能力">
+                  <div>
+                    <span>多模态理解</span>
+                    <b>{mediaCapabilities === null ? "能力状态暂不可读" : mediaCapabilities.vision_semantic_enabled ? "视觉语义模型已就绪" : "当前为技术校验模式"}</b>
+                    <small>
+                      {mediaCapabilities === null
+                        ? "查询条件仍可人工编辑；系统不会把未知能力误报为已启用。"
+                        : <>视觉 {mediaCapabilities.vision_semantic_enabled ? "可用" : "未启用"} · ASR {mediaCapabilities.asr_enabled ? "可用" : "未启用"}
+                          {!mediaCapabilities.asr_enabled ? "；口播相关类型将保留为未知，等待人工确认。" : "；视频口播会自动转写并参与类型判断。"}</>}
+                    </small>
+                  </div>
+                </section>
               <section className="miyun-grid">
                 <article className="surface-card miyun-analysis-form">
                   <header className="miyun-card-heading">
@@ -1148,6 +1271,8 @@ export function MiyunMaterialsPage({
                     }
                     onClick={() =>
                       void run(async () => {
+                        const analysisAssets = assets.filter((asset) => assetRefs.includes(asset.id));
+                        await prepareMiyunMediaUnderstanding(currentProject.id, analysisAssets, setNotice);
                         setDraft(
                           await api.analyzeMiyunProductProfile(
                             currentProject.id,
@@ -1159,8 +1284,7 @@ export function MiyunMaterialsPage({
                               ...(categoryName
                                 ? { category_name: categoryName }
                                 : {}),
-                              product_asset_refs: assets
-                                .filter((asset) => assetRefs.includes(asset.id))
+                              product_asset_refs: analysisAssets
                                 .map((asset) => ({
                                   asset_id: asset.id,
                                   version: asset.version,
@@ -1282,6 +1406,7 @@ export function MiyunMaterialsPage({
                             setDraft({
                               ...profile,
                               keywords: [...profile.keywords],
+                              material_types: [...(profile.material_types ?? [])],
                               material_content_types: [
                                 ...profile.material_content_types,
                               ],
@@ -1343,6 +1468,7 @@ export function MiyunMaterialsPage({
                     <select
                       aria-label="产品分析"
                       name="miyun-product-profile"
+                      title={selected ? profileSelectionSummary(selected) : undefined}
                       value={selected?.id ?? ""}
                       onChange={(e) => setProfileId(e.target.value)}
                     >
@@ -1350,7 +1476,7 @@ export function MiyunMaterialsPage({
                         .filter((profile) => profile.status === "confirmed")
                         .map((profile) => (
                           <option key={profile.id} value={profile.id}>
-                            {profile.product_name} · {profileKeywordPreview(profile)} · {profileMaterialTypePreview(profile)}
+                            {miyunProfileSelectLabel(profile)}
                           </option>
                         ))}
                     </select>
@@ -2061,6 +2187,7 @@ export function profileQuery(profile: ApiMiyunProductProfile): ApiMiyunProfileQu
     category_id: profile.category_id,
     category_name: profile.category_name,
     keywords: profile.keywords,
+    material_types: profile.material_types ?? [],
     material_content_types: profile.material_content_types,
     // Go serializes persisted date-only values as RFC3339 timestamps, while
     // the confirmation endpoint intentionally accepts calendar dates only.
@@ -2084,6 +2211,8 @@ function ProfileEditor({
   onConfirm: () => void;
 }) {
   const confirmed = draft.status === "confirmed";
+  const selectedMaterialTypes = canonicalFilterValues(draft.material_types ?? [], materialTypeValue);
+  const selectedContentTypes = canonicalFilterValues(draft.material_content_types, materialContentTypeValue);
   return (
     <article className="surface-card miyun-profile-editor">
       <header className="miyun-card-heading">
@@ -2111,24 +2240,64 @@ function ProfileEditor({
           }
         />
       </label>
-      <label>
-        素材类型（逗号分隔）
-        <input
-          name="miyun-profile-material-types"
-          autoComplete="off"
-          disabled={confirmed}
-          value={draft.material_content_types.join(", ")}
-          onChange={(e) =>
-            onChange({
-              ...draft,
-              material_content_types: e.target.value
-                .split(",")
-                .map((x) => x.trim())
-                .filter(Boolean),
-            })
-          }
-        />
-      </label>
+      <fieldset className="miyun-filter-selector">
+        <legend>素材载体 <span>米云 mtype</span></legend>
+        <div className="miyun-filter-option-grid">
+          {materialTypeOptions.map((option) => {
+            const selected = selectedMaterialTypes.has(option.value);
+            return (
+              <label key={option.value} data-selected={selected}>
+                <input
+                  type="checkbox"
+                  name="miyun-profile-material-types"
+                  value={option.value}
+                  checked={selected}
+                  disabled={confirmed}
+                  onChange={() => onChange({
+                    ...draft,
+                    material_types: toggleFilterValue(
+                      draft.material_types ?? [], option.value, materialTypeOptions, materialTypeValue,
+                    ),
+                  })}
+                />
+                <span><b>{option.label}</b><small>mtype {option.value}</small></span>
+              </label>
+            );
+          })}
+        </div>
+        <small className="miyun-filter-selection-summary">
+          {selectedMaterialTypes.size ? `已选 ${selectedMaterialTypes.size} 项` : "未选择时不限制素材载体"}；保存时使用米云官方 ID。
+        </small>
+      </fieldset>
+      <fieldset className="miyun-filter-selector">
+        <legend>内容类型 <span>米云 materialTag</span></legend>
+        <div className="miyun-filter-option-grid">
+          {materialContentTypeOptions.map((option) => {
+            const selected = selectedContentTypes.has(option.value);
+            return (
+              <label key={option.value} data-selected={selected}>
+                <input
+                  type="checkbox"
+                  name="miyun-profile-material-content-types"
+                  value={option.value}
+                  checked={selected}
+                  disabled={confirmed}
+                  onChange={() => onChange({
+                    ...draft,
+                    material_content_types: toggleFilterValue(
+                      draft.material_content_types, option.value, materialContentTypeOptions, materialContentTypeValue,
+                    ),
+                  })}
+                />
+                <span><b>{option.label}</b><small>materialTag {option.value}</small></span>
+              </label>
+            );
+          })}
+        </div>
+        <small className="miyun-filter-selection-summary">
+          {selectedContentTypes.size ? `已选 ${selectedContentTypes.size} 项` : "未选择时不限制内容类型"}；可同时选择多个类型。
+        </small>
+      </fieldset>
       {confirmed ? (
         <section className="miyun-next-step" aria-labelledby="miyun-next-step-title">
           <span aria-hidden="true"><Check size={18} /></span>

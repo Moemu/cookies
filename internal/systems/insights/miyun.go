@@ -205,6 +205,7 @@ type MiyunProductProfile struct {
 	CategoryID            string                     `json:"category_id,omitempty"`
 	CategoryName          string                     `json:"category_name,omitempty"`
 	Keywords              []string                   `json:"keywords"`
+	MaterialTypes         []string                   `json:"material_types"`
 	MaterialContentTypes  []string                   `json:"material_content_types"`
 	WindowStart           time.Time                  `json:"window_start"`
 	WindowEnd             time.Time                  `json:"window_end"`
@@ -249,6 +250,9 @@ func (p MiyunProductProfile) Validate() error {
 		return fmt.Errorf("%w: deterministic rule profiles must not claim model lineage", ErrInvalidRequest)
 	}
 	if err := validateUniqueStrings("keyword", p.Keywords); err != nil {
+		return err
+	}
+	if err := validateUniqueStrings("material type", p.MaterialTypes); err != nil {
 		return err
 	}
 	if err := validateUniqueStrings("material content type", p.MaterialContentTypes); err != nil {

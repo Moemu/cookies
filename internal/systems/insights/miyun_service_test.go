@@ -36,7 +36,7 @@ func TestMiyunAnalyzeIsDeterministicExplainableAndSupersedesDraft(t *testing.T) 
 		t.Fatal(err)
 	}
 	if first.InputHash != second.InputHash || first.ProductName != second.ProductName ||
-		!reflect.DeepEqual(first.Keywords, second.Keywords) || !reflect.DeepEqual(first.MaterialContentTypes, second.MaterialContentTypes) {
+		!reflect.DeepEqual(first.Keywords, second.Keywords) || !reflect.DeepEqual(first.MaterialTypes, second.MaterialTypes) || !reflect.DeepEqual(first.MaterialContentTypes, second.MaterialContentTypes) {
 		t.Fatalf("same frozen input produced different drafts:\nfirst=%#v\nsecond=%#v", first, second)
 	}
 	if repository.profiles[first.ID].Status != MiyunProfileSuperseded || repository.profiles[first.ID].Version != 2 || second.Status != MiyunProfileDraft {
@@ -45,7 +45,7 @@ func TestMiyunAnalyzeIsDeterministicExplainableAndSupersedesDraft(t *testing.T) 
 	if second.AnalysisMethod != "rules" || second.ModelVersion != "" || !containsString(second.AnalysisWarnings, "model_not_used:deterministic_rules") {
 		t.Fatalf("rule lineage is not explicit: %#v", second)
 	}
-	if len(second.FieldSources) != 5 || second.FieldSources[0].ReviewState != "suggested" || len(second.FieldSources[0].SourceRefs) == 0 {
+	if len(second.FieldSources) != 6 || second.FieldSources[0].ReviewState != "suggested" || len(second.FieldSources[0].SourceRefs) == 0 {
 		t.Fatalf("field sources=%#v", second.FieldSources)
 	}
 	projectReader := service.MiyunProjects.(fakeMiyunProjectReader)

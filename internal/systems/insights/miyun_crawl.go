@@ -55,16 +55,17 @@ type MiyunMaterialListPage struct {
 }
 
 type MiyunQuerySnapshot struct {
-	SchemaVersion string                     `json:"schema_version"`
-	Operation     string                     `json:"operation"`
-	ProfileID     string                     `json:"profile_id"`
-	ConnectionID  string                     `json:"connection_id"`
-	MaxPages      int                        `json:"max_pages"`
-	Query         crawler.YouShuQuery        `json:"query"`
-	FrozenAt      time.Time                  `json:"frozen_at"`
-	ProfileInput  json.RawMessage            `json:"profile_input"`
-	AssetRefs     []contract.AssetVersionRef `json:"asset_refs"`
-	DocumentIDs   []string                   `json:"document_ids"`
+	SchemaVersion        string                     `json:"schema_version"`
+	FilterCatalogVersion string                     `json:"filter_catalog_version"`
+	Operation            string                     `json:"operation"`
+	ProfileID            string                     `json:"profile_id"`
+	ConnectionID         string                     `json:"connection_id"`
+	MaxPages             int                        `json:"max_pages"`
+	Query                crawler.YouShuQuery        `json:"query"`
+	FrozenAt             time.Time                  `json:"frozen_at"`
+	ProfileInput         json.RawMessage            `json:"profile_input"`
+	AssetRefs            []contract.AssetVersionRef `json:"asset_refs"`
+	DocumentIDs          []string                   `json:"document_ids"`
 }
 
 type MiyunCrawlPageRecord struct {
@@ -185,10 +186,21 @@ func (s Service) CreateMiyunCrawlJob(ctx context.Context, actor contract.ActorCo
 		ProductID: []string{}, Tpl: []string{}, SearchField: "all", SearchDSL: []json.RawMessage{},
 		AccountType: []string{}, IsSearchAiScene: crawler.YouShuInt(0),
 	}
+	mtypes, err := normalizeMiyunMTypes(profile.MaterialTypes)
+	if err != nil {
+		return MiyunCrawlJob{}, fmt.Errorf("%w: confirmed profile contains an invalid mtype", ErrInvalidState)
+	}
+	materialTags, err := normalizeMiyunMaterialTags(profile.MaterialContentTypes)
+	if err != nil {
+		return MiyunCrawlJob{}, fmt.Errorf("%w: confirmed profile contains an invalid materialTag", ErrInvalidState)
+	}
+	query.MType = miyunFilterValue(mtypes)
+	query.MaterialTag = miyunFilterValue(materialTags)
 	snapshot := MiyunQuerySnapshot{
 		SchemaVersion: MiyunQuerySchemaV1, Operation: request.Operation, ProfileID: profile.ID, ConnectionID: connection.ID,
-		MaxPages: request.MaxPages,
-		Query:    query, FrozenAt: now, ProfileInput: append(json.RawMessage(nil), profile.InputSnapshot...),
+		FilterCatalogVersion: MiyunMaterialFilterCatalogVersion,
+		MaxPages:             request.MaxPages,
+		Query:                query, FrozenAt: now, ProfileInput: append(json.RawMessage(nil), profile.InputSnapshot...),
 		AssetRefs: append([]contract.AssetVersionRef(nil), profile.ProductAssetRefs...), DocumentIDs: append([]string(nil), profile.KnowledgeDocumentIDs...),
 	}
 	queryJSON, err := json.Marshal(snapshot)
@@ -485,6 +497,9 @@ func (s Service) HandleMiyunCrawlJob(ctx context.Context, claim jobruntime.Claim
 	}
 	var frozen MiyunQuerySnapshot
 	if json.Unmarshal(job.QuerySnapshot, &frozen) != nil || frozen.SchemaVersion != MiyunQuerySchemaV1 || frozen.ProfileID != job.ProductProfileID || frozen.ConnectionID != job.ConnectionID {
+		return jobruntime.Result{}, terminalMiyunExecution("MIYUN_QUERY_SNAPSHOT_INVALID", ErrInvalidState)
+	}
+	if frozen.FilterCatalogVersion != "" && frozen.FilterCatalogVersion != MiyunMaterialFilterCatalogVersion {
 		return jobruntime.Result{}, terminalMiyunExecution("MIYUN_QUERY_SNAPSHOT_INVALID", ErrInvalidState)
 	}
 	// Snapshots created before max_pages was introduced remain executable and
