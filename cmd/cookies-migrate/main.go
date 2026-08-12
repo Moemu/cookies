@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"time"
 
@@ -14,6 +15,13 @@ import (
 )
 
 func main() {
+	verifyDeliveryHashes := flag.Bool(
+		"verify-delivery-hashes",
+		false,
+		"read and verify every immutable DeliveryPlan snapshot after migration",
+	)
+	flag.Parse()
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("invalid configuration: %v", err)
@@ -47,11 +55,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("backfill Strategy Creative Handoffs: %v", err)
 	}
+	verifiedDeliveryHashes := 0
+	if *verifyDeliveryHashes {
+		verifiedDeliveryHashes, err = delivery.VerifyPlanCanonicalHashes(ctx, db)
+		if err != nil {
+			log.Fatalf("verify DeliveryPlan canonical hashes: %v", err)
+		}
+	}
 	log.Printf(
-		"migrations are current; backfilled %d DeliveryPlan canonical hashes, %d Delivery approvals, %d Delivery executions, and %d Strategy Creative Handoffs",
+		"migrations are current; backfilled %d DeliveryPlan canonical hashes, %d Delivery approvals, %d Delivery executions, and %d Strategy Creative Handoffs; explicitly verified %d DeliveryPlan canonical hashes",
 		deliveryBackfilled,
 		approvalBackfilled,
 		executionBackfilled,
 		backfilled,
+		verifiedDeliveryHashes,
 	)
 }
