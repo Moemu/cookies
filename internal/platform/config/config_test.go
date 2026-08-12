@@ -359,7 +359,7 @@ func TestArkVideoAdapterIsExplicitAndLocalOnly(t *testing.T) {
 	}
 }
 
-func TestVolcengineASRLegacyConfigurationIsExplicitAndLocalOnly(t *testing.T) {
+func TestVolcengineASRLegacyConfigurationIsExplicitAndReusable(t *testing.T) {
 	t.Parallel()
 	if _, err := FromLookup(mapLookup(map[string]string{
 		"COOKIES_PROVIDER_AUDIO_ADAPTER": "volcengine_asr",
@@ -380,13 +380,34 @@ func TestVolcengineASRLegacyConfigurationIsExplicitAndLocalOnly(t *testing.T) {
 		config.Provider.VolcengineASR.Model != "bigmodel" {
 		t.Fatalf("unexpected ASR defaults: %#v", config.Provider.VolcengineASR)
 	}
-	if _, err := FromLookup(mapLookup(map[string]string{
+	staging, err := FromLookup(mapLookup(map[string]string{
 		"COOKIES_ENV": "staging", "COOKIES_BLOB_PROVIDER": "memory",
-		"COOKIES_PROVIDER_AUDIO_ADAPTER":      "volcengine_asr",
-		"COOKIES_VOLCENGINE_ASR_APP_ID":       "test-app",
-		"COOKIES_VOLCENGINE_ASR_ACCESS_TOKEN": "test-token",
+		"COOKIES_PROVIDER_AUDIO_ADAPTER":          "volcengine_asr",
+		"COOKIES_VOLCENGINE_ASR_APP_ID":           "test-app",
+		"COOKIES_VOLCENGINE_ASR_ACCESS_TOKEN":     "test-token",
+		"COOKIES_MEDIA_UNDERSTANDING_ASR_ENABLED": "true",
+	}))
+	if err != nil || !staging.MediaUnderstanding.ASREnabled {
+		t.Fatalf("expected reusable Volcengine ASR configuration: %#v err=%v", staging.MediaUnderstanding, err)
+	}
+}
+
+func TestMediaUnderstandingProviderRolloutIsIndependent(t *testing.T) {
+	t.Parallel()
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_MEDIA_UNDERSTANDING_REAL_PROVIDER_ENABLED": "true",
 	})); err == nil {
-		t.Fatal("expected Volcengine ASR outside local to be rejected")
+		t.Fatal("real media understanding must require the gateway adapter")
+	}
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	value, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_PROVIDER_TEXT_ADAPTER":                     "adapter_gateway",
+		"COOKIES_PROVIDER_MASTER_KEY":                       key,
+		"COOKIES_MEDIA_UNDERSTANDING_REAL_PROVIDER_ENABLED": "true",
+		"COOKIES_MEDIA_UNDERSTANDING_VISION_MODEL_ALIAS":    "cookies.vision.material.v1",
+	}))
+	if err != nil || !value.MediaUnderstanding.RealProviderEnabled || value.Strategy.RealProviderEnabled || value.MediaUnderstanding.VisionModelAlias != "cookies.vision.material.v1" {
+		t.Fatalf("independent media understanding rollout=%#v strategy=%#v err=%v", value.MediaUnderstanding, value.Strategy, err)
 	}
 }
 
@@ -708,6 +729,32 @@ func TestSeedResearchRequiresCredentialEncryptionKey(t *testing.T) {
 	}))
 	if err != nil || !config.Research.SeedEnabled {
 		t.Fatalf("valid Seed research configuration rejected: config=%#v err=%v", config.Research, err)
+	}
+}
+
+func TestMiyunConfigurationIsDisabledByDefaultAndStrictWhenEnabled(t *testing.T) {
+	t.Parallel()
+	defaults, err := FromLookup(mapLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Miyun.Enabled || defaults.Miyun.MaxConcurrent != 1 || defaults.Miyun.RequestsPerSecond != 5 || defaults.Miyun.CooldownSeconds != 300 {
+		t.Fatalf("unsafe Miyun defaults: %#v", defaults.Miyun)
+	}
+	if _, err := FromLookup(mapLookup(map[string]string{"COOKIES_MIYUN_ENABLED": "true"})); err == nil {
+		t.Fatal("enabled Miyun without key and host allowlist was accepted")
+	}
+	configured, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_MIYUN_ENABLED":                "true",
+		"COOKIES_MIYUN_MASTER_KEY":             base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		"COOKIES_MIYUN_MASTER_KEY_VERSION":     "key-v1",
+		"COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS": "cdn.example.test,media.example.test",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured.Miyun.Enabled || len(configured.Miyun.DownloadAllowedHosts) != 2 {
+		t.Fatalf("Miyun configuration = %#v", configured.Miyun)
 	}
 }
 

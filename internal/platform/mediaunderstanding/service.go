@@ -47,11 +47,29 @@ type Service struct {
 	Assets        AssetReader
 	DerivedImages DerivedImageWriter
 	Frames        media.FrameExtractor
+	Transcriber   media.Transcriber
 	Vision        VisionReader
+	RealVision    bool
 	Scheduler     Scheduler
 	ModelAlias    string
 	NewID         ids.Generator
 	Now           func() time.Time
+}
+
+type Capabilities struct {
+	VisionSemanticEnabled bool   `json:"vision_semantic_enabled"`
+	ASREnabled            bool   `json:"asr_enabled"`
+	VisionModelAlias      string `json:"vision_model_alias"`
+	ProfileVersion        string `json:"profile_version"`
+}
+
+func (s Service) Capabilities() Capabilities {
+	return Capabilities{
+		VisionSemanticEnabled: s.RealVision,
+		ASREnabled:            s.Transcriber != nil,
+		VisionModelAlias:      s.modelAlias(),
+		ProfileVersion:        DefaultProfileVersion,
+	}
 }
 
 type CreateRequest struct {
@@ -95,7 +113,9 @@ func (s Service) Request(ctx context.Context, actor contract.ActorContext, proje
 		PromptVersion  string `json:"prompt_version"`
 		SchemaVersion  string `json:"schema_version"`
 		ModelAlias     string `json:"model_alias"`
-	}{asset.Version.SHA256, profile, DefaultProfileVersion, PromptVersion, SchemaVersion, s.modelAlias()})
+		RealVision     bool   `json:"real_vision"`
+		ASREnabled     bool   `json:"asr_enabled"`
+	}{asset.Version.SHA256, profile, DefaultProfileVersion, PromptVersion, SchemaVersion, s.modelAlias(), s.RealVision, s.Transcriber != nil})
 	if err != nil {
 		return Artifact{}, false, err
 	}
@@ -116,6 +136,10 @@ func (s Service) Request(ctx context.Context, actor contract.ActorContext, proje
 		VisibleText: emptyEvidence(), Observations: emptyEvidence(), Inferences: emptyEvidence(),
 		Risks: emptyEvidence(), Unknowns: emptyEvidence(), Keyframes: emptyKeyframes(),
 		Transcript: emptyEvidence(), Warnings: emptyWarnings(),
+		Classifications: Classifications{
+			MediaFormat:  Classification{Code: "unknown", EvidenceRefs: []string{}},
+			ContentStyle: Classification{Code: "unknown", EvidenceRefs: []string{}},
+		},
 		Lineage:   ModelLineage{ModelAlias: s.modelAlias(), PromptVersion: PromptVersion, SchemaVersion: SchemaVersion},
 		CreatedBy: actor.Principal, CreatedAt: now, UpdatedAt: now,
 	}
@@ -182,16 +206,23 @@ type visionCandidate struct {
 }
 
 type visionOutput struct {
-	Summary      string            `json:"summary"`
-	VisibleText  []visionCandidate `json:"visible_text"`
-	Observations []visionCandidate `json:"observations"`
-	Inferences   []visionCandidate `json:"inferences"`
-	Risks        []visionCandidate `json:"risks"`
-	Unknowns     []visionCandidate `json:"unknowns"`
+	Summary      string               `json:"summary"`
+	VisibleText  []visionCandidate    `json:"visible_text"`
+	Observations []visionCandidate    `json:"observations"`
+	Inferences   []visionCandidate    `json:"inferences"`
+	Risks        []visionCandidate    `json:"risks"`
+	Unknowns     []visionCandidate    `json:"unknowns"`
+	ContentStyle visionClassification `json:"content_style"`
+}
+
+type visionClassification struct {
+	Code       string  `json:"code"`
+	Confidence float64 `json:"confidence"`
+	FrameIndex int     `json:"frame_index"`
 }
 
 func visionOutputSchema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","additionalProperties":false,"required":["summary","visible_text","observations","inferences","risks","unknowns"],"properties":{"summary":{"type":"string","maxLength":800},"visible_text":{"$ref":"#/$defs/items"},"observations":{"$ref":"#/$defs/items"},"inferences":{"$ref":"#/$defs/items"},"risks":{"$ref":"#/$defs/items"},"unknowns":{"$ref":"#/$defs/items"}},"$defs":{"items":{"type":"array","maxItems":24,"items":{"type":"object","additionalProperties":false,"required":["text","confidence","frame_index"],"properties":{"text":{"type":"string","maxLength":500},"confidence":{"type":"number","minimum":0,"maximum":1},"frame_index":{"type":"integer","minimum":0,"maximum":7}}}}}}`)
+	return json.RawMessage(`{"type":"object","additionalProperties":false,"required":["summary","visible_text","observations","inferences","risks","unknowns","content_style"],"properties":{"summary":{"type":"string","maxLength":800},"visible_text":{"$ref":"#/$defs/items"},"observations":{"$ref":"#/$defs/items"},"inferences":{"$ref":"#/$defs/items"},"risks":{"$ref":"#/$defs/items"},"unknowns":{"$ref":"#/$defs/items"},"content_style":{"type":"object","additionalProperties":false,"required":["code","confidence","frame_index"],"properties":{"code":{"type":"string","enum":["unknown","single_speaker","multiple_speakers","human_product_demo_no_voice","product_voiceover","product_demo_no_voice","story_drama"]},"confidence":{"type":"number","minimum":0,"maximum":1},"frame_index":{"type":"integer","minimum":0,"maximum":7}}}},"$defs":{"items":{"type":"array","maxItems":24,"items":{"type":"object","additionalProperties":false,"required":["text","confidence","frame_index"],"properties":{"text":{"type":"string","maxLength":500},"confidence":{"type":"number","minimum":0,"maximum":1},"frame_index":{"type":"integer","minimum":0,"maximum":7}}}}}}`)
 }
 
 func (s Service) modelAlias() string {

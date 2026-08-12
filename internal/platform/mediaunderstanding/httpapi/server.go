@@ -20,11 +20,16 @@ type Server struct {
 func New(service mediaunderstanding.Service) *Server {
 	server := &Server{Service: service}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/media/v1/capabilities", server.capabilities)
 	mux.HandleFunc("POST /api/media/v1/projects/{project_id}/understandings", server.create)
 	mux.HandleFunc("GET /api/media/v1/projects/{project_id}/understandings/{artifact_id}", server.get)
 	mux.HandleFunc("GET /api/media/v1/projects/{project_id}/assets/{asset_id}/versions/{version}/understanding", server.getLatestForAsset)
 	server.mux = mux
 	return server
+}
+
+func (s *Server) capabilities(writer http.ResponseWriter, _ *http.Request) {
+	writeJSON(writer, http.StatusOK, s.Service.Capabilities())
 }
 
 func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {

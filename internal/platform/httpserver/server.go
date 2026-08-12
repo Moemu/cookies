@@ -193,6 +193,7 @@ type KnowledgeManager interface {
 	GetDocumentPreview(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.DocumentPreview, error)
 	GetDocumentVisionFallbackCapability(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.DocumentVisionFallbackCapabilityView, error)
 	OpenDocumentContent(context.Context, contract.ActorContext, contract.ProjectID, string) (io.ReadCloser, assets.ObjectInfo, string, error)
+	OpenDocumentOriginal(context.Context, contract.ActorContext, contract.ProjectID, string) (io.ReadCloser, knowledge.Document, error)
 	Search(context.Context, contract.ActorContext, contract.ProjectID, knowledge.SearchRequest) ([]knowledge.SearchResult, error)
 	CreateDocument(context.Context, contract.ActorContext, contract.ProjectID, string, string, io.Reader, int64) (knowledge.Document, error)
 	CancelDocumentParse(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.JobControl, error)
@@ -406,6 +407,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/document-vision-reconciliation-candidates", server.requireProject(server.requireScope(knowledge.ScopeDocumentVisionReconcile, http.HandlerFunc(server.listKnowledgeDocumentVisionReconciliationCandidates))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/document-vision-reconciliations/{reconciliation_id}", server.requireProject(server.requireScope(knowledge.ScopeDocumentVisionReconcile, http.HandlerFunc(server.getKnowledgeDocumentVisionReconciliation))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/document-vision-reconciliations/{reconciliation_id}/confirm", server.requireProject(server.requireScope(knowledge.ScopeDocumentVisionReconcile, http.HandlerFunc(server.confirmKnowledgeDocumentVisionReconciliation))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/original", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.openKnowledgeDocumentOriginal))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/search", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.searchKnowledge))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/research-runs", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.runKnowledgeResearch))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-runs", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.listKnowledgeResearchRuns))))
@@ -853,7 +855,7 @@ func (s *Server) createKnowledgeDocument(writer http.ResponseWriter, request *ht
 	file, header, err := request.FormFile("file")
 	if err != nil {
 		writeProblem(writer, http.StatusBadRequest, contract.Error{
-			Code: "INVALID_DOCUMENT", Message: "必须提供名为 file 的 .md 或 .docx 文件",
+			Code: "INVALID_DOCUMENT", Message: "必须提供名为 file 的 MD、TXT、DOCX、XLSX 或 PDF 文件",
 			RequestID: requestContext.RequestID, Retryable: false,
 		})
 		return
@@ -865,7 +867,7 @@ func (s *Server) createKnowledgeDocument(writer http.ResponseWriter, request *ht
 	)
 	if errors.Is(err, knowledge.ErrInvalidDocument) {
 		writeProblem(writer, http.StatusBadRequest, contract.Error{
-			Code: "INVALID_DOCUMENT", Message: "仅支持有效的 .md 或 .docx，单个文件不超过 10MB",
+			Code: "INVALID_DOCUMENT", Message: "仅支持有效的 MD、TXT、DOCX、XLSX 或 PDF，单个文件不超过 10MB",
 			RequestID: requestContext.RequestID, Retryable: false,
 		})
 		return

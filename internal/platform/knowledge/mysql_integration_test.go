@@ -236,15 +236,35 @@ func TestKnowledgeCenterMySQLProjection(t *testing.T) {
 	service.Runner = researchRunner{}
 	service.Scheduler = nil
 
+	// 解析服务没配好时直接拒收，不落一份 parse_failed 的空壳文档——上传成功却读不出
+	// 任何内容，在使用者那里跟「传上去了」是一回事，回头没人知道这份要重传。
+	unavailableBytes := []byte("%PDF-1.7\n1 0 obj\n<< /Title (unavailable) >>\nendobj\n%%EOF\n")
+	if _, err := service.CreateDocument(
+		ctx, actor, projectID, "unavailable-parser.pdf", "application/pdf",
+		bytes.NewReader(unavailableBytes), int64(len(unavailableBytes)),
+	); err == nil {
+		t.Fatal("expected CreateDocument to reject a PDF while no parser is configured")
+	}
+
 	service.DocumentParser = parserStub{}
 	service.DocumentScheduler = parseSchedulerStub{}
-	pdfBytes := []byte("%PDF-1.7 fake integration payload")
+	pdfBytes := []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
 	pdf, err := service.CreateDocument(
 		ctx, actor, projectID, "market-report.pdf", "application/pdf",
 		bytes.NewReader(pdfBytes), int64(len(pdfBytes)),
 	)
 	if err != nil || pdf.Status != "parse_queued" {
 		t.Fatalf("queued PDF=%#v err=%v", pdf, err)
+	}
+	// 原件下载（来自上游）：不管解析排到哪一步，原文件都要能按项目权限重新取回。
+	originalStream, originalDocument, err := service.OpenDocumentOriginal(ctx, actor, projectID, pdf.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalPDFBytes, originalReadErr := io.ReadAll(originalStream)
+	_ = originalStream.Close()
+	if originalReadErr != nil || !bytes.Equal(originalPDFBytes, pdfBytes) || originalDocument.ID != pdf.ID {
+		t.Fatalf("original PDF=%q document=%#v err=%v", originalPDFBytes, originalDocument, originalReadErr)
 	}
 	payload, _ := json.Marshal(map[string]string{"document_id": pdf.ID})
 	if _, err := service.HandleDocumentParseJob(ctx, jobruntime.Claim{
