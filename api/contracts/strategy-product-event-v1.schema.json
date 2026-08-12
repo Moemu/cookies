@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "strategy-product-event-v1.schema.json",
+  "title": "Strategy Product Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "id", "organization_id", "project_id", "workspace_id", "event_type", "stage", "actor_kind", "actor_id_hash", "resource", "duration_ms", "outcome", "attributes", "occurred_at"],
+  "properties": {
+    "contract_version": {"const": "strategy-product-event/v1"},
+    "id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "organization_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "project_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "workspace_id": {"oneOf": [{"type": "null"}, {"type": "string", "minLength": 1, "maxLength": 96}]},
+    "event_type": {"enum": ["workspace.opened", "stage.viewed", "assistant.command_submitted", "assistant.first_ack", "assistant.first_meaningful_update", "assistant.proposal_accepted", "assistant.proposal_edited", "assistant.proposal_ignored", "research.started", "research.finding_verified", "research.completed", "research.partial", "research.failed", "research.cancelled", "research.proposal_applied", "research.proposal_stale", "document.parse_started", "document.ready", "document.partial", "document.failed", "document.vision_fallback", "brief.confirmed", "strategy.confirmed", "review.submitted", "review.approved", "review.returned", "handoff.created", "activity.stalled", "activity.retried"]},
+    "stage": {"oneOf": [{"type": "null"}, {"enum": ["intake", "brief", "strategy", "review", "handoff"]}]},
+    "actor_kind": {"enum": ["user", "service"]},
+    "actor_id_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "resource": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["type", "id", "version"],
+          "properties": {
+            "type": {"type": "string", "minLength": 1, "maxLength": 48},
+            "id": {"type": "string", "minLength": 1, "maxLength": 96},
+            "version": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}
+          }
+        }
+      ]
+    },
+    "duration_ms": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]},
+    "outcome": {"oneOf": [{"type": "null"}, {"enum": ["accepted", "viewed", "succeeded", "partial", "failed", "cancelled", "stalled", "retried", "edited", "ignored", "stale", "approved", "returned"]}]},
+    "attributes": {
+      "type": "object", "maxProperties": 12,
+      "properties": {
+        "capability": {"$ref": "#/$defs/identifier"},
+        "finding_count": {"$ref": "#/$defs/count"},
+        "mode": {"$ref": "#/$defs/identifier"},
+        "panel": {"$ref": "#/$defs/identifier"},
+        "parse_strategy": {"$ref": "#/$defs/identifier"},
+        "proposal_kind": {"$ref": "#/$defs/identifier"},
+        "quality_tier": {"$ref": "#/$defs/identifier"},
+        "reason_code": {"$ref": "#/$defs/identifier"},
+        "retry_count": {"$ref": "#/$defs/count"},
+        "review_mode": {"$ref": "#/$defs/identifier"},
+        "round": {"$ref": "#/$defs/count"},
+        "source_count": {"$ref": "#/$defs/count"},
+        "status": {"$ref": "#/$defs/identifier"}
+      },
+      "additionalProperties": false
+    },
+    "occurred_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$"},
+    "count": {"type": "integer", "minimum": 0}
+  }
+}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -46,6 +47,7 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		t.Fatal(err)
 	}
 	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
+	integrationDispatchAt := time.Now().UTC().Add(24 * time.Hour)
 	organizationID := contract.OrganizationID("org_strategy_it_" + suffix)
 	projectID := contract.ProjectID("project_strategy_it_" + suffix)
 	userID := "user_strategy_it_" + suffix
@@ -74,12 +76,19 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	}
 	service := strategy.Service{
 		DB: db, Projects: projectService, Knowledge: integrationKnowledgeReader{reference.ID: reference},
-		Agents: agent.MySQLStore{DB: db}, V2Enabled: true,
+		Agents: integrationAgentWriter{AvailableAt: integrationDispatchAt}, ProductEvents: strategy.MySQLProductEventWriter{DB: db}, V2Enabled: true,
 		CreativeTaskPlanningEnabled: true,
 		CreativeTaskPromptVersion:   "strategy.creative_task.generate.v2",
 	}
 	if err := service.EnsureCreativeBusinessCatalog(ctx); err != nil {
 		t.Fatalf("seed creative business catalog: %v", err)
+	}
+	formalPolicy, err := service.UpdateReviewPolicy(ctx, actor, projectID, strategy.UpdateReviewPolicyRequest{
+		Mode: strategy.ReviewModeDesignatedApprovers, ApproverUserIDs: []string{actor.Principal.ID},
+		AllowSelfApproval: true, ExpectedVersion: 0,
+	})
+	if err != nil || formalPolicy.Mode != strategy.ReviewModeDesignatedApprovers {
+		t.Fatalf("configure formal review policy: policy=%#v err=%v", formalPolicy, err)
 	}
 
 	createdTask, duplicate, err := service.CreateTask(
@@ -138,9 +147,18 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || duplicate {
 		t.Fatalf("create conversation: duplicate=%v err=%v", duplicate, err)
 	}
-	messageResult, duplicate, err := service.SendMessage(ctx, actor, contract.IdempotencyKey("message_"+suffix), bundle.Conversation.ID, "目标：新品认知；受众：研发负责人；卖点：缩短研发周期")
+	initialRequirement := "目标：新品认知；受众：研发负责人；卖点：缩短研发周期"
+	messageResult, duplicate, err := service.SendMessage(ctx, actor, contract.IdempotencyKey("message_"+suffix), bundle.Conversation.ID, initialRequirement)
 	if err != nil || duplicate {
 		t.Fatalf("send message: duplicate=%v err=%v", duplicate, err)
+	}
+	var messageTaskInput struct {
+		ContextManifest strategy.ProjectContextManifest `json:"context_manifest"`
+	}
+	if err := json.Unmarshal(messageResult.AgentTask.InputSnapshot, &messageTaskInput); err != nil ||
+		messageTaskInput.ContextManifest.Stage != "intake" ||
+		messageTaskInput.ContextManifest.WorkspaceRef.ID != workspace.ID {
+		t.Fatalf("message context manifest=%#v err=%v", messageTaskInput.ContextManifest, err)
 	}
 	messages, err := service.ListMessages(ctx, actor, bundle.Conversation.ID, messageResult.Message.ID, 50)
 	if err != nil || len(messages) != 0 {
@@ -151,6 +169,172 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	}
 	if err := runAgentTaskThroughRuntime(ctx, db, service, messageResult.AgentTask); err != nil {
 		t.Fatalf("extract brief: %v", err)
+	}
+	memory, err := service.GetConversationMemory(ctx, actor, bundle.Conversation.ID)
+	if err != nil || memory.SummaryKind != "deterministic" || memory.SummaryContentHash.Validate() != nil ||
+		memory.RecentWindowStartMessageID == "" || memory.ArtifactManifest.BriefRef.ID == "" {
+		t.Fatalf("conversation memory=%#v err=%v", memory, err)
+	}
+	memory, err = service.CompactConversationMemory(ctx, actor, bundle.Conversation.ID)
+	if err != nil || memory.Version < 2 || memory.LastCompactedAt == nil {
+		t.Fatalf("compacted conversation memory=%#v err=%v", memory, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE strategy_conversation_memories
+		SET summary_content_hash = ''
+		WHERE organization_id = ? AND project_id = ? AND conversation_id = ?`,
+		actor.OrganizationID, projectID, bundle.Conversation.ID); err != nil {
+		t.Fatalf("simulate legacy conversation memory: %v", err)
+	}
+	draftBeforeProposal, err := service.GetTaskBriefDraft(ctx, actor, bundle.Task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistantTurn, duplicate, err := service.SendMessageV2(
+		ctx, actor, contract.IdempotencyKey("assistant_message_"+suffix), bundle.Conversation.ID,
+		strategy.SendMessageV2Request{
+			ContractVersion: strategy.MessageCreateContractV2,
+			Content:         []strategy.MessageContentBlock{{Type: "text", Text: "品牌：Assistant Brand"}},
+			ContextStage:    "brief",
+			ContextSurface:  "assistant",
+		},
+	)
+	if err != nil || duplicate {
+		t.Fatalf("send assistant turn: duplicate=%v err=%v", duplicate, err)
+	}
+	var assistantTaskInput struct {
+		ContextSurface string `json:"context_surface"`
+	}
+	if err := json.Unmarshal(assistantTurn.AgentTask.InputSnapshot, &assistantTaskInput); err != nil || assistantTaskInput.ContextSurface != "assistant" {
+		t.Fatalf("assistant task surface=%q err=%v", assistantTaskInput.ContextSurface, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, assistantTurn.AgentTask); err != nil {
+		t.Fatalf("run assistant proposal: %v", err)
+	}
+	memory, err = service.GetConversationMemory(ctx, actor, bundle.Conversation.ID)
+	if err != nil || memory.SummaryContentHash.Validate() != nil {
+		t.Fatalf("legacy conversation memory was not repaired: memory=%#v err=%v", memory, err)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT event_type, stage, duration_ms
+		FROM strategy_product_events
+		WHERE organization_id = ? AND project_id = ? AND resource_type = 'conversation_message' AND resource_id = ?
+		ORDER BY occurred_at, id`, actor.OrganizationID, projectID, assistantTurn.Message.ID)
+	if err != nil {
+		t.Fatalf("read assistant latency events: %v", err)
+	}
+	assistantEvents := map[string]int64{}
+	for rows.Next() {
+		var eventType, stage string
+		var duration sql.NullInt64
+		if err := rows.Scan(&eventType, &stage, &duration); err != nil {
+			t.Fatal(err)
+		}
+		if stage != "brief" || eventType != strategy.ProductEventAssistantCommandSubmitted && (!duration.Valid || duration.Int64 < 0) {
+			t.Fatalf("assistant event %s stage=%s duration=%#v", eventType, stage, duration)
+		}
+		assistantEvents[eventType]++
+	}
+	_ = rows.Close()
+	for _, eventType := range []string{
+		strategy.ProductEventAssistantCommandSubmitted,
+		strategy.ProductEventAssistantFirstAck,
+		strategy.ProductEventAssistantFirstMeaningfulUpdate,
+	} {
+		if assistantEvents[eventType] != 1 {
+			t.Fatalf("assistant event counts = %#v", assistantEvents)
+		}
+	}
+	draftAfterProposal, err := service.GetTaskBriefDraft(ctx, actor, bundle.Task.ID)
+	if err != nil || draftAfterProposal.Version != draftBeforeProposal.Version {
+		t.Fatalf("assistant mutated Brief before acceptance: before=%d after=%d err=%v", draftBeforeProposal.Version, draftAfterProposal.Version, err)
+	}
+	proposals, err := service.ListArtifactProposals(ctx, actor, workspace.ID, "proposed")
+	if err != nil || len(proposals) != 1 || len(proposals[0].Operations) == 0 {
+		t.Fatalf("assistant proposals=%#v err=%v", proposals, err)
+	}
+	appliedProposal, duplicate, err := service.ApplyArtifactProposal(
+		ctx, actor, contract.IdempotencyKey("assistant_apply_"+suffix), proposals[0].ID,
+		strategy.ApplyArtifactProposalRequest{ExpectedVersion: proposals[0].Version},
+	)
+	if err != nil || duplicate || appliedProposal.Proposal.Status != "applied" || appliedProposal.Draft.Version != draftBeforeProposal.Version+1 {
+		t.Fatalf("apply assistant proposal: duplicate=%v result=%#v err=%v", duplicate, appliedProposal, err)
+	}
+	replayedProposal, duplicate, err := service.ApplyArtifactProposal(
+		ctx, actor, contract.IdempotencyKey("assistant_apply_"+suffix), proposals[0].ID,
+		strategy.ApplyArtifactProposalRequest{ExpectedVersion: proposals[0].Version},
+	)
+	if err != nil || !duplicate || replayedProposal.Proposal.ID != proposals[0].ID {
+		t.Fatalf("replay assistant proposal: duplicate=%v result=%#v err=%v", duplicate, replayedProposal, err)
+	}
+	ignoredTurn, _, err := service.SendMessageV2(
+		ctx, actor, contract.IdempotencyKey("assistant_ignore_message_"+suffix), bundle.Conversation.ID,
+		strategy.SendMessageV2Request{
+			ContractVersion: strategy.MessageCreateContractV2,
+			Content:         []strategy.MessageContentBlock{{Type: "text", Text: "地区：中国大陆"}},
+			ContextStage:    "brief",
+			ContextSurface:  "assistant",
+		},
+	)
+	if err != nil {
+		t.Fatalf("send ignored assistant turn: %v", err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, ignoredTurn.AgentTask); err != nil {
+		t.Fatalf("run ignored assistant proposal: %v", err)
+	}
+	proposals, err = service.ListArtifactProposals(ctx, actor, workspace.ID, "proposed")
+	if err != nil || len(proposals) != 1 {
+		t.Fatalf("proposal to ignore=%#v err=%v", proposals, err)
+	}
+	ignoredProposal, duplicate, err := service.IgnoreArtifactProposal(
+		ctx, actor, contract.IdempotencyKey("assistant_ignore_"+suffix), proposals[0].ID, proposals[0].Version,
+	)
+	if err != nil || duplicate || ignoredProposal.Status != "ignored" {
+		t.Fatalf("ignore assistant proposal: duplicate=%v proposal=%#v err=%v", duplicate, ignoredProposal, err)
+	}
+	staleTurn, _, err := service.SendMessageV2(
+		ctx, actor, contract.IdempotencyKey("assistant_stale_message_"+suffix), bundle.Conversation.ID,
+		strategy.SendMessageV2Request{
+			ContractVersion: strategy.MessageCreateContractV2,
+			Content:         []strategy.MessageContentBlock{{Type: "text", Text: "语言：zh-CN"}},
+			ContextStage:    "brief",
+			ContextSurface:  "assistant",
+		},
+	)
+	if err != nil {
+		t.Fatalf("send stale assistant turn: %v", err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, staleTurn.AgentTask); err != nil {
+		t.Fatalf("run stale assistant proposal: %v", err)
+	}
+	proposals, err = service.ListArtifactProposals(ctx, actor, workspace.ID, "proposed")
+	if err != nil || len(proposals) != 1 {
+		t.Fatalf("proposal to stale=%#v err=%v", proposals, err)
+	}
+	currentDraft, err := service.GetTaskBriefDraft(ctx, actor, bundle.Task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentDraft, _, err = service.PatchBriefDraft(
+		ctx, actor, contract.IdempotencyKey("stale_proposal_target_"+suffix), bundle.Task.ID,
+		strategy.BriefPatch{ExpectedVersion: currentDraft.Version, Operations: []strategy.BriefPatchOperation{{
+			Op: "set", FieldPath: "budget.total", Value: json.RawMessage(`"30 万元"`),
+		}}},
+	)
+	if err != nil {
+		t.Fatalf("advance proposal target: %v", err)
+	}
+	if _, _, err := service.ApplyArtifactProposal(
+		ctx, actor, contract.IdempotencyKey("assistant_stale_apply_"+suffix), proposals[0].ID,
+		strategy.ApplyArtifactProposalRequest{ExpectedVersion: proposals[0].Version},
+	); !errors.Is(err, strategy.ErrVersionConflict) {
+		t.Fatalf("stale proposal apply error=%v", err)
+	}
+	staleProposals, err := service.ListArtifactProposals(ctx, actor, workspace.ID, "stale")
+	if err != nil || len(staleProposals) != 1 || staleProposals[0].ID != proposals[0].ID {
+		t.Fatalf("stale proposals=%#v err=%v", staleProposals, err)
+	}
+	memory, err = service.GetConversationMemory(ctx, actor, bundle.Conversation.ID)
+	if err != nil {
+		t.Fatalf("memory after assistant proposal: %v", err)
 	}
 	draft, err := service.GetTaskBriefDraft(ctx, actor, bundle.Task.ID)
 	if err != nil {
@@ -172,11 +356,134 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || !draft.Completeness.Ready {
 		t.Fatalf("patch brief: ready=%v err=%v", draft.Completeness.Ready, err)
 	}
+	manifest, err := service.BuildProjectContextManifest(ctx, actor, workspace.ID, "brief")
+	if err != nil || manifest.BriefRef == nil || manifest.BriefRef.Version != draft.Version ||
+		len(manifest.SelectedSourceRefs) != 1 || manifest.MemoryVersion != memory.Version {
+		t.Fatalf("project context manifest=%#v err=%v", manifest, err)
+	}
+	excludedSourceTurn, duplicate, err := service.SendMessageV2(
+		ctx, actor, contract.IdempotencyKey("assistant_excluded_source_"+suffix), bundle.Conversation.ID,
+		strategy.SendMessageV2Request{
+			ContractVersion:   strategy.MessageCreateContractV2,
+			Content:           []strategy.MessageContentBlock{{Type: "text", Text: "检查当前阶段，不修改 Brief"}},
+			ContextStage:      "brief",
+			ContextSurface:    "assistant",
+			ExcludedSourceIDs: []string{reference.ID},
+		},
+	)
+	if err != nil || duplicate {
+		t.Fatalf("send assistant turn with excluded source: duplicate=%v err=%v", duplicate, err)
+	}
+	var excludedSourceInput struct {
+		ContextManifest strategy.ProjectContextManifest `json:"context_manifest"`
+	}
+	if err := json.Unmarshal(excludedSourceTurn.AgentTask.InputSnapshot, &excludedSourceInput); err != nil ||
+		len(excludedSourceInput.ContextManifest.SelectedSourceRefs) != 0 {
+		t.Fatalf("assistant exclusion manifest=%#v err=%v", excludedSourceInput.ContextManifest, err)
+	}
+	manifestAfterExclusion, err := service.BuildProjectContextManifest(ctx, actor, workspace.ID, "brief")
+	if err != nil || len(manifestAfterExclusion.SelectedSourceRefs) != 1 || manifestAfterExclusion.SelectedSourceRefs[0].ID != reference.ID {
+		t.Fatalf("assistant exclusion changed authoritative sources=%#v err=%v", manifestAfterExclusion.SelectedSourceRefs, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, excludedSourceTurn.AgentTask); err != nil {
+		t.Fatalf("run assistant turn with source exclusion: %v", err)
+	}
 	evidenceReferences, err := service.ListEvidenceReferences(ctx, actor, projectID, reference.ID)
 	if err != nil || len(evidenceReferences) != 1 ||
 		evidenceReferences[0].TargetType != "brief_draft" ||
 		evidenceReferences[0].TargetVersion != draft.Version {
 		t.Fatalf("draft evidence references=%#v err=%v", evidenceReferences, err)
+	}
+	researchRunID := "researchrun_strategy_" + suffix
+	researchFindingOne := "researchfinding_proposition_" + suffix
+	researchFindingTwo := "researchfinding_constraints_" + suffix
+	researchNow := time.Now().UTC()
+	for _, fixture := range []struct {
+		id, claim, field, implication, hash string
+		value                               json.RawMessage
+	}{
+		{researchFindingOne, "研发负责人优先采用可量化证据", "proposition", "把核心主张改为可核验的交付结果", "sha256:" + strings.Repeat("a", 64), json.RawMessage(`"用可验证精度与交付结果缩短研发决策周期"`)},
+		{researchFindingTwo, "受众反感无法验证的绝对化承诺", "constraints", "补充证据与承诺边界", "sha256:" + strings.Repeat("b", 64), json.RawMessage(`["所有精度与交付承诺必须附可追溯证据"]`)},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO platform_research_findings
+			(id, contract_version, organization_id, project_id, research_run_id, round_number,
+			 claim, status, time_scope, confidence, supporting_source_ids, conflicting_source_ids,
+			 target_artifact, target_field_path, implication, proposed_value, content_hash, created_at, updated_at)
+			VALUES (?, 'strategy-research-finding/v1', ?, ?, ?, 1, ?, 'verified', '2026-H1', 'high',
+			 JSON_ARRAY('source_a', 'source_b'), JSON_ARRAY(), 'brief', ?, ?, ?, ?, ?, ?)`,
+			fixture.id, actor.OrganizationID, projectID, researchRunID, fixture.claim,
+			fixture.field, fixture.implication, fixture.value, fixture.hash, researchNow, researchNow); err != nil {
+			t.Fatalf("insert research finding fixture: %v", err)
+		}
+	}
+	if err := service.OnResearchCompleted(ctx, knowledge.ResearchRun{
+		ID: researchRunID, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		RunMode: "deep", Status: "completed",
+		SourceRef: &contract.ResourceRef{Type: "strategy_workspace", ID: workspace.ID},
+		Findings: []knowledge.ResearchFinding{
+			{ID: researchFindingOne, Status: "verified", Confidence: "high", Target: knowledge.ResearchFindingTarget{Artifact: "brief", FieldPath: "proposition"}, Implication: "把核心主张改为可核验的交付结果", ProposedValue: json.RawMessage(`"用可验证精度与交付结果缩短研发决策周期"`)},
+			{ID: researchFindingTwo, Status: "verified", Confidence: "high", Target: knowledge.ResearchFindingTarget{Artifact: "brief", FieldPath: "constraints"}, Implication: "补充证据与承诺边界", ProposedValue: json.RawMessage(`["所有精度与交付承诺必须附可追溯证据"]`)},
+		},
+	}); err != nil {
+		t.Fatalf("create research adoption proposals: %v", err)
+	}
+	researchProposals, err := service.ListResearchAdoptionProposals(ctx, actor, workspace.ID, researchRunID)
+	if err != nil || len(researchProposals) != 2 {
+		t.Fatalf("research proposals=%#v err=%v", researchProposals, err)
+	}
+	var propositionProposal, constraintsProposal strategy.ArtifactProposal
+	for _, proposal := range researchProposals {
+		switch proposal.Operations[0].FieldPath {
+		case "proposition":
+			propositionProposal = proposal
+		case "constraints":
+			constraintsProposal = proposal
+		}
+	}
+	appliedResearch, duplicate, err := service.ApplyResearchAdoptionProposal(
+		ctx, actor, contract.IdempotencyKey("research_apply_"+suffix), propositionProposal.ID,
+		strategy.ApplyArtifactProposalRequest{ExpectedVersion: propositionProposal.Version},
+	)
+	if err != nil || duplicate || appliedResearch.Brief == nil ||
+		appliedResearch.Brief.Document.Proposition != "用可验证精度与交付结果缩短研发决策周期" {
+		t.Fatalf("apply research proposal=%#v duplicate=%v err=%v", appliedResearch, duplicate, err)
+	}
+	if _, _, err := service.ApplyResearchAdoptionProposal(
+		ctx, actor, contract.IdempotencyKey("research_stale_"+suffix), constraintsProposal.ID,
+		strategy.ApplyArtifactProposalRequest{ExpectedVersion: constraintsProposal.Version},
+	); !errors.Is(err, strategy.ErrVersionConflict) {
+		t.Fatalf("stale research proposal error=%v", err)
+	}
+	staleResearch, err := service.ListResearchAdoptionProposals(ctx, actor, workspace.ID, researchRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, proposal := range staleResearch {
+		if proposal.ID == constraintsProposal.ID {
+			constraintsProposal = proposal
+		}
+	}
+	if constraintsProposal.Status != "stale" || constraintsProposal.StaleReason == "" {
+		t.Fatalf("stale research proposal=%#v", constraintsProposal)
+	}
+	remapped, duplicate, err := service.RemapResearchAdoptionProposal(
+		ctx, actor, contract.IdempotencyKey("research_remap_"+suffix), constraintsProposal.ID,
+		strategy.RemapResearchProposalRequest{ExpectedVersion: constraintsProposal.Version},
+	)
+	if err != nil || duplicate || remapped.Status != "proposed" || remapped.SupersedesProposalID != constraintsProposal.ID {
+		t.Fatalf("remap research proposal=%#v duplicate=%v err=%v", remapped, duplicate, err)
+	}
+	appliedRemap, _, err := service.ApplyResearchAdoptionProposal(
+		ctx, actor, contract.IdempotencyKey("research_apply_remap_"+suffix), remapped.ID,
+		strategy.ApplyArtifactProposalRequest{ExpectedVersion: remapped.Version},
+	)
+	if err != nil || appliedRemap.Brief == nil || len(appliedRemap.Brief.Document.Constraints) != 1 {
+		t.Fatalf("apply remapped research proposal=%#v err=%v", appliedRemap, err)
+	}
+	draft = *appliedRemap.Brief
+	findingEvidence, err := service.ListEvidenceReferences(ctx, actor, projectID, researchFindingOne)
+	if err != nil || len(findingEvidence) != 1 || findingEvidence[0].EvidenceType != "research_finding" {
+		t.Fatalf("research finding evidence=%#v err=%v", findingEvidence, err)
 	}
 	briefVersion, duplicate, err := service.ConfirmBrief(ctx, actor, contract.IdempotencyKey("confirm_"+suffix), bundle.Task.ID, draft.Version)
 	if err != nil || duplicate {
@@ -344,7 +651,7 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		t.Fatalf("get generation metadata: %v", err)
 	}
 	if metadata.GenerationMode != "deterministic" ||
-		metadata.PromptVersion != "strategy.generate.v4" ||
+		metadata.PromptVersion != "strategy.generate.v5" ||
 		len(metadata.SkillVersions) < 3 ||
 		len(metadata.SkillSnapshotHashes) < 2 ||
 		len(metadata.GenerationContextHash) != 64 ||
@@ -352,9 +659,37 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		metadata.QualityReport == nil || !metadata.QualityReport.Passed {
 		t.Fatalf("generation metadata=%#v", metadata)
 	}
+	service.Text = &provider.Service{TextAdapter: &deepReviewTextAdapter{}}
+	service.DeepReviewModelAlias = "cookies.text.deep_review"
+	perspectiveRevision, err := service.GetDraftRevision(ctx, actor, strategyDraft.ID, strategyDraft.CurrentRevision)
+	if err != nil {
+		t.Fatalf("get perspective revision: %v", err)
+	}
+	perspective, duplicate, err := service.StartStrategyPerspective(
+		ctx, actor, contract.IdempotencyKey("strategy_perspective_"+suffix), strategyDraft.ID,
+		strategy.StartStrategyPerspectiveRequest{
+			ExpectedRevision:    strategyDraft.CurrentRevision,
+			ExpectedContentHash: perspectiveRevision.ContentHash,
+		},
+	)
+	if err != nil || duplicate || perspective.Analysis.Status != "pending" ||
+		perspective.Analysis.TargetKind != "strategy_revision" || perspective.Analysis.ReviewID != "" ||
+		perspective.AgentTask.SourceType != "strategy_draft" {
+		t.Fatalf("start strategy perspective without review: result=%#v duplicate=%v err=%v", perspective, duplicate, err)
+	}
+	if err := runAgentTaskThroughRuntime(ctx, db, service, perspective.AgentTask); err != nil {
+		t.Fatalf("run strategy perspective: %v", err)
+	}
+	perspectiveResult, err := service.GetLatestStrategyPerspective(ctx, actor, strategyDraft.ID)
+	if err != nil || perspectiveResult.Status != "succeeded" || perspectiveResult.TargetKind != "strategy_revision" ||
+		perspectiveResult.ReviewID != "" || perspectiveResult.CandidateRevision != strategyDraft.CurrentRevision {
+		t.Fatalf("strategy perspective result=%#v err=%v", perspectiveResult, err)
+	}
 	review, duplicate, err := service.SubmitStrategy(ctx, actor, contract.IdempotencyKey("submit_"+suffix), strategyDraft.ID, strategyDraft.Version, strategyDraft.CurrentRevision)
-	if err != nil || duplicate {
-		t.Fatalf("submit strategy: duplicate=%v err=%v", duplicate, err)
+	if err != nil || duplicate || review.ReviewMode != strategy.ReviewModeDesignatedApprovers ||
+		len(review.Assignments) != 1 || review.Assignments[0].ReviewerUserID != actor.Principal.ID ||
+		review.Assignments[0].Status != "pending" {
+		t.Fatalf("submit formal strategy review: review=%#v duplicate=%v err=%v", review, duplicate, err)
 	}
 	service.Text = &provider.Service{TextAdapter: &deepReviewTextAdapter{failFirst: true}}
 	service.DeepReviewModelAlias = "cookies.text.deep_review"
@@ -449,6 +784,13 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err != nil || duplicate {
 		t.Fatalf("approve strategy: duplicate=%v err=%v", duplicate, err)
 	}
+	approvedFormalReview, err := service.GetReview(ctx, actor, review.ID)
+	if err != nil || approvedFormalReview.Status != "approved" ||
+		approvedFormalReview.ReviewMode != strategy.ReviewModeDesignatedApprovers ||
+		len(approvedFormalReview.Assignments) != 1 || approvedFormalReview.Assignments[0].Status != "approved" ||
+		!approvedFormalReview.CandidateContentHash.Equal(review.CandidateContentHash) {
+		t.Fatalf("formal review assignment/hash lineage: review=%#v err=%v", approvedFormalReview, err)
+	}
 	completedTask, err := service.GetTask(ctx, actor, bundle.Task.ID)
 	if err != nil || completedTask.Status != "completed" {
 		t.Fatalf("task after strategy approval=%#v err=%v", completedTask, err)
@@ -459,6 +801,80 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	}
 	if !stored.ContentHash.Equal(published.ContentHash) || stored.Snapshot.StrategyRevision != 2 {
 		t.Fatalf("unexpected package: %#v", stored)
+	}
+	packageSnapshotBefore := mustJSON(t, stored.Snapshot)
+	migrationNow := time.Now().UTC()
+	legacyDocument := strategyDraft.Revision.Document
+	legacyDirections := legacyDocument.CreativeDirections()
+	legacyDocument.ContractVersion = "strategy-draft/v2"
+	legacyDocument.CreativeRecommendations = legacyDirections
+	legacyDocument.CreativeStrategy = nil
+	legacyHash, err := contract.NewContentHash(legacyDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyStrategyID := "strategy_legacy_v2_" + suffix
+	legacyDocumentJSON := mustJSON(t, legacyDocument)
+	if _, err := db.ExecContext(ctx, `INSERT INTO strategy_drafts
+		(id, organization_id, project_id, task_id, brief_id, brief_version, project_context_version,
+		 status, current_revision, version, skill_versions, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', 1, 1, ?, ?, ?, ?)`,
+		legacyStrategyID, organizationID, projectID, bundle.Task.ID, legacyDocument.Lineage.BriefID,
+		legacyDocument.Lineage.BriefVersion, legacyDocument.Lineage.ProjectContextVersion,
+		mustJSON(t, legacyDocument.Lineage.SkillVersions), actor.Principal.ID, migrationNow, migrationNow); err != nil {
+		t.Fatalf("seed legacy strategy draft: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO strategy_draft_revisions
+		(strategy_id, revision, organization_id, project_id, base_revision, document, changed_sections,
+		 content_hash, lineage, created_by, created_at)
+		VALUES (?, 1, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`, legacyStrategyID, organizationID, projectID,
+		legacyDocumentJSON, mustJSON(t, []string{"all"}), legacyHash, mustJSON(t, legacyDocument.Lineage),
+		actor.Principal.ID, migrationNow); err != nil {
+		t.Fatalf("seed legacy strategy revision: %v", err)
+	}
+	legacyDraft, err := service.GetDraft(ctx, actor, legacyStrategyID)
+	if err != nil || legacyDraft.Revision == nil || legacyDraft.Revision.Document.ContractVersion != "strategy-draft/v2" {
+		t.Fatalf("read legacy strategy: draft=%#v err=%v", legacyDraft, err)
+	}
+	if _, _, err := service.PatchStrategy(ctx, actor, contract.IdempotencyKey("legacy_patch_"+suffix), legacyStrategyID, strategy.StrategySectionPatch{
+		ExpectedVersion: 1, BaseRevision: 1, Section: "creative_recommendations",
+		Value: mustJSON(t, []string{"legacy write must remain closed"}),
+	}); !errors.Is(err, strategy.ErrStrategyUpgradeRequired) {
+		t.Fatalf("legacy writer was not closed: %v", err)
+	}
+	dryRun, err := strategy.MigrateEditableStrategiesToV3(ctx, db, strategy.StrategyV3MigrationOptions{
+		OrganizationID: organizationID, Now: migrationNow.Add(time.Minute),
+	})
+	if err != nil || dryRun.Mode != "dry_run" || len(dryRun.Candidates) != 1 ||
+		dryRun.Candidates[0].StrategyID != legacyStrategyID || !dryRun.HistoricalHashesStable {
+		t.Fatalf("strategy v3 dry run=%#v err=%v", dryRun, err)
+	}
+	legacyAfterDryRun, err := service.GetDraft(ctx, actor, legacyStrategyID)
+	if err != nil || legacyAfterDryRun.CurrentRevision != 1 {
+		t.Fatalf("dry run mutated strategy: draft=%#v err=%v", legacyAfterDryRun, err)
+	}
+	backupPath := filepath.Join(t.TempDir(), "strategy-v3-backup.json")
+	applied, err := strategy.MigrateEditableStrategiesToV3(ctx, db, strategy.StrategyV3MigrationOptions{
+		Apply: true, BackupPath: backupPath, OrganizationID: organizationID, Now: migrationNow.Add(2 * time.Minute),
+	})
+	if err != nil || applied.Mode != "apply" || len(applied.Candidates) != 1 ||
+		!applied.HistoricalHashesStable || applied.HistoricalPackageCount < 1 {
+		t.Fatalf("strategy v3 apply=%#v err=%v", applied, err)
+	}
+	if _, err := os.Stat(backupPath); err != nil {
+		t.Fatalf("strategy v3 backup missing: %v", err)
+	}
+	legacyDraft, err = service.GetDraft(ctx, actor, legacyStrategyID)
+	if err != nil || legacyDraft.CurrentRevision != 2 || legacyDraft.Revision == nil ||
+		legacyDraft.Revision.BaseRevision == nil || *legacyDraft.Revision.BaseRevision != 1 ||
+		legacyDraft.Revision.Document.ContractVersion != "strategy-draft/v3" ||
+		legacyDraft.Revision.Document.CreativeStrategy == nil || len(legacyDraft.Revision.Document.CreativeRecommendations) != 0 {
+		t.Fatalf("legacy successor draft=%#v err=%v", legacyDraft, err)
+	}
+	storedAfterMigration, err := service.GetPackage(ctx, actor, projectID, published.PackageID, published.Version)
+	if err != nil || !storedAfterMigration.ContentHash.Equal(published.ContentHash) ||
+		string(mustJSON(t, storedAfterMigration.Snapshot)) != string(packageSnapshotBefore) {
+		t.Fatalf("historical package changed during successor migration: package=%#v err=%v", storedAfterMigration, err)
 	}
 	handoff, err := service.GetCreativeHandoff(ctx, actor, projectID, published.PackageID, published.Version)
 	if err != nil {
@@ -494,6 +910,23 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		packageBoundPlan.PackageRef == nil || packageBoundPlan.HandoffRef == nil ||
 		packageBoundPlan.SelectedRouteID != handoff.Routes[0].RouteID {
 		t.Fatalf("create package-bound task plan: plan=%#v duplicate=%v err=%v", packageBoundPlan, duplicate, err)
+	}
+	packageBoundPlan, duplicate, err = service.PatchCreativeTaskPlanAnswers(
+		ctx, actor, contract.IdempotencyKey("creative_package_overlay_"+suffix), packageBoundPlan.ID,
+		strategy.CreativeTaskAnswerPatch{
+			ExpectedVersion: packageBoundPlan.Version,
+			Operations: []strategy.CreativeTaskAnswerOperation{
+				{Op: "set", QuestionID: "audience_scene", Value: json.RawMessage(`"研发负责人准备内部评审材料时"`)},
+			},
+		},
+	)
+	if err != nil || duplicate || packageBoundPlan.CurrentRevision != 2 {
+		t.Fatalf("patch package-bound task overlay: plan=%#v duplicate=%v err=%v", packageBoundPlan, duplicate, err)
+	}
+	packageAfterTaskOverlay, err := service.GetPackage(ctx, actor, projectID, published.PackageID, published.Version)
+	if err != nil || !packageAfterTaskOverlay.ContentHash.Equal(published.ContentHash) ||
+		string(mustJSON(t, packageAfterTaskOverlay.Snapshot)) != string(packageSnapshotBefore) {
+		t.Fatalf("task overlay mutated immutable StrategyPackage: package=%#v err=%v", packageAfterTaskOverlay, err)
 	}
 	if _, err := service.GetCreativeHandoff(ctx, actor, contract.ProjectID("other_project"), published.PackageID, published.Version); !errors.Is(err, strategy.ErrProjectAccessDenied) {
 		t.Fatalf("cross-project handoff read error = %v", err)
@@ -728,6 +1161,67 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 		!strings.Contains(strings.Join(routeRevisionDraft.Revision.Document.ChannelStrategy[0].Formats, " "), "小红书图文笔记") {
 		t.Fatalf("create route revision from approved strategy: draft=%#v duplicate=%v err=%v", routeRevisionDraft, duplicate, err)
 	}
+	strategyResearchRunID := "researchrun_strategy_target_" + suffix
+	strategyResearchFindingID := "researchfinding_strategy_target_" + suffix
+	strategyResearchHash := "sha256:" + strings.Repeat("c", 64)
+	strategyResearchNow := time.Now().UTC()
+	if _, err := db.ExecContext(ctx, `INSERT INTO platform_research_findings
+		(id, contract_version, organization_id, project_id, research_run_id, round_number,
+		 claim, status, time_scope, confidence, supporting_source_ids, conflicting_source_ids,
+		 target_artifact, target_field_path, implication, proposed_value, content_hash, created_at, updated_at)
+		VALUES (?, 'strategy-research-finding/v1', ?, ?, ?, 2,
+			'策略摘要应明确可验证的决策结果', 'verified', '2026-H1', 'high',
+			JSON_ARRAY('source_strategy_a', 'source_strategy_b'), JSON_ARRAY(),
+			'strategy', 'executive_summary', '将研究证据落实到策略摘要', ?, ?, ?, ?)`,
+		strategyResearchFindingID, actor.OrganizationID, projectID, strategyResearchRunID,
+		json.RawMessage(`"用可验证的决策证据降低研发团队的渠道试错成本"`), strategyResearchHash,
+		strategyResearchNow, strategyResearchNow); err != nil {
+		t.Fatalf("insert Strategy-target research finding: %v", err)
+	}
+	if err := service.OnResearchCompleted(ctx, knowledge.ResearchRun{
+		ID: strategyResearchRunID, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		RunMode: "deep", Status: "completed",
+		SourceRef: &contract.ResourceRef{Type: "strategy_workspace", ID: workspace.ID},
+		Findings: []knowledge.ResearchFinding{{
+			ID: strategyResearchFindingID, Status: "verified", Confidence: "high",
+			Target:        knowledge.ResearchFindingTarget{Artifact: "strategy", FieldPath: "executive_summary"},
+			Implication:   "将研究证据落实到策略摘要",
+			ProposedValue: json.RawMessage(`"用可验证的决策证据降低研发团队的渠道试错成本"`),
+		}},
+	}); err != nil {
+		t.Fatalf("create Strategy-target research proposal: %v", err)
+	}
+	strategyResearchProposals, err := service.ListResearchAdoptionProposals(ctx, actor, workspace.ID, strategyResearchRunID)
+	if err != nil || len(strategyResearchProposals) != 1 ||
+		strategyResearchProposals[0].ContractVersion != strategy.ResearchAdoptionProposalContractV1 ||
+		strategyResearchProposals[0].TargetType != "strategy_revision" {
+		t.Fatalf("Strategy-target research proposals=%#v err=%v", strategyResearchProposals, err)
+	}
+	strategyProposal := strategyResearchProposals[0]
+	strategyApplyKey := contract.IdempotencyKey("research_apply_strategy_" + suffix)
+	strategyAdoption, duplicate, err := service.ApplyResearchAdoptionProposal(
+		ctx, actor, strategyApplyKey, strategyProposal.ID,
+		strategy.ApplyArtifactProposalRequest{ExpectedVersion: strategyProposal.Version},
+	)
+	if err != nil || duplicate || strategyAdoption.Strategy == nil ||
+		strategyAdoption.Strategy.CurrentRevision != routeRevisionDraft.CurrentRevision+1 ||
+		strategyAdoption.Strategy.Revision.Document.ExecutiveSummary != "用可验证的决策证据降低研发团队的渠道试错成本" {
+		t.Fatalf("apply Strategy-target research=%#v duplicate=%v err=%v", strategyAdoption, duplicate, err)
+	}
+	replayedStrategyAdoption, duplicate, err := service.ApplyResearchAdoptionProposal(
+		ctx, actor, strategyApplyKey, strategyProposal.ID,
+		strategy.ApplyArtifactProposalRequest{ExpectedVersion: strategyProposal.Version},
+	)
+	if err != nil || !duplicate || replayedStrategyAdoption.Strategy == nil ||
+		replayedStrategyAdoption.Strategy.CurrentRevision != strategyAdoption.Strategy.CurrentRevision {
+		t.Fatalf("replay Strategy-target research=%#v duplicate=%v err=%v", replayedStrategyAdoption, duplicate, err)
+	}
+	strategyFindingEvidence, err := service.ListEvidenceReferences(ctx, actor, projectID, strategyResearchFindingID)
+	if err != nil || len(strategyFindingEvidence) != 1 ||
+		strategyFindingEvidence[0].TargetType != "strategy_revision" ||
+		strategyFindingEvidence[0].TargetVersion != strategyAdoption.Strategy.CurrentRevision {
+		t.Fatalf("Strategy research evidence=%#v err=%v", strategyFindingEvidence, err)
+	}
 	var outboxCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_outbox WHERE organization_id = ?
 		AND event_type = 'strategy.approved.v1'`, organizationID).Scan(&outboxCount); err != nil || outboxCount != 2 {
@@ -765,18 +1259,77 @@ func TestStrategyMySQLVerticalSlice(t *testing.T) {
 	if err := consumeTx.Commit(); err != nil {
 		t.Fatal(err)
 	}
+	selfPolicy, err := service.UpdateReviewPolicy(ctx, actor, projectID, strategy.UpdateReviewPolicyRequest{
+		Mode: strategy.ReviewModeSelfConfirmation, ExpectedVersion: formalPolicy.Version,
+	})
+	if err != nil || selfPolicy.Mode != strategy.ReviewModeSelfConfirmation {
+		t.Fatalf("configure self-confirmation policy: policy=%#v err=%v", selfPolicy, err)
+	}
+	selfDraft := *strategyAdoption.Strategy
+	if _, _, err := service.SubmitStrategy(
+		ctx, actor, contract.IdempotencyKey("self_submit_closed_"+suffix), selfDraft.ID,
+		selfDraft.Version, selfDraft.CurrentRevision,
+	); !errors.Is(err, strategy.ErrInvalidState) {
+		t.Fatalf("self-confirmation still allowed redundant submit: %v", err)
+	}
+	selfKey := contract.IdempotencyKey("self_confirm_" + suffix)
+	selfPackage, duplicate, err := service.ConfirmStrategy(ctx, actor, selfKey, selfDraft.ID, strategy.ConfirmRequest{
+		ExpectedVersion: selfDraft.Version, CandidateRevision: selfDraft.CurrentRevision,
+	})
+	if err != nil || duplicate || selfPackage.Status != "published" ||
+		selfPackage.Snapshot.Approval.ReviewID == "" || selfPackage.ContentHash.Validate() != nil {
+		t.Fatalf("self confirm and publish: package=%#v duplicate=%v err=%v", selfPackage, duplicate, err)
+	}
+	confirmedDraft, err := service.GetDraft(ctx, actor, selfDraft.ID)
+	if err != nil || confirmedDraft.Status != "approved" || confirmedDraft.Version != selfDraft.Version+1 ||
+		confirmedDraft.CurrentReviewID != selfPackage.Snapshot.Approval.ReviewID {
+		t.Fatalf("self confirmation did not complete in one draft transition: draft=%#v err=%v", confirmedDraft, err)
+	}
+	selfReview, err := service.GetReview(ctx, actor, selfPackage.Snapshot.Approval.ReviewID)
+	if err != nil || selfReview.Status != "approved" || selfReview.ReviewMode != strategy.ReviewModeSelfConfirmation ||
+		len(selfReview.Assignments) != 1 || selfReview.Assignments[0].Status != "approved" {
+		t.Fatalf("self confirmation audit lineage: review=%#v err=%v", selfReview, err)
+	}
+	replayedSelfPackage, duplicate, err := service.ConfirmStrategy(ctx, actor, selfKey, selfDraft.ID, strategy.ConfirmRequest{
+		ExpectedVersion: selfDraft.Version, CandidateRevision: selfDraft.CurrentRevision,
+	})
+	if err != nil || !duplicate || !replayedSelfPackage.ContentHash.Equal(selfPackage.ContentHash) {
+		t.Fatalf("replay self confirmation: package=%#v duplicate=%v err=%v", replayedSelfPackage, duplicate, err)
+	}
 }
 
 func runAgentTaskThroughRuntime(ctx context.Context, db *sql.DB, service strategy.Service, task agent.Task) error {
-	runtimeStore := jobruntime.MySQLStore{DB: db}
-	dispatcher := agent.Dispatcher{DB: db, Jobs: runtimeStore}
+	executionNow := time.Now().UTC().Add(24 * time.Hour)
+	result, err := db.ExecContext(ctx, `UPDATE platform_agent_dispatches SET available_at = ?, updated_at = ?
+		WHERE organization_id = ? AND project_id = ? AND agent_task_id = ? AND status = 'pending'`,
+		executionNow, executionNow, task.OrganizationID, task.ProjectID, task.ID)
+	if err != nil {
+		return fmt.Errorf("isolate agent dispatch %s: %w", task.ID, err)
+	}
+	if changed, rowsErr := result.RowsAffected(); rowsErr != nil || changed != 1 {
+		return fmt.Errorf("isolate agent dispatch %s: expected one pending dispatch, changed=%d error=%v", task.ID, changed, rowsErr)
+	}
+	runtimeStore := jobruntime.MySQLStore{
+		DB: db, ClaimOrganizationID: task.OrganizationID, ClaimProjectID: task.ProjectID,
+	}
+	dispatcher := agent.Dispatcher{
+		DB: db, Jobs: runtimeStore,
+		ClaimOrganizationID: task.OrganizationID, ClaimProjectID: task.ProjectID,
+		ClaimAgentTaskID: task.ID,
+		Now:              func() time.Time { return executionNow },
+	}
 	processed, err := dispatcher.RunOnce(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("dispatch agent task %s: %w", task.ID, err)
 	}
 	if !processed {
 		return errors.New("agent dispatch was not processed")
 	}
+	dispatchedTask, err := (agent.MySQLStore{DB: db}).Get(ctx, task.OrganizationID, task.ProjectID, task.ID)
+	if err != nil {
+		return err
+	}
+	runtimeStore.ClaimJobID = dispatchedTask.JobID
 	var domainErr error
 	handler := agent.RuntimeHandlerWithFinalFailure(agent.MySQLStore{DB: db}, func(ctx context.Context, task agent.Task) (*contract.ResourceRef, error) {
 		ref, err := service.HandleAgentTask(ctx, task)
@@ -785,15 +1338,16 @@ func runAgentTaskThroughRuntime(ctx context.Context, db *sql.DB, service strateg
 		}
 		return ref, err
 	}, service.HandleAgentTaskFinalFailure, runtimeStore)
+	workerStartedAt := time.Now()
 	worker := jobruntime.Worker{
 		Store: runtimeStore, Handlers: map[string]jobruntime.Handler{task.Kind: handler},
-		Canceller: runtimeStore,
+		Canceller: runtimeStore, Now: func() time.Time { return executionNow.Add(time.Since(workerStartedAt)) },
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		processed, err = worker.RunOnce(ctx, "strategy-integration")
 		if err != nil {
-			return err
+			return fmt.Errorf("run agent job %s for task %s: %w", runtimeStore.ClaimJobID, task.ID, err)
 		}
 		if !processed {
 			time.Sleep(250 * time.Millisecond)
@@ -825,6 +1379,28 @@ type deepReviewTextAdapter struct {
 	failFirst  bool
 	alwaysFail bool
 	calls      int
+}
+
+type integrationAgentWriter struct{ AvailableAt time.Time }
+
+func (w integrationAgentWriter) CreateIn(ctx context.Context, executor agent.DBTX, request agent.CreateRequest) error {
+	if err := (agent.MySQLStore{}).CreateIn(ctx, executor, request); err != nil {
+		return err
+	}
+	result, err := executor.ExecContext(ctx, `UPDATE platform_agent_dispatches SET available_at = ?
+		WHERE organization_id = ? AND project_id = ? AND agent_task_id = ? AND status = 'pending'`,
+		w.AvailableAt.UTC(), request.Task.OrganizationID, request.Task.ProjectID, request.Task.ID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("isolate agent dispatch %s: expected one pending row, changed=%d", request.Task.ID, changed)
+	}
+	return nil
 }
 
 func (*deepReviewTextAdapter) InspectTextRoute(
@@ -875,12 +1451,22 @@ func recommendationContains(
 	return false
 }
 
+func mustJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
+
 func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contract.OrganizationID, userID string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	statements := []string{
 		"DELETE FROM event_consumptions WHERE event_id IN (SELECT event_id FROM event_outbox WHERE organization_id=?)",
+		"DELETE FROM strategy_product_events WHERE organization_id=?",
 		"DELETE FROM strategy_creative_task_strategy_versions WHERE organization_id=?",
 		"DELETE FROM strategy_creative_task_plan_revisions WHERE organization_id=?",
 		"DELETE FROM strategy_creative_task_plans WHERE organization_id=?",
@@ -897,6 +1483,8 @@ func cleanupStrategyIntegration(t *testing.T, db *sql.DB, organizationID contrac
 		"DELETE FROM strategy_packages WHERE organization_id=?",
 		"DELETE FROM strategy_reviews WHERE organization_id=?",
 		"DELETE FROM strategy_review_policies WHERE organization_id=?",
+		"DELETE FROM strategy_artifact_proposals WHERE organization_id=?",
+		"DELETE FROM platform_research_findings WHERE organization_id=?",
 		"DELETE FROM strategy_draft_revisions WHERE organization_id=?",
 		"DELETE FROM strategy_drafts WHERE organization_id=?",
 		"DELETE FROM strategy_brief_versions WHERE organization_id=?",

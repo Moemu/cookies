@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
+import {
+  parseStrategyWorkspaceRoute,
+  type StrategyPanel,
+  type StrategyStage,
+} from '../features/strategy/workspace/workspaceRoute'
 import type { SystemKey } from '../types'
 
 export interface AppRoute {
@@ -15,12 +20,17 @@ export interface AppRoute {
   view?: string
   tourRunId?: string
   tourCase?: string
+  strategyStage?: StrategyStage
+  strategyPanel?: StrategyPanel
+  strategyResource?: string
+  strategyNeedsCanonicalRedirect?: boolean
 }
 
 const systemKeys = new Set<SystemKey>(['strategy', 'creative', 'insight', 'delivery'])
 
 export function parseRoute(location = `${window.location.pathname}${window.location.search}`): AppRoute {
-  const url = new URL(location, window.location.origin)
+  const origin = typeof window === 'undefined' ? 'https://cookies.local' : window.location.origin
+  const url = new URL(location, origin)
   const parts = url.pathname.split('/').filter(Boolean)
   if (parts[0] === 'settings') return { isHome: false, isProjectHome: false, isProjectManagement: false, isModelSettings: true, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks' }
   if (parts[0] !== 'projects' || !parts[1]) return { isHome: true, isProjectHome: false, isProjectManagement: false, isModelSettings: false, isLegacyProjectSystemRoute: false, systemKey: 'strategy', navId: 'tasks' }
@@ -38,6 +48,7 @@ export function parseRoute(location = `${window.location.pathname}${window.locat
   }
   const normalizedSystem = parts[2] === 'insights' ? 'insight' : parts[2]
   const systemKey = systemKeys.has(normalizedSystem as SystemKey) ? normalizedSystem as SystemKey : 'strategy'
+  const strategyWorkspaceRoute = parseStrategyWorkspaceRoute(url.toString())
   return {
     isHome: false,
     isProjectHome: false,
@@ -52,11 +63,16 @@ export function parseRoute(location = `${window.location.pathname}${window.locat
     view: url.searchParams.get('view') ?? undefined,
     tourRunId: url.searchParams.get('tour_run_id') ?? undefined,
     tourCase: url.searchParams.get('tour_case') ?? undefined,
+    strategyStage: strategyWorkspaceRoute?.location.stage,
+    strategyPanel: strategyWorkspaceRoute?.location.panel,
+    strategyResource: strategyWorkspaceRoute?.location.resource,
+    strategyNeedsCanonicalRedirect: strategyWorkspaceRoute?.needsCanonicalRedirect,
   }
 }
 
 function defaultNavForSystem(systemKey: SystemKey) {
-  if (systemKey === 'insight') return 'prelaunch'
+  // 洞察的落点是「分析」：日常最常进的就是这一屏。
+  if (systemKey === 'insight') return 'analysis'
   if (systemKey === 'delivery') return 'plans'
   return 'tasks'
 }
@@ -86,10 +102,10 @@ export function useAppRoute() {
     window.addEventListener('popstate', sync)
     return () => window.removeEventListener('popstate', sync)
   }, [])
-  const navigate = useCallback((path: string, replace = false) => {
+  const navigate = useCallback((path: string, replace = false, preserveWindowScroll = false) => {
     window.history[replace ? 'replaceState' : 'pushState']({}, '', path)
     setRoute(parseRoute(path))
-    window.scrollTo({ top: 0 })
+    if (!preserveWindowScroll) window.scrollTo({ top: 0 })
   }, [])
   return { route, navigate }
 }

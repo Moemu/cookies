@@ -2,13 +2,10 @@ package strategy
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
-	"github.com/shikanon/cookies/internal/platform/eventoutbox"
 )
 
 func (s Service) SubmitStrategy(ctx context.Context, actor contract.ActorContext, key contract.IdempotencyKey, strategyID string, expectedVersion, candidateRevision int64) (Review, bool, error) {
@@ -28,6 +25,9 @@ func (s Service) SubmitStrategy(ctx context.Context, actor contract.ActorContext
 	policy, err := s.GetReviewPolicy(ctx, actor, draft.ProjectID)
 	if err != nil {
 		return Review{}, false, err
+	}
+	if policy.Mode == ReviewModeSelfConfirmation {
+		return Review{}, false, ErrInvalidState
 	}
 	request := struct {
 		ExpectedVersion   int64 `json:"expected_version"`
@@ -271,10 +271,6 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 	if err != nil {
 		return PackageVersion{}, false, err
 	}
-	projectContext, err := s.project(ctx, actor, draft.ProjectID)
-	if err != nil {
-		return PackageVersion{}, false, err
-	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return PackageVersion{}, false, err
@@ -298,205 +294,23 @@ func (s Service) ApproveStrategy(ctx context.Context, actor contract.ActorContex
 		!review.CandidateContentHash.Equal(request.CandidateContentHash) {
 		return PackageVersion{}, false, ErrReviewStale
 	}
+	// Refresh Project context only after the Draft/Review locks are held so the
+	// package and handoff never freeze an older product set observed before a
+	// concurrent Project context update.
+	projectContext, err := s.project(ctx, actor, lockedDraft.ProjectID)
+	if err != nil {
+		return PackageVersion{}, false, err
+	}
 	if projectContext.ProjectContextVersion != lockedDraft.ProjectContextVersion {
 		return PackageVersion{}, false, ErrReviewStale
 	}
-	revision, err := scanDraftRevision(tx.QueryRowContext(ctx, draftRevisionSelect+` WHERE organization_id = ?
-		AND project_id = ? AND strategy_id = ? AND revision = ?`, actor.OrganizationID,
-		draft.ProjectID, strategyID, review.CandidateRevision))
+	packageVersion, err := s.publishReviewedStrategyInTx(
+		ctx, tx, actor, lockedDraft, review, assignment, projectContext,
+	)
 	if err != nil {
 		return PackageVersion{}, false, err
 	}
-	if !revision.ContentHash.Equal(review.CandidateContentHash) {
-		return PackageVersion{}, false, ErrReviewStale
-	}
-	brief, err := scanBriefVersion(tx.QueryRowContext(ctx, briefVersionSelect+` WHERE organization_id = ?
-		AND project_id = ? AND brief_id = ? AND version = ?`, actor.OrganizationID,
-		draft.ProjectID, draft.BriefID, draft.BriefVersion))
-	if err != nil {
-		return PackageVersion{}, false, err
-	}
-	if problems := s.projectBriefCompatibilityProblems(ctx, actor, draft.ProjectID, brief.Snapshot); len(problems) > 0 {
-		return PackageVersion{}, false, StrategyPublishBlockedError{Problems: problems}
-	}
-	var compliancePassed bool
-	var complianceHash contract.ContentHash
-	err = tx.QueryRowContext(ctx, `SELECT passed, candidate_content_hash
-		FROM strategy_compliance_reports WHERE organization_id = ? AND project_id = ?
-		AND strategy_id = ? AND strategy_revision = ?`,
-		actor.OrganizationID, draft.ProjectID, strategyID, revision.Revision).
-		Scan(&compliancePassed, &complianceHash)
-	if err == sql.ErrNoRows {
-		compliance := evaluateCompliance(revision.Document, brief, s.now())
-		compliancePassed = compliance.Passed
-		complianceHash = revision.ContentHash
-	} else if err != nil {
-		return PackageVersion{}, false, err
-	}
-	if !complianceHash.Equal(revision.ContentHash) || !compliancePassed {
-		return PackageVersion{}, false, StrategyPublishBlockedError{Problems: []ValidationError{{
-			Field: "strategy.compliance", Reason: "策略合规检查存在阻断项或已过期",
-		}}}
-	}
-	readiness := calculateReadiness(brief, revision.Document)
-	if len(readiness.PublishBlockers) > 0 {
-		return PackageVersion{}, false, StrategyPublishBlockedError{Problems: readiness.PublishBlockers}
-	}
-	packageID := ""
-	latestVersion := int64(0)
-	row := tx.QueryRowContext(ctx, `SELECT id, latest_version FROM strategy_packages
-		WHERE organization_id = ? AND project_id = ? AND strategy_id = ? FOR UPDATE`,
-		actor.OrganizationID, draft.ProjectID, strategyID)
-	err = row.Scan(&packageID, &latestVersion)
-	if err == sql.ErrNoRows {
-		packageID, err = s.newID("strategypackage")
-		if err != nil {
-			return PackageVersion{}, false, err
-		}
-	} else if err != nil {
-		return PackageVersion{}, false, err
-	}
-	now := s.now()
-	versionNumber := latestVersion + 1
-	packageContractVersion := "strategy-package/v1"
-	if revision.Document.ContractVersion == "strategy-draft/v2" {
-		packageContractVersion = "strategy-package/v2"
-	}
-	snapshot := PackageSnapshot{
-		ContractVersion: packageContractVersion, PackageID: packageID, PackageVersion: versionNumber,
-		OrganizationID: actor.OrganizationID, ProjectID: draft.ProjectID, StrategyID: strategyID,
-		StrategyRevision: revision.Revision, Brief: brief, Strategy: revision.Document, Readiness: readiness,
-		CreativeRoutes: creativeRoutesForPackage(brief, revision.Document),
-		Approval:       PackageApproval{ReviewID: review.ID, ApprovedBy: actor.Principal.ID, ApprovedAt: now},
-	}
-	for _, route := range snapshot.CreativeRoutes {
-		if err := route.Validate(); err != nil {
-			return PackageVersion{}, false, err
-		}
-	}
-	contentHash, err := PackageContentHash(snapshot)
-	if err != nil {
-		return PackageVersion{}, false, err
-	}
-	snapshot.Approval.ContentHash = contentHash
-	if err := VerifyPackageContentHash(snapshot); err != nil {
-		return PackageVersion{}, false, err
-	}
-	packageVersion := PackageVersion{
-		PackageID: packageID, Version: versionNumber, OrganizationID: actor.OrganizationID,
-		ProjectID: draft.ProjectID, Snapshot: snapshot, ContentHash: contentHash,
-		Status: "published", PublishedBy: actor.Principal.ID, PublishedAt: now,
-	}
-	packageVersion, handoff, err := packageVersionWithHandoffReadiness(packageVersion, projectContext.ProductIDs)
-	if err != nil {
-		return PackageVersion{}, false, err
-	}
-	snapshot = packageVersion.Snapshot
-	contentHash = packageVersion.ContentHash
-	if latestVersion == 0 {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO strategy_packages
-			(id, organization_id, project_id, strategy_id, latest_version, status, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, 'published', ?, ?)`, packageID, actor.OrganizationID,
-			draft.ProjectID, strategyID, versionNumber, now, now); err != nil {
-			return PackageVersion{}, false, err
-		}
-	} else {
-		if _, err := tx.ExecContext(ctx, `UPDATE strategy_package_versions SET status = 'superseded'
-			WHERE organization_id = ? AND project_id = ? AND package_id = ? AND version = ?`,
-			actor.OrganizationID, draft.ProjectID, packageID, latestVersion); err != nil {
-			return PackageVersion{}, false, err
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE strategy_packages SET latest_version = ?,
-			status = 'published', updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
-			versionNumber, now, actor.OrganizationID, draft.ProjectID, packageID); err != nil {
-			return PackageVersion{}, false, err
-		}
-	}
-	snapshotJSONValue, _ := snapshotJSON(snapshot)
-	if _, err := tx.ExecContext(ctx, `INSERT INTO strategy_package_versions
-		(package_id, version, organization_id, project_id, strategy_id, strategy_revision,
-		 review_id, snapshot, content_hash, published_by, published_at, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published')`, packageID, versionNumber,
-		actor.OrganizationID, draft.ProjectID, strategyID, revision.Revision, review.ID,
-		snapshotJSONValue, contentHash, actor.Principal.ID, now); err != nil {
-		return PackageVersion{}, false, err
-	}
-	handoffSnapshot, err := json.Marshal(handoff)
-	if err != nil {
-		return PackageVersion{}, false, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO strategy_creative_handoffs
-		(organization_id, project_id, package_id, package_version, contract_version,
-		 snapshot, content_hash, published_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, actor.OrganizationID, draft.ProjectID,
-		packageID, versionNumber, handoff.ContractVersion, handoffSnapshot,
-		handoff.HandoffContentHash, now); err != nil {
-		return PackageVersion{}, false, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE strategy_reviews SET status = 'approved',
-		decided_by = ?, decided_at = ?, updated_at = ? WHERE organization_id = ? AND project_id = ?
-		AND id = ? AND status = 'open'`, actor.Principal.ID, now, now, actor.OrganizationID,
-		draft.ProjectID, review.ID); err != nil {
-		return PackageVersion{}, false, err
-	}
-	if err := updateReviewAssignmentDecision(ctx, tx, assignment, "approved", "", now); err != nil {
-		return PackageVersion{}, false, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE strategy_drafts SET status = 'approved',
-		version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ?
-		AND id = ? AND version = ?`, now, actor.OrganizationID, draft.ProjectID, strategyID,
-		lockedDraft.Version); err != nil {
-		return PackageVersion{}, false, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE strategy_tasks SET status = 'completed',
-		version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
-		now, actor.OrganizationID, draft.ProjectID, lockedDraft.TaskID); err != nil {
-		return PackageVersion{}, false, err
-	}
-	eventID, err := s.newID("event")
-	if err != nil {
-		return PackageVersion{}, false, err
-	}
-	traceID := eventID
-	if requestContext, ok := contract.RequestContextFrom(ctx); ok && requestContext.TraceID != "" {
-		traceID = requestContext.TraceID
-	}
-	if latestVersion > 0 {
-		supersededEventID, eventErr := s.newID("event")
-		if eventErr != nil {
-			return PackageVersion{}, false, eventErr
-		}
-		supersededPayload := mustJSON(map[string]any{
-			"event_id": supersededEventID, "event_type": "strategy.superseded.v1", "occurred_at": now,
-			"producer": "strategy", "organization_id": actor.OrganizationID, "project_id": draft.ProjectID,
-			"subject": map[string]any{"type": "strategy_package", "id": packageID, "version": latestVersion},
-			"data": map[string]any{
-				"superseded_version": latestVersion, "replacement_version": versionNumber,
-			},
-			"trace_id": traceID,
-		})
-		if err := (eventoutbox.MySQLStore{}).AppendIn(ctx, tx, eventoutbox.Event{
-			ID: supersededEventID, OrganizationID: actor.OrganizationID, ProjectID: draft.ProjectID,
-			Type: "strategy.superseded.v1", SubjectType: "strategy_package", SubjectID: packageID,
-			SubjectVersion: latestVersion, Payload: supersededPayload, CreatedAt: now,
-		}); err != nil {
-			return PackageVersion{}, false, err
-		}
-	}
-	eventPayload := mustJSON(map[string]any{
-		"event_id": eventID, "event_type": "strategy.approved.v1", "occurred_at": now,
-		"producer": "strategy", "organization_id": actor.OrganizationID, "project_id": draft.ProjectID,
-		"subject":  map[string]any{"type": "strategy_package", "id": packageID, "version": versionNumber},
-		"data":     map[string]any{"package_id": packageID, "package_version": versionNumber, "content_hash": contentHash},
-		"trace_id": traceID,
-	})
-	if err := (eventoutbox.MySQLStore{}).AppendIn(ctx, tx, eventoutbox.Event{
-		ID: eventID, OrganizationID: actor.OrganizationID, ProjectID: draft.ProjectID,
-		Type: "strategy.approved.v1", SubjectType: "strategy_package", SubjectID: packageID,
-		SubjectVersion: versionNumber, Payload: eventPayload, CreatedAt: now,
-	}); err != nil {
-		return PackageVersion{}, false, err
-	}
+	now := packageVersion.PublishedAt
 	if err := insertReceipt(ctx, tx, actor, draft.ProjectID, "strategy.approve", key, hash, 201, packageVersion, now); err != nil {
 		if isDuplicate(err) {
 			tx.Rollback()
@@ -555,7 +369,7 @@ func calculateReadiness(brief BriefVersion, document StrategyDocument) Readiness
 		}
 	}
 	videoRouteReady := len(creativeRoutesForPackage(brief, document)) > 0
-	result.CreativeReady = len(document.CreativeRecommendations) > 0 && (xiaohongshuReady || videoRouteReady)
+	result.CreativeReady = len(document.CreativeDirections()) > 0 && (xiaohongshuReady || videoRouteReady)
 	result.DeliveryReady = strings.TrimSpace(brief.Snapshot.Budget.Total) != "" && strings.TrimSpace(brief.Snapshot.Schedule.Window) != ""
 	result.InsightsReady = strings.TrimSpace(brief.Snapshot.Measurement.PrimaryKPI) != ""
 	return result
@@ -624,7 +438,7 @@ func ExportPackageMarkdown(value PackageVersion) string {
 		fmt.Fprintf(&builder, "- %s：%s（%s）\n", channel.Platform, channel.Role, strings.Join(channel.Formats, "、"))
 	}
 	builder.WriteString("\n## 创意建议\n\n")
-	for _, item := range doc.CreativeRecommendations {
+	for _, item := range doc.CreativeDirections() {
 		fmt.Fprintf(&builder, "- %s\n", item)
 	}
 	fmt.Fprintf(&builder, "\n## 版本证据\n\n- Package: `%s` v%d\n- Content hash: `%s`\n",

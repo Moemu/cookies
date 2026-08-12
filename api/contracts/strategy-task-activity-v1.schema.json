@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "strategy-task-activity-v1.schema.json",
+  "title": "Strategy Task Activity v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "id", "kind", "status", "phase", "round", "progress", "summary", "confirmed_conclusions", "source_scope", "resource_ref", "actions", "cancel_requested", "heartbeat_at", "updated_at"],
+  "properties": {
+    "contract_version": {"const": "strategy-task-activity/v1"},
+    "id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "kind": {"enum": ["assistant", "quick_research", "deep_research", "document_parse", "brief_generation", "strategy_generation", "deep_review"]},
+    "status": {"enum": ["queued", "running", "waiting_user", "partially_completed", "succeeded", "failed", "cancelled", "stalled"]},
+    "phase": {"type": "string", "minLength": 1, "maxLength": 48},
+    "round": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "object", "additionalProperties": false, "required": ["current", "max"], "properties": {"current": {"type": "integer", "minimum": 0}, "max": {"type": "integer", "minimum": 1, "maximum": 20}}}
+      ]
+    },
+    "progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value", "message"],
+      "properties": {
+        "kind": {"enum": ["milestone", "pages", "indeterminate"]},
+        "value": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 0, "maximum": 100}]},
+        "message": {"type": "string", "minLength": 1, "maxLength": 240}
+      }
+    },
+    "summary": {"type": "string", "minLength": 1, "maxLength": 500},
+    "confirmed_conclusions": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/conclusion"}},
+    "source_scope": {"$ref": "#/$defs/sourceScope"},
+    "resource_ref": {"$ref": "#/$defs/resourceRef"},
+    "execution_ref": {"$ref": "#/$defs/resourceRef"},
+    "actions": {"type": "array", "uniqueItems": true, "items": {"enum": ["open", "cancel", "retry", "provide_input"]}},
+    "cancel_requested": {"type": "boolean"},
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 128},
+        "message": {"type": "string", "minLength": 1, "maxLength": 500},
+        "retryable": {"type": "boolean"}
+      }
+    },
+    "heartbeat_at": {"oneOf": [{"type": "null"}, {"type": "string", "format": "date-time"}]},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "conclusion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "text", "status", "source_count"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 96},
+        "text": {"type": "string", "minLength": 1, "maxLength": 500},
+        "status": {"enum": ["tentative", "verified", "conflicting"]},
+        "source_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "sourceScope": {
+      "type": "object", "additionalProperties": false,
+      "required": ["project_id"],
+      "properties": {
+        "project_id": {"type": "string", "minLength": 1, "maxLength": 96},
+        "workspace_id": {"type": "string", "minLength": 1, "maxLength": 96},
+        "conversation_id": {"type": "string", "minLength": 1, "maxLength": 96}
+      }
+    },
+    "resourceRef": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": {"type": "string", "minLength": 1, "maxLength": 48},
+        "id": {"type": "string", "minLength": 1, "maxLength": 96},
+        "version": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

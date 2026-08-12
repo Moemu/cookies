@@ -196,7 +196,7 @@ func (w GeneratedIntakeWorker) fetchAndIngest(ctx context.Context, intake Genera
 	if metadata.MIMEType != declared.DeclaredMIMEType || metadata.SizeBytes != declared.DeclaredSizeBytes || (declared.DeclaredSHA256 != nil && metadata.SHA256 != *declared.DeclaredSHA256) {
 		return AssetCommit{}, &contract.JobError{Code: "OUTPUT_METADATA_MISMATCH", Message: "provider output does not match declared metadata", Retryable: false}
 	}
-	location, err := w.Upload.Blobs.Put(ctx, w.Upload.QuarantineBucket, quarantineKey(intake.OrganizationID, intake.ID), bytes.NewReader(data), int64(len(data)), metadata.MIMEType)
+	location, err := w.Upload.Blobs.Put(ctx, w.Upload.QuarantineBucket, quarantineKey(intake.OrganizationID, intake.ProjectID, intake.ID), bytes.NewReader(data), int64(len(data)), metadata.MIMEType)
 	if err != nil {
 		return AssetCommit{}, &contract.JobError{Code: "ASSET_STORAGE_UNAVAILABLE", Message: "failed to stage provider output", Retryable: true}
 	}

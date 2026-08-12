@@ -1,0 +1,49 @@
+.strategy-v2-shell {
+  --strategy-canvas: oklch(0.975 0.006 252);
+  --strategy-surface: oklch(0.995 0.002 252);
+  --strategy-surface-muted: oklch(0.958 0.009 252);
+  --strategy-surface-strong: oklch(0.925 0.016 252);
+  --strategy-line: oklch(0.88 0.015 252);
+  --strategy-line-strong: oklch(0.78 0.025 252);
+  --strategy-text: oklch(0.25 0.03 252);
+  --strategy-text-muted: oklch(0.51 0.026 252);
+  --strategy-text-soft: oklch(0.62 0.022 252);
+  --strategy-accent: oklch(0.54 0.2 257);
+  --strategy-accent-strong: oklch(0.43 0.17 257);
+  --strategy-accent-soft: oklch(0.955 0.025 257);
+  --strategy-success: oklch(0.52 0.115 155);
+  --strategy-warning: oklch(0.62 0.12 76);
+  --strategy-danger: oklch(0.52 0.17 28);
+  --strategy-shadow: 0 18px 54px oklch(0.28 0.055 252 / 16%);
+  --strategy-ease: cubic-bezier(.22, 1, .36, 1);
+  color: var(--strategy-text);
+  font-size: 14px;
+}
+
+.strategy-v2-shell :where(button, input, textarea, select) {
+  font: inherit;
+}
+
+.strategy-v2-shell :where(button, textarea, select):focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--strategy-accent) 78%, white);
+  outline-offset: 2px;
+}
+
+.strategy-v2-shell :where(button) {
+  transition: color 180ms var(--strategy-ease), background-color 180ms var(--strategy-ease), border-color 180ms var(--strategy-ease), transform 120ms var(--strategy-ease);
+}
+
+.strategy-v2-shell :where(button):active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .strategy-v2-shell *,
+  .strategy-v2-shell *::before,
+  .strategy-v2-shell *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

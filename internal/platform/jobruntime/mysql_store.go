@@ -14,7 +14,12 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
-type MySQLStore struct{ DB *sql.DB }
+type MySQLStore struct {
+	DB                  *sql.DB
+	ClaimOrganizationID contract.OrganizationID
+	ClaimProjectID      contract.ProjectID
+	ClaimJobID          string
+}
 
 func (s MySQLStore) Enqueue(ctx context.Context, request CreateRequest) (contract.Job, bool, error) {
 	if s.DB == nil {
@@ -59,7 +64,12 @@ func (s MySQLStore) Claim(ctx context.Context, workerID string, now time.Time) (
 	}
 	defer tx.Rollback()
 	row := tx.QueryRowContext(ctx, `SELECT id, kind, organization_id, project_id, status, progress, payload, cancellable, version, attempt_count, max_attempts, created_at, updated_at
-		FROM platform_jobs WHERE status = 'queued' AND cancel_requested_at IS NULL AND available_at <= ? ORDER BY available_at, created_at LIMIT 1 FOR UPDATE SKIP LOCKED`, now)
+		FROM platform_jobs WHERE status = 'queued' AND cancel_requested_at IS NULL AND available_at <= ?
+		  AND (? = '' OR organization_id = ?) AND (? = '' OR project_id = ?)
+		  AND (? = '' OR id = ?)
+		ORDER BY available_at, created_at LIMIT 1 FOR UPDATE SKIP LOCKED`,
+		now, s.ClaimOrganizationID, s.ClaimOrganizationID, s.ClaimProjectID, s.ClaimProjectID,
+		s.ClaimJobID, s.ClaimJobID)
 	job, payload, err := scanJob(row)
 	if err == sql.ErrNoRows {
 		return Claim{}, false, nil
@@ -266,10 +276,9 @@ func (s MySQLStore) CancelClaim(ctx context.Context, claim Claim, now time.Time)
 	return nil
 }
 
-// ReclaimExpired returns abandoned running jobs to the queue. It does not mark
-// a job terminal at recovery time: the domain handler must get one final
-// chance to synchronize its public state before Worker applies the attempt
-// policy to a deferred or failed execution.
+// ReclaimExpired returns ordinary abandoned running jobs to the queue. Jobs
+// with an accepted cancellation request become terminal instead: Claim omits
+// them, so re-queuing would otherwise create a permanently unclaimable job.
 func (s MySQLStore) ReclaimExpired(ctx context.Context, now time.Time, leaseDuration time.Duration) (LeaseRecovery, error) {
 	if s.DB == nil {
 		return LeaseRecovery{}, fmt.Errorf("MySQL database is required")
@@ -278,10 +287,48 @@ func (s MySQLStore) ReclaimExpired(ctx context.Context, now time.Time, leaseDura
 		return LeaseRecovery{}, fmt.Errorf("lease duration must be positive")
 	}
 	deadline := now.Add(-leaseDuration)
+	cancelled, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs
+		SET status = 'cancelled', lock_owner = NULL, locked_at = NULL,
+			version = version + 1, updated_at = ?
+		WHERE status = 'running' AND locked_at <= ? AND cancel_requested_at IS NOT NULL
+		  AND (? = '' OR organization_id = ?) AND (? = '' OR project_id = ?)
+		  AND (? = '' OR id = ?)`,
+		now, deadline, s.ClaimOrganizationID, s.ClaimOrganizationID, s.ClaimProjectID, s.ClaimProjectID,
+		s.ClaimJobID, s.ClaimJobID)
+	if err != nil {
+		return LeaseRecovery{}, err
+	}
+	cancelledCount, err := cancelled.RowsAffected()
+	if err != nil {
+		return LeaseRecovery{}, err
+	}
+	failed, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs
+		SET status = 'failed', lock_owner = NULL, locked_at = NULL,
+			error_code = 'JOB_ATTEMPT_LIMIT_EXCEEDED',
+			error_message = 'Job reached its maximum execution attempts after an abandoned lease',
+			retryable = FALSE, version = version + 1, updated_at = ?
+		WHERE status = 'running' AND locked_at <= ? AND cancel_requested_at IS NULL
+		  AND attempt_count >= max_attempts
+		  AND (? = '' OR organization_id = ?) AND (? = '' OR project_id = ?)
+		  AND (? = '' OR id = ?)`,
+		now, deadline, s.ClaimOrganizationID, s.ClaimOrganizationID, s.ClaimProjectID, s.ClaimProjectID,
+		s.ClaimJobID, s.ClaimJobID)
+	if err != nil {
+		return LeaseRecovery{}, err
+	}
+	failedCount, err := failed.RowsAffected()
+	if err != nil {
+		return LeaseRecovery{}, err
+	}
 	rescheduled, err := s.DB.ExecContext(ctx, `UPDATE platform_jobs
 		SET status = 'queued', available_at = ?, lock_owner = NULL, locked_at = NULL,
 			version = version + 1, updated_at = ?
-		WHERE status = 'running' AND locked_at <= ?`, now, now, deadline)
+		WHERE status = 'running' AND locked_at <= ? AND cancel_requested_at IS NULL
+		  AND attempt_count < max_attempts
+		  AND (? = '' OR organization_id = ?) AND (? = '' OR project_id = ?)
+		  AND (? = '' OR id = ?)`,
+		now, now, deadline, s.ClaimOrganizationID, s.ClaimOrganizationID, s.ClaimProjectID, s.ClaimProjectID,
+		s.ClaimJobID, s.ClaimJobID)
 	if err != nil {
 		return LeaseRecovery{}, err
 	}
@@ -289,7 +336,7 @@ func (s MySQLStore) ReclaimExpired(ctx context.Context, now time.Time, leaseDura
 	if err != nil {
 		return LeaseRecovery{}, err
 	}
-	return LeaseRecovery{Rescheduled: rescheduledCount}, nil
+	return LeaseRecovery{Rescheduled: rescheduledCount, Cancelled: cancelledCount, Failed: failedCount}, nil
 }
 
 func (s MySQLStore) transition(ctx context.Context, claim Claim, status contract.JobStatus, problem *contract.JobError, resultType, resultID, resultVersion any, now time.Time) error {

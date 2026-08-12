@@ -32,6 +32,10 @@ func TestConfirmedReportBecomesReusableExperienceAndPreLaunchReference(t *testin
 		Conclusion:      "面对新品种草时，首图保持单一利益点。",
 		Conditions:      []string{"小红书图文", "新品首发"},
 		Counterexamples: []string{"复杂参数对比内容"},
+		// 「统计观察 + 充分」收敛出 ✅ 能归因，才过得了下游默认引用集的第二道闸。
+		CardType:   CardStatistic,
+		Confidence: ConfidenceSufficient,
+		DataBasis:  DataBasis{AssetCount: 6, SampleSize: 42000, Metrics: []string{"点击率"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -112,27 +116,39 @@ func TestRetiringExperienceRequiresReasonAndConfirmScope(t *testing.T) {
 	}
 }
 
-func TestChallengedExperienceGoesToReviewInsteadOfSilentOverwrite(t *testing.T) {
+// 被质疑的经验挂个标记，不从引用集里撤下来。
+//
+// 老做法是把它转成「待复审」状态，于是它当场从所有下游消失。但「有人觉得该重新
+// 看一眼」和「这条结论不成立」是两回事——前者是提醒，后者才是决定。让提醒顺手
+// 撤掉一条正在被引用的经验，等于让任何一个人的怀疑单方面改写别人的依据。
+func TestChallengedExperienceIsFlaggedNotWithdrawn(t *testing.T) {
 	t.Parallel()
 	service := testService()
 	actor := testActor()
 	experience := confirmedExperience(t, service, actor)
-	review, err := service.RequestExperienceReview(context.Background(), actor, "project_1", experience.ID, ExperienceTransitionRequest{
+	flagged, err := service.RequestExperienceReview(context.Background(), actor, "project_1", experience.ID, ExperienceTransitionRequest{
 		ExpectedVersion: experience.Version, Reason: "新一轮数据与该结论冲突。",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if flagged.Status != ExperienceConfirmed || !flagged.NeedsReview {
+		t.Fatalf("标复审不该改状态：%#v", flagged)
+	}
+	if !flagged.Quotable() || flagged.ReviewHint() == "" {
+		t.Fatalf("标了复审仍然在用，但界面上要说出来：%#v", flagged)
+	}
 	preLaunch, err := service.GetPreLaunch(context.Background(), actor, "project_1", PreLaunchFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if review.Status != ExperienceNeedsReview || len(preLaunch.ExperienceReferences) != 0 {
-		t.Fatalf("review=%#v prelaunch=%#v", review, preLaunch)
+	if len(preLaunch.ExperienceReferences) == 0 {
+		t.Fatalf("标了复审的经验仍然该出现在投前参考里：%#v", preLaunch)
 	}
-	back, err := service.ConfirmExperience(context.Background(), actor, "project_1", review.ID, review.Version)
-	if err != nil || back.Status != ExperienceConfirmed {
-		t.Fatalf("review must be resolvable back to confirmed: %#v err=%v", back, err)
+	// 重新看过、还成立，就是再确认一次；确认要把标记摘掉，否则它会一直挂着。
+	back, err := service.ConfirmExperience(context.Background(), actor, "project_1", flagged.ID, flagged.Version)
+	if err != nil || back.Status != ExperienceConfirmed || back.NeedsReview {
+		t.Fatalf("复审完成后标记要摘掉：%#v err=%v", back, err)
 	}
 }
 
@@ -147,6 +163,12 @@ func TestRevisionSupersedesPredecessorOnlyAfterItIsConfirmed(t *testing.T) {
 		Conditions:      []string{"小红书图文", "新品首发"},
 		Counterexamples: []string{"复杂参数对比内容"},
 		Reason:          "补充标题层面的适用条件。",
+		// 修订不重述依据的话，档位会掉回默认的「假设 + 方向性」——那是有意的，
+		// 改了说法却没说清凭什么，本来就不该继续顶着 ✅。这条测的是版本接替，
+		// 所以把依据照抄过来，让前后两版停在同一档。
+		CardType:   CardStatistic,
+		Confidence: ConfidenceSufficient,
+		DataBasis:  DataBasis{AssetCount: 6, SampleSize: 42000, Metrics: []string{"点击率"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -434,10 +456,17 @@ func confirmedExperience(t *testing.T, service Service, actor contract.ActorCont
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 写死「统计观察 + 充分」而不是用默认值：默认落在「假设 + 方向性」，
+	// 那一档收敛出来是 👁 只是观察，进不了下游的默认引用集。用它做夹具的话，
+	// 这些测的是状态流转的用例会因为判定档位不够而失败，读的人会以为
+	// 是状态流转坏了。
 	experience, err := service.CreateExperience(context.Background(), actor, "project_1", report.ID, report.Version, CreateExperienceRequest{
 		Conclusion:      "面对新品种草时，首图保持单一利益点。",
 		Conditions:      []string{"小红书图文"},
 		Counterexamples: []string{"复杂参数对比内容"},
+		CardType:        CardStatistic,
+		Confidence:      ConfidenceSufficient,
+		DataBasis:       DataBasis{AssetCount: 6, SampleSize: 42000, Metrics: []string{"点击率"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -583,8 +612,19 @@ func testService() Service {
 
 type testProjects struct{}
 
+// 返回的东西要跟真实的 project.Service 一样过得了 ValidateBrandBound——
+// 那边出口就校验了品牌与产品列表。桩比真实实现宽松的话，一个组不出合法
+// 项目上下文的 bug 在单测里全绿，到线上才被供应商层拒掉。
 func (testProjects) RequireActiveContext(_ context.Context, actor contract.ActorContext, projectID contract.ProjectID) (contract.ProjectContext, error) {
-	return contract.ProjectContext{OrganizationID: actor.OrganizationID, ProjectID: projectID, ProjectContextVersion: 1}, nil
+	brandID := contract.BrandID("brand_1")
+	value := contract.ProjectContext{
+		OrganizationID: actor.OrganizationID, ProjectID: projectID, ProjectContextVersion: 1,
+		BrandID: &brandID, ProductIDs: []contract.ProductID{"product_1"},
+	}
+	if err := value.ValidateBrandBound(); err != nil {
+		panic(err)
+	}
+	return value, nil
 }
 
 type testDelivery struct{}
@@ -636,6 +676,24 @@ func (r *memoryRepository) GetReport(_ context.Context, organizationID contract.
 	}
 	return value, nil
 }
+func (r *memoryRepository) FindDraftByWindow(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, windowStart, windowEnd string) (InsightReport, error) {
+	// map 遍历顺序是随机的，所以这里按 ID 取最小的那份，而不是「碰到的第一份」。
+	// 不定序的伪造仓储会让「记两笔进同一份草稿」这类测试偶发失败。
+	var found InsightReport
+	for _, value := range r.reports {
+		if value.OrganizationID != organizationID || value.ProjectID != projectID ||
+			value.Status != ReportDraft || value.WindowStart != windowStart || value.WindowEnd != windowEnd {
+			continue
+		}
+		if found.ID == "" || value.ID < found.ID {
+			found = value
+		}
+	}
+	if found.ID == "" {
+		return InsightReport{}, ErrNotFound
+	}
+	return found, nil
+}
 func (r *memoryRepository) ConfirmReport(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, actorID string, now time.Time) (InsightReport, error) {
 	value, err := r.GetReport(context.Background(), organizationID, projectID, id)
 	if err != nil {
@@ -649,6 +707,37 @@ func (r *memoryRepository) ConfirmReport(_ context.Context, organizationID contr
 	value.ConfirmedBy = actorID
 	value.ConfirmedAt = &now
 	value.UpdatedAt = now
+	r.reports[id] = value
+	return value, nil
+}
+func (r *memoryRepository) PurgeEmptyDrafts(_ context.Context, before time.Time) (int64, error) {
+	purged := int64(0)
+	for id, value := range r.reports {
+		if value.Status == ReportDraft && len(value.Digest) == 0 && value.CreatedAt.Before(before) {
+			delete(r.reports, id)
+			purged++
+		}
+	}
+	return purged, nil
+}
+func (r *memoryRepository) SubmitReport(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string, expectedVersion int64, executionID string, digest []ReportFinding, actorID string, at time.Time) (InsightReport, error) {
+	value, err := r.GetReport(context.Background(), organizationID, projectID, id)
+	if err != nil {
+		return InsightReport{}, err
+	}
+	if value.Status != ReportDraft {
+		return InsightReport{}, ErrInvalidState
+	}
+	if value.Version != expectedVersion {
+		return InsightReport{}, ErrVersionConflict
+	}
+	value.ExecutionID = executionID
+	value.Digest = digest
+	value.Status = ReportConfirmed
+	value.Version++
+	value.ConfirmedBy = actorID
+	value.ConfirmedAt = &at
+	value.UpdatedAt = at
 	r.reports[id] = value
 	return value, nil
 }
@@ -744,11 +833,36 @@ func (r *memoryRepository) TransitionExperience(ctx context.Context, input Trans
 	r.experiences[value.ID] = value
 	return value, nil
 }
+func (r *memoryRepository) FlagExperienceForReview(_ context.Context, input FlagExperienceReviewInput) (Experience, error) {
+	value, ok := r.experiences[input.ID]
+	if !ok || value.OrganizationID != input.OrganizationID || value.ProjectID != input.ProjectID {
+		return Experience{}, ErrNotFound
+	}
+	if value.Version != input.ExpectedVersion {
+		return Experience{}, ErrVersionConflict
+	}
+	if value.Status != ExperienceConfirmed {
+		return Experience{}, ErrInvalidState
+	}
+	r.audits = append(r.audits, ExperienceAudit{
+		ID: input.AuditID, OrganizationID: input.OrganizationID, ProjectID: input.ProjectID,
+		ExperienceID: value.ID, FromStatus: ExperienceConfirmed, ToStatus: ExperienceConfirmed,
+		Reason: input.Reason, ActorID: input.ActorID, CreatedAt: input.Now,
+	})
+	value.NeedsReview = input.NeedsReview
+	value.StatusReason = input.Reason
+	value.StatusChangedBy = input.ActorID
+	value.StatusChangedAt = &input.Now
+	value.Version++
+	value.UpdatedAt = input.Now
+	r.experiences[value.ID] = value
+	return value, nil
+}
 func (r *memoryRepository) ConfirmExperience(ctx context.Context, input ConfirmExperienceInput) (Experience, error) {
 	value, err := r.TransitionExperience(ctx, TransitionExperienceInput{
 		OrganizationID: input.OrganizationID, ProjectID: input.ProjectID, ID: input.ID,
 		ExpectedVersion: input.ExpectedVersion,
-		From:            []ExperienceStatus{ExperiencePending, ExperienceNeedsReview},
+		From:            []ExperienceStatus{ExperiencePending, ExperienceConfirmed},
 		To:              ExperienceConfirmed, ActorID: input.ActorID, Now: input.Now, AuditID: input.AuditID,
 	})
 	if err != nil {
@@ -756,6 +870,7 @@ func (r *memoryRepository) ConfirmExperience(ctx context.Context, input ConfirmE
 	}
 	value.ConfirmedBy = input.ActorID
 	value.ConfirmedAt = &input.Now
+	value.NeedsReview = false
 	r.experiences[value.ID] = value
 	if value.SupersedesID == "" {
 		return value, nil
@@ -767,7 +882,7 @@ func (r *memoryRepository) ConfirmExperience(ctx context.Context, input ConfirmE
 	superseded, err := r.TransitionExperience(ctx, TransitionExperienceInput{
 		OrganizationID: input.OrganizationID, ProjectID: input.ProjectID, ID: previous.ID,
 		ExpectedVersion: previous.Version,
-		From:            []ExperienceStatus{ExperiencePending, ExperienceConfirmed, ExperienceNeedsReview},
+		From:            []ExperienceStatus{ExperiencePending, ExperienceConfirmed},
 		To:              ExperienceRetired, Reason: "已被第 " + strconv.Itoa(value.Revision) + " 版取代。",
 		ActorID: input.ActorID, Now: input.Now, AuditID: input.SupersedeAuditID,
 	})
@@ -813,4 +928,60 @@ func containsStatus(values []ExperienceStatus, value ExperienceStatus) bool {
 		}
 	}
 	return false
+}
+
+// 下游默认引用有两道闸：状态在用，判定能归因。
+//
+// 只看状态是不够的。一条「👁 只是观察」的经验也可以被人确认——确认的是
+// 「这个观察值得记下来」，不是「这个因果成立」。让它进默认引用集，下一轮就会
+// 有人照着一个没排除混杂的观察去做素材，而他不会知道自己在赌。
+func TestOnlyExplainedExperiencesAreReusableByDefault(t *testing.T) {
+	t.Parallel()
+
+	explained := Experience{Status: ExperienceConfirmed, Judgement: judge(ConfidenceSufficient, "")}
+	if !explained.Reusable() {
+		t.Error("在用且能归因的经验应该可默认引用")
+	}
+
+	observed := Experience{Status: ExperienceConfirmed, Judgement: judge(ConfidenceDirectional, "")}
+	if observed.Reusable() {
+		t.Error("只是观察的经验不该进默认引用集")
+	}
+
+	pending := Experience{Status: ExperiencePending, Judgement: judge(ConfidenceSufficient, "")}
+	if pending.Reusable() {
+		t.Error("还没人确认的经验不该被引用")
+	}
+}
+
+// 标了「该看一眼了」的经验仍然在用。这正是把它从状态改成标记的理由：
+// 读的地方只认 confirmed，不会因为漏判一个状态就让它凭空消失。
+func TestFlaggedExperienceStaysUsable(t *testing.T) {
+	t.Parallel()
+
+	value := Experience{Status: ExperienceConfirmed, NeedsReview: true, Judgement: judge(ConfidenceSufficient, "")}
+	if !value.Reusable() {
+		t.Error("标了复审的经验仍然在用，仍然可引用")
+	}
+	if value.ReviewHint() == "" {
+		t.Error("标了复审就要在界面上说出来，否则这个标记等于没有")
+	}
+	if value.StatusLabel() != "在用" {
+		t.Errorf("状态标签应该是「在用」，得到 %q", value.StatusLabel())
+	}
+}
+
+func TestStatusLabelsAreTheThreeAgreedWords(t *testing.T) {
+	t.Parallel()
+
+	cases := map[ExperienceStatus]string{
+		ExperiencePending:   "待定",
+		ExperienceConfirmed: "在用",
+		ExperienceRetired:   "停用",
+	}
+	for status, want := range cases {
+		if got := (Experience{Status: status}).StatusLabel(); got != want {
+			t.Errorf("%s 的标签应该是 %q，得到 %q", status, want, got)
+		}
+	}
 }

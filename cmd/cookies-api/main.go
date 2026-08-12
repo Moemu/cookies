@@ -16,12 +16,16 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/shikanon/cookies/internal/integrations/crawler"
 	"github.com/shikanon/cookies/internal/integrations/creativedelivery"
 	"github.com/shikanon/cookies/internal/integrations/creativeprovider"
 	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
+	"github.com/shikanon/cookies/internal/integrations/gotenberg"
+	"github.com/shikanon/cookies/internal/integrations/lasdocument"
 	"github.com/shikanon/cookies/internal/integrations/productsource"
 	"github.com/shikanon/cookies/internal/integrations/projectdelivery"
 	"github.com/shikanon/cookies/internal/integrations/seedresearch"
@@ -58,6 +62,9 @@ func main() {
 	}
 	ffmpegPath := localExecutablePath(cfg.Environment, cfg.Media.FFmpegPath, "ffmpeg")
 	ffprobePath := localExecutablePath(cfg.Environment, cfg.Media.FFprobePath, "ffprobe")
+	if cfg.MediaUnderstanding.ASREnabled && ffmpegPath == "" {
+		log.Fatal("invalid configuration: COOKIES_MEDIA_UNDERSTANDING_ASR_ENABLED requires an available ffmpeg executable")
+	}
 
 	db, err := database.Open(context.Background(), cfg.MySQL)
 	if err != nil {
@@ -295,6 +302,7 @@ func main() {
 	creativeService.DirectionScheduler = creative.JobRuntimeDirectionGenerationScheduler{Store: runtimeStore}
 	creativeService.AINativeOperationCanceller = creativeAINativeOperationCanceller{store: runtimeStore}
 	var researchRunner knowledge.ExternalResearchRunner
+	var researchRouteInspector strategysystem.ResearchRouteInspector
 	if cfg.Research.SeedEnabled {
 		cipher, cipherErr := provider.NewAESGCMCredentialCipher(
 			cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion,
@@ -305,17 +313,23 @@ func main() {
 		gatewayConfig := provider.MySQLGatewayConfigStore{
 			DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
 		}
-		researchRunner = &seedresearch.Client{
+		seedResearchClient := &seedresearch.Client{
 			Routes: gatewayConfig, Credentials: gatewayConfig,
 			ModelAlias: cfg.Research.SeedModelAlias, MaxConcurrent: cfg.Research.MaxConcurrent,
 			AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
 		}
+		researchRunner = seedResearchClient
+		researchRouteInspector = seedResearchClient
 		log.Printf("Knowledge research configured: transport=ark_responses tool=web_search model_alias=%s",
 			cfg.Research.SeedModelAlias)
 	}
 	knowledgeService := &knowledge.Service{
 		DB: db, Projects: projectService, Blobs: blobs, Scanner: scanner,
 		AssetsBucket: cfg.ObjectStorage.AssetsBucket, Runner: researchRunner,
+		JobProgress: runtimeStore, JobCanceller: runtimeStore,
+	}
+	if researchRunner != nil {
+		knowledgeService.SourceVerifier = knowledge.SafeHTTPResearchSourceVerifier{Timeout: 8 * time.Second}
 	}
 	if cfg.Research.TikaEnabled {
 		knowledgeService.DocumentParser = knowledge.TikaParser{
@@ -327,6 +341,37 @@ func main() {
 			Store: runtimeStore, NewID: func() (string, error) { return ids.New("documentparsejob") },
 		}
 		log.Printf("Knowledge document parsing configured: parser=tika version=%s", cfg.Research.TikaVersion)
+	}
+	if cfg.Research.DocumentVisionEnabled {
+		cipher, cipherErr := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
+		if cipherErr != nil {
+			log.Fatalf("configure LAS document vision credential encryption: %v", cipherErr)
+		}
+		gatewayConfig := provider.MySQLGatewayConfigStore{
+			DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+		}
+		knowledgeService.DocumentVision = &lasdocument.Client{
+			Routes: gatewayConfig, Credentials: gatewayConfig,
+			SourceURLs:   blobs,
+			OutputBucket: cfg.ObjectStorage.AssetsBucket, OutputPrefix: "provider-output/document-vision",
+			AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
+		}
+		knowledgeService.VisionModelAlias = cfg.Research.DocumentVisionModelAlias
+		knowledgeService.VisionScheduler = knowledge.JobRuntimeDocumentVisionFallbackScheduler{
+			Store: runtimeStore, NewID: func() (string, error) { return ids.New("documentvisionjob") },
+		}
+		log.Printf("Knowledge document vision configured: provider=volcengine_las model_alias=%s input=tos output=tos",
+			cfg.Research.DocumentVisionModelAlias)
+	}
+	if cfg.Research.DocumentConverterEnabled {
+		knowledgeService.DocumentConverter = &gotenberg.Client{
+			BaseURL: cfg.Research.DocumentConverterBaseURL, Version: cfg.Research.DocumentConverterVersion,
+			Timeout:           time.Duration(cfg.Research.DocumentConverterTimeout) * time.Second,
+			MaxPDFBytes:       int64(cfg.Research.DocumentConverterMaxPDFBytes),
+			AllowInsecureHTTP: cfg.Research.DocumentConverterAllowHTTP,
+		}
+		log.Printf("Knowledge presentation conversion configured: converter=gotenberg_libreoffice version=%s",
+			cfg.Research.DocumentConverterVersion)
 	}
 	if researchRunner != nil {
 		knowledgeService.Scheduler = knowledge.JobRuntimeResearchScheduler{
@@ -341,9 +386,11 @@ func main() {
 	if visionAdapter != nil {
 		visionProvider = &provider.Service{VisionAdapter: visionAdapter, VisionSources: assetVisionSourceResolver{uploads: uploadService}}
 	}
+	log.Printf("Media understanding configured: real_provider=%t vision_model_alias=%s asr=%t", cfg.MediaUnderstanding.RealProviderEnabled, cfg.MediaUnderstanding.VisionModelAlias, cfg.MediaUnderstanding.ASREnabled)
 	mediaUnderstandingService := &mediaunderstanding.Service{
 		Store: mediaunderstanding.MySQLStore{DB: db}, Projects: projectService, Assets: uploadService,
-		DerivedImages: uploadService, Vision: visionProvider, ModelAlias: "cookies.vision.standard",
+		DerivedImages: uploadService, Vision: visionProvider, RealVision: cfg.MediaUnderstanding.RealProviderEnabled,
+		ModelAlias: cfg.MediaUnderstanding.VisionModelAlias,
 		Scheduler: mediaunderstanding.JobRuntimeScheduler{
 			Store: runtimeStore, NewID: func() (string, error) { return ids.New("mediaunderstandingjob") },
 		},
@@ -353,6 +400,18 @@ func main() {
 			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
 			Sources: creativeMediaSource{repository: assetRepository, blobs: blobs},
 		}
+	}
+	if cfg.MediaUnderstanding.ASREnabled && ffmpegPath != "" {
+		mediaUnderstandingService.Transcriber = creativeprovider.AssetTranscriber{
+			Assets: uploadService, FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			ASR: creativeprovider.VolcengineASR{Config: creativeprovider.ASRConfig{
+				Endpoint: cfg.Provider.VolcengineASR.Endpoint, AuthMode: cfg.Provider.VolcengineASR.AuthMode,
+				AppID: cfg.Provider.VolcengineASR.AppID, AccessToken: cfg.Provider.VolcengineASR.AccessToken,
+				APIKey: cfg.Provider.VolcengineASR.APIKey, ResourceID: cfg.Provider.VolcengineASR.ResourceID,
+				Model: cfg.Provider.VolcengineASR.Model,
+			}},
+		}
+		log.Printf("Media understanding ASR configured: adapter=volcengine_asr model=%s", cfg.Provider.VolcengineASR.Model)
 	}
 	remixService := remix.NewMemoryService(func() (string, error) { return ids.New("remixplan") })
 	agentService := agent.NewMemoryService(remixService, func(prefix string) (string, error) { return ids.New(prefix) })
@@ -398,14 +457,72 @@ func main() {
 		creativeService.AINativeStoryboardPlanner = creative.ModelAINativeStoryboardPlanner{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
 		creativeService.AINativeVoiceoverFitter = creative.ModelAINativeVoiceoverFitter{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
 	}
+	var miyunCipher insights.MiyunSecretCipher
+	var miyunPages insights.MiyunPageClient
+	var miyunVerifier insights.MiyunConnectionVerifier
+	var miyunImports insights.MiyunAuthorizedImporter
+	var miyunPreviews insights.MiyunAuthorizedPreviewer
+	if cfg.Miyun.Enabled {
+		cipher, cipherErr := insights.NewAESGCMMiyunSecretCipher(cfg.Miyun.MasterKey, cfg.Miyun.MasterKeyVersion)
+		if cipherErr != nil {
+			log.Fatalf("configure Miyun secret encryption: %v", cipherErr)
+		}
+		if uploadService.VideoProbe == nil && uploadService.MediaProbe == nil {
+			log.Fatalf("configure Miyun external import: ffprobe or media probe is required")
+		}
+		gate := &crawler.YouShuGate{
+			MaxConcurrent: cfg.Miyun.MaxConcurrent, RequestsPerSecond: cfg.Miyun.RequestsPerSecond,
+			Cooldown: time.Duration(cfg.Miyun.CooldownSeconds) * time.Second,
+		}
+		protocol := miyunProtocolAdapter{endpoint: cfg.Miyun.Endpoint, cipher: cipher, client: &http.Client{Timeout: 30 * time.Second}, gate: gate}
+		externalImports := assets.ExternalImportService{
+			Repository: assetRepository, Projects: projectService, Upload: *uploadService,
+			QuarantineBucket: cfg.ObjectStorage.QuarantineBucket,
+		}
+		miyunCipher, miyunPages, miyunVerifier = cipher, protocol, protocol
+		miyunImports = miyunAuthorizedImportAdapter{
+			downloader: &crawler.YouShuDownloader{HTTPClient: &http.Client{Timeout: 2 * time.Minute}, AllowedHosts: cfg.Miyun.DownloadAllowedHosts},
+			assets:     externalImports, ledger: assetRepository, workRoot: miyunWorkRoot(cfg.Media.VideoWorkRoot),
+		}
+		miyunPreviews = miyunAuthorizedPreviewAdapter{
+			downloader: &crawler.YouShuDownloader{HTTPClient: &http.Client{Timeout: 2 * time.Minute}, AllowedHosts: cfg.Miyun.DownloadAllowedHosts},
+			workRoot:   miyunWorkRoot(cfg.Media.VideoWorkRoot),
+		}
+		log.Printf("Miyun collection configured: real_calls=true concurrency=%d rate=%d cooldown_seconds=%d download_hosts=%d",
+			cfg.Miyun.MaxConcurrent, cfg.Miyun.RequestsPerSecond, cfg.Miyun.CooldownSeconds, len(cfg.Miyun.DownloadAllowedHosts))
+	}
 	insightsService := &insights.Service{
-		Repository:  insights.MySQLRepository{DB: db},
-		Assets:      insights.MySQLRepository{DB: db},
-		Connectors:  insights.MySQLRepository{DB: db},
-		Runs:        insights.MySQLRepository{DB: db},
-		Experiments: insights.MySQLRepository{DB: db},
-		Projects:    projectService,
-		Delivery:    deliveryinsights.Reader{Service: deliveryService},
+		Repository:     insights.MySQLRepository{DB: db},
+		Assets:         insights.MySQLRepository{DB: db},
+		ExternalAssets: insights.MySQLRepository{DB: db},
+		Connectors:     insights.MySQLRepository{DB: db},
+		Runs:           insights.MySQLRepository{DB: db},
+		Experiments:    insights.MySQLRepository{DB: db},
+		Thresholds:     insights.MySQLRepository{DB: db},
+		Projects:       projectService,
+		Delivery:       deliveryinsights.Reader{Service: deliveryService},
+		Media:          insightMediaReader{uploads: uploadService},
+		// 视频类提取走多模态。为 nil 时视频类退回人填画面描述那条路——
+		// 这里永远不为 nil（媒体理解服务总是构造出来的），但它内部的视觉链路
+		// 可能没接通，那种情况由 UnderstandMedia 自己识别并回落。
+		Understanding: insightMediaUnderstander{service: mediaUnderstandingService},
+
+		// 米云素材（来自上游 shikanon/cookies）。
+		Miyun:               insights.MySQLRepository{DB: db},
+		MiyunProjects:       miyunProjectSourceAdapter{projects: projectService},
+		MiyunAssets:         miyunAssetSourceAdapter{uploads: uploadService},
+		MiyunKnowledge:      miyunKnowledgeSourceAdapter{knowledge: knowledgeService},
+		MiyunHandoffContent: miyunHandoffContentAdapter{uploads: uploadService, knowledge: knowledgeService},
+		MiyunMedia:          miyunMediaEvidenceAdapter{media: mediaUnderstandingService},
+		MiyunCrawl:          insights.MySQLRepository{DB: db},
+		MiyunJobs:           runtimeStore,
+		MiyunPages:          miyunPages,
+		MiyunImports:        miyunImports,
+		MiyunReturns:        miyunReturnImportAdapter{imports: assets.ExternalImportService{Repository: assetRepository, Projects: projectService, Upload: *uploadService, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket}, uploads: *uploadService},
+		MiyunPreviews:       miyunPreviews,
+		MiyunSecrets:        miyunCipher,
+		MiyunVerifier:       miyunVerifier,
+		MiyunCooldown:       time.Duration(cfg.Miyun.CooldownSeconds) * time.Second,
 	}
 	// Text 为 nil 时提取会直接失败，不会退化成模板产出——
 	// 库里一条编造的特征，代价远大于一次失败的提取。
@@ -417,8 +534,16 @@ func main() {
 		httpserver.DomainMount{Pattern: "/api/insights/v1/", Handler: insightshttp.New(insightsService)})
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
+	if knowledgeService.DocumentScheduler != nil || knowledgeService.Scheduler != nil || knowledgeService.VisionScheduler != nil {
+		knowledgeReconciler := knowledge.JobStateReconciler{Service: knowledgeService, Limit: 20}
+		startWorker(workerContext, "knowledge-job-reconcile", knowledgeReconciler.RunOnce)
+	}
 	agentStore := agent.MySQLStore{DB: db}
 	runtimeHandlers := map[string]jobruntime.Handler{}
+	if cfg.Miyun.Enabled {
+		runtimeHandlers[insights.MiyunCrawlJobKind] = insightsService.HandleMiyunCrawlJob
+		runtimeHandlers[insights.MiyunMaterialImportJobKind] = insightsService.HandleMiyunMaterialImportJob
+	}
 	runtimeHandlers[creative.DirectionGenerationJobKind] = creativeService.HandleDirectionGenerationJob
 	creativeService.AINativeScriptScheduler = creative.JobRuntimeAINativeScriptScheduler{
 		Store: runtimeStore,
@@ -430,6 +555,9 @@ func main() {
 	}
 	if knowledgeService.DocumentParser != nil {
 		runtimeHandlers[knowledge.DocumentParseJobKind] = knowledgeService.HandleDocumentParseJob
+	}
+	if knowledgeService.DocumentVision != nil {
+		runtimeHandlers[knowledge.DocumentVisionFallbackJobKind] = knowledgeService.HandleDocumentVisionFallbackJob
 	}
 	creativeService.RenderScheduler = creative.JobRuntimeRenderScheduler{
 		Store: runtimeStore, NewID: func() (string, error) { return ids.New("creativerenderexec") },
@@ -467,12 +595,17 @@ func main() {
 		runtimeHandlers["creative.editing.render"] = creative.EditingRenderRuntimeHandler(*creativeService)
 	}
 	if cfg.Strategy.Enabled {
+		productEventWriter := strategysystem.MySQLProductEventWriter{DB: db}
 		strategyService := strategysystem.Service{
 			DB: db, Projects: projectService, Knowledge: knowledgeService, ConversationKnowledge: knowledgeService,
-			ConversationResearch: knowledgeService,
+			ConversationResearch: knowledgeService, ResearchRoutes: researchRouteInspector,
+			DocumentVisionRoutes: knowledgeService.DocumentVision,
 			ConversationMedia:    mediaUnderstandingService,
-			CreativeAssets:       uploadService, Agents: agentStore, Text: textProvider,
-			TextModelAlias: cfg.Strategy.TextModelAlias, DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
+			CreativeAssets:       uploadService, Agents: agentStore,
+			ProductEvents: productEventWriter, Text: textProvider,
+			TextModelAlias: cfg.Strategy.TextModelAlias, LiteTextModelAlias: cfg.Strategy.LiteTextModelAlias,
+			DeepReviewModelAlias: cfg.Strategy.DeepReviewModelAlias,
+			ResearchModelAlias:   cfg.Research.SeedModelAlias, DocumentVisionModelAlias: cfg.Research.DocumentVisionModelAlias,
 			PromptVersion:             cfg.Strategy.PromptVersion,
 			ConversationPromptVersion: cfg.Strategy.ConversationPromptVersion,
 			RevisePromptVersion:       cfg.Strategy.RevisePromptVersion,
@@ -487,6 +620,10 @@ func main() {
 			DisableApproval:              !cfg.Strategy.ApproveEnabled,
 			AllowedOrganizations:         strategyOrganizationAllowlist(cfg.Strategy.OrganizationAllowlist),
 		}
+		knowledgeService.DocumentEvents = strategysystem.KnowledgeDocumentProductEventSink{
+			Writer: productEventWriter, NewID: func() (string, error) { return ids.New("strategyproductevent") },
+		}
+		knowledgeService.ResearchCompletion = strategyService
 		if err := strategyService.EnsureCreativeBusinessCatalog(context.Background()); err != nil {
 			log.Fatalf("seed Strategy creative business catalog: %v", err)
 		}
@@ -743,6 +880,9 @@ func buildTextAdapter(cfg config.Config, db *sql.DB) (provider.TextProviderAdapt
 }
 
 func buildVisionAdapter(cfg config.Config, db *sql.DB) (provider.VisionProviderAdapter, error) {
+	if !cfg.MediaUnderstanding.RealProviderEnabled {
+		return provider.FakeSyncAdapter{}, nil
+	}
 	switch cfg.Provider.TextAdapter {
 	case "fake":
 		return provider.FakeSyncAdapter{}, nil
@@ -789,6 +929,114 @@ func strategyOrganizationAllowlist(values []string) map[contract.OrganizationID]
 }
 
 type assetVisionSourceResolver struct{ uploads *assets.UploadService }
+
+type miyunProjectSourceAdapter struct{ projects *project.Service }
+type miyunAssetSourceAdapter struct{ uploads *assets.UploadService }
+type miyunKnowledgeSourceAdapter struct{ knowledge *knowledge.Service }
+type miyunHandoffContentAdapter struct {
+	uploads   *assets.UploadService
+	knowledge *knowledge.Service
+}
+type miyunMediaEvidenceAdapter struct{ media *mediaunderstanding.Service }
+
+func (a miyunProjectSourceAdapter) ReadMiyunProjectSource(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (insights.MiyunProjectSource, error) {
+	projectContext, err := a.projects.GetContext(ctx, actor, projectID)
+	if err != nil {
+		return insights.MiyunProjectSource{}, err
+	}
+	businessContext, err := a.projects.GetBusinessContext(ctx, actor, projectID)
+	if err != nil {
+		return insights.MiyunProjectSource{}, err
+	}
+	workbench, err := a.projects.GetWorkbench(ctx, actor, projectID)
+	if err != nil {
+		return insights.MiyunProjectSource{}, err
+	}
+	if businessContext.ProjectID != projectID || workbench.Project.ProjectID != string(projectID) ||
+		workbench.Project.OrganizationID != string(actor.OrganizationID) {
+		return insights.MiyunProjectSource{}, fmt.Errorf("%w: Miyun Project projections are inconsistent", insights.ErrInvalidState)
+	}
+	products := make([]insights.MiyunProjectProduct, 0, len(businessContext.Products))
+	for _, product := range businessContext.Products {
+		products = append(products, insights.MiyunProjectProduct{ID: product.ID, Name: product.Name})
+	}
+	return insights.MiyunProjectSource{
+		Context: projectContext, ProjectName: businessContext.ProjectName,
+		BrandName: businessContext.BrandName, CategoryName: workbench.Brand.Category,
+		Products: products,
+	}, nil
+}
+
+func (a miyunAssetSourceAdapter) ReadMiyunAssetSource(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (insights.MiyunAssetSource, error) {
+	value, err := a.uploads.Get(ctx, actor, projectID, ref)
+	if err != nil {
+		return insights.MiyunAssetSource{}, err
+	}
+	return insights.MiyunAssetSource{
+		Ref: value.Version.Ref(), Kind: value.Asset.Kind, MIMEType: value.Version.MIMEType,
+		SHA256: value.Version.SHA256,
+		Ready:  value.Asset.Status == assets.AssetReady && value.Version.Status == assets.AssetReady,
+	}, nil
+}
+
+func (a miyunKnowledgeSourceAdapter) ReadMiyunKnowledgeSource(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, documentID string) (insights.MiyunKnowledgeSource, error) {
+	value, err := a.knowledge.GetDocument(ctx, actor, projectID, documentID)
+	if err != nil {
+		return insights.MiyunKnowledgeSource{}, err
+	}
+	return insights.MiyunKnowledgeSource{
+		ID: value.ID, Filename: value.Filename, MIMEType: value.MIMEType,
+		Status: value.Status, Text: value.ExtractedText, TextSHA256: value.TextSHA256, ContentSHA256: value.ContentSHA256,
+	}, nil
+}
+
+func (a miyunHandoffContentAdapter) OpenMiyunHandoffAsset(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (io.ReadCloser, error) {
+	if a.uploads == nil {
+		return nil, fmt.Errorf("Miyun asset content reader is unavailable")
+	}
+	stream, _, err := a.uploads.OpenPreview(ctx, actor, projectID, ref)
+	return stream, err
+}
+func (a miyunHandoffContentAdapter) OpenMiyunHandoffDocument(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (io.ReadCloser, error) {
+	if a.knowledge == nil {
+		return nil, fmt.Errorf("Miyun knowledge content reader is unavailable")
+	}
+	stream, _, err := a.knowledge.OpenDocumentOriginalStream(ctx, actor, projectID, id)
+	return stream, err
+}
+
+func (a miyunMediaEvidenceAdapter) ReadLatestMiyunMediaEvidence(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (insights.MiyunMediaEvidence, bool, error) {
+	value, err := a.media.GetLatestForAsset(ctx, actor, projectID, ref)
+	if errors.Is(err, mediaunderstanding.ErrNotFound) {
+		return insights.MiyunMediaEvidence{}, false, nil
+	}
+	if err != nil {
+		return insights.MiyunMediaEvidence{}, false, err
+	}
+	evidence := make([]string, 0, 1+len(value.VisibleText)+len(value.Observations)+len(value.Inferences)+len(value.Risks)+len(value.Unknowns)+len(value.Transcript))
+	if value.Summary != "" {
+		evidence = append(evidence, value.Summary)
+	}
+	for _, group := range [][]mediaunderstanding.Evidence{value.VisibleText, value.Observations, value.Inferences, value.Risks, value.Unknowns, value.Transcript} {
+		for _, item := range group {
+			evidence = append(evidence, item.Text)
+		}
+	}
+	asrProviderCode, asrModelVersion := "", ""
+	if value.TranscriptionLineage != nil {
+		asrProviderCode, asrModelVersion = value.TranscriptionLineage.ProviderCode, value.TranscriptionLineage.ModelVersion
+	}
+	return insights.MiyunMediaEvidence{
+		ArtifactID: value.ID, Status: string(value.Status), ContentHash: value.ContentHash, Evidence: evidence,
+		MediaFormatCode:        value.Classifications.MediaFormat.Code,
+		ContentStyleCode:       value.Classifications.ContentStyle.Code,
+		ContentStyleConfidence: value.Classifications.ContentStyle.Confidence,
+		VisionProviderCode:     value.Lineage.ProviderCode,
+		VisionModelVersion:     value.Lineage.ModelVersion,
+		ASRProviderCode:        asrProviderCode,
+		ASRModelVersion:        asrModelVersion,
+	}, true, nil
+}
 
 type creativeAssetReader struct{ uploads *assets.UploadService }
 
@@ -945,6 +1193,119 @@ func (r creativeAssetReader) ReadForCreative(ctx context.Context, actor contract
 		DurationMS: value.Version.DurationMS, FrameRate: value.Version.FrameRate,
 		VideoCodec: value.Version.VideoCodec, AudioCodec: value.Version.AudioCodec,
 	}, nil
+}
+
+// insightMediaReader 把素材库上传时探测到的元数据递给洞察的客观可测层。
+//
+// 只读，而且只读已经落库的探测结果——洞察不再跑一遍 ffprobe。两处各自量出的时长
+// 对不上的时候，没人说得清该信谁，而这一层的全部价值就在于「同一个文件量两遍
+// 结果一样」。
+type insightMediaReader struct{ uploads *assets.UploadService }
+
+func (r insightMediaReader) ReadMediaFacts(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID,
+	platformAssetID string, platformAssetVersion int64) (insights.MediaFacts, error) {
+	if r.uploads == nil {
+		return insights.MediaFacts{}, fmt.Errorf("asset upload service is required")
+	}
+	value, err := r.uploads.Get(ctx, actor, projectID, contract.AssetVersionRef{
+		AssetID: contract.AssetID(platformAssetID), Version: platformAssetVersion,
+	})
+	if err != nil {
+		return insights.MediaFacts{}, err
+	}
+	// 探测没成功就如实说没有。这几个字段在失败时是零值，当成「时长 0 秒」写进
+	// 客观可测层，就是把一个探测故障伪装成一条测量结论。
+	if value.Version.Media.ProbeStatus != assets.MediaProbeSucceeded {
+		reason := "素材库还没探测过这个文件"
+		switch value.Version.Media.ProbeStatus {
+		case assets.MediaProbeFailed:
+			reason = "素材库探测这个文件失败了"
+		case assets.MediaProbeNotRequired:
+			reason = "这个文件不是音视频，没有可探测的时长"
+		}
+		return insights.MediaFacts{Unavailable: reason}, nil
+	}
+	return insights.MediaFacts{
+		Measured:        true,
+		DurationSeconds: value.Version.Media.DurationSeconds,
+		WidthPixels:     value.Version.WidthPixels,
+		HeightPixels:    value.Version.HeightPixels,
+	}, nil
+}
+
+// insightMediaUnderstander 把平台的「媒体理解」接到洞察的视频语义提取上。
+//
+// 一次 Request 同时管排队和读结果：媒体理解按 (文件 SHA256, profile, prompt 版本,
+// 模型别名) 算输入指纹去重，同一条视频重复请求拿回的是同一份产出，不会重复排队，
+// 也不会重复花钱。所以洞察那边只有一个方法，不用自己判断该 Request 还是该 Get。
+type insightMediaUnderstander struct{ service *mediaunderstanding.Service }
+
+func (u insightMediaUnderstander) UnderstandMedia(ctx context.Context, actor contract.ActorContext,
+	projectID contract.ProjectID, platformAssetID string, platformAssetVersion int64) (insights.MediaUnderstanding, error) {
+	if u.service == nil {
+		return insights.MediaUnderstanding{Unavailable: "这个环境没接多模态"}, nil
+	}
+	artifact, _, err := u.service.Request(ctx, actor, projectID, mediaunderstanding.CreateRequest{
+		AssetID: platformAssetID, Version: platformAssetVersion,
+	})
+	if errors.Is(err, mediaunderstanding.ErrUnsupportedProfile) {
+		return insights.MediaUnderstanding{
+			Unavailable: "这条视频不在多模态能看的范围内（只看 15–90 秒的 mp4）",
+		}, nil
+	}
+	if err != nil {
+		return insights.MediaUnderstanding{}, err
+	}
+
+	switch artifact.Status {
+	case mediaunderstanding.StatusRunning:
+		return insights.MediaUnderstanding{Pending: true, ArtifactID: artifact.ID}, nil
+	case mediaunderstanding.StatusFailed:
+		return insights.MediaUnderstanding{
+			ArtifactID: artifact.ID, Unavailable: understandingFailureReason(artifact),
+		}, nil
+	}
+	// 视觉链路没配好时，媒体理解仍然会落一条 partial，里面只有一句技术校验
+	// （applyTechnicalFallback）。那句话喂给特征模型只会让它照着编，所以这里当成
+	// 「没看成」，让洞察回落到人填正文——它自己在 Warnings 里说了这件事。
+	for _, warning := range artifact.Warnings {
+		switch warning {
+		case "vision_provider_unavailable", "vision_route_unavailable", "fake_vision_no_semantic_claims":
+			return insights.MediaUnderstanding{
+				ArtifactID: artifact.ID, Unavailable: "这个环境的视觉模型没接通，模型没真看画面",
+			}, nil
+		}
+	}
+	return insights.MediaUnderstanding{
+		Ready: true, ArtifactID: artifact.ID, Summary: artifact.Summary,
+		Observations: evidenceTexts(artifact.Observations), Inferences: evidenceTexts(artifact.Inferences),
+		VisibleText: evidenceTexts(artifact.VisibleText), Transcript: evidenceTexts(artifact.Transcript),
+		KeyframeCount: len(artifact.Keyframes), ProviderCode: artifact.Lineage.ProviderCode,
+		ModelAlias: artifact.Lineage.ModelAlias, ModelVersion: artifact.Lineage.ModelVersion,
+		ContentHash: artifact.ContentHash,
+	}, nil
+}
+
+func understandingFailureReason(artifact mediaunderstanding.Artifact) string {
+	if message := strings.TrimSpace(artifact.ErrorMessage); message != "" {
+		return message
+	}
+	return "多模态没能看完这条视频"
+}
+
+// evidenceTexts 只取正文，丢掉帧号和置信度。
+//
+// 丢掉是有意的：这段字是要发给特征模型的，带上「frame_index: 2, confidence: 0.7」
+// 只会让它把这些数字也当成待提取的内容。帧号和置信度仍然完整留在媒体理解的产出上，
+// 想看证据链去那边看——那边有帧图，这边只有文字。
+func evidenceTexts(items []mediaunderstanding.Evidence) []string {
+	texts := make([]string, 0, len(items))
+	for _, item := range items {
+		if value := strings.TrimSpace(item.Text); value != "" {
+			texts = append(texts, value)
+		}
+	}
+	return texts
 }
 
 func (r assetVisionSourceResolver) ResolveVisionSources(ctx context.Context, actor contract.ActorContext, projectContext contract.ProjectContext, refs []contract.ProjectAssetRef) ([]provider.VisionSource, error) {

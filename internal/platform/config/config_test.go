@@ -16,6 +16,7 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		value.Strategy.PackageToCreativeEnabled || value.Strategy.CriticEnabled ||
 		!value.Strategy.ContextSelectionEnabled ||
 		value.Strategy.TextModelAlias != "cookies.text.standard" ||
+		value.Strategy.LiteTextModelAlias != "cookies.text.lite" ||
 		value.Strategy.DeepReviewModelAlias != "cookies.text.deep_review" ||
 		value.Strategy.PromptVersion != "strategy.generate.v4" ||
 		value.Strategy.ConversationPromptVersion != "strategy.conversation.v6" ||
@@ -27,6 +28,10 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		value.Strategy.CreativeTaskPromptVersion != "strategy.creative_task.generate.v2" ||
 		len(value.Strategy.OrganizationAllowlist) != 0 {
 		t.Fatalf("unexpected Strategy defaults: %#v", value.Strategy)
+	}
+	if value.Research.SeedModelAlias != "cookies.research.web.standard" ||
+		value.Research.DocumentVisionModelAlias != "cookies.document.vision.standard" {
+		t.Fatalf("unexpected fixed research/document aliases: %#v", value.Research)
 	}
 	if !strings.Contains(value.MySQL.DSN, "127.0.0.1:3307") {
 		t.Fatalf("default MySQL DSN does not use the isolated local port: %q", value.MySQL.DSN)
@@ -354,7 +359,7 @@ func TestArkVideoAdapterIsExplicitAndLocalOnly(t *testing.T) {
 	}
 }
 
-func TestVolcengineASRLegacyConfigurationIsExplicitAndLocalOnly(t *testing.T) {
+func TestVolcengineASRLegacyConfigurationIsExplicitAndReusable(t *testing.T) {
 	t.Parallel()
 	if _, err := FromLookup(mapLookup(map[string]string{
 		"COOKIES_PROVIDER_AUDIO_ADAPTER": "volcengine_asr",
@@ -375,13 +380,34 @@ func TestVolcengineASRLegacyConfigurationIsExplicitAndLocalOnly(t *testing.T) {
 		config.Provider.VolcengineASR.Model != "bigmodel" {
 		t.Fatalf("unexpected ASR defaults: %#v", config.Provider.VolcengineASR)
 	}
-	if _, err := FromLookup(mapLookup(map[string]string{
+	staging, err := FromLookup(mapLookup(map[string]string{
 		"COOKIES_ENV": "staging", "COOKIES_BLOB_PROVIDER": "memory",
-		"COOKIES_PROVIDER_AUDIO_ADAPTER":      "volcengine_asr",
-		"COOKIES_VOLCENGINE_ASR_APP_ID":       "test-app",
-		"COOKIES_VOLCENGINE_ASR_ACCESS_TOKEN": "test-token",
+		"COOKIES_PROVIDER_AUDIO_ADAPTER":          "volcengine_asr",
+		"COOKIES_VOLCENGINE_ASR_APP_ID":           "test-app",
+		"COOKIES_VOLCENGINE_ASR_ACCESS_TOKEN":     "test-token",
+		"COOKIES_MEDIA_UNDERSTANDING_ASR_ENABLED": "true",
+	}))
+	if err != nil || !staging.MediaUnderstanding.ASREnabled {
+		t.Fatalf("expected reusable Volcengine ASR configuration: %#v err=%v", staging.MediaUnderstanding, err)
+	}
+}
+
+func TestMediaUnderstandingProviderRolloutIsIndependent(t *testing.T) {
+	t.Parallel()
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_MEDIA_UNDERSTANDING_REAL_PROVIDER_ENABLED": "true",
 	})); err == nil {
-		t.Fatal("expected Volcengine ASR outside local to be rejected")
+		t.Fatal("real media understanding must require the gateway adapter")
+	}
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	value, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_PROVIDER_TEXT_ADAPTER":                     "adapter_gateway",
+		"COOKIES_PROVIDER_MASTER_KEY":                       key,
+		"COOKIES_MEDIA_UNDERSTANDING_REAL_PROVIDER_ENABLED": "true",
+		"COOKIES_MEDIA_UNDERSTANDING_VISION_MODEL_ALIAS":    "cookies.vision.material.v1",
+	}))
+	if err != nil || !value.MediaUnderstanding.RealProviderEnabled || value.Strategy.RealProviderEnabled || value.MediaUnderstanding.VisionModelAlias != "cookies.vision.material.v1" {
+		t.Fatalf("independent media understanding rollout=%#v strategy=%#v err=%v", value.MediaUnderstanding, value.Strategy, err)
 	}
 }
 
@@ -438,6 +464,80 @@ func TestFromLookupUsesObjectStorageCompatibilityNamesForTOS(t *testing.T) {
 	}
 	if got, want := config.ObjectStorage.AssetsBucket, "compat-assets"; got != want {
 		t.Fatalf("AssetsBucket = %q, want %q", got, want)
+	}
+}
+
+func TestFromLookupUsesSingleTOSBucketForAllObjectClasses(t *testing.T) {
+	t.Parallel()
+	config, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_BLOB_PROVIDER":          "tos",
+		"COOKIES_TOS_ENDPOINT":           "tos.example.com",
+		"COOKIES_TOS_REGION":             "cn-test",
+		"COOKIES_TOS_ACCESS_KEY":         "test-access-key",
+		"COOKIES_TOS_SECRET_KEY":         "test-secret-key",
+		"COOKIES_TOS_BUCKET":             "cookies-storage",
+		"COOKIES_TOS_QUARANTINE_BUCKET":  "legacy-quarantine",
+		"COOKIES_TOS_ASSETS_BUCKET":      "legacy-assets",
+		"COOKIES_PROVIDER_OUTPUT_BUCKET": "legacy-provider-output",
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup() error = %v", err)
+	}
+	if got, want := config.ObjectStorage.QuarantineBucket, "cookies-storage"; got != want {
+		t.Fatalf("QuarantineBucket = %q, want %q", got, want)
+	}
+	if got, want := config.ObjectStorage.AssetsBucket, "cookies-storage"; got != want {
+		t.Fatalf("AssetsBucket = %q, want %q", got, want)
+	}
+	if got, want := config.Provider.OutputBucket, "cookies-storage"; got != want {
+		t.Fatalf("OutputBucket = %q, want %q", got, want)
+	}
+}
+
+func TestDocumentVisionRequiresEncryptedRouteAndOneSharedTOSBucket(t *testing.T) {
+	t.Parallel()
+	if _, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_DOCUMENT_VISION_ENABLED": "true",
+	})); err == nil {
+		t.Fatal("expected document vision with filesystem storage to be rejected")
+	}
+	base := map[string]string{
+		"COOKIES_DOCUMENT_VISION_ENABLED": "true",
+		"COOKIES_BLOB_PROVIDER":           "tos", "COOKIES_TOS_ENDPOINT": "tos.example.com",
+		"COOKIES_TOS_REGION": "cn-test", "COOKIES_TOS_ACCESS_KEY": "key", "COOKIES_TOS_SECRET_KEY": "secret",
+		"COOKIES_PROVIDER_MASTER_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32)),
+	}
+	base["COOKIES_TOS_ASSETS_BUCKET"] = "assets"
+	base["COOKIES_TOS_QUARANTINE_BUCKET"] = "quarantine"
+	base["COOKIES_PROVIDER_OUTPUT_BUCKET"] = "outputs"
+	if _, err := FromLookup(mapLookup(base)); err == nil {
+		t.Fatal("expected document vision with multiple buckets to be rejected")
+	}
+	base["COOKIES_TOS_BUCKET"] = "cookies-storage"
+	config, err := FromLookup(mapLookup(base))
+	if err != nil || !config.Research.DocumentVisionEnabled {
+		t.Fatalf("valid document vision configuration rejected: config=%#v err=%v", config.Research, err)
+	}
+	base["COOKIES_DOCUMENT_CONVERTER_ENABLED"] = "true"
+	base["COOKIES_DOCUMENT_CONVERTER_BASE_URL"] = "http://gotenberg:3000"
+	if _, err := FromLookup(mapLookup(base)); err == nil {
+		t.Fatal("expected insecure converter HTTP without explicit opt-in to be rejected")
+	}
+	base["COOKIES_DOCUMENT_CONVERTER_ALLOW_INSECURE_HTTP"] = "true"
+	config, err = FromLookup(mapLookup(base))
+	if err != nil || !config.Research.DocumentConverterEnabled || config.Research.DocumentConverterVersion == "" {
+		t.Fatalf("valid document converter configuration rejected: config=%#v err=%v", config.Research, err)
+	}
+}
+
+func TestDocumentConverterRequiresDocumentVision(t *testing.T) {
+	t.Parallel()
+	_, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_DOCUMENT_CONVERTER_ENABLED":             "true",
+		"COOKIES_DOCUMENT_CONVERTER_ALLOW_INSECURE_HTTP": "true",
+	}))
+	if err == nil {
+		t.Fatal("expected converter without document vision to be rejected")
 	}
 }
 
@@ -629,6 +729,32 @@ func TestSeedResearchRequiresCredentialEncryptionKey(t *testing.T) {
 	}))
 	if err != nil || !config.Research.SeedEnabled {
 		t.Fatalf("valid Seed research configuration rejected: config=%#v err=%v", config.Research, err)
+	}
+}
+
+func TestMiyunConfigurationIsDisabledByDefaultAndStrictWhenEnabled(t *testing.T) {
+	t.Parallel()
+	defaults, err := FromLookup(mapLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Miyun.Enabled || defaults.Miyun.MaxConcurrent != 1 || defaults.Miyun.RequestsPerSecond != 5 || defaults.Miyun.CooldownSeconds != 300 {
+		t.Fatalf("unsafe Miyun defaults: %#v", defaults.Miyun)
+	}
+	if _, err := FromLookup(mapLookup(map[string]string{"COOKIES_MIYUN_ENABLED": "true"})); err == nil {
+		t.Fatal("enabled Miyun without key and host allowlist was accepted")
+	}
+	configured, err := FromLookup(mapLookup(map[string]string{
+		"COOKIES_MIYUN_ENABLED":                "true",
+		"COOKIES_MIYUN_MASTER_KEY":             base64.StdEncoding.EncodeToString(make([]byte, 32)),
+		"COOKIES_MIYUN_MASTER_KEY_VERSION":     "key-v1",
+		"COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS": "cdn.example.test,media.example.test",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured.Miyun.Enabled || len(configured.Miyun.DownloadAllowedHosts) != 2 {
+		t.Fatalf("Miyun configuration = %#v", configured.Miyun)
 	}
 }
 

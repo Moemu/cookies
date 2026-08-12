@@ -329,6 +329,7 @@ func adminScopes() []contract.Scope {
 		"strategy.approve", "strategy.package.read", "creative.read", "creative.write",
 		"delivery.read", "delivery.write", "delivery.approve", "delivery.execute",
 		"insights.read", "insights.write", "insights.confirm",
+		"knowledge.document_vision.reconcile",
 	}
 	return contract.ScopesFromStrings(values)
 }

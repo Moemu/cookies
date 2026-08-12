@@ -9,6 +9,21 @@ import type {
   ResearchRun,
 } from './types'
 
+export type RequirementConfirmationOperation = { fieldPath: string; value: string }
+
+export function requirementConfirmationOperations(brief: BriefDraft): RequirementConfirmationOperation[] {
+  const fields = [
+    ['product.name', brief.document.product?.name],
+    ['campaign.objective', brief.document.campaign.objective],
+    ['audience.primary', brief.document.audience.primary],
+    ['proposition', brief.document.proposition],
+  ] as const
+  return fields.flatMap(([fieldPath, value]) => {
+    if (!value?.trim() || brief.field_states[fieldPath]?.confirmation === 'confirmed') return []
+    return [{ fieldPath, value }]
+  })
+}
+
 export type ConversationLensItem = {
   key: 'product' | 'objective' | 'audience' | 'proposition'
   label: string

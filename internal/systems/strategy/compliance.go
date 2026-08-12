@@ -61,6 +61,11 @@ func documentForClaimReview(document StrategyDocument) StrategyDocument {
 	document = documentWithoutCompliance(document)
 	document.Constraints = nil
 	document.CreativeRecommendations = outwardFacingRecommendations(document.CreativeRecommendations)
+	if document.CreativeStrategy != nil {
+		creative := *document.CreativeStrategy
+		creative.Avoidances = nil
+		document.CreativeStrategy = &creative
+	}
 	document.PlatformPlans = append([]PlatformPlan(nil), document.PlatformPlans...)
 	for index := range document.PlatformPlans {
 		document.PlatformPlans[index].Constraints = nil

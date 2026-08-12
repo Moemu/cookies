@@ -83,7 +83,7 @@ func TestFilterExcludesUnscopedExperiencesButReportsHowMany(t *testing.T) {
 func TestCardReportsMissingFieldsInsteadOfHidingTheCard(t *testing.T) {
 	t.Parallel()
 	card := buildInsightCard(Experience{
-		Conclusion: "首图保持单一利益点。", CardType: CardHypothesis, Confidence: ConfidenceDirectional,
+		Conclusion: "首图保持单一利益点。", CardType: CardHypothesis, Judgement: judge(ConfidenceDirectional, ""),
 	}, 0)
 	want := map[string]bool{"适用范围": true, "数据依据": true, "内容依据": true, "风险与反例": true, "建议动作": true}
 	if len(card.MissingFields) != len(want) {
@@ -104,9 +104,9 @@ func TestCardReportsMissingFieldsInsteadOfHidingTheCard(t *testing.T) {
 func TestFeaturePatternsCountAppearancesAndKeepStrongestConfidence(t *testing.T) {
 	t.Parallel()
 	patterns := buildFeaturePatterns([]Experience{
-		{Confidence: ConfidenceLowSample, Applicability: Applicability{Channels: []string{"douyin"}},
+		{Judgement: judge(ConfidenceLowSample, ""), Applicability: Applicability{Channels: []string{"douyin"}},
 			ContentBasis: ContentBasis{Features: []string{"开头露脸", "字幕加粗"}}},
-		{Confidence: ConfidenceSufficient, Applicability: Applicability{Channels: []string{"xiaohongshu"}},
+		{Judgement: judge(ConfidenceSufficient, ""), Applicability: Applicability{Channels: []string{"xiaohongshu"}},
 			ContentBasis: ContentBasis{Features: []string{"开头露脸"}}},
 	})
 	if len(patterns) != 2 || patterns[0].Feature != "开头露脸" || patterns[0].CardCount != 2 {

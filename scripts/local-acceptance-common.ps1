@@ -67,7 +67,12 @@ function Initialize-LocalAcceptanceEnvironment {
         "COOKIES_LOCAL_PRINCIPAL_KIND"                 = "user"
         "COOKIES_LOCAL_PRINCIPAL_ID"                   = "user_local"
         "COOKIES_LOCAL_PROJECT_ID"                     = "project_local"
-        "COOKIES_LOCAL_SCOPES"                         = "project.read,project.write,assets.read,assets.write,provider.job.create,provider.text.generate,provider.vision.understand,creative.read,creative.write,strategy.read,strategy.write,strategy.confirm,strategy.review,strategy.approve,strategy.package.read"
+        "COOKIES_LOCAL_SCOPES"                         = "project.read,project.write,assets.read,assets.write,insights.read,insights.write,insights.confirm,provider.job.create,provider.text.generate,provider.vision.understand,creative.read,creative.write,strategy.read,strategy.write,strategy.confirm,strategy.review,strategy.approve,strategy.package.read"
+        "COOKIES_MIYUN_ENABLED"                        = "true"
+        "COOKIES_MIYUN_ENDPOINT"                       = "https://api.youshu.youcloud.com/graphql"
+        "COOKIES_MIYUN_MASTER_KEY"                     = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+        "COOKIES_MIYUN_MASTER_KEY_VERSION"             = "v1"
+        "COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS"         = "api.youshu.youcloud.com,creative-static-ag-v2.umcdn.cn"
         "COOKIES_STRATEGY_ENABLED"                     = "true"
         "COOKIES_STRATEGY_CRITIC_ENABLED"              = "true"
         "COOKIES_STRATEGY_APPROVE_ENABLED"             = "true"
@@ -195,10 +200,10 @@ GROUP BY r.model_alias, rr.upstream_model, r.status, c.connection_type, c.status
         $fields[0] -ne $script:SeedTextAlias -or
         $fields[1] -ne $script:SeedTextModel -or
         $fields[2] -ne "enabled" -or
-        $fields[3] -ne "adapter_gateway" -or
+        $fields[3] -notin @("adapter_gateway", "ark") -or
         $fields[4] -ne "enabled" -or
         [int]$fields[5] -lt 1) {
-        throw "The '$script:SeedTextAlias' route is not ready for $script:SeedTextModel. Re-import the shared Adapter provider configuration."
+        throw "The '$script:SeedTextAlias' route is not ready for $script:SeedTextModel. Configure an active Adapter or Ark provider connection."
     }
     Write-Host "Seed text route verified: $script:SeedTextAlias -> $script:SeedTextModel"
 }

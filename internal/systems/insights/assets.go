@@ -78,16 +78,41 @@ func (k AssetSourceKind) valid() bool {
 	return false
 }
 
-// FeatureSource separates the two data layers 03 §14 insists must not overwrite
-// each other: AI 推断 and 人工结论.
+// FeatureSource separates the data layers 03 §14 insists must not overwrite
+// each other: AI 推断、人工结论，以及从文件本身算出来的客观量。
 type FeatureSource string
 
 const (
-	SourceAI    FeatureSource = "ai"
+	// SourceAI 模型推断：模型看着素材猜出来的。可以展示，不能进归因结论——
+	// 拿一个猜测去解释另一个猜测，结论看起来有理，其实一层假设都没减少。
+	SourceAI FeatureSource = "ai"
+	// SourceHuman 人工标注：人填的。人会错，但人为自己填的东西负责。
 	SourceHuman FeatureSource = "human"
+	// SourceDerived 客观可测：从文件本身算出来的，时长、分辨率、镜头数、语速。
+	// 同一个文件算两遍结果一样，这是三类里唯一可复现的。
+	SourceDerived FeatureSource = "derived"
 )
 
-func (s FeatureSource) valid() bool { return s == SourceAI || s == SourceHuman }
+func (s FeatureSource) valid() bool {
+	return s == SourceAI || s == SourceHuman || s == SourceDerived
+}
+
+func (s FeatureSource) Label() string {
+	switch s {
+	case SourceDerived:
+		return "客观可测"
+	case SourceHuman:
+		return "人工标注"
+	case SourceAI:
+		return "模型推断"
+	}
+	return string(s)
+}
+
+// AdmissibleForAttribution 决定这个来源的特征能不能进归因结论。
+func (s FeatureSource) AdmissibleForAttribution() bool {
+	return s == SourceDerived || s == SourceHuman
+}
 
 // Confidence is the level an AI inference must carry (03 §5 末).
 type Confidence string

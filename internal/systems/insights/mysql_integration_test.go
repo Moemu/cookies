@@ -151,23 +151,29 @@ func TestExperienceLifecycleAgainstMySQL(t *testing.T) {
 		t.Fatalf("lineage=%d err=%v", len(lineage), err)
 	}
 
-	// needs_review is the only way to challenge a confirmed conclusion.
-	reviewed, err := repository.TransitionExperience(ctx, insights.TransitionExperienceInput{
+	// 质疑一条在用的结论，走的是标记，不是状态。标完它还在用、还能被引用。
+	flagged, err := repository.FlagExperienceForReview(ctx, insights.FlagExperienceReviewInput{
 		OrganizationID: organizationID, ProjectID: projectID, ID: revision.ID,
-		ExpectedVersion: promoted.Version, From: []insights.ExperienceStatus{insights.ExperienceConfirmed},
-		To: insights.ExperienceNeedsReview, Reason: "新一轮数据与结论冲突", ActorID: userID, Now: now,
+		ExpectedVersion: promoted.Version, NeedsReview: true,
+		Reason: "新一轮数据与结论冲突", ActorID: userID, Now: now,
 		AuditID: "experienceaudit_it_7_" + suffix,
 	})
-	if err != nil || reviewed.Status != insights.ExperienceNeedsReview || reviewed.Reusable() {
-		t.Fatalf("needs review=%#v err=%v", reviewed, err)
+	if err != nil || flagged.Status != insights.ExperienceConfirmed || !flagged.NeedsReview || !flagged.Reusable() {
+		t.Fatalf("flag for review=%#v err=%v", flagged, err)
 	}
-	if _, err := repository.TransitionExperience(ctx, insights.TransitionExperienceInput{
+	// 标记要真的落库，不能只活在返回值里——下一个读它的人得看得见。
+	stored, err := repository.GetExperience(ctx, organizationID, projectID, revision.ID)
+	if err != nil || !stored.NeedsReview || stored.ReviewHint() == "" {
+		t.Fatalf("stored flag=%#v err=%v", stored, err)
+	}
+	// 拿旧版本号再标一次是并发写，必须被版本号挡住。
+	if _, err := repository.FlagExperienceForReview(ctx, insights.FlagExperienceReviewInput{
 		OrganizationID: organizationID, ProjectID: projectID, ID: revision.ID,
-		ExpectedVersion: reviewed.Version, From: []insights.ExperienceStatus{insights.ExperienceConfirmed},
-		To: insights.ExperienceNeedsReview, Reason: "重复请求", ActorID: userID, Now: now,
+		ExpectedVersion: promoted.Version, NeedsReview: true,
+		Reason: "重复请求", ActorID: userID, Now: now,
 		AuditID: "experienceaudit_it_8_" + suffix,
-	}); !errors.Is(err, insights.ErrInvalidState) {
-		t.Fatalf("repeat review error = %v", err)
+	}); !errors.Is(err, insights.ErrVersionConflict) {
+		t.Fatalf("stale flag error = %v", err)
 	}
 }
 
@@ -392,7 +398,11 @@ func seedExperience(ctx context.Context, t *testing.T, repository insights.MySQL
 		ReportID: reportID, SourceExecutionID: "deliveryexecution_it_" + id,
 		SourceEvidenceID: "evidence_it_" + id, SourceMetricSnapshotID: "metricsnapshot_it_" + id,
 		Conclusion: "本地集成测试结论", Conditions: []string{"小红书图文"}, Counterexamples: []string{"未覆盖视频"},
-		Status: insights.ExperiencePending, StatusChangedBy: userID, StatusChangedAt: &now,
+		// card_type 和 confidence 在库里都有 CHECK，空串过不去。这里给足量证据，
+		// 是因为下面要断言「确认之后可默认引用」——两道闸得都开着才验得出来。
+		CardType:  insights.CardStatistic,
+		Judgement: insights.NewJudgement(insights.ConfidenceSufficient, ""),
+		Status:    insights.ExperiencePending, StatusChangedBy: userID, StatusChangedAt: &now,
 		Version: 1, CreatedBy: userID, CreatedAt: now, UpdatedAt: now,
 	}
 	stored, err := repository.CreateExperience(ctx, value, insights.ExperienceAudit{
@@ -421,6 +431,9 @@ func cleanupInsightsIntegration(t *testing.T, db *sql.DB, organizationID contrac
 		"DELETE FROM insight_experience_audits WHERE organization_id=?",
 		"DELETE FROM insight_experiences WHERE organization_id=?",
 		"DELETE FROM insight_reports WHERE organization_id=?",
+		// EnsureLocalProject 会顺手建一行运行时，它外键指向 projects。
+		// 不先删它，下面每一条清理都会连环失败，测试留一地脏数据。
+		"DELETE FROM platform_project_runtimes WHERE organization_id=?",
 		"DELETE FROM project_context_versions WHERE organization_id=?",
 		"DELETE FROM project_products WHERE organization_id=?",
 		"DELETE FROM project_memberships WHERE organization_id=?",

@@ -351,12 +351,13 @@ type BriefPatchOperation struct {
 }
 
 type BriefPatch struct {
-	ContractVersion string                `json:"contract_version,omitempty"`
-	BaseVersion     int64                 `json:"base_version,omitempty"`
-	ExpectedVersion int64                 `json:"expected_version,omitempty"`
-	Operations      []BriefPatchOperation `json:"operations"`
-	Questions       []string              `json:"questions,omitempty"`
-	Warnings        []string              `json:"warnings,omitempty"`
+	ContractVersion  string                `json:"contract_version,omitempty"`
+	BaseVersion      int64                 `json:"base_version,omitempty"`
+	ExpectedVersion  int64                 `json:"expected_version,omitempty"`
+	ConfirmationMode string                `json:"confirmation_mode,omitempty"`
+	Operations       []BriefPatchOperation `json:"operations"`
+	Questions        []string              `json:"questions,omitempty"`
+	Warnings         []string              `json:"warnings,omitempty"`
 }
 
 type ConversationQuestion struct {
@@ -383,7 +384,8 @@ type StrategyDocument struct {
 	Audience                StrategyAudience  `json:"audience"`
 	Proposition             string            `json:"proposition"`
 	ChannelStrategy         []ChannelStrategy `json:"channel_strategy"`
-	CreativeRecommendations []string          `json:"creative_recommendations"`
+	CreativeRecommendations []string          `json:"creative_recommendations,omitempty"`
+	CreativeStrategy        *CreativeStrategy `json:"creative_strategy,omitempty"`
 	Constraints             []string          `json:"constraints"`
 	BudgetAndCadence        BudgetAndCadence  `json:"budget_and_cadence"`
 	ExperimentMatrix        []Experiment      `json:"experiment_matrix"`
@@ -405,6 +407,30 @@ type ChannelStrategy struct {
 	Platform string   `json:"platform"`
 	Role     string   `json:"role"`
 	Formats  []string `json:"formats"`
+}
+
+type CreativeStrategy struct {
+	Objective        string              `json:"objective"`
+	MessageHierarchy []string            `json:"message_hierarchy"`
+	Territories      []CreativeTerritory `json:"territories"`
+	Tone             []string            `json:"tone"`
+	Mandatories      []string            `json:"mandatories"`
+	Avoidances       []string            `json:"avoidances"`
+}
+
+type CreativeTerritory struct {
+	Name               string              `json:"name"`
+	AudienceTension    string              `json:"audience_tension"`
+	CoreIdea           string              `json:"core_idea"`
+	Proof              []string            `json:"proof"`
+	ChannelAdaptations []ChannelAdaptation `json:"channel_adaptations"`
+}
+
+type ChannelAdaptation struct {
+	Platform   string   `json:"platform"`
+	Role       string   `json:"role"`
+	Adaptation string   `json:"adaptation"`
+	Formats    []string `json:"formats,omitempty"`
 }
 type PlatformPlan struct {
 	Platform       string   `json:"platform"`
@@ -435,7 +461,7 @@ type StrategyLineage struct {
 }
 
 func (d StrategyDocument) Validate() error {
-	if (d.ContractVersion != "strategy-draft/v1" && d.ContractVersion != "strategy-draft/v2") ||
+	if (d.ContractVersion != "strategy-draft/v1" && d.ContractVersion != "strategy-draft/v2" && d.ContractVersion != "strategy-draft/v3") ||
 		strings.TrimSpace(d.Objective) == "" ||
 		strings.TrimSpace(d.Audience.Primary) == "" || strings.TrimSpace(d.Proposition) == "" ||
 		len(d.ChannelStrategy) == 0 || d.Lineage.BriefID == "" || d.Lineage.BriefVersion < 1 ||
@@ -447,7 +473,7 @@ func (d StrategyDocument) Validate() error {
 			return fmt.Errorf("%w: channel strategy is invalid", ErrInvalidRequest)
 		}
 	}
-	if d.ContractVersion == "strategy-draft/v2" {
+	if d.ContractVersion == "strategy-draft/v2" || d.ContractVersion == "strategy-draft/v3" {
 		if len(d.PlatformPlans) == 0 || strings.TrimSpace(d.ExecutiveSummary) == "" {
 			return fmt.Errorf("%w: multi-platform strategy is incomplete", ErrInvalidRequest)
 		}
@@ -461,7 +487,51 @@ func (d StrategyDocument) Validate() error {
 			seen[plan.Platform] = true
 		}
 	}
+	if d.ContractVersion == "strategy-draft/v3" {
+		if len(d.CreativeRecommendations) > 0 || d.CreativeStrategy == nil {
+			return fmt.Errorf("%w: v3 creative strategy is incomplete", ErrInvalidRequest)
+		}
+		if err := d.CreativeStrategy.validate(); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (value CreativeStrategy) validate() error {
+	if strings.TrimSpace(value.Objective) == "" || len(value.MessageHierarchy) == 0 ||
+		len(value.Territories) == 0 || len(value.Tone) == 0 {
+		return fmt.Errorf("%w: creative strategy is incomplete", ErrInvalidRequest)
+	}
+	for _, territory := range value.Territories {
+		if strings.TrimSpace(territory.Name) == "" || strings.TrimSpace(territory.AudienceTension) == "" ||
+			strings.TrimSpace(territory.CoreIdea) == "" || len(territory.Proof) == 0 || len(territory.ChannelAdaptations) == 0 {
+			return fmt.Errorf("%w: creative territory is incomplete", ErrInvalidRequest)
+		}
+		for _, adaptation := range territory.ChannelAdaptations {
+			if !supportedPlatform(adaptation.Platform) || strings.TrimSpace(adaptation.Role) == "" ||
+				strings.TrimSpace(adaptation.Adaptation) == "" {
+				return fmt.Errorf("%w: creative channel adaptation is invalid", ErrInvalidRequest)
+			}
+		}
+	}
+	return nil
+}
+
+// CreativeDirections is a read-only compatibility projection. It lets legacy
+// handoff readers display v3 territories without serializing a v2 field back
+// into the immutable Strategy document.
+func (d StrategyDocument) CreativeDirections() []string {
+	if d.ContractVersion != "strategy-draft/v3" || d.CreativeStrategy == nil {
+		return append([]string(nil), d.CreativeRecommendations...)
+	}
+	result := make([]string, 0, len(d.CreativeStrategy.Territories))
+	for _, territory := range d.CreativeStrategy.Territories {
+		if value := strings.TrimSpace(territory.CoreIdea); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func supportedPlatform(value string) bool {
@@ -646,7 +716,8 @@ type DeepReviewAnalysis struct {
 	ID                   string                    `json:"id"`
 	OrganizationID       contract.OrganizationID   `json:"organization_id"`
 	ProjectID            contract.ProjectID        `json:"project_id"`
-	ReviewID             string                    `json:"review_id"`
+	TargetKind           string                    `json:"target_kind"`
+	ReviewID             string                    `json:"review_id,omitempty"`
 	StrategyID           string                    `json:"strategy_id"`
 	CandidateRevision    int64                     `json:"candidate_revision"`
 	CandidateContentHash contract.ContentHash      `json:"candidate_content_hash"`
@@ -669,6 +740,11 @@ type DeepReviewAnalysis struct {
 
 type StartDeepReviewRequest struct {
 	ExpectedReviewStatus string `json:"expected_review_status"`
+}
+
+type StartStrategyPerspectiveRequest struct {
+	ExpectedRevision    int64                `json:"expected_revision"`
+	ExpectedContentHash contract.ContentHash `json:"expected_content_hash"`
 }
 
 type DeepReviewStartResult struct {

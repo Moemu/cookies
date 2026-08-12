@@ -190,11 +190,26 @@ type KnowledgeManager interface {
 	ImportDocument(context.Context, contract.ActorContext, contract.ProjectID, knowledge.ImportDocumentRequest) (knowledge.Document, error)
 	ListDocuments(context.Context, contract.ActorContext, contract.ProjectID, int) ([]knowledge.Document, error)
 	GetDocument(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.Document, error)
+	GetDocumentPreview(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.DocumentPreview, error)
+	GetDocumentVisionFallbackCapability(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.DocumentVisionFallbackCapabilityView, error)
+	OpenDocumentContent(context.Context, contract.ActorContext, contract.ProjectID, string) (io.ReadCloser, assets.ObjectInfo, string, error)
+	OpenDocumentOriginal(context.Context, contract.ActorContext, contract.ProjectID, string) (io.ReadCloser, knowledge.Document, error)
 	Search(context.Context, contract.ActorContext, contract.ProjectID, knowledge.SearchRequest) ([]knowledge.SearchResult, error)
 	CreateDocument(context.Context, contract.ActorContext, contract.ProjectID, string, string, io.Reader, int64) (knowledge.Document, error)
+	CancelDocumentParse(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.JobControl, error)
+	RetryDocumentParse(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.Document, error)
+	RunDocumentVisionFallback(context.Context, contract.ActorContext, contract.ProjectID, string, knowledge.RunDocumentVisionFallbackRequest) (knowledge.Document, error)
+	ListDocumentVisionReconciliationCandidates(context.Context, contract.ActorContext, contract.ProjectID, int) ([]knowledge.DocumentVisionReconciliationCandidate, error)
+	GetDocumentVisionReconciliation(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.DocumentVisionReconciliation, error)
+	ProposeDocumentVisionReconciliation(context.Context, contract.ActorContext, contract.ProjectID, string, knowledge.ProposeDocumentVisionReconciliationRequest) (knowledge.DocumentVisionReconciliation, error)
+	ConfirmDocumentVisionReconciliation(context.Context, contract.ActorContext, contract.ProjectID, string, knowledge.ConfirmDocumentVisionReconciliationRequest) (knowledge.DocumentVisionReconciliation, error)
 	RunResearch(context.Context, contract.ActorContext, contract.ProjectID, knowledge.ResearchRequest) (knowledge.ResearchRun, error)
 	GetResearchRun(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.ResearchRun, error)
 	ListResearchRuns(context.Context, contract.ActorContext, contract.ProjectID, int) ([]knowledge.ResearchRun, error)
+	ListResearchFindings(context.Context, contract.ActorContext, contract.ProjectID, string) ([]knowledge.ResearchFinding, error)
+	GetResearchReport(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.ResearchArtifact, error)
+	CancelResearch(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.JobControl, error)
+	RetryResearch(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.ResearchRun, error)
 	ListResearchArtifacts(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]knowledge.ResearchArtifact, error)
 	GetResearchArtifact(context.Context, contract.ActorContext, contract.ProjectID, string) (knowledge.ResearchArtifact, error)
 }
@@ -382,10 +397,25 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope(knowledge.ScopeWrite, http.HandlerFunc(server.knowledgeDocumentEntry))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.listKnowledgeDocuments))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents/{document_id}", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.getKnowledgeDocument))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/preview", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.previewKnowledgeDocument))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/visual-fallback-capability", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.getKnowledgeDocumentVisionFallbackCapability))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/content", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.knowledgeDocumentContent))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/cancel", server.requireProject(server.requireScope(knowledge.ScopeWrite, http.HandlerFunc(server.cancelKnowledgeDocumentParse))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/retry", server.requireProject(server.requireScope(knowledge.ScopeWrite, http.HandlerFunc(server.retryKnowledgeDocumentParse))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/run-visual-fallback", server.requireProject(server.requireScope(knowledge.ScopeWrite, http.HandlerFunc(server.runKnowledgeDocumentVisionFallback))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/vision-reconciliations", server.requireProject(server.requireScope(knowledge.ScopeDocumentVisionReconcile, http.HandlerFunc(server.proposeKnowledgeDocumentVisionReconciliation))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/document-vision-reconciliation-candidates", server.requireProject(server.requireScope(knowledge.ScopeDocumentVisionReconcile, http.HandlerFunc(server.listKnowledgeDocumentVisionReconciliationCandidates))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/document-vision-reconciliations/{reconciliation_id}", server.requireProject(server.requireScope(knowledge.ScopeDocumentVisionReconcile, http.HandlerFunc(server.getKnowledgeDocumentVisionReconciliation))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/document-vision-reconciliations/{reconciliation_id}/confirm", server.requireProject(server.requireScope(knowledge.ScopeDocumentVisionReconcile, http.HandlerFunc(server.confirmKnowledgeDocumentVisionReconciliation))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/documents/{document_id}/original", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.openKnowledgeDocumentOriginal))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/search", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.searchKnowledge))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/research-runs", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.runKnowledgeResearch))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-runs", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.listKnowledgeResearchRuns))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-runs/{research_run_id}", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.getKnowledgeResearchRun))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-runs/{research_run_id}/findings", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.listKnowledgeResearchFindings))))
+	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-runs/{research_run_id}/report", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.getKnowledgeResearchReport))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/research-runs/{research_run_id}/cancel", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.cancelKnowledgeResearch))))
+	server.mux.Handle("POST /platform/v1/projects/{project_id}/knowledge/research-runs/{research_run_id}/retry", server.requireProject(server.requireScope("strategy.write", http.HandlerFunc(server.retryKnowledgeResearch))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-artifacts", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.listKnowledgeResearchArtifacts))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}/knowledge/research-artifacts/{artifact_id}", server.requireProject(server.requireScope(knowledge.ScopeRead, http.HandlerFunc(server.getKnowledgeResearchArtifact))))
 	server.mux.Handle("POST /platform/v1/projects/{project_id}/remix-plans", server.requireProject(server.requireScope(remix.ScopePlanWrite, http.HandlerFunc(server.createRemixPlan))))
@@ -825,7 +855,7 @@ func (s *Server) createKnowledgeDocument(writer http.ResponseWriter, request *ht
 	file, header, err := request.FormFile("file")
 	if err != nil {
 		writeProblem(writer, http.StatusBadRequest, contract.Error{
-			Code: "INVALID_DOCUMENT", Message: "必须提供名为 file 的 .md 或 .docx 文件",
+			Code: "INVALID_DOCUMENT", Message: "必须提供名为 file 的 MD、TXT、DOCX、XLSX 或 PDF 文件",
 			RequestID: requestContext.RequestID, Retryable: false,
 		})
 		return
@@ -837,7 +867,7 @@ func (s *Server) createKnowledgeDocument(writer http.ResponseWriter, request *ht
 	)
 	if errors.Is(err, knowledge.ErrInvalidDocument) {
 		writeProblem(writer, http.StatusBadRequest, contract.Error{
-			Code: "INVALID_DOCUMENT", Message: "仅支持有效的 .md 或 .docx，单个文件不超过 10MB",
+			Code: "INVALID_DOCUMENT", Message: "仅支持有效的 MD、TXT、DOCX、XLSX 或 PDF，单个文件不超过 10MB",
 			RequestID: requestContext.RequestID, Retryable: false,
 		})
 		return
@@ -896,10 +926,19 @@ func (s *Server) runKnowledgeResearch(writer http.ResponseWriter, request *http.
 		return
 	}
 	status := http.StatusCreated
-	if value.Status == "running" {
+	if researchResponseIsActive(value.Status) {
 		status = http.StatusAccepted
 	}
 	writeJSON(writer, status, value)
+}
+
+func researchResponseIsActive(status string) bool {
+	switch status {
+	case "queued", "planning", "searching", "reading", "cross_checking", "drafting", "auditing":
+		return true
+	default:
+		return false
+	}
 }
 
 type modelJobCreateBody struct {

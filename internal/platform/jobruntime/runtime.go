@@ -50,12 +50,13 @@ type Claim struct {
 
 type Result struct{ Ref *contract.ResourceRef }
 
-// LeaseRecovery reports how many abandoned executions became available again.
-// An expired lease is requeued even at its attempt limit so its domain handler
-// can persist any corresponding public state before the generic worker marks
-// the job terminal.
+// LeaseRecovery reports how abandoned executions were resolved. Ordinary
+// expired leases become available again; leases with an accepted cancellation
+// request become terminal so they cannot remain unclaimable in queued state.
 type LeaseRecovery struct {
 	Rescheduled int64
+	Cancelled   int64
+	Failed      int64
 }
 
 // LeaseRecoverer is deliberately separate from Store because recovery is a
@@ -117,16 +118,19 @@ func (w Worker) RunOnce(ctx context.Context, workerID string) (bool, error) {
 		return true, w.Store.Fail(ctx, claim, contract.JobError{Code: "JOB_HANDLER_UNAVAILABLE", Message: "No handler is configured for this job kind", Retryable: false}, w.Now().UTC())
 	}
 	result, err := w.runHandler(ctx, claim, handler)
-	if err == nil {
-		if w.Canceller != nil {
-			cancelled, checkErr := w.Canceller.IsCancelRequested(ctx, claim.Job.OrganizationID, claim.Job.ID)
-			if checkErr != nil {
-				return true, checkErr
-			}
-			if cancelled {
-				return true, w.Canceller.CancelClaim(ctx, claim, w.Now().UTC())
-			}
+	// Cancellation wins over success, deferral, and failure. In particular, a
+	// job cancelled while an upstream request is returning a DeferredError must
+	// not be rescheduled into a queued-but-unclaimable state.
+	if w.Canceller != nil {
+		cancelled, checkErr := w.Canceller.IsCancelRequested(ctx, claim.Job.OrganizationID, claim.Job.ID)
+		if checkErr != nil {
+			return true, checkErr
 		}
+		if cancelled {
+			return true, w.Canceller.CancelClaim(ctx, claim, w.Now().UTC())
+		}
+	}
+	if err == nil {
 		return true, w.Store.Succeed(ctx, claim, result, w.Now().UTC())
 	}
 	if errors.Is(err, ErrLeaseLost) {

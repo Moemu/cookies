@@ -107,3 +107,46 @@ func TestNormalizeMessageV2AllowsBackgroundSearchIntentBeforeEvidence(t *testing
 		t.Fatalf("policy=%#v", result.RequestedPolicy)
 	}
 }
+
+func TestNormalizeMessageV2BindsAssistantSurfaceOutsideFrozenBody(t *testing.T) {
+	t.Parallel()
+	result, err := normalizeMessageV2(SendMessageV2Request{
+		ContractVersion:   MessageCreateContractV2,
+		Content:           []MessageContentBlock{{Type: "text", Text: "品牌：轻氧"}},
+		ContextStage:      "strategy",
+		ContextSurface:    "assistant",
+		ExcludedSourceIDs: []string{"source_b", "source_a"},
+	})
+	if err != nil {
+		t.Fatalf("normalize assistant message: %v", err)
+	}
+	if result.ContextStage != "strategy" || result.ContextSurface != "assistant" {
+		t.Fatalf("context=%s/%s", result.ContextStage, result.ContextSurface)
+	}
+	if len(result.ExcludedSourceIDs) != 2 || result.ExcludedSourceIDs[0] != "source_a" || result.ExcludedSourceIDs[1] != "source_b" {
+		t.Fatalf("excluded source IDs=%#v", result.ExcludedSourceIDs)
+	}
+	if _, err := normalizeMessageV2(SendMessageV2Request{
+		ContractVersion: MessageCreateContractV2,
+		Content:         []MessageContentBlock{{Type: "text", Text: "hello"}},
+		ContextSurface:  "floating-widget",
+	}); err == nil {
+		t.Fatal("unsupported context surface must be rejected")
+	}
+	if _, err := normalizeMessageV2(SendMessageV2Request{
+		ContractVersion:   MessageCreateContractV2,
+		Content:           []MessageContentBlock{{Type: "text", Text: "hello"}},
+		ContextSurface:    "workspace",
+		ExcludedSourceIDs: []string{"source_1"},
+	}); err == nil {
+		t.Fatal("direct workspace message accepted Assistant-only source exclusions")
+	}
+	if _, err := normalizeMessageV2(SendMessageV2Request{
+		ContractVersion:   MessageCreateContractV2,
+		Content:           []MessageContentBlock{{Type: "text", Text: "hello"}},
+		ContextSurface:    "assistant",
+		ExcludedSourceIDs: []string{"source_1", "source_1"},
+	}); err == nil {
+		t.Fatal("duplicate source exclusion was accepted")
+	}
+}

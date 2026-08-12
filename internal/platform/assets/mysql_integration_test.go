@@ -123,11 +123,68 @@ func TestMySQLAssetGate2(t *testing.T) {
 	if _, err := uploads.List(ctx, other, projectID, 10); err == nil {
 		t.Fatal("cross-organization project access was allowed")
 	}
+
+	video := append([]byte{0, 0, 0, 16, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'}, bytes.Repeat([]byte{0}, 16)...)
+	externalUpload := uploads
+	externalUpload.VideoProbe = integrationVideoProbe{}
+	idSequence := 0
+	externalImports := assets.ExternalImportService{
+		Repository: repository, Projects: projectService, Upload: externalUpload, QuarantineBucket: "integration-quarantine",
+		Now: func() time.Time { return now },
+		NewID: func(prefix string) (string, error) {
+			idSequence++
+			return prefix + "_" + suffix + "_" + strconv.Itoa(idSequence), nil
+		},
+	}
+	firstExternal, err := externalImports.Import(ctx, rc, projectID, contract.IdempotencyKey("external_1_"+suffix), assets.ExternalMediaImportRequest{
+		SourceProvider: "miyun", SourceObjectID: "remote_1_" + suffix, MIMEType: "video/mp4", SizeBytes: int64(len(video)),
+	}, func(context.Context) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(video)), nil })
+	if err != nil {
+		t.Fatalf("first external import: %v", err)
+	}
+	secondExternal, err := externalImports.Import(ctx, rc, projectID, contract.IdempotencyKey("external_2_"+suffix), assets.ExternalMediaImportRequest{
+		SourceProvider: "miyun", SourceObjectID: "remote_2_" + suffix, MIMEType: "video/mp4", SizeBytes: int64(len(video)),
+	}, func(context.Context) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(video)), nil })
+	if err != nil {
+		t.Fatalf("deduplicated external import: %v", err)
+	}
+	if firstExternal.AssetVersion != secondExternal.AssetVersion {
+		t.Fatalf("same content created different assets: first=%#v second=%#v", firstExternal, secondExternal)
+	}
+	projectAsset, err := repository.GetProjectAsset(ctx, organizationID, projectID, firstExternal.AssetVersion)
+	if err != nil || projectAsset.Version.SourceType != contract.AssetSourceImported {
+		t.Fatalf("external asset=%#v err=%v", projectAsset, err)
+	}
+	ledger, err := repository.GetExternalImportBySource(ctx, organizationID, projectID, "miyun", "remote_2_"+suffix)
+	if err != nil || ledger.Status != assets.ExternalImportSucceeded || ledger.CommittedAssetID != firstExternal.AssetVersion.AssetID {
+		t.Fatalf("external ledger=%#v err=%v", ledger, err)
+	}
+	retryRequest := assets.ExternalMediaImportRequest{SourceProvider: "miyun", SourceObjectID: "remote_retry_" + suffix, MIMEType: "video/mp4", SizeBytes: int64(len(video))}
+	if _, err := externalImports.Import(ctx, rc, projectID, contract.IdempotencyKey("external_retry_"+suffix), retryRequest, func(context.Context) (io.ReadCloser, error) {
+		return nil, errors.New("temporary source failure")
+	}); err == nil {
+		t.Fatal("temporary external source failure was not recorded")
+	}
+	retriedExternal, err := externalImports.Import(ctx, rc, projectID, contract.IdempotencyKey("external_retry_"+suffix), retryRequest,
+		func(context.Context) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(video)), nil })
+	if err != nil || retriedExternal.AssetVersion != firstExternal.AssetVersion {
+		t.Fatalf("external retry=%#v err=%v", retriedExternal, err)
+	}
+	retryLedger, err := repository.GetExternalImportBySource(ctx, organizationID, projectID, "miyun", retryRequest.SourceObjectID)
+	if err != nil || retryLedger.Status != assets.ExternalImportSucceeded || retryLedger.AttemptCount != 2 {
+		t.Fatalf("external retry ledger=%#v err=%v", retryLedger, err)
+	}
 }
 
 type integrationFetcher struct {
 	data     []byte
 	metadata contract.OutputMetadata
+}
+
+type integrationVideoProbe struct{}
+
+func (integrationVideoProbe) Probe(context.Context, []byte) (assets.VideoMetadata, error) {
+	return assets.VideoMetadata{DurationMS: 1000, WidthPixels: 16, HeightPixels: 16, FrameRate: "25/1", VideoCodec: "h264"}, nil
 }
 
 func (f integrationFetcher) Open(context.Context, contract.ProjectRef, contract.ProviderOutputRef) (io.ReadCloser, contract.OutputMetadata, error) {
@@ -150,7 +207,10 @@ func cleanupOrganization(t *testing.T, db *sql.DB, organizationID contract.Organ
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	statements := []string{
-		"DELETE FROM asset_features WHERE organization_id=?", "DELETE FROM assets_outbox WHERE organization_id=?", "DELETE FROM project_assets WHERE organization_id=?", "DELETE FROM asset_versions WHERE organization_id=?", "DELETE FROM assets WHERE organization_id=?", "DELETE FROM asset_blobs WHERE organization_id=?", "DELETE FROM generated_intakes WHERE organization_id=?", "DELETE FROM upload_sessions WHERE organization_id=?", "DELETE FROM project_context_versions WHERE organization_id=?", "DELETE FROM project_products WHERE organization_id=?", "DELETE FROM project_memberships WHERE organization_id=?", "DELETE FROM projects WHERE organization_id=?", "DELETE FROM brand_guideline_versions WHERE organization_id=?", "DELETE FROM products WHERE organization_id=?", "DELETE FROM brands WHERE organization_id=?", "DELETE FROM service_identity_scopes WHERE organization_id=?", "DELETE FROM service_identities WHERE organization_id=?", "DELETE FROM organization_memberships WHERE organization_id=?", "DELETE FROM organizations WHERE id=?",
+		"DELETE FROM asset_features WHERE organization_id=?", "DELETE FROM assets_outbox WHERE organization_id=?", "DELETE FROM asset_external_imports WHERE organization_id=?", "DELETE FROM project_assets WHERE organization_id=?", "DELETE FROM asset_versions WHERE organization_id=?", "DELETE FROM assets WHERE organization_id=?", "DELETE FROM asset_blobs WHERE organization_id=?", "DELETE FROM generated_intakes WHERE organization_id=?", "DELETE FROM upload_sessions WHERE organization_id=?",
+		// 建项目时会顺手写一行运行时，它外键指向 projects。不先删它，后面每一条
+		// 清理都连环失败，测试跑一次就往开发库里留一份脏数据。
+		"DELETE FROM platform_project_runtimes WHERE organization_id=?", "DELETE FROM project_context_versions WHERE organization_id=?", "DELETE FROM project_products WHERE organization_id=?", "DELETE FROM project_memberships WHERE organization_id=?", "DELETE FROM projects WHERE organization_id=?", "DELETE FROM brand_guideline_versions WHERE organization_id=?", "DELETE FROM products WHERE organization_id=?", "DELETE FROM brands WHERE organization_id=?", "DELETE FROM service_identity_scopes WHERE organization_id=?", "DELETE FROM service_identities WHERE organization_id=?", "DELETE FROM organization_memberships WHERE organization_id=?", "DELETE FROM organizations WHERE id=?",
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement, organizationID); err != nil {

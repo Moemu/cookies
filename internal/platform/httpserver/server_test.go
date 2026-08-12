@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/assets"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
+	"github.com/shikanon/cookies/internal/platform/knowledge"
 	"github.com/shikanon/cookies/internal/platform/project"
 	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/platform/remix"
@@ -34,6 +36,95 @@ func TestHealthDoesNotRequireIdentity(t *testing.T) {
 	if response.Header().Get("X-Request-ID") == "" {
 		t.Fatal("expected response request ID")
 	}
+}
+
+func TestKnowledgeOriginalStreamsAuthorizedImmutableBytes(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+		Scopes:         []contract.Scope{knowledge.ScopeRead},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &originalKnowledgeManager{content: "xlsx bytes", document: knowledge.Document{
+		ID: "doc_1", ProjectID: "project_1", Filename: "产品 数据.xlsx",
+		MIMEType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", SizeBytes: 10,
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+		Knowledge: manager,
+	})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_1/knowledge/documents/doc_1/original", nil))
+
+	if response.Code != http.StatusOK || response.Body.String() != manager.content {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "private, no-store" || response.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("security headers = %#v", response.Header())
+	}
+	if !strings.Contains(response.Header().Get("Content-Disposition"), "attachment") || manager.projectID != "project_1" || manager.documentID != "doc_1" {
+		t.Fatalf("disposition=%q scope=%q/%q", response.Header().Get("Content-Disposition"), manager.projectID, manager.documentID)
+	}
+	denied := httptest.NewRecorder()
+	server.ServeHTTP(denied, httptest.NewRequest(http.MethodGet, "/platform/v1/projects/project_2/knowledge/documents/doc_1/original", nil))
+	if denied.Code != http.StatusForbidden || manager.projectID != "project_1" {
+		t.Fatalf("cross-project status=%d manager project=%q", denied.Code, manager.projectID)
+	}
+}
+
+func TestKnowledgeUploadRejectionListsSupportedFormats(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+		Scopes: []contract.Scope{knowledge.ScopeWrite},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &originalKnowledgeManager{createErr: knowledge.ErrInvalidDocument}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Knowledge: manager,
+	})
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	file, err := form.CreateFormFile("file", "design.psd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.Write([]byte("unsupported"))
+	if err := form.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/platform/v1/projects/project_1/knowledge/documents", &body)
+	request.Header.Set("Content-Type", form.FormDataContentType())
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "TXT") || !strings.Contains(response.Body.String(), "XLSX") || !strings.Contains(response.Body.String(), "PDF") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+type originalKnowledgeManager struct {
+	KnowledgeManager
+	content    string
+	document   knowledge.Document
+	projectID  contract.ProjectID
+	documentID string
+	createErr  error
+}
+
+func (m *originalKnowledgeManager) OpenDocumentOriginal(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID, documentID string) (io.ReadCloser, knowledge.Document, error) {
+	m.projectID, m.documentID = projectID, documentID
+	return io.NopCloser(strings.NewReader(m.content)), m.document, nil
+}
+
+func (m *originalKnowledgeManager) CreateDocument(context.Context, contract.ActorContext, contract.ProjectID, string, string, io.Reader, int64) (knowledge.Document, error) {
+	return knowledge.Document{}, m.createErr
 }
 
 func TestProjectActionClassifiesRoleSensitiveRoutes(t *testing.T) {
@@ -210,6 +301,11 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 		{name: "viral source unavailable", err: creative.ErrViralAnalysisSourceUnavailable, wantStatus: http.StatusUnprocessableEntity, wantCode: "VIRAL_ANALYSIS_SOURCE_UNAVAILABLE"},
 		{name: "viral provider unavailable", err: creative.ErrViralAnalysisProviderUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "VIRAL_ANALYSIS_PROVIDER_UNAVAILABLE", wantRetryable: true},
 		{name: "viral invalid response", err: creative.ErrViralAnalysisResponseInvalid, wantStatus: http.StatusBadGateway, wantCode: "VIRAL_ANALYSIS_RESPONSE_INVALID", wantRetryable: true},
+		{name: "document vision reconciliation", err: knowledge.ErrDocumentVisionReconciliationRequired, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_REQUIRED"},
+		{name: "document vision reconciliation forbidden", err: knowledge.ErrDocumentVisionReconciliationForbidden, wantStatus: http.StatusForbidden, wantCode: "DOCUMENT_VISION_RECONCILIATION_FORBIDDEN"},
+		{name: "invalid document vision reconciliation", err: knowledge.ErrDocumentVisionReconciliationInvalid, wantStatus: http.StatusBadRequest, wantCode: "INVALID_DOCUMENT_VISION_RECONCILIATION"},
+		{name: "same document vision operator", err: knowledge.ErrDocumentVisionReconciliationSameActor, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_SECOND_OPERATOR_REQUIRED"},
+		{name: "document vision reconciliation conflict", err: knowledge.ErrDocumentVisionReconciliationConflict, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_CONFLICT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -235,6 +331,44 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDocumentVisionReconciliationConfirmationRequiresExplicitDecision(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "admin_2"},
+		Scopes:         []contract.Scope{knowledge.ScopeDocumentVisionReconcile},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &knowledge.Service{}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: allowingProjectAuthorizer{}, Knowledge: service,
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/platform/v1/projects/project_1/knowledge/document-vision-reconciliations/reconciliation_1/confirm",
+		strings.NewReader(`{}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "INVALID_DOCUMENT_VISION_RECONCILIATION") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+type allowingProjectAuthorizer struct{}
+
+func (allowingProjectAuthorizer) AuthorizeProject(context.Context, contract.ActorContext, contract.ProjectID) error {
+	return nil
+}
+
+func (allowingProjectAuthorizer) AuthorizeProjectAction(context.Context, contract.ActorContext, contract.ProjectID, string) error {
+	return nil
 }
 
 func TestAuthenticatedDomainMountReceivesTrustedRequestContext(t *testing.T) {

@@ -254,9 +254,11 @@ func scanDraftRevision(row rowScanner) (DraftRevision, error) {
 	if base.Valid {
 		value.BaseRevision = &base.Int64
 	}
-	if err := json.Unmarshal(document, &value.Document); err != nil {
+	decoded, err := DecodeStrategyDocumentReadOnly(document)
+	if err != nil {
 		return DraftRevision{}, err
 	}
+	value.Document = decoded
 	if err := json.Unmarshal(changed, &value.ChangedSections); err != nil {
 		return DraftRevision{}, err
 	}
@@ -319,8 +321,10 @@ func scanPackageVersion(row rowScanner) (PackageVersion, error) {
 		&value.PublishedAt); err != nil {
 		return PackageVersion{}, mapNotFound(err)
 	}
-	if err := json.Unmarshal(snapshot, &value.Snapshot); err != nil {
+	decoded, err := decodePackageSnapshotReadOnly(snapshot)
+	if err != nil {
 		return PackageVersion{}, err
 	}
+	value.Snapshot = decoded
 	return value, nil
 }
