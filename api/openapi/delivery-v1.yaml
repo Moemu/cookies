@@ -218,21 +218,21 @@ paths:
         '201': { $ref: '#/components/responses/ChangeSet' }
         '412': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
-  /api/delivery/v1/projects/{project_id}/operator-feedback/{feedback_id}:create-controlled-change-set:
+  /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/controlled-change-sets:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
-      - name: feedback_id
+      - name: run_id
         in: path
         required: true
         schema: { type: string, minLength: 1 }
-      - $ref: '#/components/parameters/IdempotencyKey'
     post:
       operationId: createControlledDeliveryChangeSet
       summary: Freeze the latest accepted or modified feedback into a formal controlled ChangeSet
       description: >-
         This operation never writes an advertising platform. It freezes Plan, Intent, feedback,
         Decision, final Configuration, Workflow, account, action, budget and Skill identities.
-        Rejected feedback, an older feedback record or any hash/version drift is rejected.
+        The service selects the latest feedback for the run itself. Rejected feedback,
+        an older feedback record or any hash/version drift is rejected.
       requestBody:
         required: true
         content:
@@ -297,6 +297,39 @@ paths:
               schema: { $ref: '#/components/schemas/RemoteWriteApproval' }
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/controlled-change-sets/{controlled_change_set_id}:execute:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: controlled_change_set_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: createControlledDeliveryExecution
+      summary: Create the business execution aggregate for one unexpired formal approval
+      responses:
+        '201':
+          description: Controlled business execution awaiting its Platform ComputerUseRun.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlledExecution' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/controlled-executions/{execution_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/ExecutionID'
+    get:
+      operationId: getControlledDeliveryExecution
+      summary: Read the server-authoritative controlled business execution projection
+      responses:
+        '200':
+          description: Controlled business execution.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlledExecution' }
+        '404': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets:
     parameters:
@@ -1247,13 +1280,9 @@ components:
     CreateControlledChangeSetRequest:
       type: object
       additionalProperties: false
-      required: [action, budget_limit_minor, currency, object_fingerprint, skill_id, skill_version]
+      required: [observatory_run_id, skill_version]
       properties:
-        action: { type: string, const: create_project_and_promotions }
-        budget_limit_minor: { type: integer, minimum: 0 }
-        currency: { type: string, const: CNY }
-        object_fingerprint: { type: string, minLength: 1 }
-        skill_id: { type: string, const: oceanengine-ecommerce-manual }
+        observatory_run_id: { type: string, minLength: 1 }
         skill_version: { type: string, minLength: 1 }
     ControlledChangeSet:
       type: object
@@ -1295,6 +1324,22 @@ components:
         approved_by: { type: string }
         approved_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
+    ControlledExecution:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, controlled_change_set_id, remote_write_approval_id, status, version, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        controlled_change_set_id: { type: string }
+        remote_write_approval_id: { type: string }
+        computer_use_run_id: { type: string }
+        status: { type: string, enum: [pending, running, succeeded, failed, partial, result_unknown, cancelled] }
+        version: { type: integer, minimum: 1 }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     Principal:
       type: object
       additionalProperties: false

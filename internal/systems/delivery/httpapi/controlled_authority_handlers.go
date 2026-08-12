@@ -81,7 +81,8 @@ func (s *Server) approveControlledChangeSet(w http.ResponseWriter, r *http.Reque
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"change_set": change, "approval": approval})
+	_ = change
+	writeJSON(w, http.StatusOK, approval)
 }
 func (s *Server) createControlledExecution(w http.ResponseWriter, r *http.Request) {
 	app, err := s.controlledApp()
