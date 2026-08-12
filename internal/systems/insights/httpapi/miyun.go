@@ -304,6 +304,12 @@ func (s *Server) getMiyunProductSource(writer http.ResponseWriter, request *http
 		writeMiyunError(writer, request, err)
 		return
 	}
+	// 一个产品都没登记时这里是 nil 切片，直接序列化会得到 products: null，而契约
+	// （MiyunProductSource）把 products 声明成必填数组。前端照契约读 .length，拿到
+	// null 就整页崩在「读取失败」上——空项目是常态，不该是错误状态。
+	if value.Products == nil {
+		value.Products = []insights.MiyunProjectProduct{}
+	}
 	writeJSON(writer, http.StatusOK, value)
 }
 

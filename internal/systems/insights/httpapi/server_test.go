@@ -231,6 +231,22 @@ func TestMiyunProductSourceStaysProjectScoped(t *testing.T) {
 	}
 }
 
+func TestMiyunProductSourceReturnsEmptyArrayWhenNoProductRegistered(t *testing.T) {
+	t.Parallel()
+	// 空项目返回 products: null 时，前端按契约读 .length 会直接抛 TypeError，整页
+	// 显示成「读取失败」。没登记产品是新项目的正常起点，不能长得像故障。
+	server := New(&applicationStub{miyunProductSource: insights.MiyunProductSource{ProjectName: "Project"}})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet,
+		"/api/insights/v1/projects/project_1/miyun/product-source", ""))
+	if response.Code != http.StatusOK {
+		t.Fatalf("product source status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"products":[]`) {
+		t.Fatalf("expected products to serialize as an empty array, got %s", response.Body.String())
+	}
+}
+
 func TestMiyunManualImportRequiresKeyAndMapsIdempotencyConflict(t *testing.T) {
 	t.Parallel()
 	body := `{"asset_ref":{"asset_id":"asset_1","version":1},"miyun_material_id":"remote_1","source_ref":"https://example.test/material/1","data_card":{"schema_version":"miyun-data-card/v1","captured_at":"2026-08-10T12:00:00Z","delivery_days":0,"cumulative_impressions_raw":"0","cumulative_impressions":0,"related_ads":0,"related_creators":0,"material_score":0,"views":0,"likes":0,"comments":0,"shares":0,"saves":0}}`
