@@ -1555,6 +1555,409 @@ paths:
                 $ref: '#/components/schemas/ExperimentVariant'
         default:
           $ref: '#/components/responses/Problem'
+  /api/insights/v1/projects/{project_id}/miyun/product-profiles:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List versioned Miyun product analysis profiles
+      operationId: listMiyunProductProfiles
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Product profiles, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/MiyunProductProfile'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/product-profiles:analyze:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: Derive a draft Miyun product profile using deterministic rules
+      operationId: analyzeMiyunProductProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AnalyzeMiyunProductProfileRequest'}
+      responses:
+        '201':
+          description: Draft profile with input lineage and field-level sources.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MiyunProductProfile'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/product-profiles/{profile_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunProfileID'
+    get:
+      summary: Get one Miyun product profile
+      operationId: getMiyunProductProfile
+      responses:
+        '200':
+          description: Product profile.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MiyunProductProfile'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/product-profiles/{profile_id}:confirm:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunProfileID'
+    post:
+      summary: Confirm an edited Miyun product profile immutably
+      operationId: confirmMiyunProductProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ConfirmMiyunProductProfileRequest'}
+      responses:
+        '200':
+          description: Confirmed profile.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MiyunProductProfile'}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials:manual-import:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+    post:
+      summary: Register a typed Miyun data card against an existing ready MP4 AssetVersion
+      operationId: manualImportMiyunMaterial
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ManualMiyunMaterialRequest'}
+      responses:
+        '200':
+          description: Idempotent replay of the existing import.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MiyunManualImportResult'}
+        '201':
+          description: Manual material, append-only snapshot, and insight asset created atomically.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MiyunManualImportResult'}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/connection:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Get the safe public Miyun connection state
+      operationId: getMiyunConnection
+      responses:
+        '200':
+          description: Encrypted-session metadata; the session is never returned.
+          content: {application/json: {schema: {$ref: '#/components/schemas/MiyunConnection'}}}
+        default: {$ref: '#/components/responses/Problem'}
+    put:
+      summary: Create or rotate the encrypted Miyun session
+      operationId: updateMiyunConnection
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/UpdateMiyunConnectionRequest'}}}
+      responses:
+        '200':
+          description: Updated safe connection state.
+          content: {application/json: {schema: {$ref: '#/components/schemas/MiyunConnection'}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/connection:verify:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      summary: Explicitly perform one bounded read-only connection probe
+      operationId: verifyMiyunConnection
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ExpectedVersion'}}}
+      responses:
+        '200':
+          description: Verified safe connection state.
+          content: {application/json: {schema: {$ref: '#/components/schemas/MiyunConnection'}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/product-source:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: Read Project-scoped product identities available to Miyun analysis
+      operationId: getMiyunProductSource
+      responses:
+        '200':
+          description: Human-readable Project product identities, never a global product catalogue.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MiyunProductSource'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/crawl-jobs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List persistent Miyun crawl jobs
+      operationId: listMiyunCrawlJobs
+      parameters: [{$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200':
+          description: Jobs newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties: {items: {type: array, items: {$ref: '#/components/schemas/MiyunCrawlJob'}}}
+        default: {$ref: '#/components/responses/Problem'}
+    post:
+      summary: Freeze a confirmed profile query and enqueue collection
+      operationId: createMiyunCrawlJob
+      parameters: [{$ref: '#/components/parameters/IdempotencyKey'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/CreateMiyunCrawlJobRequest'}}}
+      responses:
+        '201':
+          description: Persistent queued job or its idempotent replay.
+          content: {application/json: {schema: {$ref: '#/components/schemas/MiyunCrawlJob'}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/crawl-jobs/{job_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunJobID'
+    get:
+      summary: Get a persistent Miyun crawl job
+      operationId: getMiyunCrawlJob
+      responses:
+        '200': {description: Crawl job., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunCrawlJob'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/crawl-jobs/{job_id}:cancel:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunJobID'
+    post:
+      summary: Cancel queued or running collection
+      operationId: cancelMiyunCrawlJob
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses:
+        '200': {description: Cancelled job., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunCrawlJob'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/crawl-jobs/{job_id}:retry:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunJobID'
+      - $ref: '#/components/parameters/IdempotencyKey'
+    post:
+      summary: Create an explicitly idempotent retry from a terminal job
+      operationId: retryMiyunCrawlJob
+      responses:
+        '201': {description: Retry job., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunCrawlJob'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      summary: List Miyun current material projections, optionally scoped to one crawl job
+      operationId: listMiyunMaterials
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - name: crawl_job_id
+          in: query
+          schema: {type: string, minLength: 1}
+          description: Include materials having a snapshot captured by this crawl job, including globally deduplicated materials first seen by another job.
+        - name: offset
+          in: query
+          schema: {type: integer, minimum: 0, default: 0}
+        - name: q
+          in: query
+          schema: {type: string, maxLength: 200}
+        - name: sort
+          in: query
+          schema: {type: string, enum: [delivery_days, cumulative_impressions, related_ads, related_creators, material_score]}
+        - name: handoff_eligible
+          in: query
+          schema: {type: boolean, default: false}
+          description: Restrict both items and total to confirmed materials whose import status is imported or deduplicated, so handoff pagination uses one consistent result set.
+      responses:
+        '200':
+          description: Current materials in project scope or in the requested crawl-job result set; snapshots remain separate.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, limit, offset]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/MiyunMaterial'}}
+                  total: {type: integer, minimum: 0}
+                  limit: {type: integer, minimum: 1}
+                  offset: {type: integer, minimum: 0}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunMaterialID'
+    get:
+      summary: Get current material and append-only snapshots
+      operationId: getMiyunMaterial
+      responses:
+        '200': {description: Material detail., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterialDetail'}}}}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}/preview:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunMaterialID'
+    get:
+      summary: Stream an authorized Miyun candidate preview without exposing its upstream locator
+      operationId: previewMiyunMaterial
+      responses:
+        '200':
+          description: Project-authorized MP4 bytes proxied by the server; the upstream resource URL is never returned.
+          content:
+            video/mp4:
+              schema: {type: string, format: binary}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}:confirm:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunMaterialID'
+    post:
+      summary: Human-confirm a material and enqueue authorized MP4 import
+      operationId: confirmMiyunMaterial
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterialDecisionRequest'}}}
+      responses:
+        '200': {description: Confirmed material., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterial'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}:reject:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunMaterialID'
+    post:
+      summary: Human-reject a material without downloading it
+      operationId: rejectMiyunMaterial
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterialDecisionRequest'}}}
+      responses:
+        '200': {description: Rejected material., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterial'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/materials/{material_id}:retry-import:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/MiyunMaterialID'
+    post:
+      summary: Retry only a failed confirmed material import
+      operationId: retryMiyunMaterialImport
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses:
+        '202': {description: Import retry accepted., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunMaterial'}}}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}]
+    get:
+      summary: List versioned Miyun handoffs
+      operationId: listMiyunHandoffs
+      parameters: [{$ref: '#/components/parameters/Limit'}]
+      responses: {'200': {description: Handoffs., content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/MiyunHandoff'}}}}}}}, default: {$ref: '#/components/responses/Problem'}}
+    post:
+      summary: Freeze a confirmed imported Miyun source and confirmed product profile into a draft handoff
+      operationId: createMiyunHandoff
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateMiyunHandoff'}}}}
+      responses: {'201': {description: Created or idempotently replayed handoff., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoff'}}}}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}]
+    get:
+      summary: Get a frozen Miyun handoff
+      operationId: getMiyunHandoff
+      responses: {'200': {description: Handoff., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoff'}}}}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/export:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}]
+    get:
+      summary: Stream one flat frozen handoff package; successful streaming, not AI receipt, marks exported
+      operationId: exportMiyunHandoff
+      parameters:
+        - name: package
+          in: query
+          required: true
+          description: Select the source-material ZIP or the project-material ZIP. Both archives contain actual files only and keep every file at the ZIP root; the sources package contains Miyun MP4s only.
+          schema: {type: string, enum: [sources, project]}
+      responses: {'200': {description: ZIP stream., content: {application/zip: {schema: {type: string, format: binary}}}}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}:mark-delivered:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}]
+    post:
+      summary: Explicitly record human delivery of a successfully exported handoff
+      operationId: markMiyunHandoffDelivered
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses: {'200': {description: Delivered handoff., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoff'}}}}, '409': {$ref: '#/components/responses/Problem'}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+    post:
+      summary: Explicitly create one recoverable manual MP4 return for an exported or delivered handoff
+      operationId: createMiyunHandoffReturn
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses: {'201': {description: Return record., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoffReturn'}}}}, '409': {$ref: '#/components/responses/Problem'}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns:import:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}]
+    post:
+      summary: Import one MP4 or a flat ZIP of up to 20 returned MP4s
+      description: An MP4 without metadata is associated with the current crawl job. A filename prefixed with source_material_id followed by two underscores, or a manifest.xlsx row containing output_filename and source_material_id, associates the result with that source material. ZIPs may contain root-level MP4 files and one optional root-level manifest.xlsx only.
+      operationId: importMiyunHandoffReturnBundle
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: {type: object, required: [file, expected_version, idempotency_key], properties: {file: {type: string, format: binary}, expected_version: {type: integer, minimum: 1}, idempotency_key: {type: string, minLength: 1}}}
+      responses:
+        '200':
+          description: Imported return records and any per-file failures.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, returns]
+                properties:
+                  status: {type: string, enum: [succeeded, partial, failed]}
+                  returns: {type: array, items: {$ref: '#/components/schemas/MiyunHandoffReturn'}}
+                  failed_filenames: {type: array, items: {type: string}}
+        '409': {$ref: '#/components/responses/Problem'}
+        default: {$ref: '#/components/responses/Problem'}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns/{return_id}:upload:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}, {$ref: '#/components/parameters/MiyunReturnID'}]
+    post:
+      summary: Upload one manual MP4 through the Assets authorized import, scan and probe path
+      operationId: uploadMiyunHandoffReturn
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: {type: object, required: [file, expected_version, idempotency_key], properties: {file: {type: string, format: binary}, expected_version: {type: integer, minimum: 1}, idempotency_key: {type: string, minLength: 1}, declared_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}}}
+      responses: {'200': {description: Scanned and probed return asset, not yet marked returned., content: {application/json: {schema: {$ref: '#/components/schemas/MiyunHandoffReturn'}}}}, '409': {$ref: '#/components/responses/Problem'}, default: {$ref: '#/components/responses/Problem'}}
+  /api/insights/v1/projects/{project_id}/miyun/handoffs/{handoff_id}/returns/{return_id}:mark-returned:
+    parameters: [{$ref: '#/components/parameters/ProjectID'}, {$ref: '#/components/parameters/MiyunHandoffID'}, {$ref: '#/components/parameters/MiyunReturnID'}, {$ref: '#/components/parameters/IdempotencyKey'}]
+    post:
+      summary: Atomically freeze a successful manual return and mark its handoff returned
+      operationId: markMiyunHandoffReturned
+      requestBody: {$ref: '#/components/requestBodies/ExpectedVersion'}
+      responses: {'200': {description: Returned handoff and frozen return record., content: {application/json: {schema: {type: object, required: [handoff, return], properties: {handoff: {$ref: '#/components/schemas/MiyunHandoff'}, return: {$ref: '#/components/schemas/MiyunHandoffReturn'}}}}}}, '409': {$ref: '#/components/responses/Problem'}, default: {$ref: '#/components/responses/Problem'}}
 components:
   securitySchemes:
     sessionCookie:
@@ -1567,6 +1970,36 @@ components:
       in: path
       required: true
       schema: { type: string }
+    MiyunProfileID:
+      name: profile_id
+      in: path
+      required: true
+      schema: {type: string}
+    MiyunJobID:
+      name: job_id
+      in: path
+      required: true
+      schema: {type: string}
+    MiyunMaterialID:
+      name: material_id
+      in: path
+      required: true
+      schema: {type: string}
+    MiyunHandoffID:
+      name: handoff_id
+      in: path
+      required: true
+      schema: {type: string}
+    MiyunReturnID:
+      name: return_id
+      in: path
+      required: true
+      schema: {type: string}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128}
     ReportID:
       name: report_id
       in: path
@@ -1664,6 +2097,391 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    ExpectedVersion:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties: {expected_version: {type: integer, minimum: 1}}
+    MiyunConnection:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, status, version, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        status: {type: string, enum: [unverified, ready, auth_required, disabled]}
+        session_expires_at: {type: string, format: date-time}
+        last_verified_at: {type: string, format: date-time}
+        last_successful_request_at: {type: string, format: date-time}
+        cooldown_until: {type: string, format: date-time}
+        last_error_kind: {type: string}
+        last_error_code: {type: string}
+        last_error_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    UpdateMiyunConnectionRequest:
+      type: object
+      additionalProperties: false
+      required: [session]
+      properties:
+        session: {type: string, minLength: 8, maxLength: 16356, writeOnly: true}
+        session_expires_at: {type: string, format: date-time}
+        expected_version: {type: integer, minimum: 0}
+    CreateMiyunCrawlJobRequest:
+      type: object
+      additionalProperties: false
+      required: [product_profile_id, operation]
+      properties:
+        product_profile_id: {type: string, minLength: 1}
+        operation: {type: string, enum: [product, cid]}
+    MiyunCrawlJob:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, connection_id, product_profile_id, status, operation, query_schema_version, query_snapshot, runtime_job_id, completed_pages, discovered_count, deduplicated_count, downloaded_count, failed_count, version, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        connection_id: {type: string}
+        product_profile_id: {type: string}
+        status: {type: string, enum: [queued, running, cooling_down, auth_required, partial, succeeded, failed, cancelled]}
+        operation: {type: string, enum: [product, cid]}
+        query_schema_version: {type: string, const: miyun-query/v1}
+        query_snapshot: {type: object, additionalProperties: true, readOnly: true}
+        runtime_job_id: {type: string}
+        completed_pages: {type: integer, minimum: 0}
+        discovered_count: {type: integer, minimum: 0}
+        deduplicated_count: {type: integer, minimum: 0}
+        downloaded_count: {type: integer, minimum: 0}
+        failed_count: {type: integer, minimum: 0}
+        cooldown_until: {type: string, format: date-time}
+        last_error_kind: {type: string}
+        last_error_code: {type: string}
+        version: {type: integer, minimum: 1}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    MiyunMaterialDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        note: {type: string, maxLength: 1000}
+    AssetVersionRef:
+      type: object
+      additionalProperties: false
+      required: [asset_id, version]
+      properties:
+        asset_id: {type: string}
+        version: {type: integer, minimum: 1}
+    AnalyzeMiyunProductProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [connection_id, product_asset_refs, knowledge_document_ids]
+      properties:
+        connection_id: {type: string, minLength: 1}
+        product_id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          description: Existing Project product identity. Omit to analyze an unregistered Project product under a server-generated pending identity.
+        product_name: {type: string, minLength: 1, maxLength: 255}
+        category_name: {type: string, minLength: 1, maxLength: 255}
+        product_asset_refs:
+          type: array
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/AssetVersionRef'}
+        knowledge_document_ids:
+          type: array
+          uniqueItems: true
+          items: {type: string, minLength: 1}
+    MiyunProductSource:
+      type: object
+      additionalProperties: false
+      required: [project_name, brand_name, category_name, products]
+      properties:
+        project_name: {type: string}
+        brand_name: {type: string}
+        category_name: {type: string}
+        products:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, name]
+            properties:
+              id: {type: string}
+              name: {type: string}
+    MiyunProfileQuery:
+      type: object
+      additionalProperties: false
+      required: [product_name, keywords, material_content_types, window_start, window_end]
+      properties:
+        product_name: {type: string, minLength: 1, maxLength: 255}
+        category_id: {type: string}
+        category_name: {type: string}
+        keywords:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, minLength: 1, maxLength: 100}
+        material_content_types:
+          type: array
+          uniqueItems: true
+          items: {type: string, minLength: 1, maxLength: 100}
+        window_start: {type: string, format: date}
+        window_end: {type: string, format: date}
+    ConfirmMiyunProductProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, query]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        query: {$ref: '#/components/schemas/MiyunProfileQuery'}
+    MiyunProfileFieldSource:
+      type: object
+      additionalProperties: false
+      required: [field, source_kind, source_refs, confidence, review_state, explanation]
+      properties:
+        field: {type: string}
+        source_kind: {type: string}
+        source_refs:
+          type: array
+          items: {type: string}
+        confidence: {type: string, enum: [high, medium, low, unknown]}
+        review_state: {type: string, enum: [suggested, unknown, human_confirmed]}
+        explanation: {type: string}
+    MiyunProductProfile:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, connection_id, status, product_id, product_name, keywords, material_content_types, window_start, window_end, project_context_version, product_asset_refs, knowledge_document_ids, rule_version, analysis_method, input_hash, input_snapshot, field_sources, analysis_warnings, version, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        connection_id: {type: string}
+        status: {type: string, enum: [draft, confirmed, superseded]}
+        product_id: {type: string}
+        product_name: {type: string}
+        brand_name: {type: string}
+        category_id: {type: string}
+        category_name: {type: string}
+        keywords:
+          type: array
+          items: {type: string}
+        material_content_types:
+          type: array
+          items: {type: string}
+        window_start: {type: string, format: date-time}
+        window_end: {type: string, format: date-time}
+        project_context_version: {type: integer, minimum: 1}
+        product_asset_refs:
+          type: array
+          items: {$ref: '#/components/schemas/AssetVersionRef'}
+        knowledge_document_ids:
+          type: array
+          items: {type: string}
+        rule_version: {type: string, const: miyun-product-profile-rules/v1}
+        model_version: {type: string, description: Omitted because Goal 2 uses deterministic rules and no model.}
+        analysis_method: {type: string, const: rules}
+        input_hash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        input_snapshot: {type: object, additionalProperties: true}
+        field_sources:
+          type: array
+          items: {$ref: '#/components/schemas/MiyunProfileFieldSource'}
+        analysis_warnings:
+          type: array
+          items: {type: string}
+        confirmed_by: {type: string}
+        confirmed_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ManualMiyunDataCard:
+      type: object
+      additionalProperties: false
+      required: [schema_version, captured_at, delivery_days, cumulative_impressions_raw, cumulative_impressions, related_ads, related_creators, material_score, views, likes, comments, shares, saves]
+      properties:
+        schema_version: {type: string, const: miyun-data-card/v1}
+        captured_at: {type: string, format: date-time}
+        first_published_at: {type: string, format: date-time}
+        last_published_at: {type: string, format: date-time}
+        delivery_days: {type: integer, minimum: 0}
+        cumulative_impressions_raw: {type: string, minLength: 1, maxLength: 64}
+        cumulative_impressions: {type: integer, minimum: 0}
+        related_ads: {type: integer, minimum: 0}
+        related_creators: {type: integer, minimum: 0}
+        material_score: {type: number, minimum: 0}
+        views: {type: integer, minimum: 0}
+        likes: {type: integer, minimum: 0}
+        comments: {type: integer, minimum: 0}
+        shares: {type: integer, minimum: 0}
+        saves: {type: integer, minimum: 0}
+        source_fields: {type: object, additionalProperties: true}
+    ManualMiyunMaterialRequest:
+      type: object
+      additionalProperties: false
+      required: [asset_ref, miyun_material_id, source_ref, data_card]
+      properties:
+        asset_ref: {$ref: '#/components/schemas/AssetVersionRef'}
+        miyun_material_id: {type: string, minLength: 1, maxLength: 191}
+        source_ref: {type: string, format: uri, pattern: '^https://'}
+        title: {type: string, maxLength: 255}
+        data_card: {$ref: '#/components/schemas/ManualMiyunDataCard'}
+    MiyunMaterial:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, miyun_material_id, import_method, source_ref_status, selection_status, import_status, version, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        miyun_material_id: {type: string}
+        first_seen_crawl_job_id: {type: string}
+        import_method: {type: string, enum: [crawler, manual]}
+        resource_id: {type: string}
+        resource_expected_size: {type: integer, minimum: 0}
+        source_ref: {type: string}
+        source_ref_status: {type: string, enum: [verified, unknown]}
+        title: {type: string}
+        selection_status: {type: string, enum: [discovered, confirmed, rejected]}
+        import_status: {type: string, enum: [pending, downloading, imported, deduplicated, failed, skipped]}
+        platform_asset_id: {type: string}
+        platform_asset_version: {type: integer, minimum: 1}
+        insight_asset_id: {type: string}
+        external_import_id: {type: string}
+        decision_by: {type: string}
+        decision_at: {type: string, format: date-time}
+        decision_note: {type: string, maxLength: 1000}
+        last_import_error_kind: {type: string}
+        last_import_error_code: {type: string}
+        version: {type: integer, minimum: 1}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    MiyunMaterialSnapshot:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, material_id, source_page, import_method, schema_version, captured_at, delivery_days, cumulative_impressions, cumulative_impressions_raw, related_ads, related_creators, related_creators_raw, related_creators_known, material_score, views, likes, comments, shares, saves, created_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        material_id: {type: string}
+        crawl_job_id: {type: string}
+        source_page: {type: integer, minimum: 0}
+        import_method: {type: string, enum: [crawler, manual]}
+        schema_version: {type: string}
+        captured_at: {type: string, format: date-time}
+        first_published_at: {type: string, format: date-time}
+        last_published_at: {type: string, format: date-time}
+        delivery_days: {type: integer, minimum: 0}
+        cumulative_impressions: {type: integer, minimum: 0}
+        cumulative_impressions_raw: {type: string}
+        related_ads: {type: integer, minimum: 0}
+        related_creators: {type: integer, minimum: 0}
+        related_creators_raw: {type: string}
+        related_creators_known: {type: boolean}
+        material_score: {type: number, minimum: 0}
+        views: {type: integer, minimum: 0}
+        likes: {type: integer, minimum: 0}
+        comments: {type: integer, minimum: 0}
+        shares: {type: integer, minimum: 0}
+        saves: {type: integer, minimum: 0}
+        sanitized_raw: {type: object, additionalProperties: true}
+        created_at: {type: string, format: date-time}
+    MiyunMaterialDetail:
+      type: object
+      additionalProperties: false
+      required: [material, snapshots]
+      properties:
+        material: {$ref: '#/components/schemas/MiyunMaterial'}
+        snapshots:
+          type: array
+          items: {$ref: '#/components/schemas/MiyunMaterialSnapshot'}
+    CreateMiyunHandoff:
+      type: object
+      additionalProperties: false
+      required: [source_material_ids, product_profile_id, crawl_job_id]
+      properties:
+        source_material_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, minLength: 1}
+        product_profile_id: {type: string, minLength: 1}
+        crawl_job_id: {type: string, minLength: 1}
+    MiyunHandoff:
+      type: object
+      description: Frozen cookies draft handoff; it does not assert AI-system receipt or any cross-system state.
+      required: [id, organization_id, project_id, source_material_ids, product_profile_id, status, manifest_version, parameter_version, product_files_snapshot, source_snapshot, profile_snapshot, input_hash, version, created_by, created_at, updated_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        source_material_id: {type: string, description: Legacy primary source retained for relational lineage.}
+        source_material_ids: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+        product_profile_id: {type: string}
+        crawl_job_id: {type: string, description: Crawl batch whose material snapshots were frozen. Omitted only on legacy handoffs.}
+        status: {type: string, enum: [exporting, exported, delivered, returned, failed]}
+        manifest_version:
+          type: string
+          enum: [miyun-handoff-manifest/cookies-draft-v1, miyun-handoff-manifest/cookies-draft-v2, miyun-handoff-manifest/cookies-draft-v3]
+          description: cookies draft only; v1/v2 are retained for frozen historical handoffs and v3 identifies one of two flat upload packages per manifest row.
+        parameter_version: {type: string, const: miyun-handoff-parameters/v1}
+        product_files_snapshot: {type: object, additionalProperties: true}
+        source_snapshot: {type: object, additionalProperties: true}
+        profile_snapshot: {type: object, additionalProperties: true}
+        input_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        version: {type: integer, minimum: 1}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        returns: {type: array, items: {$ref: '#/components/schemas/MiyunHandoffReturn'}}
+    MiyunHandoffReturn:
+      type: object
+      required: [id, handoff_id, handoff_version, manifest_version, input_hash, parameter_version, product_profile_id, association_source, status, version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        handoff_id: {type: string}
+        handoff_version: {type: integer, minimum: 1}
+        manifest_version: {type: string}
+        input_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        parameter_version: {type: string}
+        product_profile_id: {type: string}
+        crawl_job_id: {type: string}
+        source_material_id: {type: string}
+        association_source: {type: string, enum: [crawl_job, filename, manifest_xlsx]}
+        container_filename: {type: string}
+        status: {type: string, enum: [created, uploaded, failed, returned]}
+        filename: {type: string}
+        asset_version: {type: object, properties: {asset_id: {type: string}, version: {type: integer, minimum: 1}}}
+        mime_type: {type: string, enum: [video/mp4]}
+        sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        size_bytes: {type: integer, minimum: 1}
+        insight_asset_id: {type: string}
+        uploaded_by: {type: string}
+        uploaded_at: {type: string, format: date-time}
+        failure_code: {type: string}
+        returned_by: {type: string}
+        returned_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    MiyunManualImportResult:
+      type: object
+      additionalProperties: false
+      required: [material, snapshot, insight_asset, replayed]
+      properties:
+        material: {$ref: '#/components/schemas/MiyunMaterial'}
+        snapshot: {$ref: '#/components/schemas/MiyunMaterialSnapshot'}
+        insight_asset: {$ref: '#/components/schemas/InsightAsset'}
+        replayed: {type: boolean}
     CreateReport:
       type: object
       additionalProperties: false

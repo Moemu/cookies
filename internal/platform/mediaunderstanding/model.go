@@ -10,9 +10,9 @@ import (
 
 const ContractVersion = "platform-media-understanding-artifact/v1"
 const DefaultProfile = "strategy.multimodal.p0"
-const DefaultProfileVersion = "v1"
-const PromptVersion = "media.understand.v1"
-const SchemaVersion = "media-understanding-output/v1"
+const DefaultProfileVersion = "v2"
+const PromptVersion = "media.understand.v2"
+const SchemaVersion = "media-understanding-output/v2"
 
 type Status string
 
@@ -51,35 +51,53 @@ type ModelLineage struct {
 	SchemaVersion   string `json:"schema_version"`
 }
 
+type TranscriptionLineage struct {
+	ProviderCode string `json:"provider_code"`
+	ModelVersion string `json:"model_version"`
+}
+
+type Classification struct {
+	Code         string   `json:"code"`
+	Confidence   float64  `json:"confidence"`
+	EvidenceRefs []string `json:"evidence_refs"`
+}
+
+type Classifications struct {
+	MediaFormat  Classification `json:"media_format"`
+	ContentStyle Classification `json:"content_style"`
+}
+
 type Artifact struct {
-	ContractVersion   string                   `json:"contract_version"`
-	ID                string                   `json:"id"`
-	OrganizationID    contract.OrganizationID  `json:"organization_id"`
-	ProjectID         contract.ProjectID       `json:"project_id"`
-	AssetRef          contract.ProjectAssetRef `json:"asset_ref"`
-	AssetKind         contract.AssetKind       `json:"asset_kind"`
-	AssetSHA256       string                   `json:"asset_sha256"`
-	Profile           string                   `json:"profile"`
-	ProfileVersion    string                   `json:"profile_version"`
-	InputIdentityHash string                   `json:"input_identity_hash"`
-	Status            Status                   `json:"status"`
-	JobID             string                   `json:"job_id,omitempty"`
-	Summary           string                   `json:"summary,omitempty"`
-	VisibleText       []Evidence               `json:"visible_text"`
-	Observations      []Evidence               `json:"observations"`
-	Inferences        []Evidence               `json:"inferences"`
-	Risks             []Evidence               `json:"risks"`
-	Unknowns          []Evidence               `json:"unknowns"`
-	Keyframes         []Keyframe               `json:"keyframes"`
-	Transcript        []Evidence               `json:"transcript"`
-	Warnings          []string                 `json:"warnings"`
-	Lineage           ModelLineage             `json:"model_lineage"`
-	ContentHash       string                   `json:"content_hash"`
-	ErrorCode         string                   `json:"error_code,omitempty"`
-	ErrorMessage      string                   `json:"error_message,omitempty"`
-	CreatedBy         contract.Principal       `json:"created_by"`
-	CreatedAt         time.Time                `json:"created_at"`
-	UpdatedAt         time.Time                `json:"updated_at"`
+	ContractVersion      string                   `json:"contract_version"`
+	ID                   string                   `json:"id"`
+	OrganizationID       contract.OrganizationID  `json:"organization_id"`
+	ProjectID            contract.ProjectID       `json:"project_id"`
+	AssetRef             contract.ProjectAssetRef `json:"asset_ref"`
+	AssetKind            contract.AssetKind       `json:"asset_kind"`
+	AssetSHA256          string                   `json:"asset_sha256"`
+	Profile              string                   `json:"profile"`
+	ProfileVersion       string                   `json:"profile_version"`
+	InputIdentityHash    string                   `json:"input_identity_hash"`
+	Status               Status                   `json:"status"`
+	JobID                string                   `json:"job_id,omitempty"`
+	Summary              string                   `json:"summary,omitempty"`
+	VisibleText          []Evidence               `json:"visible_text"`
+	Observations         []Evidence               `json:"observations"`
+	Inferences           []Evidence               `json:"inferences"`
+	Risks                []Evidence               `json:"risks"`
+	Unknowns             []Evidence               `json:"unknowns"`
+	Keyframes            []Keyframe               `json:"keyframes"`
+	Transcript           []Evidence               `json:"transcript"`
+	TranscriptionLineage *TranscriptionLineage    `json:"transcription_lineage,omitempty"`
+	Classifications      Classifications          `json:"classifications"`
+	Warnings             []string                 `json:"warnings"`
+	Lineage              ModelLineage             `json:"model_lineage"`
+	ContentHash          string                   `json:"content_hash"`
+	ErrorCode            string                   `json:"error_code,omitempty"`
+	ErrorMessage         string                   `json:"error_message,omitempty"`
+	CreatedBy            contract.Principal       `json:"created_by"`
+	CreatedAt            time.Time                `json:"created_at"`
+	UpdatedAt            time.Time                `json:"updated_at"`
 }
 
 func (a Artifact) Validate() error {
@@ -110,7 +128,38 @@ func (a Artifact) Validate() error {
 			}
 		}
 	}
+	if len(a.Transcript) > 0 {
+		if a.TranscriptionLineage == nil || strings.TrimSpace(a.TranscriptionLineage.ProviderCode) == "" || strings.TrimSpace(a.TranscriptionLineage.ModelVersion) == "" {
+			return fmt.Errorf("media understanding transcription lineage is required")
+		}
+	}
+	if !validMediaFormatCode(a.Classifications.MediaFormat.Code) || !validContentStyleCode(a.Classifications.ContentStyle.Code) {
+		return fmt.Errorf("media understanding classification code is invalid")
+	}
+	for _, classification := range []Classification{a.Classifications.MediaFormat, a.Classifications.ContentStyle} {
+		if classification.Confidence < 0 || classification.Confidence > 1 {
+			return fmt.Errorf("media understanding classification confidence is invalid")
+		}
+	}
 	return nil
+}
+
+func validMediaFormatCode(value string) bool {
+	switch value {
+	case "", "unknown", "single_image", "gif", "image_group", "video", "vertical_video":
+		return true
+	default:
+		return false
+	}
+}
+
+func validContentStyleCode(value string) bool {
+	switch value {
+	case "", "unknown", "single_speaker", "multiple_speakers", "human_product_demo_no_voice", "product_voiceover", "product_demo_no_voice", "story_drama":
+		return true
+	default:
+		return false
+	}
 }
 
 func emptyEvidence() []Evidence  { return []Evidence{} }

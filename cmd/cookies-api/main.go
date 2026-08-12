@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shikanon/cookies/internal/integrations/crawler"
 	"github.com/shikanon/cookies/internal/integrations/creativedelivery"
 	"github.com/shikanon/cookies/internal/integrations/creativeprovider"
 	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
@@ -58,6 +59,9 @@ func main() {
 	}
 	ffmpegPath := localExecutablePath(cfg.Environment, cfg.Media.FFmpegPath, "ffmpeg")
 	ffprobePath := localExecutablePath(cfg.Environment, cfg.Media.FFprobePath, "ffprobe")
+	if cfg.MediaUnderstanding.ASREnabled && ffmpegPath == "" {
+		log.Fatal("invalid configuration: COOKIES_MEDIA_UNDERSTANDING_ASR_ENABLED requires an available ffmpeg executable")
+	}
 
 	db, err := database.Open(context.Background(), cfg.MySQL)
 	if err != nil {
@@ -341,9 +345,11 @@ func main() {
 	if visionAdapter != nil {
 		visionProvider = &provider.Service{VisionAdapter: visionAdapter, VisionSources: assetVisionSourceResolver{uploads: uploadService}}
 	}
+	log.Printf("Media understanding configured: real_provider=%t vision_model_alias=%s asr=%t", cfg.MediaUnderstanding.RealProviderEnabled, cfg.MediaUnderstanding.VisionModelAlias, cfg.MediaUnderstanding.ASREnabled)
 	mediaUnderstandingService := &mediaunderstanding.Service{
 		Store: mediaunderstanding.MySQLStore{DB: db}, Projects: projectService, Assets: uploadService,
-		DerivedImages: uploadService, Vision: visionProvider, ModelAlias: "cookies.vision.standard",
+		DerivedImages: uploadService, Vision: visionProvider, RealVision: cfg.MediaUnderstanding.RealProviderEnabled,
+		ModelAlias: cfg.MediaUnderstanding.VisionModelAlias,
 		Scheduler: mediaunderstanding.JobRuntimeScheduler{
 			Store: runtimeStore, NewID: func() (string, error) { return ids.New("mediaunderstandingjob") },
 		},
@@ -353,6 +359,18 @@ func main() {
 			FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
 			Sources: creativeMediaSource{repository: assetRepository, blobs: blobs},
 		}
+	}
+	if cfg.MediaUnderstanding.ASREnabled && ffmpegPath != "" {
+		mediaUnderstandingService.Transcriber = creativeprovider.AssetTranscriber{
+			Assets: uploadService, FFmpegPath: ffmpegPath, WorkRoot: cfg.Media.VideoWorkRoot,
+			ASR: creativeprovider.VolcengineASR{Config: creativeprovider.ASRConfig{
+				Endpoint: cfg.Provider.VolcengineASR.Endpoint, AuthMode: cfg.Provider.VolcengineASR.AuthMode,
+				AppID: cfg.Provider.VolcengineASR.AppID, AccessToken: cfg.Provider.VolcengineASR.AccessToken,
+				APIKey: cfg.Provider.VolcengineASR.APIKey, ResourceID: cfg.Provider.VolcengineASR.ResourceID,
+				Model: cfg.Provider.VolcengineASR.Model,
+			}},
+		}
+		log.Printf("Media understanding ASR configured: adapter=volcengine_asr model=%s", cfg.Provider.VolcengineASR.Model)
 	}
 	remixService := remix.NewMemoryService(func() (string, error) { return ids.New("remixplan") })
 	agentService := agent.NewMemoryService(remixService, func(prefix string) (string, error) { return ids.New(prefix) })
@@ -398,14 +416,63 @@ func main() {
 		creativeService.AINativeStoryboardPlanner = creative.ModelAINativeStoryboardPlanner{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
 		creativeService.AINativeVoiceoverFitter = creative.ModelAINativeVoiceoverFitter{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
 	}
+	var miyunCipher insights.MiyunSecretCipher
+	var miyunPages insights.MiyunPageClient
+	var miyunVerifier insights.MiyunConnectionVerifier
+	var miyunImports insights.MiyunAuthorizedImporter
+	var miyunPreviews insights.MiyunAuthorizedPreviewer
+	if cfg.Miyun.Enabled {
+		cipher, cipherErr := insights.NewAESGCMMiyunSecretCipher(cfg.Miyun.MasterKey, cfg.Miyun.MasterKeyVersion)
+		if cipherErr != nil {
+			log.Fatalf("configure Miyun secret encryption: %v", cipherErr)
+		}
+		if uploadService.VideoProbe == nil && uploadService.MediaProbe == nil {
+			log.Fatalf("configure Miyun external import: ffprobe or media probe is required")
+		}
+		gate := &crawler.YouShuGate{
+			MaxConcurrent: cfg.Miyun.MaxConcurrent, RequestsPerSecond: cfg.Miyun.RequestsPerSecond,
+			Cooldown: time.Duration(cfg.Miyun.CooldownSeconds) * time.Second,
+		}
+		protocol := miyunProtocolAdapter{endpoint: cfg.Miyun.Endpoint, cipher: cipher, client: &http.Client{Timeout: 30 * time.Second}, gate: gate}
+		externalImports := assets.ExternalImportService{
+			Repository: assetRepository, Projects: projectService, Upload: *uploadService,
+			QuarantineBucket: cfg.ObjectStorage.QuarantineBucket,
+		}
+		miyunCipher, miyunPages, miyunVerifier = cipher, protocol, protocol
+		miyunImports = miyunAuthorizedImportAdapter{
+			downloader: &crawler.YouShuDownloader{HTTPClient: &http.Client{Timeout: 2 * time.Minute}, AllowedHosts: cfg.Miyun.DownloadAllowedHosts},
+			assets:     externalImports, ledger: assetRepository, workRoot: miyunWorkRoot(cfg.Media.VideoWorkRoot),
+		}
+		miyunPreviews = miyunAuthorizedPreviewAdapter{
+			downloader: &crawler.YouShuDownloader{HTTPClient: &http.Client{Timeout: 2 * time.Minute}, AllowedHosts: cfg.Miyun.DownloadAllowedHosts},
+			workRoot:   miyunWorkRoot(cfg.Media.VideoWorkRoot),
+		}
+		log.Printf("Miyun collection configured: real_calls=true concurrency=%d rate=%d cooldown_seconds=%d download_hosts=%d",
+			cfg.Miyun.MaxConcurrent, cfg.Miyun.RequestsPerSecond, cfg.Miyun.CooldownSeconds, len(cfg.Miyun.DownloadAllowedHosts))
+	}
 	insightsService := &insights.Service{
-		Repository:  insights.MySQLRepository{DB: db},
-		Assets:      insights.MySQLRepository{DB: db},
-		Connectors:  insights.MySQLRepository{DB: db},
-		Runs:        insights.MySQLRepository{DB: db},
-		Experiments: insights.MySQLRepository{DB: db},
-		Projects:    projectService,
-		Delivery:    deliveryinsights.Reader{Service: deliveryService},
+		Repository:          insights.MySQLRepository{DB: db},
+		Miyun:               insights.MySQLRepository{DB: db},
+		MiyunProjects:       miyunProjectSourceAdapter{projects: projectService},
+		MiyunAssets:         miyunAssetSourceAdapter{uploads: uploadService},
+		MiyunKnowledge:      miyunKnowledgeSourceAdapter{knowledge: knowledgeService},
+		MiyunHandoffContent: miyunHandoffContentAdapter{uploads: uploadService, knowledge: knowledgeService},
+		MiyunMedia:          miyunMediaEvidenceAdapter{media: mediaUnderstandingService},
+		MiyunCrawl:          insights.MySQLRepository{DB: db},
+		MiyunJobs:           runtimeStore,
+		MiyunPages:          miyunPages,
+		MiyunImports:        miyunImports,
+		MiyunReturns:        miyunReturnImportAdapter{imports: assets.ExternalImportService{Repository: assetRepository, Projects: projectService, Upload: *uploadService, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket}, uploads: *uploadService},
+		MiyunPreviews:       miyunPreviews,
+		MiyunSecrets:        miyunCipher,
+		MiyunVerifier:       miyunVerifier,
+		MiyunCooldown:       time.Duration(cfg.Miyun.CooldownSeconds) * time.Second,
+		Assets:              insights.MySQLRepository{DB: db},
+		Connectors:          insights.MySQLRepository{DB: db},
+		Runs:                insights.MySQLRepository{DB: db},
+		Experiments:         insights.MySQLRepository{DB: db},
+		Projects:            projectService,
+		Delivery:            deliveryinsights.Reader{Service: deliveryService},
 	}
 	// Text 为 nil 时提取会直接失败，不会退化成模板产出——
 	// 库里一条编造的特征，代价远大于一次失败的提取。
@@ -419,6 +486,10 @@ func main() {
 	defer stopWorkers()
 	agentStore := agent.MySQLStore{DB: db}
 	runtimeHandlers := map[string]jobruntime.Handler{}
+	if cfg.Miyun.Enabled {
+		runtimeHandlers[insights.MiyunCrawlJobKind] = insightsService.HandleMiyunCrawlJob
+		runtimeHandlers[insights.MiyunMaterialImportJobKind] = insightsService.HandleMiyunMaterialImportJob
+	}
 	runtimeHandlers[creative.DirectionGenerationJobKind] = creativeService.HandleDirectionGenerationJob
 	creativeService.AINativeScriptScheduler = creative.JobRuntimeAINativeScriptScheduler{
 		Store: runtimeStore,
@@ -743,6 +814,9 @@ func buildTextAdapter(cfg config.Config, db *sql.DB) (provider.TextProviderAdapt
 }
 
 func buildVisionAdapter(cfg config.Config, db *sql.DB) (provider.VisionProviderAdapter, error) {
+	if !cfg.MediaUnderstanding.RealProviderEnabled {
+		return provider.FakeSyncAdapter{}, nil
+	}
 	switch cfg.Provider.TextAdapter {
 	case "fake":
 		return provider.FakeSyncAdapter{}, nil
@@ -789,6 +863,114 @@ func strategyOrganizationAllowlist(values []string) map[contract.OrganizationID]
 }
 
 type assetVisionSourceResolver struct{ uploads *assets.UploadService }
+
+type miyunProjectSourceAdapter struct{ projects *project.Service }
+type miyunAssetSourceAdapter struct{ uploads *assets.UploadService }
+type miyunKnowledgeSourceAdapter struct{ knowledge *knowledge.Service }
+type miyunHandoffContentAdapter struct {
+	uploads   *assets.UploadService
+	knowledge *knowledge.Service
+}
+type miyunMediaEvidenceAdapter struct{ media *mediaunderstanding.Service }
+
+func (a miyunProjectSourceAdapter) ReadMiyunProjectSource(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID) (insights.MiyunProjectSource, error) {
+	projectContext, err := a.projects.GetContext(ctx, actor, projectID)
+	if err != nil {
+		return insights.MiyunProjectSource{}, err
+	}
+	businessContext, err := a.projects.GetBusinessContext(ctx, actor, projectID)
+	if err != nil {
+		return insights.MiyunProjectSource{}, err
+	}
+	workbench, err := a.projects.GetWorkbench(ctx, actor, projectID)
+	if err != nil {
+		return insights.MiyunProjectSource{}, err
+	}
+	if businessContext.ProjectID != projectID || workbench.Project.ProjectID != string(projectID) ||
+		workbench.Project.OrganizationID != string(actor.OrganizationID) {
+		return insights.MiyunProjectSource{}, fmt.Errorf("%w: Miyun Project projections are inconsistent", insights.ErrInvalidState)
+	}
+	products := make([]insights.MiyunProjectProduct, 0, len(businessContext.Products))
+	for _, product := range businessContext.Products {
+		products = append(products, insights.MiyunProjectProduct{ID: product.ID, Name: product.Name})
+	}
+	return insights.MiyunProjectSource{
+		Context: projectContext, ProjectName: businessContext.ProjectName,
+		BrandName: businessContext.BrandName, CategoryName: workbench.Brand.Category,
+		Products: products,
+	}, nil
+}
+
+func (a miyunAssetSourceAdapter) ReadMiyunAssetSource(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (insights.MiyunAssetSource, error) {
+	value, err := a.uploads.Get(ctx, actor, projectID, ref)
+	if err != nil {
+		return insights.MiyunAssetSource{}, err
+	}
+	return insights.MiyunAssetSource{
+		Ref: value.Version.Ref(), Kind: value.Asset.Kind, MIMEType: value.Version.MIMEType,
+		SHA256: value.Version.SHA256,
+		Ready:  value.Asset.Status == assets.AssetReady && value.Version.Status == assets.AssetReady,
+	}, nil
+}
+
+func (a miyunKnowledgeSourceAdapter) ReadMiyunKnowledgeSource(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, documentID string) (insights.MiyunKnowledgeSource, error) {
+	value, err := a.knowledge.GetDocument(ctx, actor, projectID, documentID)
+	if err != nil {
+		return insights.MiyunKnowledgeSource{}, err
+	}
+	return insights.MiyunKnowledgeSource{
+		ID: value.ID, Filename: value.Filename, MIMEType: value.MIMEType,
+		Status: value.Status, Text: value.ExtractedText, TextSHA256: value.TextSHA256, ContentSHA256: value.ContentSHA256,
+	}, nil
+}
+
+func (a miyunHandoffContentAdapter) OpenMiyunHandoffAsset(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (io.ReadCloser, error) {
+	if a.uploads == nil {
+		return nil, fmt.Errorf("Miyun asset content reader is unavailable")
+	}
+	stream, _, err := a.uploads.OpenPreview(ctx, actor, projectID, ref)
+	return stream, err
+}
+func (a miyunHandoffContentAdapter) OpenMiyunHandoffDocument(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (io.ReadCloser, error) {
+	if a.knowledge == nil {
+		return nil, fmt.Errorf("Miyun knowledge content reader is unavailable")
+	}
+	stream, _, err := a.knowledge.OpenDocumentOriginalStream(ctx, actor, projectID, id)
+	return stream, err
+}
+
+func (a miyunMediaEvidenceAdapter) ReadLatestMiyunMediaEvidence(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, ref contract.AssetVersionRef) (insights.MiyunMediaEvidence, bool, error) {
+	value, err := a.media.GetLatestForAsset(ctx, actor, projectID, ref)
+	if errors.Is(err, mediaunderstanding.ErrNotFound) {
+		return insights.MiyunMediaEvidence{}, false, nil
+	}
+	if err != nil {
+		return insights.MiyunMediaEvidence{}, false, err
+	}
+	evidence := make([]string, 0, 1+len(value.VisibleText)+len(value.Observations)+len(value.Inferences)+len(value.Risks)+len(value.Unknowns)+len(value.Transcript))
+	if value.Summary != "" {
+		evidence = append(evidence, value.Summary)
+	}
+	for _, group := range [][]mediaunderstanding.Evidence{value.VisibleText, value.Observations, value.Inferences, value.Risks, value.Unknowns, value.Transcript} {
+		for _, item := range group {
+			evidence = append(evidence, item.Text)
+		}
+	}
+	asrProviderCode, asrModelVersion := "", ""
+	if value.TranscriptionLineage != nil {
+		asrProviderCode, asrModelVersion = value.TranscriptionLineage.ProviderCode, value.TranscriptionLineage.ModelVersion
+	}
+	return insights.MiyunMediaEvidence{
+		ArtifactID: value.ID, Status: string(value.Status), ContentHash: value.ContentHash, Evidence: evidence,
+		MediaFormatCode:        value.Classifications.MediaFormat.Code,
+		ContentStyleCode:       value.Classifications.ContentStyle.Code,
+		ContentStyleConfidence: value.Classifications.ContentStyle.Confidence,
+		VisionProviderCode:     value.Lineage.ProviderCode,
+		VisionModelVersion:     value.Lineage.ModelVersion,
+		ASRProviderCode:        asrProviderCode,
+		ASRModelVersion:        asrModelVersion,
+	}, true, nil
+}
 
 type creativeAssetReader struct{ uploads *assets.UploadService }
 

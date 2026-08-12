@@ -2,6 +2,7 @@ package mediaunderstanding
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -93,6 +94,35 @@ func TestMissingVisionRouteProducesExplicitPartialArtifact(t *testing.T) {
 	}
 	if artifact.Status != StatusPartial || len(artifact.Observations) != 1 || artifact.Warnings[0] != "vision_route_unavailable" {
 		t.Fatalf("artifact=%#v", artifact)
+	}
+}
+
+func TestMediaClassificationUsesTechnicalFormatAndRequiresTranscriptForSpeech(t *testing.T) {
+	t.Parallel()
+	asset := assets.ProjectAsset{
+		Asset:   assets.Asset{Kind: contract.AssetVideo},
+		Version: assets.AssetVersion{MIMEType: "video/mp4", WidthPixels: 1080, HeightPixels: 1920},
+	}
+	format := classifyMediaFormat(asset)
+	if format.Code != "vertical_video" || format.Confidence != 1 {
+		t.Fatalf("format=%#v", format)
+	}
+	artifact := validArtifact()
+	artifact.AssetKind = contract.AssetVideo
+	frame := Keyframe{TimestampMS: 1000, FrameRef: contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "frame_1", Version: 1}}}
+	output := json.RawMessage(`{"summary":"商品旁白展示","visible_text":[],"observations":[],"inferences":[],"risks":[],"unknowns":[],"content_style":{"code":"product_voiceover","confidence":0.9,"frame_index":0}}`)
+	if err := applyVisionResponse(&artifact, provider.SynchronousResponse{StructuredOutput: output, ProviderCode: "gateway", ModelVersion: "vision-v1"}, []Keyframe{frame}); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Classifications.ContentStyle.Code != "unknown" || artifact.Classifications.ContentStyle.Confidence != 0 || artifact.Warnings[0] != "content_style_requires_transcript" {
+		t.Fatalf("classification without ASR=%#v warnings=%v", artifact.Classifications.ContentStyle, artifact.Warnings)
+	}
+	artifact.Transcript = []Evidence{{ID: "transcript_01", Text: "产品旁白", Confidence: 1, Locator: Locator{Kind: "audio_transcript", AssetRef: artifact.AssetRef}}}
+	if err := applyVisionResponse(&artifact, provider.SynchronousResponse{StructuredOutput: output, ProviderCode: "gateway", ModelVersion: "vision-v1"}, []Keyframe{frame}); err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Classifications.ContentStyle.Code != "product_voiceover" || artifact.Classifications.ContentStyle.Confidence != 0.9 {
+		t.Fatalf("classification with ASR=%#v", artifact.Classifications.ContentStyle)
 	}
 }
 

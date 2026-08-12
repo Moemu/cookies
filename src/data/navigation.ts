@@ -48,6 +48,7 @@ export const systems: SystemDefinition[] = [
       { id: 'performance', label: '投后分析', icon: TrendingUp, group: '工作', layout: 'analysis', description: '连接投放指标与素材特征，解释表现、疲劳、异常和驱动因素。', views: ['指标总览', '素材对比', '趋势', '疲劳', '异常', '驱动因素'] },
       { id: 'connections', label: '数据接入', icon: Database, group: '数据', layout: 'operations', description: '管理平台数据源、字段映射、素材映射和同步。', views: ['数据源', '导入任务', '字段映射', '素材映射', '同步记录'] },
       { id: 'assets', label: '分析素材库', icon: Library, group: '素材与分析', layout: 'table', description: '建立可分析素材索引、版本、特征与血缘。', views: ['全部素材', '待匹配', '待提取', '特征', '版本与血缘'] },
+      { id: 'miyun-materials', label: '米云素材', icon: Aperture, group: '素材与分析', layout: 'workspace', description: '围绕产品资料、授权采集和透明数据卡完成米云素材的人工候选决策。', views: ['产品分析', '采集任务', '素材候选', '裂变任务'] },
       // 视图按素材类型切分，取自 03 §一级导航与 19 §5.2；原来的「案例拆解/漫剧大盘/制作方法/包装检查」
       // 来自参考站点，与 PRD 的六类特征体系对不上（基线文档 §5 冲突 5）。
       { id: 'content', label: '内容分析', icon: Film, group: '素材与分析', layout: 'analysis', description: '把创意内容转成可比较的变量：按素材类型提取特征，同时服务投前参考与投后解释。', views: ['小红书', '公众号', '品牌广告', '数字人', '广告前贴', '爆款复刻', '单素材拆解'] },

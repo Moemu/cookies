@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"strconv"
 	"testing"
@@ -114,9 +115,27 @@ func TestKnowledgeCenterMySQLProjection(t *testing.T) {
 		t.Fatalf("invalid category error=%v", err)
 	}
 
+	unavailablePDFBytes := []byte("%PDF-1.7\n1 0 obj\n<< /Title (unavailable) >>\nendobj\n%%EOF\n")
+	unavailablePDF, err := service.CreateDocument(
+		ctx, actor, projectID, "unavailable-parser.pdf", "application/pdf",
+		bytes.NewReader(unavailablePDFBytes), int64(len(unavailablePDFBytes)),
+	)
+	if err != nil || unavailablePDF.Status != "parse_failed" || unavailablePDF.ParseErrorCode != "PARSER_UNAVAILABLE" || unavailablePDF.ExtractedText != "" {
+		t.Fatalf("unconfigured PDF=%#v err=%v", unavailablePDF, err)
+	}
+	original, originalDocument, err := service.OpenDocumentOriginal(ctx, actor, projectID, unavailablePDF.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalBytes, readErr := io.ReadAll(original)
+	_ = original.Close()
+	if readErr != nil || !bytes.Equal(originalBytes, unavailablePDFBytes) || originalDocument.ID != unavailablePDF.ID {
+		t.Fatalf("original PDF=%q document=%#v err=%v", originalBytes, originalDocument, readErr)
+	}
+
 	service.DocumentParser = parserStub{}
 	service.DocumentScheduler = parseSchedulerStub{}
-	pdfBytes := []byte("%PDF-1.7 fake integration payload")
+	pdfBytes := []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
 	pdf, err := service.CreateDocument(
 		ctx, actor, projectID, "market-report.pdf", "application/pdf",
 		bytes.NewReader(pdfBytes), int64(len(pdfBytes)),

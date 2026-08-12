@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -1641,6 +1642,27 @@ func (s *Server) getKnowledgeDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) openKnowledgeDocumentOriginal(w http.ResponseWriter, r *http.Request) {
+	if s.knowledge == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	stream, document, err := s.knowledge.OpenDocumentOriginal(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")), r.PathValue("document_id"))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	defer stream.Close()
+	w.Header().Set("Content-Type", document.MIMEType)
+	w.Header().Set("Content-Length", strconv.FormatInt(document.SizeBytes, 10))
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": document.Filename}))
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, stream)
 }
 
 func (s *Server) searchKnowledge(w http.ResponseWriter, r *http.Request) {

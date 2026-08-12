@@ -34,18 +34,20 @@ type LocalIdentity struct {
 }
 
 type Config struct {
-	Environment   Environment
-	HTTPAddr      string
-	MySQL         MySQL
-	Auth          Auth
-	ObjectStorage ObjectStorage
-	Scanner       Scanner
-	Media         Media
-	Provider      Provider
-	Creative      Creative
-	Strategy      Strategy
-	Research      Research
-	LocalIdentity *LocalIdentity
+	Environment        Environment
+	HTTPAddr           string
+	MySQL              MySQL
+	Auth               Auth
+	ObjectStorage      ObjectStorage
+	Scanner            Scanner
+	Media              Media
+	MediaUnderstanding MediaUnderstanding
+	Provider           Provider
+	Creative           Creative
+	Strategy           Strategy
+	Research           Research
+	Miyun              Miyun
+	LocalIdentity      *LocalIdentity
 }
 
 type Auth struct {
@@ -79,6 +81,14 @@ type Media struct {
 	FFmpegPath    string
 	FFprobePath   string
 	VideoWorkRoot string
+}
+
+// MediaUnderstanding owns multimodal inference rollout independently from
+// Strategy generation and other Creative model features.
+type MediaUnderstanding struct {
+	RealProviderEnabled bool
+	ASREnabled          bool
+	VisionModelAlias    string
 }
 
 // Strategy controls gradual rollout independently from the Creative system.
@@ -139,6 +149,19 @@ type Research struct {
 	MaxOutputBytes     int
 }
 
+// Miyun controls the real third-party collection path. It is disabled by
+// default; enabling it requires an application key and explicit CDN allowlist.
+type Miyun struct {
+	Enabled              bool
+	Endpoint             string
+	MasterKey            string
+	MasterKeyVersion     string
+	DownloadAllowedHosts []string
+	MaxConcurrent        int
+	RequestsPerSecond    int
+	CooldownSeconds      int
+}
+
 // Provider contains only local composition choices. Credentials are read from
 // the process environment (or ignored local .env), never from project data.
 type Provider struct {
@@ -183,10 +206,9 @@ type OpenAIImage struct {
 	BaseURL string
 }
 
-// VolcengineASR is the local-only preconfiguration for the recording-file
-// recognition capability. The actual audio.transcribe execution adapter is
-// introduced with the Creative Phase 2 runtime, so keeping this separate from
-// Ark text/video prevents one credential from being used for the wrong API.
+// VolcengineASR configures the shared recording-file recognition adapter.
+// Keeping it separate from Ark text/video prevents one credential from being
+// used for the wrong API.
 type VolcengineASR struct {
 	Endpoint    string
 	AuthMode    string
@@ -294,6 +316,14 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	mediaUnderstandingRealProviderEnabled, err := strictBoolValueOr(lookup, "COOKIES_MEDIA_UNDERSTANDING_REAL_PROVIDER_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	mediaUnderstandingASREnabled, err := strictBoolValueOr(lookup, "COOKIES_MEDIA_UNDERSTANDING_ASR_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	strategyApproveEnabled, err := strictBoolValueOr(lookup, "COOKIES_STRATEGY_APPROVE_ENABLED", true)
 	if err != nil {
 		return Config{}, err
@@ -382,6 +412,10 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	miyunEnabled, err := strictBoolValueOr(lookup, "COOKIES_MIYUN_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	generatePromptDefault := "strategy.generate.v2"
 	conversationPromptDefault := "strategy.conversation.v3"
 	revisePromptDefault := "strategy.revise.v2"
@@ -424,6 +458,11 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			FFmpegPath:    valueOr(lookup, "COOKIES_FFMPEG_PATH", ""),
 			FFprobePath:   valueOr(lookup, "COOKIES_FFPROBE_PATH", ""),
 			VideoWorkRoot: valueOr(lookup, "COOKIES_VIDEO_WORK_ROOT", ".data/video-work"),
+		},
+		MediaUnderstanding: MediaUnderstanding{
+			RealProviderEnabled: mediaUnderstandingRealProviderEnabled,
+			ASREnabled:          mediaUnderstandingASREnabled,
+			VisionModelAlias:    valueOr(lookup, "COOKIES_MEDIA_UNDERSTANDING_VISION_MODEL_ALIAS", "cookies.vision.standard"),
 		},
 		Creative: Creative{
 			DirectionPlanningEnabled:       directionPlanningEnabled,
@@ -473,6 +512,13 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			MCPEnvAllowlist:    splitCSV(valueOr(lookup, "COOKIES_RESEARCH_MCP_ENV_ALLOWLIST", "PATH,PATHEXT,SystemRoot,TEMP,TMP,ComSpec")),
 			TimeoutSeconds:     intValueOr(lookup, "COOKIES_RESEARCH_TIMEOUT_SECONDS", 120),
 			MaxOutputBytes:     intValueOr(lookup, "COOKIES_RESEARCH_MAX_OUTPUT_BYTES", 4*1024*1024),
+		},
+		Miyun: Miyun{
+			Enabled: miyunEnabled, Endpoint: valueOr(lookup, "COOKIES_MIYUN_ENDPOINT", "https://api.youshu.youcloud.com/graphql"),
+			MasterKey: valueOr(lookup, "COOKIES_MIYUN_MASTER_KEY", ""), MasterKeyVersion: valueOr(lookup, "COOKIES_MIYUN_MASTER_KEY_VERSION", "v1"),
+			DownloadAllowedHosts: splitCSV(valueOr(lookup, "COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS", "")),
+			MaxConcurrent:        intValueOr(lookup, "COOKIES_MIYUN_MAX_CONCURRENT", 1), RequestsPerSecond: intValueOr(lookup, "COOKIES_MIYUN_REQUESTS_PER_SECOND", 5),
+			CooldownSeconds: intValueOr(lookup, "COOKIES_MIYUN_COOLDOWN_SECONDS", 300),
 		},
 		Provider: Provider{
 			ImageAdapter:      valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),
@@ -637,6 +683,33 @@ func (c Config) Validate() error {
 		(strings.TrimSpace(c.Research.MCPToolName) == "" || strings.TrimSpace(c.Research.MCPProtocolVersion) == "") {
 		return fmt.Errorf("MCP stdio research requires a tool name and protocol version")
 	}
+	if c.Miyun.MaxConcurrent < 1 || c.Miyun.MaxConcurrent > 2 {
+		return fmt.Errorf("COOKIES_MIYUN_MAX_CONCURRENT must be between 1 and 2")
+	}
+	if c.Miyun.RequestsPerSecond < 1 || c.Miyun.RequestsPerSecond > 8 {
+		return fmt.Errorf("COOKIES_MIYUN_REQUESTS_PER_SECOND must be between 1 and 8")
+	}
+	if c.Miyun.CooldownSeconds < 60 || c.Miyun.CooldownSeconds > 3600 {
+		return fmt.Errorf("COOKIES_MIYUN_COOLDOWN_SECONDS must be between 60 and 3600")
+	}
+	if c.Miyun.Enabled {
+		endpoint, err := url.Parse(strings.TrimSpace(c.Miyun.Endpoint))
+		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil {
+			return fmt.Errorf("COOKIES_MIYUN_ENDPOINT must be an absolute HTTPS URL")
+		}
+		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(c.Miyun.MasterKey))
+		if err != nil || len(key) != 32 || strings.TrimSpace(c.Miyun.MasterKeyVersion) == "" {
+			return fmt.Errorf("COOKIES_MIYUN_MASTER_KEY must be a base64-encoded 32-byte key with a version")
+		}
+		if len(c.Miyun.DownloadAllowedHosts) == 0 {
+			return fmt.Errorf("COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS is required when Miyun is enabled")
+		}
+		for _, host := range c.Miyun.DownloadAllowedHosts {
+			if strings.TrimSpace(host) == "" || strings.ContainsAny(host, "/@?#") {
+				return fmt.Errorf("COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS must contain hostnames only")
+			}
+		}
+	}
 	if c.Provider.ImageAdapter != "fake" && c.Provider.ImageAdapter != "ark_image" && c.Provider.ImageAdapter != "openai_image" && c.Provider.ImageAdapter != "adapter_gateway" {
 		return fmt.Errorf("COOKIES_PROVIDER_IMAGE_ADAPTER must be fake, ark_image, openai_image, or adapter_gateway")
 	}
@@ -654,6 +727,15 @@ func (c Config) Validate() error {
 	}
 	if c.Strategy.RealProviderEnabled && c.Provider.TextAdapter != "adapter_gateway" && c.Provider.TextAdapter != "ark_text" {
 		return fmt.Errorf("COOKIES_STRATEGY_REAL_PROVIDER_ENABLED requires a real text adapter")
+	}
+	if strings.TrimSpace(c.MediaUnderstanding.VisionModelAlias) == "" {
+		return fmt.Errorf("COOKIES_MEDIA_UNDERSTANDING_VISION_MODEL_ALIAS must not be empty")
+	}
+	if c.MediaUnderstanding.RealProviderEnabled && c.Provider.TextAdapter != "adapter_gateway" {
+		return fmt.Errorf("COOKIES_MEDIA_UNDERSTANDING_REAL_PROVIDER_ENABLED requires COOKIES_PROVIDER_TEXT_ADAPTER=adapter_gateway")
+	}
+	if c.MediaUnderstanding.ASREnabled && c.Provider.AudioAdapter != "volcengine_asr" {
+		return fmt.Errorf("COOKIES_MEDIA_UNDERSTANDING_ASR_ENABLED requires COOKIES_PROVIDER_AUDIO_ADAPTER=volcengine_asr")
 	}
 	if strings.TrimSpace(c.Strategy.TextModelAlias) == "" {
 		return fmt.Errorf("COOKIES_STRATEGY_TEXT_MODEL_ALIAS must not be empty")
@@ -710,9 +792,6 @@ func (c Config) Validate() error {
 		return fmt.Errorf("ark_text is local-only and requires COOKIES_ARK_TEXT_API_KEY and COOKIES_ARK_TEXT_MODEL")
 	}
 	if c.Provider.AudioAdapter == "volcengine_asr" {
-		if c.Environment != EnvironmentLocal {
-			return fmt.Errorf("volcengine_asr is local-only until the audio.transcribe runtime is introduced")
-		}
 		endpoint, err := url.Parse(c.Provider.VolcengineASR.Endpoint)
 		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" {
 			return fmt.Errorf("COOKIES_VOLCENGINE_ASR_ENDPOINT must be an absolute HTTPS URL")
