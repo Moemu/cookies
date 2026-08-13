@@ -3,6 +3,8 @@ package creative
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"image"
 	stdDraw "image/draw"
@@ -83,7 +85,7 @@ func (s Service) normalizeShortDramaReferenceBoardCandidate(
 	}
 	requestContext := contract.RequestContext{RequestID: "short-drama-board-" + candidate.ID, TraceID: taskID, Actor: actor}
 	asset, err := s.RenderedImages.IngestRenderedImage(
-		ctx, requestContext, projectID, candidate.ID+"-model-reference", bytes.NewReader(content), int64(len(content)),
+		ctx, requestContext, projectID, shortDramaRenderedImageJobID(candidate.ID, "model-reference"), bytes.NewReader(content), int64(len(content)),
 		board.Width, board.Height, []contract.AssetVersionRef{candidate.Asset.AssetVersion}, nil,
 	)
 	if err != nil {
@@ -91,6 +93,18 @@ func (s Service) normalizeShortDramaReferenceBoardCandidate(
 	}
 	candidate.ModelReferenceAsset = &asset
 	return candidate, nil
+}
+
+func shortDramaRenderedImageJobID(candidateID, purpose string) string {
+	const maxRenderJobIDLength = 96
+	value := candidateID + "-" + purpose
+	if len(value) <= maxRenderJobIDLength {
+		return value
+	}
+	digest := sha256.Sum256([]byte(value))
+	suffix := "-" + hex.EncodeToString(digest[:8])
+	prefixLength := maxRenderJobIDLength - len(suffix)
+	return value[:prefixLength] + suffix
 }
 
 func coverCropBounds(bounds image.Rectangle, targetWidth, targetHeight int) image.Rectangle {
