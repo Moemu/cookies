@@ -27,7 +27,7 @@ func (r MySQLRepository) CreateObservatoryRun(ctx context.Context, value Deliver
 	}
 	var mysqlError *mysqlDriver.MySQLError
 	if errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
-		existing, getErr := scanObservatoryRun(r.DB.QueryRowContext(ctx, observatoryRunSelect+` WHERE organization_id=? AND project_id=? AND input_hash=?`, value.OrganizationID, value.ProjectID, value.InputHash))
+		existing, getErr := scanObservatoryRun(r.DB.QueryRowContext(ctx, observatoryRunByInputHashQuery, value.OrganizationID, value.ProjectID, value.InputHash))
 		if getErr != nil {
 			return DeliveryObservatoryRun{}, false, getErr
 		}
@@ -40,7 +40,7 @@ func (r MySQLRepository) CreateObservatoryRun(ctx context.Context, value Deliver
 }
 
 func (r MySQLRepository) ListObservatoryRuns(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]DeliveryObservatoryRun, error) {
-	rows, err := r.DB.QueryContext(ctx, observatoryRunSelect+` WHERE organization_id=? AND project_id=? ORDER BY created_at DESC,run_id DESC LIMIT ?`, organizationID, projectID, limit)
+	rows, err := r.DB.QueryContext(ctx, observatoryRunsByProjectQuery, organizationID, projectID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (r MySQLRepository) ListObservatoryRuns(ctx context.Context, organizationID
 }
 
 func (r MySQLRepository) GetObservatoryRun(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (DeliveryObservatoryRun, error) {
-	value, err := scanObservatoryRun(r.DB.QueryRowContext(ctx, observatoryRunSelect+` WHERE organization_id=? AND project_id=? AND run_id=?`, organizationID, projectID, id))
+	value, err := scanObservatoryRun(r.DB.QueryRowContext(ctx, observatoryRunByIDQuery, organizationID, projectID, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return DeliveryObservatoryRun{}, ErrNotFound
 	}
@@ -65,6 +65,9 @@ func (r MySQLRepository) GetObservatoryRun(ctx context.Context, organizationID c
 }
 
 const observatoryRunSelect = `SELECT run_json FROM delivery_observatory_runs`
+const observatoryRunByInputHashQuery = `SELECT run_json FROM delivery_observatory_runs WHERE organization_id=? AND project_id=? AND input_hash=?`
+const observatoryRunsByProjectQuery = `SELECT run_json FROM delivery_observatory_runs WHERE organization_id=? AND project_id=? ORDER BY created_at DESC,run_id DESC LIMIT ?`
+const observatoryRunByIDQuery = `SELECT run_json FROM delivery_observatory_runs WHERE organization_id=? AND project_id=? AND run_id=?`
 
 func scanObservatoryRun(row rowScanner) (DeliveryObservatoryRun, error) {
 	var payload []byte
@@ -95,7 +98,7 @@ func (r MySQLRepository) CreateObservatoryFeedback(ctx context.Context, value De
 	var mysqlError *mysqlDriver.MySQLError
 	if errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
 		var existingRequestHash string
-		existing, getErr := scanObservatoryFeedback(r.DB.QueryRowContext(ctx, observatoryFeedbackSelect+` WHERE organization_id=? AND project_id=? AND idempotency_key=?`, value.OrganizationID, value.ProjectID, idempotencyKey))
+		existing, getErr := scanObservatoryFeedback(r.DB.QueryRowContext(ctx, observatoryFeedbackByIdempotencyKeyQuery, value.OrganizationID, value.ProjectID, idempotencyKey))
 		if getErr != nil {
 			return DeliveryObservatoryFeedback{}, false, getErr
 		}
@@ -112,7 +115,7 @@ func (r MySQLRepository) CreateObservatoryFeedback(ctx context.Context, value De
 }
 
 func (r MySQLRepository) ListObservatoryFeedback(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, runID string, limit int) ([]DeliveryObservatoryFeedback, error) {
-	rows, err := r.DB.QueryContext(ctx, observatoryFeedbackSelect+` WHERE organization_id=? AND project_id=? AND run_id=? ORDER BY created_at DESC,feedback_id DESC LIMIT ?`, organizationID, projectID, runID, limit)
+	rows, err := r.DB.QueryContext(ctx, observatoryFeedbackByRunQuery, organizationID, projectID, runID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +132,8 @@ func (r MySQLRepository) ListObservatoryFeedback(ctx context.Context, organizati
 }
 
 const observatoryFeedbackSelect = `SELECT feedback_json,run_outcome FROM delivery_observatory_feedback`
+const observatoryFeedbackByIdempotencyKeyQuery = `SELECT feedback_json,run_outcome FROM delivery_observatory_feedback WHERE organization_id=? AND project_id=? AND idempotency_key=?`
+const observatoryFeedbackByRunQuery = `SELECT feedback_json,run_outcome FROM delivery_observatory_feedback WHERE organization_id=? AND project_id=? AND run_id=? ORDER BY created_at DESC,feedback_id DESC LIMIT ?`
 
 func scanObservatoryFeedback(row rowScanner) (DeliveryObservatoryFeedback, error) {
 	var payload []byte

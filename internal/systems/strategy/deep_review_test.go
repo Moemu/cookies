@@ -5,8 +5,47 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shikanon/cookies/internal/platform/provider"
 	"github.com/shikanon/cookies/internal/systems/strategy/promptkit"
 )
+
+func TestDeepReviewRouteReady(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		inspection provider.TextRouteInspection
+		want       bool
+	}{
+		{
+			name:       "synchronous Responses route",
+			inspection: provider.TextRouteInspection{Ready: true, APIMode: provider.TextAPIResponses},
+			want:       true,
+		},
+		{
+			name:       "background Responses route",
+			inspection: provider.TextRouteInspection{Ready: true, APIMode: provider.TextAPIResponses, Background: true},
+			want:       true,
+		},
+		{
+			name:       "chat completions route",
+			inspection: provider.TextRouteInspection{Ready: true, APIMode: provider.TextAPIChatCompletions},
+			want:       false,
+		},
+		{
+			name:       "unready Responses route",
+			inspection: provider.TextRouteInspection{APIMode: provider.TextAPIResponses},
+			want:       false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := deepReviewRouteReady(test.inspection); got != test.want {
+				t.Fatalf("deepReviewRouteReady(%#v) = %t, want %t", test.inspection, got, test.want)
+			}
+		})
+	}
+}
 
 func TestDeepReviewV2SchemaAllowsNoFindings(t *testing.T) {
 	t.Parallel()
