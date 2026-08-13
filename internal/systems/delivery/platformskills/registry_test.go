@@ -7,7 +7,7 @@ func TestOceanEngineEcommerceManualFreezesStageBBaselineWithoutClaimingDriverRea
 	if err != nil {
 		t.Fatal(err)
 	}
-	if definition.Executable || definition.RealBrowserDriver || definition.SubmitAllowed || definition.GateOne.Ready {
+	if definition.Executable || definition.RealBrowserDriver || definition.SubmitAllowed {
 		t.Fatalf("calibration baseline claims runtime readiness: %#v", definition)
 	}
 	if definition.EvidenceObserved != "2026-08-06" || definition.UIBaseline.RevalidatedAt != "2026-08-13" || definition.UIBaseline.DriftCheck != "promotion_configuration_branches_revalidated" {
@@ -19,7 +19,7 @@ func TestOceanEngineEcommerceManualFreezesStageBBaselineWithoutClaimingDriverRea
 	if definition.SafetyExit.Method != "discard_unsubmitted_local_form" || len(definition.WriteValidationPending) < 6 {
 		t.Fatalf("stage B safe exit or pending write boundary was not preserved: %#v", definition)
 	}
-	if !definition.RuntimePolicy.ProjectFormLiveCalibrated || !definition.RuntimePolicy.PromotionFormLiveCalibrated || !definition.RuntimePolicy.ControlPlaneEvidenceRecorded || definition.GateOne.Result != "passed" {
+	if !definition.RuntimePolicy.ProjectFormLiveCalibrated || !definition.RuntimePolicy.PromotionFormLiveCalibrated || !definition.RuntimePolicy.ControlPlaneEvidenceRecorded || !definition.GateOne.Ready || definition.GateOne.Result != "passed" {
 		t.Fatalf("passed takeover calibration status was overstated or lost: %#v", definition)
 	}
 	if definition.RuntimePolicy.AgentFinalSubmitDocumentation != "deferred_until_end_to_end_flow_validated" {
