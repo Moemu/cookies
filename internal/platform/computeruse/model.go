@@ -347,6 +347,19 @@ func (a TakeoverEvidenceAction) Valid() bool {
 	return slices.Contains([]TakeoverEvidenceAction{TakeoverObservePage, TakeoverBeginFormFill, TakeoverFieldReadback, TakeoverDiscardDraft, TakeoverVerifyNoWrite}, a)
 }
 
+type TakeoverWriteOutcome string
+
+const (
+	TakeoverResultObserved TakeoverWriteOutcome = "result_observed"
+	TakeoverListConfirmed  TakeoverWriteOutcome = "list_confirmed"
+	TakeoverWriteRejected  TakeoverWriteOutcome = "rejected_or_error"
+	TakeoverResultUnknown  TakeoverWriteOutcome = "result_unknown"
+)
+
+func (o TakeoverWriteOutcome) Valid() bool {
+	return slices.Contains([]TakeoverWriteOutcome{TakeoverResultObserved, TakeoverListConfirmed, TakeoverWriteRejected, TakeoverResultUnknown}, o)
+}
+
 type FinalConfirmation struct {
 	SchemaVersion  string                  `json:"schema_version"`
 	ID             string                  `json:"id"`

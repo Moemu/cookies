@@ -81,14 +81,14 @@
     "acceptance_checklist": ["reidentify_current_page_and_account", "confirm_ui_has_not_drifted", "establish_stable_dom_locators", "fill_only_unsubmitted_fields", "read_back_every_field", "discard_draft", "confirm_no_platform_write"]
   },
   "gate_two_preparation": {
-    "status": "contract_frozen_authorization_required",
+    "status": "ports_ready_authorization_required",
     "execution_authorized": false,
     "final_confirmation_issued": false,
-    "production_submit_port_mounted": false,
+    "production_submit_port_mounted": true,
     "skill_submit_allowed": false,
     "maximum_final_clicks": 1,
     "preflight_ref": "docs/delivery/fixtures/oceanengine-gate-two-preflight-v0.1.json",
     "required_runtime_checks": ["fresh_controlled_authority", "explicit_user_authorization_in_execution_turn", "responsible_user_online", "account_project_action_budget_exact_match", "current_page_values_match_approval", "unexpired_single_use_confirmation", "valid_fenced_lease", "kill_switch_inactive", "single_click_budget", "post_write_result_and_list_readback", "result_unknown_no_resubmit", "confirmed_mapping_requires_two_matching_readbacks"],
-    "implementation_gaps": ["takeover_remote_write_authorization_port", "post_write_result_evidence_port", "delivery_mapping_http_api", "skill_final_submit_instructions_after_validation"]
+    "implementation_gaps": ["skill_final_submit_instructions_after_validation"]
   }
 }

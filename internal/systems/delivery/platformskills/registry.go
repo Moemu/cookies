@@ -15,7 +15,7 @@ const (
 var ErrInvalidDefinition = errors.New("invalid delivery Platform Skill definition")
 
 var gateTwoRequiredRuntimeChecks = []string{"fresh_controlled_authority", "explicit_user_authorization_in_execution_turn", "responsible_user_online", "account_project_action_budget_exact_match", "current_page_values_match_approval", "unexpired_single_use_confirmation", "valid_fenced_lease", "kill_switch_inactive", "single_click_budget", "post_write_result_and_list_readback", "result_unknown_no_resubmit", "confirmed_mapping_requires_two_matching_readbacks"}
-var gateTwoImplementationGaps = []string{"takeover_remote_write_authorization_port", "post_write_result_evidence_port", "delivery_mapping_http_api", "skill_final_submit_instructions_after_validation"}
+var gateTwoImplementationGaps = []string{"skill_final_submit_instructions_after_validation"}
 
 //go:embed definitions/*.json
 var definitions embed.FS
@@ -134,10 +134,10 @@ func (d Definition) Validate() error {
 		d.GateOne.PromotionFormStatus != "passed" ||
 		d.GateOne.ControlPlaneEvidenceStatus != "passed" ||
 		d.GateOne.LiveEvidenceRef == "" ||
-		d.GateTwoPreparation.Status != "contract_frozen_authorization_required" ||
+		d.GateTwoPreparation.Status != "ports_ready_authorization_required" ||
 		d.GateTwoPreparation.ExecutionAuthorized ||
 		d.GateTwoPreparation.FinalConfirmationIssued ||
-		d.GateTwoPreparation.ProductionSubmitPortMounted ||
+		!d.GateTwoPreparation.ProductionSubmitPortMounted ||
 		d.GateTwoPreparation.SkillSubmitAllowed ||
 		d.GateTwoPreparation.MaximumFinalClicks != 1 ||
 		d.GateTwoPreparation.PreflightRef != "docs/delivery/fixtures/oceanengine-gate-two-preflight-v0.1.json" ||

@@ -226,6 +226,55 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/RecordedComputerUseTakeoverEvidence'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-action-attempts:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: authorizeComputerUseTakeoverAction
+      summary: Atomically authorize exactly one operator-controlled final click without performing it.
+      description: Requires an active fenced takeover, an exact site-policy match, zero readback diffs, an unexpired immutable authority binding, an inactive Kill Switch, and a fresh one-time final confirmation. The confirmation, authorized attempt, pre-click evidence, running step, and transition to submitting are committed atomically. No Browser Driver is invoked.
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema: {type: string, minLength: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AuthorizeComputerUseTakeoverActionRequest'}
+      responses:
+        '200':
+          description: Single-use authorization and redacted pre-click evidence. The caller remains responsible for the manual browser click.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthorizedComputerUseTakeoverAction'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-action-attempts/{attempt_id}:outcome:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    - name: attempt_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    post:
+      operationId: recordComputerUseTakeoverActionOutcome
+      summary: Record fenced result-page or list-page evidence for the one authorized click.
+      description: result_observed advances to verifying; list_confirmed advances to succeeded; result_unknown is terminal and requires reconciliation, never resubmission. Delivery confirms the platform mapping only after distinct result and list evidence agree on object ID and status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RecordComputerUseTakeoverOutcomeRequest'}
+      responses:
+        '200':
+          description: Atomically recorded outcome evidence, step, event, and Run transition.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecordedComputerUseTakeoverEvidence'}
+        '409': {$ref: '#/components/responses/Conflict'}
   /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
@@ -3501,8 +3550,8 @@ components:
         run_id: {type: string, minLength: 1}
         sequence: {type: integer, minimum: 1}
         workflow_step_id: {type: string, minLength: 1}
-        action: {type: string, enum: [observe_page, begin_form_fill, field_readback, discard_draft, verify_no_write]}
-        status: {type: string, enum: [running, succeeded, failed]}
+        action: {type: string, enum: [observe_page, begin_form_fill, field_readback, discard_draft, verify_no_write, submit_platform_configuration, result_observed, list_confirmed, rejected_or_error, result_unknown]}
+        status: {type: string, enum: [running, succeeded, failed, result_unknown]}
         blocking_reason: {$ref: '#/components/schemas/ComputerUseBlockingReason'}
         attempt: {type: integer, minimum: 1}
         version: {type: integer, minimum: 1}
@@ -3561,6 +3610,72 @@ components:
         run: {$ref: '#/components/schemas/ComputerUseRun'}
         step: {$ref: '#/components/schemas/ComputerUseStep'}
         evidence: {$ref: '#/components/schemas/ComputerUseEvidence'}
+    AuthorizeComputerUseTakeoverActionRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, step_id, sequence, confirmation_id, confirmation_token, lease_id, fencing_token, page_kind, platform_project_id, before_page_facts, field_readback, diff_keys, page_reference, selector_version, action_version]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        step_id: {type: string, minLength: 1}
+        sequence: {type: integer, minimum: 1}
+        confirmation_id: {type: string, minLength: 1}
+        confirmation_token: {type: string, minLength: 32, writeOnly: true}
+        lease_id: {type: string, minLength: 1}
+        fencing_token: {type: integer, minimum: 1}
+        page_kind: {type: string, minLength: 1}
+        platform_project_id: {type: string, minLength: 1}
+        before_page_facts: {type: object, additionalProperties: {type: string}}
+        field_readback: {type: object, minProperties: 1, additionalProperties: {type: string}}
+        diff_keys: {type: array, maxItems: 0, items: {type: string}}
+        page_reference: {type: string, format: uri}
+        selector_version: {type: string, minLength: 1}
+        action_version: {type: string, minLength: 1}
+    ComputerUseControlledActionAttempt:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, run_id, step_id, confirmation_id, approval_id, lease_id, fencing_token, action_hash, idempotency_key, status, created_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        run_id: {type: string}
+        step_id: {type: string}
+        confirmation_id: {type: string}
+        approval_id: {type: string}
+        lease_id: {type: string}
+        fencing_token: {type: integer, minimum: 1}
+        action_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        idempotency_key: {type: string}
+        status: {type: string, const: authorized}
+        created_at: {type: string, format: date-time}
+    AuthorizedComputerUseTakeoverAction:
+      type: object
+      additionalProperties: false
+      required: [run, attempt, step, evidence]
+      properties:
+        run: {$ref: '#/components/schemas/ComputerUseRun'}
+        attempt: {$ref: '#/components/schemas/ComputerUseControlledActionAttempt'}
+        step: {$ref: '#/components/schemas/ComputerUseStep'}
+        evidence: {$ref: '#/components/schemas/ComputerUseEvidence'}
+    RecordComputerUseTakeoverOutcomeRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, lease_id, fencing_token, step_id, sequence, outcome, page_kind, platform_project_id, before_page_facts, after_page_facts, field_readback, page_reference, selector_version, action_version]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        lease_id: {type: string, minLength: 1}
+        fencing_token: {type: integer, minimum: 1}
+        step_id: {type: string, minLength: 1}
+        sequence: {type: integer, minimum: 1}
+        outcome: {type: string, enum: [result_observed, list_confirmed, rejected_or_error, result_unknown]}
+        page_kind: {type: string, minLength: 1}
+        platform_project_id: {type: string, minLength: 1}
+        before_page_facts: {type: object, additionalProperties: {type: string}}
+        after_page_facts: {type: object, additionalProperties: {type: string}}
+        field_readback: {type: object, additionalProperties: {type: string}}
+        page_reference: {type: string, format: uri}
+        selector_version: {type: string, minLength: 1}
+        action_version: {type: string, minLength: 1}
     IssueComputerUseConfirmationRequest:
       type: object
       additionalProperties: false

@@ -30,7 +30,7 @@ Lease；页面值必须再次逐字段回读并与这些冻结 hash 一致。
 用户必须在执行当轮明确给出账户、测试项目、动作、预算上限和“一次最终点击”授权，且责任人
 保持在线。一般性的“继续”、历史授权、账户余额为零或本准备文档均不能替代该授权。
 
-## 未来接管式门二的两阶段端口
+## 已实现的接管式门二两阶段端口
 
 1. **authorize once**：在真实点击前，由服务端重新校验 authority、Approval、确认 token、
    Lease/fencing、Kill Switch、SitePolicy、账户/项目和页面实际回读，然后原子创建唯一
@@ -42,12 +42,13 @@ Lease；页面值必须再次逐字段回读并与这些冻结 hash 一致。
 任何超时、网络断开、页面跳转不明或回读缺失都按 `result_unknown` 处理，只允许查询、
 重新识别或人工接管，禁止再次点击提交。
 
+以上端口已挂载到 takeover-only 生产控制面，但它们不会调用 Browser Driver：授权端口只原子
+消费确认并记录点击前证据，实际点击仍由受控接管操作者完成；结果端口只记录点击后的独立回读。
+Delivery Mapping HTTP API 同样已挂载，并保持平台对象值由两份证据确认、不可由创建请求注入。
+
 ## 尚未实现、因此继续关闭的能力
 
-- 生产 takeover 模式下的单次远程写授权端口。
-- 写后结果页结构化 evidence 端口。
-- Delivery 对外的 pending/confirm Mapping HTTP API。
 - 首次真实门二验证完成后的 Skill 最终提交说明。
 
-这些缺口完成并通过 fake/MySQL/HTTP 回归之前，不得把 `executable`、
-`real_browser_driver` 或 `submit_allowed` 改为 true。
+首次真实门二完成并复核前，不得把 `executable`、`real_browser_driver` 或
+`submit_allowed` 改为 true，也不得把最终提交行为写入 `SKILL.md`。

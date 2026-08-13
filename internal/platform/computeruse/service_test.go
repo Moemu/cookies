@@ -30,7 +30,7 @@ func TestAuthorizeActionConsumesConfirmationExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := service.IssueFinalConfirmation(context.Background(), "org_1", "project_1", run.ID, run.Authority.ApprovalActionHash, "operator_1")
+	issued, err := service.IssueFinalConfirmation(context.Background(), "org_1", "project_1", run.ID, run.Version, run.Authority.ApprovalActionHash, "operator_1")
 	if err != nil {
 		t.Fatal(err)
 	}

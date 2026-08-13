@@ -355,12 +355,17 @@ type IssuedConfirmation struct {
 	Token        string            `json:"token"`
 }
 
-func (s Service) IssueFinalConfirmation(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, runID, bindingHash, actor string) (IssuedConfirmation, error) {
+func (s Service) IssueFinalConfirmation(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, runID string, expectedVersion int64, bindingHash, actor string) (IssuedConfirmation, error) {
 	run, err := s.Repository.GetRun(ctx, organizationID, projectID, runID)
 	if err != nil {
 		return IssuedConfirmation{}, err
 	}
-	if run.State != RunAwaitingConfirmation || bindingHash != run.Authority.ApprovalActionHash || strings.TrimSpace(actor) == "" {
+	if expectedVersion < 1 || run.Version != expectedVersion {
+		return IssuedConfirmation{}, ErrVersionConflict
+	}
+	confirmationReady := run.State == RunAwaitingConfirmation && !run.Paused && !run.TakeoverActive
+	takeoverReady := run.State == RunAwaitingTakeover && run.Paused && run.TakeoverActive
+	if (!confirmationReady && !takeoverReady) || bindingHash != run.Authority.ApprovalActionHash || strings.TrimSpace(actor) == "" {
 		return IssuedConfirmation{}, ErrConfirmationInvalid
 	}
 	if s.AuthorityProvider != nil {
@@ -385,6 +390,206 @@ func (s Service) IssueFinalConfirmation(ctx context.Context, organizationID cont
 		return IssuedConfirmation{}, err
 	}
 	return IssuedConfirmation{Confirmation: confirmation, Token: token}, nil
+}
+
+type AuthorizeTakeoverActionRequest struct {
+	OrganizationID    contract.OrganizationID
+	ProjectID         contract.ProjectID
+	RunID             string
+	ExpectedVersion   int64
+	StepID            string
+	Sequence          int
+	ConfirmationID    string
+	Token             string
+	LeaseID           string
+	FencingToken      int64
+	IdempotencyKey    string
+	PageKind          string
+	PlatformProjectID string
+	BeforePageFacts   map[string]string
+	FieldReadback     map[string]string
+	DiffKeys          []string
+	PageReference     string
+	SelectorVersion   string
+	ActionVersion     string
+	Actor             string
+}
+
+type TakeoverActionAuthorization struct {
+	Run      ComputerUseRun          `json:"run"`
+	Attempt  ControlledActionAttempt `json:"attempt"`
+	Step     RunStep                 `json:"step"`
+	Evidence Evidence                `json:"evidence"`
+}
+
+// AuthorizeTakeoverAction is the production manual-click port. It consumes a
+// one-time confirmation, fences the browser lease, persists the pre-click
+// readback and advances to submitting in one repository transaction. It never
+// performs the browser action itself.
+func (s Service) AuthorizeTakeoverAction(ctx context.Context, request AuthorizeTakeoverActionRequest) (TakeoverActionAuthorization, error) {
+	if s.Repository == nil || request.ExpectedVersion < 1 || request.StepID == "" || request.Sequence < 1 || request.ConfirmationID == "" || request.Token == "" || request.LeaseID == "" || request.FencingToken < 1 || strings.TrimSpace(request.IdempotencyKey) == "" || strings.TrimSpace(request.Actor) == "" || strings.TrimSpace(request.PageKind) == "" || strings.TrimSpace(request.PlatformProjectID) == "" || strings.TrimSpace(request.PageReference) == "" || strings.TrimSpace(request.SelectorVersion) == "" || strings.TrimSpace(request.ActionVersion) == "" || len(request.FieldReadback) == 0 || len(request.DiffKeys) != 0 {
+		return TakeoverActionAuthorization{}, ErrInvalidContract
+	}
+	run, err := s.Repository.GetRun(ctx, request.OrganizationID, request.ProjectID, request.RunID)
+	if err != nil {
+		return TakeoverActionAuthorization{}, err
+	}
+	if run.Version != request.ExpectedVersion {
+		return TakeoverActionAuthorization{}, ErrVersionConflict
+	}
+	if run.State != RunAwaitingTakeover || !run.Paused || !run.TakeoverActive || run.LeaseID != request.LeaseID {
+		return TakeoverActionAuthorization{}, ErrConfirmationInvalid
+	}
+	now := s.now()
+	if s.AuthorityProvider != nil {
+		if err := s.AuthorityProvider.VerifyAuthority(ctx, run.Authority, run.ID, now); err != nil {
+			return TakeoverActionAuthorization{}, ErrConfirmationInvalid
+		}
+	}
+	lease, err := s.Repository.GetLease(ctx, request.OrganizationID, request.ProjectID, request.LeaseID)
+	if err != nil || lease.RunID != run.ID || lease.EnvironmentID != run.EnvironmentID || lease.ProfileID != run.ProfileID || lease.Platform != run.Platform || lease.AccountID != run.AccountID || lease.FencingToken != request.FencingToken || !lease.ValidAt(now) {
+		return TakeoverActionAuthorization{}, ErrLeaseUnavailable
+	}
+	policy, err := s.Repository.GetSitePolicy(ctx, request.OrganizationID, request.ProjectID, run.PolicyID)
+	if err != nil {
+		return TakeoverActionAuthorization{}, err
+	}
+	if policy.Platform != run.Platform || policy.AccountID != run.AccountID || !policy.Allows(request.PageReference, request.PageKind, request.PlatformProjectID) {
+		return TakeoverActionAuthorization{}, ErrInvalidContract
+	}
+	digest := sha256.Sum256([]byte(request.Token))
+	attemptID, err := s.newID("cua")
+	if err != nil {
+		return TakeoverActionAuthorization{}, err
+	}
+	evidenceID, err := s.newID("cuevidence")
+	if err != nil {
+		return TakeoverActionAuthorization{}, err
+	}
+	eventID, err := s.newID("cuevent")
+	if err != nil {
+		return TakeoverActionAuthorization{}, err
+	}
+	step := RunStep{ID: request.StepID, RunID: run.ID, Sequence: request.Sequence, WorkflowStepID: run.Authority.WorkflowStepID, Action: "submit_platform_configuration", Status: StepRunning, Attempt: 1, Version: 1}
+	evidence := RedactEvidence(Evidence{SchemaVersion: EvidenceSchemaV1, ID: evidenceID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, BeforePageFacts: request.BeforePageFacts, FieldReadback: request.FieldReadback, DiffKeys: []string{}, PageReference: request.PageReference, ObjectFingerprint: run.Authority.ObjectFingerprint, SkillVersion: run.Authority.SkillVersion, SelectorVersion: request.SelectorVersion, ActionVersion: request.ActionVersion, CreatedAt: now})
+	attempt := ControlledActionAttempt{ID: attemptID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, ConfirmationID: request.ConfirmationID, ApprovalID: run.Authority.ApprovalID, LeaseID: lease.ID, FencingToken: lease.FencingToken, ActionHash: run.Authority.ApprovalActionHash, IdempotencyKey: request.IdempotencyKey, Status: "authorized", CreatedAt: now}
+	event := RunEvent{ID: eventID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, Sequence: run.Version + 1, Kind: "takeover_write_authorized", Summary: "single final click authorized; browser action not executed by control plane", Actor: request.Actor, CreatedAt: now}
+	updated, attempt, err := s.Repository.AuthorizeTakeoverAction(ctx, run, request.ExpectedVersion, FinalConfirmation{ID: request.ConfirmationID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, BindingHash: run.Authority.ApprovalActionHash}, hex.EncodeToString(digest[:]), lease, attempt, step, evidence, event, now)
+	if err != nil {
+		return TakeoverActionAuthorization{}, err
+	}
+	return TakeoverActionAuthorization{Run: updated, Attempt: attempt, Step: step, Evidence: evidence}, nil
+}
+
+type RecordTakeoverOutcomeRequest struct {
+	OrganizationID    contract.OrganizationID
+	ProjectID         contract.ProjectID
+	RunID             string
+	AttemptID         string
+	ExpectedVersion   int64
+	LeaseID           string
+	FencingToken      int64
+	StepID            string
+	Sequence          int
+	Outcome           TakeoverWriteOutcome
+	PageKind          string
+	PlatformProjectID string
+	BeforePageFacts   map[string]string
+	AfterPageFacts    map[string]string
+	FieldReadback     map[string]string
+	PageReference     string
+	SelectorVersion   string
+	ActionVersion     string
+	Actor             string
+}
+
+func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeoverOutcomeRequest) (TakeoverEvidenceResult, error) {
+	if s.Repository == nil || request.AttemptID == "" || request.ExpectedVersion < 1 || request.LeaseID == "" || request.FencingToken < 1 || request.StepID == "" || request.Sequence < 1 || !request.Outcome.Valid() || strings.TrimSpace(request.Actor) == "" || strings.TrimSpace(request.PageKind) == "" || strings.TrimSpace(request.PlatformProjectID) == "" || strings.TrimSpace(request.PageReference) == "" || strings.TrimSpace(request.SelectorVersion) == "" || strings.TrimSpace(request.ActionVersion) == "" {
+		return TakeoverEvidenceResult{}, ErrInvalidContract
+	}
+	run, err := s.Repository.GetRun(ctx, request.OrganizationID, request.ProjectID, request.RunID)
+	if err != nil {
+		return TakeoverEvidenceResult{}, err
+	}
+	if run.Version != request.ExpectedVersion {
+		return TakeoverEvidenceResult{}, ErrVersionConflict
+	}
+	next, reason, status := RunFailed, BlockingReason(""), StepFailed
+	switch request.Outcome {
+	case TakeoverResultObserved:
+		if run.State != RunSubmitting || request.FieldReadback["platform_object_id"] == "" || request.FieldReadback["platform_status"] == "" {
+			return TakeoverEvidenceResult{}, ErrInvalidTransition
+		}
+		next, status = RunVerifying, StepSucceeded
+	case TakeoverListConfirmed:
+		if run.State != RunVerifying || request.FieldReadback["platform_object_id"] == "" || request.FieldReadback["platform_status"] == "" {
+			return TakeoverEvidenceResult{}, ErrInvalidTransition
+		}
+		steps, err := s.Repository.ListSteps(ctx, request.OrganizationID, request.ProjectID, run.ID)
+		if err != nil {
+			return TakeoverEvidenceResult{}, err
+		}
+		resultStepID := ""
+		for _, candidate := range steps {
+			if candidate.Action == string(TakeoverResultObserved) && candidate.Status == StepSucceeded {
+				if resultStepID != "" {
+					return TakeoverEvidenceResult{}, ErrInvalidContract
+				}
+				resultStepID = candidate.ID
+			}
+		}
+		evidence, err := s.Repository.ListEvidence(ctx, request.OrganizationID, request.ProjectID, run.ID)
+		if err != nil {
+			return TakeoverEvidenceResult{}, err
+		}
+		resultObjectID, resultStatus := "", ""
+		for _, candidate := range evidence {
+			if candidate.StepID == resultStepID {
+				resultObjectID = candidate.FieldReadback["platform_object_id"]
+				resultStatus = candidate.FieldReadback["platform_status"]
+				break
+			}
+		}
+		if resultStepID == "" || resultObjectID != request.FieldReadback["platform_object_id"] || resultStatus != request.FieldReadback["platform_status"] {
+			return TakeoverEvidenceResult{}, ErrInvalidContract
+		}
+		next, status = RunSucceeded, StepSucceeded
+	case TakeoverWriteRejected:
+		if run.State != RunSubmitting && run.State != RunVerifying {
+			return TakeoverEvidenceResult{}, ErrInvalidTransition
+		}
+		next, reason = RunFailed, BlockResultReconciliation
+	case TakeoverResultUnknown:
+		if run.State != RunSubmitting && run.State != RunVerifying {
+			return TakeoverEvidenceResult{}, ErrInvalidTransition
+		}
+		next, reason, status = RunResultUnknown, BlockResultReconciliation, StepResultUnknown
+	}
+	now := s.now()
+	lease, err := s.Repository.GetLease(ctx, request.OrganizationID, request.ProjectID, request.LeaseID)
+	if err != nil || run.LeaseID != lease.ID || lease.RunID != run.ID || lease.FencingToken != request.FencingToken || !lease.ValidAt(now) {
+		return TakeoverEvidenceResult{}, ErrLeaseUnavailable
+	}
+	policy, err := s.Repository.GetSitePolicy(ctx, request.OrganizationID, request.ProjectID, run.PolicyID)
+	if err != nil || !policy.Allows(request.PageReference, request.PageKind, request.PlatformProjectID) {
+		return TakeoverEvidenceResult{}, ErrInvalidContract
+	}
+	step := RunStep{ID: request.StepID, RunID: run.ID, Sequence: request.Sequence, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(request.Outcome), Status: status, BlockingReason: reason, Attempt: 1, Version: 1}
+	evidenceID, err := s.newID("cuevidence")
+	if err != nil {
+		return TakeoverEvidenceResult{}, err
+	}
+	evidence := RedactEvidence(Evidence{SchemaVersion: EvidenceSchemaV1, ID: evidenceID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, BeforePageFacts: request.BeforePageFacts, AfterPageFacts: request.AfterPageFacts, FieldReadback: request.FieldReadback, PageReference: request.PageReference, ObjectFingerprint: run.Authority.ObjectFingerprint, SkillVersion: run.Authority.SkillVersion, SelectorVersion: request.SelectorVersion, ActionVersion: request.ActionVersion, CreatedAt: now})
+	eventID, err := s.newID("cuevent")
+	if err != nil {
+		return TakeoverEvidenceResult{}, err
+	}
+	event := RunEvent{ID: eventID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, Sequence: run.Version + 1, Kind: "takeover_write_outcome", Summary: string(request.Outcome), Actor: request.Actor, CreatedAt: now}
+	updated, err := s.Repository.RecordTakeoverOutcome(ctx, run, request.ExpectedVersion, request.AttemptID, next, reason, step, evidence, event, now)
+	if err != nil {
+		return TakeoverEvidenceResult{}, err
+	}
+	return TakeoverEvidenceResult{Run: updated, Step: step, Evidence: evidence}, nil
 }
 
 type AuthorizeActionRequest struct {

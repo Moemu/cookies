@@ -109,6 +109,10 @@ func TestTakeoverOnlyServerRegistersScopedResourcesWithoutMountingFakeWorker(t *
 			t.Fatalf("fake worker %s unexpectedly mounted: status=%d body=%s", action, response.Code, response.Body.String())
 		}
 	}
+	authorization := call(http.MethodPost, "/api/platform/v1/computer-use/projects/project_1/runs/run_1/takeover-action-attempts", `{}`, "delivery.execute")
+	if authorization.Code != http.StatusBadRequest || strings.Contains(authorization.Body.String(), "automated worker") {
+		t.Fatalf("manual takeover authorization port status=%d body=%s", authorization.Code, authorization.Body.String())
+	}
 }
 
 func TestKillSwitchAdministrationRequiresServicePrincipalAndRemainsReadable(t *testing.T) {

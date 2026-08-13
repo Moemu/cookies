@@ -102,7 +102,7 @@ func TestMySQLAuthorizeControlledActionIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := service.IssueFinalConfirmation(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Authority.ApprovalActionHash, "operator")
+	issued, err := service.IssueFinalConfirmation(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, run.Authority.ApprovalActionHash, "operator")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,11 +159,23 @@ func TestMySQLAuthorizeControlledActionIsAtomic(t *testing.T) {
 	if recorded.Run.Version != acquired.Run.Version+1 || recorded.Evidence.BeforePageFacts["account_balance"] != redactedValue || recorded.Evidence.PageReference != "https://example.test/review" {
 		t.Fatalf("recorded=%#v", recorded)
 	}
+	issued, err = service.IssueFinalConfirmation(ctx, recorded.Run.OrganizationID, recorded.Run.ProjectID, recorded.Run.ID, recorded.Run.Version, recorded.Run.Authority.ApprovalActionHash, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized, err := service.AuthorizeTakeoverAction(ctx, AuthorizeTakeoverActionRequest{OrganizationID: recorded.Run.OrganizationID, ProjectID: recorded.Run.ProjectID, RunID: recorded.Run.ID, ExpectedVersion: recorded.Run.Version, StepID: "cu_takeover_submit_" + suffix, Sequence: 2, ConfirmationID: issued.Confirmation.ID, Token: issued.Token, LeaseID: acquired.Lease.ID, FencingToken: acquired.Lease.FencingToken, IdempotencyKey: "takeover_attempt_" + suffix, PageKind: "review", PlatformProjectID: "platform_project_1", BeforePageFacts: map[string]string{"submit_enabled": "true"}, FieldReadback: map[string]string{"daily_budget": "300"}, DiffKeys: []string{}, PageReference: "https://example.test/review", SelectorVersion: "live/v1", ActionVersion: "takeover-submit/v1", Actor: "operator"})
+	if err != nil || authorized.Run.State != RunSubmitting {
+		t.Fatalf("authorized=%#v err=%v", authorized, err)
+	}
+	unknown, err := service.RecordTakeoverOutcome(ctx, RecordTakeoverOutcomeRequest{OrganizationID: recorded.Run.OrganizationID, ProjectID: recorded.Run.ProjectID, RunID: recorded.Run.ID, AttemptID: authorized.Attempt.ID, ExpectedVersion: authorized.Run.Version, LeaseID: acquired.Lease.ID, FencingToken: acquired.Lease.FencingToken, StepID: "cu_takeover_unknown_" + suffix, Sequence: 3, Outcome: TakeoverResultUnknown, PageKind: "review", PlatformProjectID: "platform_project_1", PageReference: "https://example.test/review", SelectorVersion: "live/v1", ActionVersion: "takeover-result/v1", Actor: "operator"})
+	if err != nil || unknown.Run.State != RunResultUnknown || unknown.Run.BlockingReason != BlockResultReconciliation {
+		t.Fatalf("unknown=%#v err=%v", unknown, err)
+	}
 	var takeoverEvidence, takeoverEvents, takeoverSteps int
 	if err = db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM computer_use_evidence WHERE organization_id=? AND run_id=?),(SELECT COUNT(*) FROM computer_use_events WHERE organization_id=? AND run_id=?),(SELECT COUNT(*) FROM computer_use_run_steps WHERE organization_id=? AND run_id=?)`, org, takeoverRun.ID, org, takeoverRun.ID, org, takeoverRun.ID).Scan(&takeoverEvidence, &takeoverEvents, &takeoverSteps); err != nil {
 		t.Fatal(err)
 	}
-	if takeoverEvidence != 1 || takeoverEvents != 4 || takeoverSteps != 1 {
+	if takeoverEvidence != 3 || takeoverEvents != 6 || takeoverSteps != 3 {
 		t.Fatalf("evidence=%d events=%d steps=%d", takeoverEvidence, takeoverEvents, takeoverSteps)
 	}
 }

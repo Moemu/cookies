@@ -17,7 +17,7 @@ func TestDeterministicFakeWorkerTerminalOutcomes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			issued, err := service.IssueFinalConfirmation(context.Background(), run.OrganizationID, run.ProjectID, run.ID, prepared.Authority.ApprovalActionHash, "operator")
+			issued, err := service.IssueFinalConfirmation(context.Background(), run.OrganizationID, run.ProjectID, run.ID, prepared.Version, prepared.Authority.ApprovalActionHash, "operator")
 			if err != nil {
 				t.Fatal(err)
 			}

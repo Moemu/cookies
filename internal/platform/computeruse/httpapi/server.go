@@ -47,6 +47,8 @@ func newServer(service computeruse.Service, worker computeruse.Worker, projects 
 	s.mux.HandleFunc("GET /api/platform/v1/computer-use/projects/{project_id}/runs/{run_id}/events", s.listEvents)
 	s.mux.HandleFunc("GET /api/platform/v1/computer-use/projects/{project_id}/runs/{run_id}/evidence", s.listEvidence)
 	s.mux.HandleFunc("POST /api/platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-evidence", s.recordTakeoverEvidence)
+	s.mux.HandleFunc("POST /api/platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-action-attempts", s.authorizeTakeoverAction)
+	s.mux.HandleFunc("POST /api/platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-action-attempts/{attempt_action}", s.takeoverActionAttemptCommand)
 	s.mux.HandleFunc("POST /api/platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases", s.acquireRunLease)
 	s.mux.HandleFunc("POST /api/platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases/{lease_action}", s.runLeaseCommand)
 	s.mux.HandleFunc("POST /api/platform/v1/computer-use/projects/{project_id}/runs/{run_id}/confirmations", s.confirm)
@@ -297,6 +299,69 @@ func (s *Server) recordTakeoverEvidence(w http.ResponseWriter, r *http.Request) 
 	value, err := s.service.RecordTakeoverEvidence(r.Context(), computeruse.RecordTakeoverEvidenceRequest{OrganizationID: actor.OrganizationID, ProjectID: project, RunID: r.PathValue("run_id"), ExpectedVersion: body.ExpectedVersion, LeaseID: body.LeaseID, FencingToken: body.FencingToken, StepID: body.StepID, Sequence: body.Sequence, Action: body.Action, Status: body.Status, PageKind: body.PageKind, PlatformProjectID: body.PlatformProjectID, BeforePageFacts: body.BeforePageFacts, AfterPageFacts: body.AfterPageFacts, FieldReadback: body.FieldReadback, DiffKeys: body.DiffKeys, PageReference: body.PageReference, SelectorVersion: body.SelectorVersion, ActionVersion: body.ActionVersion, Actor: actor.Principal.ID})
 	writeResult(w, value, err)
 }
+
+func (s *Server) authorizeTakeoverAction(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.execute")
+	if !ok {
+		return
+	}
+	var body struct {
+		ExpectedVersion   int64             `json:"expected_version"`
+		StepID            string            `json:"step_id"`
+		Sequence          int               `json:"sequence"`
+		ConfirmationID    string            `json:"confirmation_id"`
+		ConfirmationToken string            `json:"confirmation_token"`
+		LeaseID           string            `json:"lease_id"`
+		FencingToken      int64             `json:"fencing_token"`
+		PageKind          string            `json:"page_kind"`
+		PlatformProjectID string            `json:"platform_project_id"`
+		BeforePageFacts   map[string]string `json:"before_page_facts"`
+		FieldReadback     map[string]string `json:"field_readback"`
+		DiffKeys          []string          `json:"diff_keys"`
+		PageReference     string            `json:"page_reference"`
+		SelectorVersion   string            `json:"selector_version"`
+		ActionVersion     string            `json:"action_version"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	value, err := s.service.AuthorizeTakeoverAction(r.Context(), computeruse.AuthorizeTakeoverActionRequest{OrganizationID: actor.OrganizationID, ProjectID: project, RunID: r.PathValue("run_id"), ExpectedVersion: body.ExpectedVersion, StepID: body.StepID, Sequence: body.Sequence, ConfirmationID: body.ConfirmationID, Token: body.ConfirmationToken, LeaseID: body.LeaseID, FencingToken: body.FencingToken, IdempotencyKey: r.Header.Get("Idempotency-Key"), PageKind: body.PageKind, PlatformProjectID: body.PlatformProjectID, BeforePageFacts: body.BeforePageFacts, FieldReadback: body.FieldReadback, DiffKeys: body.DiffKeys, PageReference: body.PageReference, SelectorVersion: body.SelectorVersion, ActionVersion: body.ActionVersion, Actor: actor.Principal.ID})
+	writeResult(w, value, err)
+}
+
+func (s *Server) takeoverActionAttemptCommand(w http.ResponseWriter, r *http.Request) {
+	parts := strings.SplitN(r.PathValue("attempt_action"), ":", 2)
+	if len(parts) != 2 || parts[1] != "outcome" {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	r.SetPathValue("attempt_id", parts[0])
+	actor, project, ok := s.authorize(w, r, "delivery.execute")
+	if !ok {
+		return
+	}
+	var body struct {
+		ExpectedVersion   int64                            `json:"expected_version"`
+		LeaseID           string                           `json:"lease_id"`
+		FencingToken      int64                            `json:"fencing_token"`
+		StepID            string                           `json:"step_id"`
+		Sequence          int                              `json:"sequence"`
+		Outcome           computeruse.TakeoverWriteOutcome `json:"outcome"`
+		PageKind          string                           `json:"page_kind"`
+		PlatformProjectID string                           `json:"platform_project_id"`
+		BeforePageFacts   map[string]string                `json:"before_page_facts"`
+		AfterPageFacts    map[string]string                `json:"after_page_facts"`
+		FieldReadback     map[string]string                `json:"field_readback"`
+		PageReference     string                           `json:"page_reference"`
+		SelectorVersion   string                           `json:"selector_version"`
+		ActionVersion     string                           `json:"action_version"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	value, err := s.service.RecordTakeoverOutcome(r.Context(), computeruse.RecordTakeoverOutcomeRequest{OrganizationID: actor.OrganizationID, ProjectID: project, RunID: r.PathValue("run_id"), AttemptID: r.PathValue("attempt_id"), ExpectedVersion: body.ExpectedVersion, LeaseID: body.LeaseID, FencingToken: body.FencingToken, StepID: body.StepID, Sequence: body.Sequence, Outcome: body.Outcome, PageKind: body.PageKind, PlatformProjectID: body.PlatformProjectID, BeforePageFacts: body.BeforePageFacts, AfterPageFacts: body.AfterPageFacts, FieldReadback: body.FieldReadback, PageReference: body.PageReference, SelectorVersion: body.SelectorVersion, ActionVersion: body.ActionVersion, Actor: actor.Principal.ID})
+	writeResult(w, value, err)
+}
 func (s *Server) acquireRunLease(w http.ResponseWriter, r *http.Request) {
 	actor, project, ok := s.authorize(w, r, "delivery.execute")
 	if !ok {
@@ -387,12 +452,13 @@ func (s *Server) confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		BindingHash string `json:"binding_hash"`
+		ExpectedVersion int64  `json:"expected_version"`
+		BindingHash     string `json:"binding_hash"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	value, err := s.service.IssueFinalConfirmation(r.Context(), actor.OrganizationID, project, r.PathValue("run_id"), body.BindingHash, actor.Principal.ID)
+	value, err := s.service.IssueFinalConfirmation(r.Context(), actor.OrganizationID, project, r.PathValue("run_id"), body.ExpectedVersion, body.BindingHash, actor.Principal.ID)
 	writeResult(w, value, err)
 }
 func (s *Server) submit(w http.ResponseWriter, r *http.Request) {

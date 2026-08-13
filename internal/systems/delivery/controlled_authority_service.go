@@ -21,7 +21,17 @@ type controlledAuthorityRepository interface {
 	ConfirmPlatformEntityMapping(context.Context, PlatformEntityMapping, int64) (PlatformEntityMapping, error)
 }
 
-type MappingReadback struct{ PlatformObjectID, PlatformStatus, EvidenceID string }
+type MappingReadback struct {
+	PlatformObjectID string `json:"platform_object_id"`
+	PlatformStatus   string `json:"platform_status"`
+	EvidenceID       string `json:"evidence_id"`
+}
+
+type ConfirmPlatformEntityMappingRequest struct {
+	ExpectedVersion int64           `json:"expected_version"`
+	Result          MappingReadback `json:"result_readback"`
+	List            MappingReadback `json:"list_readback"`
+}
 
 func (s Service) AttachComputerUseRun(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string, expectedVersion int64, runID string) (ControlledExecution, error) {
 	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
@@ -87,6 +97,17 @@ func (s Service) ConfirmPlatformEntityMapping(ctx context.Context, actor contrac
 		return PlatformEntityMapping{}, err
 	}
 	return repo.ConfirmPlatformEntityMapping(ctx, value, expectedVersion)
+}
+
+func (s Service) GetPlatformEntityMapping(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (PlatformEntityMapping, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	repo, ok := s.Repository.(controlledAuthorityRepository)
+	if !ok {
+		return PlatformEntityMapping{}, ErrUnsupportedConfigurationWorkflow
+	}
+	return repo.GetPlatformEntityMapping(ctx, actor.OrganizationID, projectID, id)
 }
 
 func (s Service) GetControlledChangeSet(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (ControlledChangeSet, error) {

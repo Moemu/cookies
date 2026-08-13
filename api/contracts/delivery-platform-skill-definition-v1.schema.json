@@ -107,15 +107,15 @@
       "additionalProperties": false,
       "required": ["status", "execution_authorized", "final_confirmation_issued", "production_submit_port_mounted", "skill_submit_allowed", "maximum_final_clicks", "preflight_ref", "required_runtime_checks", "implementation_gaps"],
       "properties": {
-        "status": { "const": "contract_frozen_authorization_required" },
+        "status": { "const": "ports_ready_authorization_required" },
         "execution_authorized": { "const": false },
         "final_confirmation_issued": { "const": false },
-        "production_submit_port_mounted": { "const": false },
+        "production_submit_port_mounted": { "const": true },
         "skill_submit_allowed": { "const": false },
         "maximum_final_clicks": { "const": 1 },
         "preflight_ref": { "const": "docs/delivery/fixtures/oceanengine-gate-two-preflight-v0.1.json" },
         "required_runtime_checks": { "type": "array", "items": { "enum": ["fresh_controlled_authority", "explicit_user_authorization_in_execution_turn", "responsible_user_online", "account_project_action_budget_exact_match", "current_page_values_match_approval", "unexpired_single_use_confirmation", "valid_fenced_lease", "kill_switch_inactive", "single_click_budget", "post_write_result_and_list_readback", "result_unknown_no_resubmit", "confirmed_mapping_requires_two_matching_readbacks"] }, "minItems": 12, "maxItems": 12, "uniqueItems": true },
-        "implementation_gaps": { "type": "array", "items": { "enum": ["takeover_remote_write_authorization_port", "post_write_result_evidence_port", "delivery_mapping_http_api", "skill_final_submit_instructions_after_validation"] }, "minItems": 4, "maxItems": 4, "uniqueItems": true }
+        "implementation_gaps": { "type": "array", "items": { "const": "skill_final_submit_instructions_after_validation" }, "minItems": 1, "maxItems": 1, "uniqueItems": true }
       }
     }
   }

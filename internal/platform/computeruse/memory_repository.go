@@ -416,6 +416,50 @@ func (r *MemoryRepository) AuthorizeControlledAction(_ context.Context, identity
 	return attempt, nil
 }
 
+func (r *MemoryRepository) AuthorizeTakeoverAction(_ context.Context, run ComputerUseRun, expected int64, identity FinalConfirmation, digest string, lease SessionLease, attempt ControlledActionAttempt, step RunStep, evidence Evidence, event RunEvent, now time.Time) (ComputerUseRun, ControlledActionAttempt, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, ok := r.runs[scopeKey(run.OrganizationID, run.ProjectID, run.ID)]
+	if !ok {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrNotFound
+	}
+	if current.Version != expected || current.State != RunAwaitingTakeover || !current.Paused || !current.TakeoverActive || current.LeaseID != lease.ID {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrVersionConflict
+	}
+	for _, key := range []string{killKey(KillSwitchGlobal, "*"), killKey(KillSwitchPlatform, string(lease.Platform)), killKey(KillSwitchOrganization, string(identity.OrganizationID))} {
+		if value, exists := r.killSwitches[key]; exists && value.Active {
+			return ComputerUseRun{}, ControlledActionAttempt{}, ErrKillSwitchActive
+		}
+	}
+	storedLease, ok := r.leases[scopeKey(lease.OrganizationID, lease.ProjectID, lease.ID)]
+	if !ok || storedLease.RunID != run.ID || storedLease.FencingToken != lease.FencingToken || !storedLease.ValidAt(now) {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrLeaseUnavailable
+	}
+	confirmationKey := scopeKey(identity.OrganizationID, identity.ProjectID, identity.ID)
+	confirmation, ok := r.confirmations[confirmationKey]
+	if !ok || confirmation.RunID != identity.RunID || confirmation.BindingHash != identity.BindingHash || confirmation.TokenDigest != digest || !confirmation.UsableAt(now) {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrConfirmationInvalid
+	}
+	if _, exists := r.attempts[scopeKey(attempt.OrganizationID, attempt.ProjectID, attempt.IdempotencyKey)]; exists {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrIdempotencyConflict
+	}
+	for _, existing := range r.steps {
+		if existing.RunID == run.ID && (existing.ID == step.ID || existing.Sequence == step.Sequence) {
+			return ComputerUseRun{}, ControlledActionAttempt{}, ErrIdempotencyConflict
+		}
+	}
+	confirmation.ConsumedAt = &now
+	confirmation.Version++
+	r.confirmations[confirmationKey] = confirmation
+	r.attempts[scopeKey(attempt.OrganizationID, attempt.ProjectID, attempt.IdempotencyKey)] = attempt
+	current.State, current.BlockingReason, current.Version, current.UpdatedAt = RunSubmitting, "", current.Version+1, now
+	r.runs[scopeKey(run.OrganizationID, run.ProjectID, run.ID)] = current
+	r.steps = append(r.steps, step)
+	r.evidence = append(r.evidence, evidence)
+	r.events = append(r.events, event)
+	return current, attempt, nil
+}
+
 func (r *MemoryRepository) AppendEvent(_ context.Context, value RunEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -447,6 +491,46 @@ func (r *MemoryRepository) RecordTakeoverEvidence(_ context.Context, run Compute
 	}
 	current.Version++
 	current.UpdatedAt = now
+	r.runs[key] = current
+	r.steps = append(r.steps, step)
+	r.evidence = append(r.evidence, evidence)
+	r.events = append(r.events, event)
+	return current, nil
+}
+
+func (r *MemoryRepository) RecordTakeoverOutcome(_ context.Context, run ComputerUseRun, expected int64, attemptID string, next RunState, reason BlockingReason, step RunStep, evidence Evidence, event RunEvent, now time.Time) (ComputerUseRun, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := scopeKey(run.OrganizationID, run.ProjectID, run.ID)
+	current, ok := r.runs[key]
+	if !ok {
+		return ComputerUseRun{}, ErrNotFound
+	}
+	if current.Version != expected || current.Version != run.Version || !current.Paused || !current.TakeoverActive || !CanTransition(current.State, next) {
+		return ComputerUseRun{}, ErrVersionConflict
+	}
+	foundAttempt := false
+	var matchedAttempt ControlledActionAttempt
+	for _, attempt := range r.attempts {
+		if attempt.ID == attemptID && attempt.RunID == run.ID && attempt.LeaseID == run.LeaseID {
+			foundAttempt = true
+			matchedAttempt = attempt
+			break
+		}
+	}
+	if !foundAttempt {
+		return ComputerUseRun{}, ErrNotFound
+	}
+	storedLease, ok := r.leases[scopeKey(run.OrganizationID, run.ProjectID, matchedAttempt.LeaseID)]
+	if !ok || storedLease.FencingToken != matchedAttempt.FencingToken || !storedLease.ValidAt(now) {
+		return ComputerUseRun{}, ErrLeaseUnavailable
+	}
+	for _, existing := range r.steps {
+		if existing.RunID == run.ID && (existing.ID == step.ID || existing.Sequence == step.Sequence) {
+			return ComputerUseRun{}, ErrIdempotencyConflict
+		}
+	}
+	current.State, current.BlockingReason, current.Version, current.UpdatedAt = next, reason, current.Version+1, now
 	r.runs[key] = current
 	r.steps = append(r.steps, step)
 	r.evidence = append(r.evidence, evidence)

@@ -420,6 +420,86 @@ func (r MySQLRepository) AuthorizeControlledAction(ctx context.Context, identity
 	return attempt, nil
 }
 
+func (r MySQLRepository) AuthorizeTakeoverAction(ctx context.Context, run ComputerUseRun, expected int64, identity FinalConfirmation, digest string, lease SessionLease, attempt ControlledActionAttempt, step RunStep, evidence Evidence, event RunEvent, now time.Time) (ComputerUseRun, ControlledActionAttempt, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, err
+	}
+	defer tx.Rollback()
+	var state RunState
+	var paused, takeover bool
+	var version int64
+	var leaseID string
+	err = tx.QueryRowContext(ctx, `SELECT state,paused,takeover_active,version,COALESCE(lease_id,'') FROM computer_use_runs WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, run.OrganizationID, run.ProjectID, run.ID).Scan(&state, &paused, &takeover, &version, &leaseID)
+	if err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrNotFound
+	}
+	if version != expected || state != RunAwaitingTakeover || !paused || !takeover || leaseID != lease.ID {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrVersionConflict
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM computer_use_kill_switches WHERE active=TRUE AND ((scope='global' AND scope_key='*') OR (scope='platform' AND scope_key=?) OR (scope='organization' AND scope_key=?)) FOR UPDATE`, lease.Platform, identity.OrganizationID)
+	if err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, err
+	}
+	active := rows.Next()
+	rows.Close()
+	if active {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrKillSwitchActive
+	}
+	storedLease, err := scanLease(tx.QueryRowContext(ctx, leaseSelect+` WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, identity.OrganizationID, identity.ProjectID, lease.ID))
+	if err != nil || storedLease.RunID != identity.RunID || storedLease.FencingToken != lease.FencingToken || !storedLease.ValidAt(now) {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrLeaseUnavailable
+	}
+	var confirmation FinalConfirmation
+	var consumed, rejected, invalidated sql.NullTime
+	err = tx.QueryRowContext(ctx, `SELECT id,organization_id,project_id,run_id,binding_hash,token_digest,issued_by,issued_at,expires_at,consumed_at,rejected_at,invalidated_at,version FROM computer_use_final_confirmations WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, identity.OrganizationID, identity.ProjectID, identity.ID).Scan(&confirmation.ID, &confirmation.OrganizationID, &confirmation.ProjectID, &confirmation.RunID, &confirmation.BindingHash, &confirmation.TokenDigest, &confirmation.IssuedBy, &confirmation.IssuedAt, &confirmation.ExpiresAt, &consumed, &rejected, &invalidated, &confirmation.Version)
+	if err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrConfirmationInvalid
+	}
+	confirmation.SchemaVersion, confirmation.ConsumedAt, confirmation.RejectedAt, confirmation.InvalidatedAt = ConfirmationSchemaV1, timePtr(consumed), timePtr(rejected), timePtr(invalidated)
+	if confirmation.RunID != identity.RunID || confirmation.BindingHash != identity.BindingHash || confirmation.TokenDigest != digest || !confirmation.UsableAt(now) {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrConfirmationInvalid
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO computer_use_controlled_action_attempts (id,organization_id,project_id,run_id,step_id,confirmation_id,approval_id,lease_id,fencing_token,action_hash,idempotency_key,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, attempt.ID, attempt.OrganizationID, attempt.ProjectID, attempt.RunID, attempt.StepID, attempt.ConfirmationID, attempt.ApprovalID, attempt.LeaseID, attempt.FencingToken, attempt.ActionHash, attempt.IdempotencyKey, attempt.Status, attempt.CreatedAt)
+	if err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrIdempotencyConflict
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE computer_use_final_confirmations SET consumed_at=?,version=version+1 WHERE organization_id=? AND project_id=? AND id=? AND version=? AND consumed_at IS NULL AND rejected_at IS NULL AND invalidated_at IS NULL`, now, identity.OrganizationID, identity.ProjectID, identity.ID, confirmation.Version)
+	if err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected != 1 {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrConfirmationInvalid
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE computer_use_runs SET state='submitting',blocking_reason=NULL,version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND state='awaiting_takeover' AND paused=TRUE AND takeover_active=TRUE`, now, run.OrganizationID, run.ProjectID, run.ID, expected)
+	if err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, err
+	}
+	affected, _ = result.RowsAffected()
+	if affected != 1 {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrVersionConflict
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO computer_use_run_steps (id,organization_id,project_id,run_id,sequence_number,workflow_step_id,action,status,blocking_reason,attempt,version) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, step.ID, run.OrganizationID, run.ProjectID, run.ID, step.Sequence, step.WorkflowStepID, step.Action, step.Status, nil, step.Attempt, step.Version); err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrIdempotencyConflict
+	}
+	payload, err := json.Marshal(evidence)
+	if err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO computer_use_evidence (id,organization_id,project_id,run_id,step_id,evidence_json,object_fingerprint,skill_version,selector_version,action_version,redaction_version,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, evidence.ID, evidence.OrganizationID, evidence.ProjectID, evidence.RunID, evidence.StepID, payload, evidence.ObjectFingerprint, evidence.SkillVersion, evidence.SelectorVersion, evidence.ActionVersion, evidence.RedactionVersion, evidence.CreatedAt); err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO computer_use_events (id,organization_id,project_id,run_id,sequence_number,kind,summary,actor,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, event.ID, event.OrganizationID, event.ProjectID, event.RunID, event.Sequence, event.Kind, event.Summary, event.Actor, event.CreatedAt); err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, err
+	}
+	updated, err := r.GetRun(ctx, run.OrganizationID, run.ProjectID, run.ID)
+	return updated, attempt, err
+}
+
 func (r MySQLRepository) AppendEvent(ctx context.Context, value RunEvent) error {
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO computer_use_events (id,organization_id,project_id,run_id,sequence_number,kind,summary,actor,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, value.ID, value.OrganizationID, value.ProjectID, value.RunID, value.Sequence, value.Kind, value.Summary, value.Actor, value.CreatedAt)
 	return err
@@ -464,6 +544,48 @@ func (r MySQLRepository) RecordTakeoverEvidence(ctx context.Context, run Compute
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO computer_use_events (id,organization_id,project_id,run_id,sequence_number,kind,summary,actor,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, event.ID, event.OrganizationID, event.ProjectID, event.RunID, event.Sequence, event.Kind, event.Summary, event.Actor, event.CreatedAt)
 	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ComputerUseRun{}, err
+	}
+	return r.GetRun(ctx, run.OrganizationID, run.ProjectID, run.ID)
+}
+
+func (r MySQLRepository) RecordTakeoverOutcome(ctx context.Context, run ComputerUseRun, expected int64, attemptID string, next RunState, reason BlockingReason, step RunStep, evidence Evidence, event RunEvent, now time.Time) (ComputerUseRun, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	defer tx.Rollback()
+	var storedAttemptID, storedLeaseID string
+	var storedFencingToken int64
+	if err := tx.QueryRowContext(ctx, `SELECT id,lease_id,fencing_token FROM computer_use_controlled_action_attempts WHERE organization_id=? AND project_id=? AND id=? AND run_id=? AND lease_id=? FOR UPDATE`, run.OrganizationID, run.ProjectID, attemptID, run.ID, run.LeaseID).Scan(&storedAttemptID, &storedLeaseID, &storedFencingToken); err != nil {
+		return ComputerUseRun{}, ErrNotFound
+	}
+	storedLease, err := scanLease(tx.QueryRowContext(ctx, leaseSelect+` WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, run.OrganizationID, run.ProjectID, storedLeaseID))
+	if err != nil || storedLease.FencingToken != storedFencingToken || !storedLease.ValidAt(now) {
+		return ComputerUseRun{}, ErrLeaseUnavailable
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE computer_use_runs SET state=?,blocking_reason=?,version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND state=? AND paused=TRUE AND takeover_active=TRUE`, next, nullableString(string(reason)), now, run.OrganizationID, run.ProjectID, run.ID, expected, run.State)
+	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	affected, _ := result.RowsAffected()
+	if affected != 1 {
+		return ComputerUseRun{}, ErrVersionConflict
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO computer_use_run_steps (id,organization_id,project_id,run_id,sequence_number,workflow_step_id,action,status,blocking_reason,attempt,version) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, step.ID, run.OrganizationID, run.ProjectID, run.ID, step.Sequence, step.WorkflowStepID, step.Action, step.Status, nullableString(string(step.BlockingReason)), step.Attempt, step.Version); err != nil {
+		return ComputerUseRun{}, ErrIdempotencyConflict
+	}
+	payload, err := json.Marshal(evidence)
+	if err != nil {
+		return ComputerUseRun{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO computer_use_evidence (id,organization_id,project_id,run_id,step_id,evidence_json,object_fingerprint,skill_version,selector_version,action_version,redaction_version,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, evidence.ID, evidence.OrganizationID, evidence.ProjectID, evidence.RunID, evidence.StepID, payload, evidence.ObjectFingerprint, evidence.SkillVersion, evidence.SelectorVersion, evidence.ActionVersion, evidence.RedactionVersion, evidence.CreatedAt); err != nil {
+		return ComputerUseRun{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO computer_use_events (id,organization_id,project_id,run_id,sequence_number,kind,summary,actor,created_at) VALUES (?,?,?,?,?,?,?,?,?)`, event.ID, event.OrganizationID, event.ProjectID, event.RunID, event.Sequence, event.Kind, event.Summary, event.Actor, event.CreatedAt); err != nil {
 		return ComputerUseRun{}, err
 	}
 	if err := tx.Commit(); err != nil {

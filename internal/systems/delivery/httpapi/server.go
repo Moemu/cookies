@@ -77,6 +77,12 @@ type controlledAuthorityApplication interface {
 	GetControlledExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledExecution, error)
 }
 
+type platformEntityMappingApplication interface {
+	CreatePendingPlatformEntityMapping(context.Context, contract.ActorContext, delivery.PlatformEntityMapping) (delivery.PlatformEntityMapping, error)
+	GetPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PlatformEntityMapping, error)
+	ConfirmPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string, int64, delivery.MappingReadback, delivery.MappingReadback) (delivery.PlatformEntityMapping, error)
+}
+
 type Server struct {
 	app Application
 	mux *http.ServeMux
@@ -118,6 +124,9 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/controlled-change-sets/{change_set_id}", server.getControlledChangeSet)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/controlled-change-sets/{controlled_change_set_action}", server.controlledChangeSetAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/controlled-executions/{execution_id}", server.getControlledExecution)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings", server.createPlatformEntityMapping)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}", server.getPlatformEntityMapping)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_action}", server.platformEntityMappingAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions", server.listExecutions)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}", server.getExecution)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/executions/{execution_id}/simulation-runs", server.createOutcomeSimulation)

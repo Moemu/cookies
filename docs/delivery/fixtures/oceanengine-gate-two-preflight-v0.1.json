@@ -2,10 +2,10 @@
   "schema_version": "oceanengine-gate-two-preflight/v0.1",
   "skill_id": "oceanengine-ecommerce-manual",
   "skill_version": "v0.1-calibration",
-  "status": "contract_frozen_authorization_required",
+  "status": "ports_ready_authorization_required",
   "execution_authorized": false,
   "final_confirmation_issued": false,
-  "production_submit_port_mounted": false,
+  "production_submit_port_mounted": true,
   "skill_submit_allowed": false,
   "maximum_final_clicks": 1,
   "execution_scope": {
@@ -33,9 +33,6 @@
   "result_unknown_policy": "query_or_takeover_never_resubmit",
   "mapping_confirmation_policy": "result_page_and_list_page_ids_and_statuses_must_match",
   "implementation_gaps": [
-    "takeover_remote_write_authorization_port",
-    "post_write_result_evidence_port",
-    "delivery_mapping_http_api",
     "skill_final_submit_instructions_after_validation"
   ]
 }

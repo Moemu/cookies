@@ -245,7 +245,7 @@ test("promotion live locators use stable semantics and retain the write boundary
   assert.deepEqual(locators.reference_gaps, []);
 });
 
-test("gate-two preflight is frozen without granting or mounting final submit", () => {
+test("gate-two preflight mounts manual ports without granting final submit", () => {
   const schemaPath = join(root, "docs", "delivery", "schemas", "oceanengine-gate-two-preflight-v0.1.json");
   const fixturePath = join(root, "docs", "delivery", "fixtures", "oceanengine-gate-two-preflight-v0.1.json");
   const rawFixture = readFileSync(fixturePath, "utf8");
@@ -255,12 +255,12 @@ test("gate-two preflight is frozen without granting or mounting final submit", (
   assert.equal(validate(fixture), true, ajv.errorsText(validate.errors));
   assert.equal(fixture.execution_authorized, false);
   assert.equal(fixture.final_confirmation_issued, false);
-  assert.equal(fixture.production_submit_port_mounted, false);
+  assert.equal(fixture.production_submit_port_mounted, true);
   assert.equal(fixture.skill_submit_allowed, false);
   assert.equal(fixture.maximum_final_clicks, 1);
   assert.equal(fixture.result_unknown_policy, "query_or_takeover_never_resubmit");
   assert.equal(fixture.mapping_confirmation_policy, "result_page_and_list_page_ids_and_statuses_must_match");
-  assert.ok((fixture.implementation_gaps as string[]).includes("takeover_remote_write_authorization_port"));
+  assert.deepEqual(fixture.implementation_gaps, ["skill_final_submit_instructions_after_validation"]);
   assert.doesNotMatch(rawFixture, /\b\d{16}\b/);
 });
 
