@@ -498,7 +498,7 @@ func (r *MemoryRepository) RecordTakeoverEvidence(_ context.Context, run Compute
 	return current, nil
 }
 
-func (r *MemoryRepository) RecordTakeoverOutcome(_ context.Context, run ComputerUseRun, expected int64, attemptID string, next RunState, reason BlockingReason, step RunStep, evidence Evidence, event RunEvent, now time.Time) (ComputerUseRun, error) {
+func (r *MemoryRepository) RecordTakeoverOutcome(_ context.Context, run ComputerUseRun, expected int64, attemptID, attemptStatus string, next RunState, reason BlockingReason, step RunStep, evidence Evidence, event RunEvent, now time.Time) (ComputerUseRun, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := scopeKey(run.OrganizationID, run.ProjectID, run.ID)
@@ -521,6 +521,10 @@ func (r *MemoryRepository) RecordTakeoverOutcome(_ context.Context, run Computer
 	if !foundAttempt {
 		return ComputerUseRun{}, ErrNotFound
 	}
+	if (matchedAttempt.Status != ControlledActionAuthorized && matchedAttempt.Status != ControlledActionVerified) ||
+		(attemptStatus != ControlledActionVerified && attemptStatus != ControlledActionFailed && attemptStatus != ControlledActionResultUnknown) {
+		return ComputerUseRun{}, ErrInvalidTransition
+	}
 	storedLease, ok := r.leases[scopeKey(run.OrganizationID, run.ProjectID, matchedAttempt.LeaseID)]
 	if !ok || storedLease.FencingToken != matchedAttempt.FencingToken || !storedLease.ValidAt(now) {
 		return ComputerUseRun{}, ErrLeaseUnavailable
@@ -530,6 +534,8 @@ func (r *MemoryRepository) RecordTakeoverOutcome(_ context.Context, run Computer
 			return ComputerUseRun{}, ErrIdempotencyConflict
 		}
 	}
+	matchedAttempt.Status = attemptStatus
+	r.attempts[scopeKey(matchedAttempt.OrganizationID, matchedAttempt.ProjectID, matchedAttempt.IdempotencyKey)] = matchedAttempt
 	current.State, current.BlockingReason, current.Version, current.UpdatedAt = next, reason, current.Version+1, now
 	r.runs[key] = current
 	r.steps = append(r.steps, step)

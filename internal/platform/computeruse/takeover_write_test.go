@@ -24,6 +24,9 @@ func TestTakeoverWriteConsumesConfirmationAndPersistsTwoPhaseResultEvidence(t *t
 	if err != nil || result.Run.State != RunVerifying {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
+	if attempt := repo.attempts[scopeKey(run.OrganizationID, run.ProjectID, "final-click-1")]; attempt.Status != ControlledActionVerified {
+		t.Fatalf("attempt status=%q", attempt.Status)
+	}
 	mismatch := RecordTakeoverOutcomeRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, AttemptID: authorized.Attempt.ID, ExpectedVersion: result.Run.Version, LeaseID: lease.ID, FencingToken: lease.FencingToken, StepID: "step_list_mismatch", Sequence: 3, Outcome: TakeoverListConfirmed, PageKind: "project_list", PlatformProjectID: "test-project-1", FieldReadback: map[string]string{"platform_object_id": "platform-2", "platform_status": "pending_review"}, PageReference: "https://ad.oceanengine.com/project/list", SelectorVersion: "live/v1", ActionVersion: "takeover-list/v1", Actor: "operator_1"}
 	if _, err := service.RecordTakeoverOutcome(context.Background(), mismatch); err != ErrInvalidContract {
 		t.Fatalf("mismatched list readback err=%v", err)
@@ -56,6 +59,9 @@ func TestTakeoverWriteRejectsDriftAndUnknownResultCannotResubmit(t *testing.T) {
 	unknown, err := service.RecordTakeoverOutcome(context.Background(), RecordTakeoverOutcomeRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, AttemptID: authorized.Attempt.ID, ExpectedVersion: authorized.Run.Version, LeaseID: lease.ID, FencingToken: lease.FencingToken, StepID: "step_unknown", Sequence: 2, Outcome: TakeoverResultUnknown, PageKind: "project_result", PlatformProjectID: "test-project-1", PageReference: "https://ad.oceanengine.com/project/result", SelectorVersion: "live/v1", ActionVersion: "takeover-result/v1", Actor: "operator_1"})
 	if err != nil || unknown.Run.State != RunResultUnknown || unknown.Run.BlockingReason != BlockResultReconciliation {
 		t.Fatalf("unknown=%#v err=%v", unknown, err)
+	}
+	if attempt := service.Repository.(*MemoryRepository).attempts[scopeKey(run.OrganizationID, run.ProjectID, "final-click-1")]; attempt.Status != ControlledActionResultUnknown {
+		t.Fatalf("attempt status=%q", attempt.Status)
 	}
 	request.ExpectedVersion = unknown.Run.Version
 	request.IdempotencyKey = "final-click-2"

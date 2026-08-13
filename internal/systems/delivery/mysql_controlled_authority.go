@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/computeruse"
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
@@ -166,20 +167,35 @@ func (r MySQLRepository) CreatePlatformEntityMapping(ctx context.Context, value 
 }
 
 func (r MySQLRepository) GetPlatformEntityMapping(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (PlatformEntityMapping, error) {
-	var value PlatformEntityMapping
-	err := r.DB.QueryRowContext(ctx, platformEntityMappingSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id).Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.AccountReferenceID, &value.PlanID, &value.ConfigurationID, &value.BusinessExecutionID, &value.ComputerUseRunID, &value.InternalObjectKind, &value.InternalObjectID, &value.PlatformObjectKind, &value.PlatformObjectID, &value.PlatformStatus, &value.ResultEvidenceID, &value.ListEvidenceID, &value.Status, &value.Version, &value.CreatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return PlatformEntityMapping{}, ErrNotFound
-	}
+	return scanPlatformEntityMapping(r.DB.QueryRowContext(ctx, platformEntityMappingSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
+}
+
+func (r MySQLRepository) ConfirmPlatformEntityMapping(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion int64, resultEvidenceID, listEvidenceID string) (PlatformEntityMapping, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return PlatformEntityMapping{}, err
 	}
-	value.SchemaVersion = PlatformEntityMappingV1
-	return value, nil
-}
-
-func (r MySQLRepository) ConfirmPlatformEntityMapping(ctx context.Context, value PlatformEntityMapping, expectedVersion int64) (PlatformEntityMapping, error) {
-	result, err := r.DB.ExecContext(ctx, `UPDATE delivery_platform_entity_mappings SET platform_object_id=?,platform_status=?,result_evidence_id=?,list_evidence_id=?,status='confirmed',version=version+1 WHERE organization_id=? AND project_id=? AND id=? AND status='pending_verification' AND version=?`, value.PlatformObjectID, value.PlatformStatus, value.ResultEvidenceID, value.ListEvidenceID, value.OrganizationID, value.ProjectID, value.ID, expectedVersion)
+	defer tx.Rollback()
+	value, err := scanPlatformEntityMapping(tx.QueryRowContext(ctx, platformEntityMappingSelect+` WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, org, project, id))
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	if value.Version != expectedVersion || value.Status != PlatformEntityMappingPending {
+		return PlatformEntityMapping{}, ErrVersionConflict
+	}
+	resultEvidence, err := loadPlatformMappingEvidence(ctx, tx, value, resultEvidenceID)
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	listEvidence, err := loadPlatformMappingEvidence(ctx, tx, value, listEvidenceID)
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	platformObjectID, platformStatus, err := validatePlatformMappingEvidence(value, resultEvidence, listEvidence)
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE delivery_platform_entity_mappings SET platform_object_id=?,platform_status=?,result_evidence_id=?,list_evidence_id=?,status='confirmed',version=version+1 WHERE organization_id=? AND project_id=? AND id=? AND status='pending_verification' AND version=?`, platformObjectID, platformStatus, resultEvidenceID, listEvidenceID, org, project, id, expectedVersion)
 	if err != nil {
 		return PlatformEntityMapping{}, err
 	}
@@ -190,7 +206,65 @@ func (r MySQLRepository) ConfirmPlatformEntityMapping(ctx context.Context, value
 	if affected != 1 {
 		return PlatformEntityMapping{}, ErrVersionConflict
 	}
-	return r.GetPlatformEntityMapping(ctx, value.OrganizationID, value.ProjectID, value.ID)
+	if err := tx.Commit(); err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	return r.GetPlatformEntityMapping(ctx, org, project, id)
+}
+
+type platformMappingEvidence struct {
+	Evidence computeruse.Evidence
+	Step     computeruse.RunStep
+}
+
+func loadPlatformMappingEvidence(ctx context.Context, tx *sql.Tx, mapping PlatformEntityMapping, evidenceID string) (platformMappingEvidence, error) {
+	var payload []byte
+	var value platformMappingEvidence
+	err := tx.QueryRowContext(ctx, `SELECT e.evidence_json,s.id,s.run_id,s.sequence_number,s.action,s.status FROM computer_use_evidence e JOIN computer_use_run_steps s ON s.organization_id=e.organization_id AND s.project_id=e.project_id AND s.run_id=e.run_id AND s.id=e.step_id WHERE e.organization_id=? AND e.project_id=? AND e.run_id=? AND e.id=? FOR UPDATE`, mapping.OrganizationID, mapping.ProjectID, mapping.ComputerUseRunID, evidenceID).Scan(&payload, &value.Step.ID, &value.Step.RunID, &value.Step.Sequence, &value.Step.Action, &value.Step.Status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return platformMappingEvidence{}, ErrNotFound
+	}
+	if err != nil {
+		return platformMappingEvidence{}, err
+	}
+	if err := json.Unmarshal(payload, &value.Evidence); err != nil {
+		return platformMappingEvidence{}, fmt.Errorf("decode computer-use evidence: %w", err)
+	}
+	return value, nil
+}
+
+func validatePlatformMappingEvidence(mapping PlatformEntityMapping, result, list platformMappingEvidence) (string, string, error) {
+	if result.Evidence.ID == "" || list.Evidence.ID == "" || result.Evidence.ID == list.Evidence.ID ||
+		result.Evidence.OrganizationID != mapping.OrganizationID || list.Evidence.OrganizationID != mapping.OrganizationID ||
+		result.Evidence.ProjectID != mapping.ProjectID || list.Evidence.ProjectID != mapping.ProjectID ||
+		result.Evidence.RunID != mapping.ComputerUseRunID || list.Evidence.RunID != mapping.ComputerUseRunID ||
+		result.Evidence.StepID != result.Step.ID || list.Evidence.StepID != list.Step.ID ||
+		result.Evidence.ObjectFingerprint != mapping.InternalObjectID || list.Evidence.ObjectFingerprint != mapping.InternalObjectID ||
+		result.Step.RunID != mapping.ComputerUseRunID || list.Step.RunID != mapping.ComputerUseRunID ||
+		result.Step.Action != string(computeruse.TakeoverResultObserved) || list.Step.Action != string(computeruse.TakeoverListConfirmed) ||
+		result.Step.Status != computeruse.StepSucceeded || list.Step.Status != computeruse.StepSucceeded ||
+		result.Step.Sequence >= list.Step.Sequence {
+		return "", "", ErrApprovalContentMismatch
+	}
+	resultObjectID, resultStatus := result.Evidence.FieldReadback["platform_object_id"], result.Evidence.FieldReadback["platform_status"]
+	listObjectID, listStatus := list.Evidence.FieldReadback["platform_object_id"], list.Evidence.FieldReadback["platform_status"]
+	if resultObjectID == "" || resultStatus == "" || resultObjectID != listObjectID || resultStatus != listStatus {
+		return "", "", ErrApprovalContentMismatch
+	}
+	return resultObjectID, resultStatus, nil
+}
+
+func scanPlatformEntityMapping(row rowScanner) (PlatformEntityMapping, error) {
+	var value PlatformEntityMapping
+	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.AccountReferenceID, &value.PlanID, &value.ConfigurationID, &value.BusinessExecutionID, &value.ComputerUseRunID, &value.InternalObjectKind, &value.InternalObjectID, &value.PlatformObjectKind, &value.PlatformObjectID, &value.PlatformStatus, &value.ResultEvidenceID, &value.ListEvidenceID, &value.Status, &value.Version, &value.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PlatformEntityMapping{}, ErrNotFound
+	}
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	value.SchemaVersion = PlatformEntityMappingV1
+	return value, nil
 }
 
 const controlledChangeSetSelect = `SELECT id,organization_id,project_id,binding_json,action,budget_limit_minor,currency,status,canonical_hash,version,created_by,created_at,updated_at FROM delivery_controlled_change_sets`

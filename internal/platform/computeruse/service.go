@@ -472,7 +472,7 @@ func (s Service) AuthorizeTakeoverAction(ctx context.Context, request AuthorizeT
 	}
 	step := RunStep{ID: request.StepID, RunID: run.ID, Sequence: request.Sequence, WorkflowStepID: run.Authority.WorkflowStepID, Action: "submit_platform_configuration", Status: StepRunning, Attempt: 1, Version: 1}
 	evidence := RedactEvidence(Evidence{SchemaVersion: EvidenceSchemaV1, ID: evidenceID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, BeforePageFacts: request.BeforePageFacts, FieldReadback: request.FieldReadback, DiffKeys: []string{}, PageReference: request.PageReference, ObjectFingerprint: run.Authority.ObjectFingerprint, SkillVersion: run.Authority.SkillVersion, SelectorVersion: request.SelectorVersion, ActionVersion: request.ActionVersion, CreatedAt: now})
-	attempt := ControlledActionAttempt{ID: attemptID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, ConfirmationID: request.ConfirmationID, ApprovalID: run.Authority.ApprovalID, LeaseID: lease.ID, FencingToken: lease.FencingToken, ActionHash: run.Authority.ApprovalActionHash, IdempotencyKey: request.IdempotencyKey, Status: "authorized", CreatedAt: now}
+	attempt := ControlledActionAttempt{ID: attemptID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, ConfirmationID: request.ConfirmationID, ApprovalID: run.Authority.ApprovalID, LeaseID: lease.ID, FencingToken: lease.FencingToken, ActionHash: run.Authority.ApprovalActionHash, IdempotencyKey: request.IdempotencyKey, Status: ControlledActionAuthorized, CreatedAt: now}
 	event := RunEvent{ID: eventID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, Sequence: run.Version + 1, Kind: "takeover_write_authorized", Summary: "single final click authorized; browser action not executed by control plane", Actor: request.Actor, CreatedAt: now}
 	updated, attempt, err := s.Repository.AuthorizeTakeoverAction(ctx, run, request.ExpectedVersion, FinalConfirmation{ID: request.ConfirmationID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, BindingHash: run.Authority.ApprovalActionHash}, hex.EncodeToString(digest[:]), lease, attempt, step, evidence, event, now)
 	if err != nil {
@@ -514,13 +514,13 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 	if run.Version != request.ExpectedVersion {
 		return TakeoverEvidenceResult{}, ErrVersionConflict
 	}
-	next, reason, status := RunFailed, BlockingReason(""), StepFailed
+	next, reason, status, attemptStatus := RunFailed, BlockingReason(""), StepFailed, ControlledActionFailed
 	switch request.Outcome {
 	case TakeoverResultObserved:
 		if run.State != RunSubmitting || request.FieldReadback["platform_object_id"] == "" || request.FieldReadback["platform_status"] == "" {
 			return TakeoverEvidenceResult{}, ErrInvalidTransition
 		}
-		next, status = RunVerifying, StepSucceeded
+		next, status, attemptStatus = RunVerifying, StepSucceeded, ControlledActionVerified
 	case TakeoverListConfirmed:
 		if run.State != RunVerifying || request.FieldReadback["platform_object_id"] == "" || request.FieldReadback["platform_status"] == "" {
 			return TakeoverEvidenceResult{}, ErrInvalidTransition
@@ -553,7 +553,7 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 		if resultStepID == "" || resultObjectID != request.FieldReadback["platform_object_id"] || resultStatus != request.FieldReadback["platform_status"] {
 			return TakeoverEvidenceResult{}, ErrInvalidContract
 		}
-		next, status = RunSucceeded, StepSucceeded
+		next, status, attemptStatus = RunSucceeded, StepSucceeded, ControlledActionVerified
 	case TakeoverWriteRejected:
 		if run.State != RunSubmitting && run.State != RunVerifying {
 			return TakeoverEvidenceResult{}, ErrInvalidTransition
@@ -563,7 +563,7 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 		if run.State != RunSubmitting && run.State != RunVerifying {
 			return TakeoverEvidenceResult{}, ErrInvalidTransition
 		}
-		next, reason, status = RunResultUnknown, BlockResultReconciliation, StepResultUnknown
+		next, reason, status, attemptStatus = RunResultUnknown, BlockResultReconciliation, StepResultUnknown, ControlledActionResultUnknown
 	}
 	now := s.now()
 	lease, err := s.Repository.GetLease(ctx, request.OrganizationID, request.ProjectID, request.LeaseID)
@@ -585,7 +585,7 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 		return TakeoverEvidenceResult{}, err
 	}
 	event := RunEvent{ID: eventID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, Sequence: run.Version + 1, Kind: "takeover_write_outcome", Summary: string(request.Outcome), Actor: request.Actor, CreatedAt: now}
-	updated, err := s.Repository.RecordTakeoverOutcome(ctx, run, request.ExpectedVersion, request.AttemptID, next, reason, step, evidence, event, now)
+	updated, err := s.Repository.RecordTakeoverOutcome(ctx, run, request.ExpectedVersion, request.AttemptID, attemptStatus, next, reason, step, evidence, event, now)
 	if err != nil {
 		return TakeoverEvidenceResult{}, err
 	}
@@ -634,7 +634,7 @@ func (s Service) AuthorizeAction(ctx context.Context, request AuthorizeActionReq
 	if err != nil {
 		return ControlledActionAttempt{}, err
 	}
-	attempt := ControlledActionAttempt{ID: attemptID, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, RunID: run.ID, StepID: request.StepID, ConfirmationID: request.ConfirmationID, ApprovalID: run.Authority.ApprovalID, LeaseID: lease.ID, FencingToken: lease.FencingToken, ActionHash: run.Authority.ApprovalActionHash, IdempotencyKey: request.IdempotencyKey, Status: "authorized", CreatedAt: now}
+	attempt := ControlledActionAttempt{ID: attemptID, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, RunID: run.ID, StepID: request.StepID, ConfirmationID: request.ConfirmationID, ApprovalID: run.Authority.ApprovalID, LeaseID: lease.ID, FencingToken: lease.FencingToken, ActionHash: run.Authority.ApprovalActionHash, IdempotencyKey: request.IdempotencyKey, Status: ControlledActionAuthorized, CreatedAt: now}
 	return s.Repository.AuthorizeControlledAction(ctx, FinalConfirmation{ID: request.ConfirmationID, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, RunID: run.ID, BindingHash: run.Authority.ApprovalActionHash}, hex.EncodeToString(digest[:]), lease, attempt, now)
 }
 

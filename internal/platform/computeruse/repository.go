@@ -44,7 +44,7 @@ type Repository interface {
 	AppendEvent(context.Context, RunEvent) error
 	AppendEvidence(context.Context, Evidence) error
 	RecordTakeoverEvidence(context.Context, ComputerUseRun, int64, RunStep, Evidence, RunEvent, time.Time) (ComputerUseRun, error)
-	RecordTakeoverOutcome(context.Context, ComputerUseRun, int64, string, RunState, BlockingReason, RunStep, Evidence, RunEvent, time.Time) (ComputerUseRun, error)
+	RecordTakeoverOutcome(context.Context, ComputerUseRun, int64, string, string, RunState, BlockingReason, RunStep, Evidence, RunEvent, time.Time) (ComputerUseRun, error)
 	ListEvents(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]RunEvent, error)
 	ListEvidence(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]Evidence, error)
 }

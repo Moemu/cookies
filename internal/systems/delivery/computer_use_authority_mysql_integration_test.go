@@ -34,7 +34,7 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		for _, statement := range []string{`DELETE FROM computer_use_events WHERE organization_id=?`, `UPDATE computer_use_runs SET lease_id=NULL WHERE organization_id=?`, `DELETE FROM computer_use_session_leases WHERE organization_id=?`, `DELETE FROM computer_use_runs WHERE organization_id=?`, `DELETE FROM computer_use_site_policies WHERE organization_id=?`, `DELETE FROM computer_use_browser_profiles WHERE organization_id=?`, `DELETE FROM computer_use_environments WHERE organization_id=?`, `DELETE FROM delivery_controlled_executions WHERE organization_id=?`, `DELETE FROM delivery_remote_write_approvals WHERE organization_id=?`, `DELETE FROM delivery_controlled_change_sets WHERE organization_id=?`, `DELETE FROM projects WHERE organization_id=?`, `DELETE FROM organizations WHERE id=?`} {
+		for _, statement := range []string{`DELETE FROM delivery_platform_entity_mappings WHERE organization_id=?`, `DELETE FROM computer_use_evidence WHERE organization_id=?`, `DELETE FROM computer_use_run_steps WHERE organization_id=?`, `DELETE FROM computer_use_events WHERE organization_id=?`, `UPDATE computer_use_runs SET lease_id=NULL WHERE organization_id=?`, `DELETE FROM computer_use_session_leases WHERE organization_id=?`, `DELETE FROM computer_use_runs WHERE organization_id=?`, `DELETE FROM computer_use_site_policies WHERE organization_id=?`, `DELETE FROM computer_use_browser_profiles WHERE organization_id=?`, `DELETE FROM computer_use_environments WHERE organization_id=?`, `DELETE FROM delivery_controlled_executions WHERE organization_id=?`, `DELETE FROM delivery_remote_write_approvals WHERE organization_id=?`, `DELETE FROM delivery_controlled_change_sets WHERE organization_id=?`, `DELETE FROM projects WHERE organization_id=?`, `DELETE FROM organizations WHERE id=?`} {
 			_, _ = db.ExecContext(context.Background(), statement, org)
 		}
 	})
@@ -94,5 +94,33 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	replayedRun, replayed, err := computerUseService.CreateBoundRun(ctx, request)
 	if err != nil || !replayed || replayedRun.ID != run.ID {
 		t.Fatalf("replay run=%+v replayed=%t err=%v", replayedRun, replayed, err)
+	}
+	resultStep := computeruse.RunStep{ID: "result_step_" + suffix, RunID: run.ID, Sequence: 1, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(computeruse.TakeoverResultObserved), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
+	listStep := computeruse.RunStep{ID: "list_step_" + suffix, RunID: run.ID, Sequence: 2, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(computeruse.TakeoverListConfirmed), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
+	if err := computerUseRepo.PutStep(ctx, org, project, resultStep); err != nil {
+		t.Fatal(err)
+	}
+	if err := computerUseRepo.PutStep(ctx, org, project, listStep); err != nil {
+		t.Fatal(err)
+	}
+	resultEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: run.ID, StepID: resultStep.ID, FieldReadback: map[string]string{"platform_object_id": "platform_1", "platform_status": "pending_review"}, ObjectFingerprint: binding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now}
+	listEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: run.ID, StepID: listStep.ID, FieldReadback: map[string]string{"platform_object_id": "platform_1", "platform_status": "pending_review"}, ObjectFingerprint: binding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(time.Second)}
+	if err := computerUseRepo.AppendEvidence(ctx, resultEvidence); err != nil {
+		t.Fatal(err)
+	}
+	if err := computerUseRepo.AppendEvidence(ctx, listEvidence); err != nil {
+		t.Fatal(err)
+	}
+	mapping := PlatformEntityMapping{SchemaVersion: PlatformEntityMappingV1, ID: "mapping_" + suffix, OrganizationID: org, ProjectID: project, AccountReferenceID: binding.AccountReferenceID, PlanID: binding.PlanID, ConfigurationID: binding.ConfigurationID, BusinessExecutionID: execution.ID, ComputerUseRunID: run.ID, InternalObjectKind: "project", InternalObjectID: binding.ObjectFingerprint, PlatformObjectKind: "project", Status: PlatformEntityMappingPending, Version: 1, CreatedAt: now}
+	mapping, err = deliveryRepo.CreatePlatformEntityMapping(ctx, mapping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deliveryRepo.ConfirmPlatformEntityMapping(ctx, org, project, mapping.ID, mapping.Version, "forged_result", "forged_list"); err != ErrNotFound {
+		t.Fatalf("forged evidence err=%v", err)
+	}
+	mapping, err = deliveryRepo.ConfirmPlatformEntityMapping(ctx, org, project, mapping.ID, mapping.Version, resultEvidence.ID, listEvidence.ID)
+	if err != nil || mapping.Status != PlatformEntityMappingConfirmed || mapping.PlatformObjectID != "platform_1" || mapping.PlatformStatus != "pending_review" {
+		t.Fatalf("mapping=%+v err=%v", mapping, err)
 	}
 }

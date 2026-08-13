@@ -80,7 +80,7 @@ type controlledAuthorityApplication interface {
 type platformEntityMappingApplication interface {
 	CreatePendingPlatformEntityMapping(context.Context, contract.ActorContext, delivery.PlatformEntityMapping) (delivery.PlatformEntityMapping, error)
 	GetPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PlatformEntityMapping, error)
-	ConfirmPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string, int64, delivery.MappingReadback, delivery.MappingReadback) (delivery.PlatformEntityMapping, error)
+	ConfirmPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ConfirmPlatformEntityMappingRequest) (delivery.PlatformEntityMapping, error)
 }
 
 type Server struct {

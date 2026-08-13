@@ -171,6 +171,10 @@ func TestMySQLAuthorizeControlledActionIsAtomic(t *testing.T) {
 	if err != nil || unknown.Run.State != RunResultUnknown || unknown.Run.BlockingReason != BlockResultReconciliation {
 		t.Fatalf("unknown=%#v err=%v", unknown, err)
 	}
+	var takeoverAttemptStatus string
+	if err = db.QueryRowContext(ctx, `SELECT status FROM computer_use_controlled_action_attempts WHERE organization_id=? AND project_id=? AND id=?`, org, project, authorized.Attempt.ID).Scan(&takeoverAttemptStatus); err != nil || takeoverAttemptStatus != ControlledActionResultUnknown {
+		t.Fatalf("attempt status=%q err=%v", takeoverAttemptStatus, err)
+	}
 	var takeoverEvidence, takeoverEvents, takeoverSteps int
 	if err = db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM computer_use_evidence WHERE organization_id=? AND run_id=?),(SELECT COUNT(*) FROM computer_use_events WHERE organization_id=? AND run_id=?),(SELECT COUNT(*) FROM computer_use_run_steps WHERE organization_id=? AND run_id=?)`, org, takeoverRun.ID, org, takeoverRun.ID, org, takeoverRun.ID).Scan(&takeoverEvidence, &takeoverEvents, &takeoverSteps); err != nil {
 		t.Fatal(err)

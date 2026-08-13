@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/computeruse"
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
@@ -14,10 +15,11 @@ type controlledMemoryRepository struct {
 	approvals  map[string]RemoteWriteApproval
 	executions map[string]ControlledExecution
 	mappings   map[string]PlatformEntityMapping
+	evidence   map[string]platformMappingEvidence
 }
 
 func newControlledMemoryRepository() *controlledMemoryRepository {
-	return &controlledMemoryRepository{memoryRepository: newMemoryRepository(), changes: map[string]ControlledChangeSet{}, approvals: map[string]RemoteWriteApproval{}, executions: map[string]ControlledExecution{}, mappings: map[string]PlatformEntityMapping{}}
+	return &controlledMemoryRepository{memoryRepository: newMemoryRepository(), changes: map[string]ControlledChangeSet{}, approvals: map[string]RemoteWriteApproval{}, executions: map[string]ControlledExecution{}, mappings: map[string]PlatformEntityMapping{}, evidence: map[string]platformMappingEvidence{}}
 }
 func (r *controlledMemoryRepository) CreateControlledChangeSet(_ context.Context, v ControlledChangeSet) (ControlledChangeSet, bool, error) {
 	for _, existing := range r.changes {
@@ -88,8 +90,8 @@ func (r *controlledMemoryRepository) GetPlatformEntityMapping(_ context.Context,
 	}
 	return v, nil
 }
-func (r *controlledMemoryRepository) ConfirmPlatformEntityMapping(_ context.Context, v PlatformEntityMapping, expectedVersion int64) (PlatformEntityMapping, error) {
-	key := repositoryKey(v.OrganizationID, v.ProjectID, v.ID)
+func (r *controlledMemoryRepository) ConfirmPlatformEntityMapping(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion int64, resultEvidenceID, listEvidenceID string) (PlatformEntityMapping, error) {
+	key := repositoryKey(org, project, id)
 	current, ok := r.mappings[key]
 	if !ok {
 		return PlatformEntityMapping{}, ErrNotFound
@@ -97,9 +99,20 @@ func (r *controlledMemoryRepository) ConfirmPlatformEntityMapping(_ context.Cont
 	if current.Version != expectedVersion || current.Status != PlatformEntityMappingPending {
 		return PlatformEntityMapping{}, ErrVersionConflict
 	}
-	v.Version = current.Version + 1
-	r.mappings[key] = v
-	return v, nil
+	result, resultOK := r.evidence[resultEvidenceID]
+	list, listOK := r.evidence[listEvidenceID]
+	if !resultOK || !listOK {
+		return PlatformEntityMapping{}, ErrNotFound
+	}
+	objectID, status, err := validatePlatformMappingEvidence(current, result, list)
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	current.PlatformObjectID, current.PlatformStatus = objectID, status
+	current.ResultEvidenceID, current.ListEvidenceID = resultEvidenceID, listEvidenceID
+	current.Status, current.Version = PlatformEntityMappingConfirmed, current.Version+1
+	r.mappings[key] = current
+	return current, nil
 }
 
 func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *testing.T) {
@@ -154,12 +167,63 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	if err != nil || mapping.Status != PlatformEntityMappingPending || mapping.PlatformObjectID != "" || mapping.PlatformStatus != "" || mapping.ResultEvidenceID != "" || mapping.ListEvidenceID != "" {
 		t.Fatalf("pending mapping=%#v err=%v", mapping, err)
 	}
-	_, err = service.ConfirmPlatformEntityMapping(context.Background(), actor, "project_a", mapping.ID, mapping.Version, MappingReadback{PlatformObjectID: "platform_1", PlatformStatus: "pending_review", EvidenceID: "evidence_result"}, MappingReadback{PlatformObjectID: "platform_2", PlatformStatus: "pending_review", EvidenceID: "evidence_list"})
-	if err != ErrApprovalContentMismatch {
-		t.Fatalf("mismatched confirmation err=%v", err)
-	}
-	mapping, err = service.ConfirmPlatformEntityMapping(context.Background(), actor, "project_a", mapping.ID, mapping.Version, MappingReadback{PlatformObjectID: "platform_1", PlatformStatus: "pending_review", EvidenceID: "evidence_result"}, MappingReadback{PlatformObjectID: "platform_1", PlatformStatus: "pending_review", EvidenceID: "evidence_list"})
+	repo.evidence["evidence_result"] = validMappingEvidence(mapping, "evidence_result", "step_result", 2, computeruse.TakeoverResultObserved, "platform_1", "pending_review")
+	repo.evidence["evidence_list"] = validMappingEvidence(mapping, "evidence_list", "step_list", 3, computeruse.TakeoverListConfirmed, "platform_1", "pending_review")
+	mapping, err = service.ConfirmPlatformEntityMapping(context.Background(), actor, "project_a", mapping.ID, ConfirmPlatformEntityMappingRequest{ExpectedVersion: mapping.Version, ResultEvidenceID: "evidence_result", ListEvidenceID: "evidence_list"})
 	if err != nil || mapping.Status != PlatformEntityMappingConfirmed || mapping.Version != 2 {
 		t.Fatalf("confirmed mapping=%#v err=%v", mapping, err)
+	}
+}
+
+func validMappingEvidence(mapping PlatformEntityMapping, evidenceID, stepID string, sequence int, action computeruse.TakeoverWriteOutcome, objectID, status string) platformMappingEvidence {
+	return platformMappingEvidence{
+		Evidence: computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: evidenceID, OrganizationID: mapping.OrganizationID, ProjectID: mapping.ProjectID, RunID: mapping.ComputerUseRunID, StepID: stepID, ObjectFingerprint: mapping.InternalObjectID, FieldReadback: map[string]string{"platform_object_id": objectID, "platform_status": status}},
+		Step:     computeruse.RunStep{ID: stepID, RunID: mapping.ComputerUseRunID, Sequence: sequence, Action: string(action), Status: computeruse.StepSucceeded},
+	}
+}
+
+func TestPlatformEntityMappingConfirmationRejectsUntrustedEvidence(t *testing.T) {
+	now := time.Date(2026, 8, 13, 13, 0, 0, 0, time.UTC)
+	actor := contract.ActorContext{OrganizationID: "org_a", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "operator"}, Scopes: contract.ScopesFromStrings([]string{string(ScopeExecute)})}
+	base := PlatformEntityMapping{SchemaVersion: PlatformEntityMappingV1, ID: "mapping_1", OrganizationID: actor.OrganizationID, ProjectID: "project_a", AccountReferenceID: "account_1", PlanID: "plan_1", ConfigurationID: "configuration_1", BusinessExecutionID: "execution_1", ComputerUseRunID: "run_1", InternalObjectKind: "project", InternalObjectID: "fingerprint_1", PlatformObjectKind: "project", Status: PlatformEntityMappingPending, Version: 1, CreatedAt: now}
+	tests := []struct {
+		name   string
+		mutate func(*controlledMemoryRepository)
+		result string
+		list   string
+		want   error
+	}{
+		{name: "evidence does not exist", result: "forged_result", list: "forged_list", want: ErrNotFound},
+		{name: "cross run evidence", result: "result", list: "list", want: ErrApprovalContentMismatch, mutate: func(repo *controlledMemoryRepository) {
+			result := validMappingEvidence(base, "result", "step_result", 2, computeruse.TakeoverResultObserved, "platform_1", "pending_review")
+			result.Evidence.RunID = "run_other"
+			repo.evidence["result"] = result
+			repo.evidence["list"] = validMappingEvidence(base, "list", "step_list", 3, computeruse.TakeoverListConfirmed, "platform_1", "pending_review")
+		}},
+		{name: "wrong step action", result: "result", list: "list", want: ErrApprovalContentMismatch, mutate: func(repo *controlledMemoryRepository) {
+			repo.evidence["result"] = validMappingEvidence(base, "result", "step_result", 2, computeruse.TakeoverListConfirmed, "platform_1", "pending_review")
+			repo.evidence["list"] = validMappingEvidence(base, "list", "step_list", 3, computeruse.TakeoverListConfirmed, "platform_1", "pending_review")
+		}},
+		{name: "forged object value", result: "result", list: "list", want: ErrApprovalContentMismatch, mutate: func(repo *controlledMemoryRepository) {
+			repo.evidence["result"] = validMappingEvidence(base, "result", "step_result", 2, computeruse.TakeoverResultObserved, "platform_1", "pending_review")
+			repo.evidence["list"] = validMappingEvidence(base, "list", "step_list", 3, computeruse.TakeoverListConfirmed, "platform_forged", "pending_review")
+		}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo := newControlledMemoryRepository()
+			repo.mappings[repositoryKey(base.OrganizationID, base.ProjectID, base.ID)] = base
+			if testCase.mutate != nil {
+				testCase.mutate(repo)
+			}
+			service := Service{Repository: repo, Projects: testProjects{}, Now: func() time.Time { return now }}
+			_, err := service.ConfirmPlatformEntityMapping(context.Background(), actor, base.ProjectID, base.ID, ConfirmPlatformEntityMappingRequest{ExpectedVersion: 1, ResultEvidenceID: testCase.result, ListEvidenceID: testCase.list})
+			if err != testCase.want {
+				t.Fatalf("err=%v want=%v", err, testCase.want)
+			}
+			if repo.mappings[repositoryKey(base.OrganizationID, base.ProjectID, base.ID)].Status != PlatformEntityMappingPending {
+				t.Fatal("mapping was confirmed from untrusted evidence")
+			}
+		})
 	}
 }

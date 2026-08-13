@@ -55,9 +55,14 @@ func TestPlatformEntityMappingHTTPKeepsPlatformValuesServerOwnedAndRequiresTwoRe
 		t.Fatalf("injected status=%d body=%s", response.Code, response.Body.String())
 	}
 	response = httptest.NewRecorder()
-	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1:confirm", `{"expected_version":1,"result_readback":{"platform_object_id":"platform_1","platform_status":"pending_review","evidence_id":"evidence_result"},"list_readback":{"platform_object_id":"platform_1","platform_status":"pending_review","evidence_id":"evidence_list"}}`))
-	if response.Code != http.StatusOK || app.confirm.ExpectedVersion != 1 || app.confirm.Result.EvidenceID == app.confirm.List.EvidenceID || !strings.Contains(response.Body.String(), `"status":"confirmed"`) {
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1:confirm", `{"expected_version":1,"result_evidence_id":"evidence_result","list_evidence_id":"evidence_list"}`))
+	if response.Code != http.StatusOK || app.confirm.ExpectedVersion != 1 || app.confirm.ResultEvidenceID == app.confirm.ListEvidenceID || !strings.Contains(response.Body.String(), `"status":"confirmed"`) {
 		t.Fatalf("confirm status=%d request=%#v body=%s", response.Code, app.confirm, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1:confirm", `{"expected_version":1,"result_evidence_id":"evidence_result","list_evidence_id":"evidence_list","platform_object_id":"forged"}`))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("client-owned platform value status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -305,10 +310,10 @@ func (s *mappingApplicationStub) CreatePendingPlatformEntityMapping(_ context.Co
 func (s *mappingApplicationStub) GetPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PlatformEntityMapping, error) {
 	return s.mapping, nil
 }
-func (s *mappingApplicationStub) ConfirmPlatformEntityMapping(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, expected int64, result, list delivery.MappingReadback) (delivery.PlatformEntityMapping, error) {
-	s.confirm = delivery.ConfirmPlatformEntityMappingRequest{ExpectedVersion: expected, Result: result, List: list}
+func (s *mappingApplicationStub) ConfirmPlatformEntityMapping(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request delivery.ConfirmPlatformEntityMappingRequest) (delivery.PlatformEntityMapping, error) {
+	s.confirm = request
 	value := s.mapping
-	value.Status, value.PlatformObjectID, value.PlatformStatus, value.ResultEvidenceID, value.ListEvidenceID = delivery.PlatformEntityMappingConfirmed, result.PlatformObjectID, result.PlatformStatus, result.EvidenceID, list.EvidenceID
+	value.Status, value.PlatformObjectID, value.PlatformStatus, value.ResultEvidenceID, value.ListEvidenceID = delivery.PlatformEntityMappingConfirmed, "platform_1", "pending_review", request.ResultEvidenceID, request.ListEvidenceID
 	return value, nil
 }
 

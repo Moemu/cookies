@@ -378,7 +378,7 @@ paths:
         schema: { type: string, minLength: 1 }
     post:
       operationId: confirmDeliveryPlatformEntityMapping
-      summary: Confirm a mapping only when distinct result-page and list-page evidence agree
+      summary: Confirm a mapping from two server-loaded Computer Use evidence records
       requestBody:
         required: true
         content:
@@ -1438,22 +1438,14 @@ components:
         status: { type: string, enum: [pending_verification, confirmed] }
         version: { type: integer, minimum: 1 }
         created_at: { type: string, format: date-time }
-    PlatformEntityMappingReadback:
-      type: object
-      additionalProperties: false
-      required: [platform_object_id, platform_status, evidence_id]
-      properties:
-        platform_object_id: { type: string, minLength: 1 }
-        platform_status: { type: string, minLength: 1 }
-        evidence_id: { type: string, minLength: 1 }
     ConfirmPlatformEntityMappingRequest:
       type: object
       additionalProperties: false
-      required: [expected_version, result_readback, list_readback]
+      required: [expected_version, result_evidence_id, list_evidence_id]
       properties:
         expected_version: { type: integer, minimum: 1 }
-        result_readback: { $ref: '#/components/schemas/PlatformEntityMappingReadback' }
-        list_readback: { $ref: '#/components/schemas/PlatformEntityMappingReadback' }
+        result_evidence_id: { type: string, minLength: 1 }
+        list_evidence_id: { type: string, minLength: 1 }
     Principal:
       type: object
       additionalProperties: false

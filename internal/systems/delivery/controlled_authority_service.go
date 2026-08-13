@@ -18,19 +18,13 @@ type controlledAuthorityRepository interface {
 	AttachComputerUseRun(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (ControlledExecution, error)
 	CreatePlatformEntityMapping(context.Context, PlatformEntityMapping) (PlatformEntityMapping, error)
 	GetPlatformEntityMapping(context.Context, contract.OrganizationID, contract.ProjectID, string) (PlatformEntityMapping, error)
-	ConfirmPlatformEntityMapping(context.Context, PlatformEntityMapping, int64) (PlatformEntityMapping, error)
-}
-
-type MappingReadback struct {
-	PlatformObjectID string `json:"platform_object_id"`
-	PlatformStatus   string `json:"platform_status"`
-	EvidenceID       string `json:"evidence_id"`
+	ConfirmPlatformEntityMapping(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, string) (PlatformEntityMapping, error)
 }
 
 type ConfirmPlatformEntityMappingRequest struct {
-	ExpectedVersion int64           `json:"expected_version"`
-	Result          MappingReadback `json:"result_readback"`
-	List            MappingReadback `json:"list_readback"`
+	ExpectedVersion  int64  `json:"expected_version"`
+	ResultEvidenceID string `json:"result_evidence_id"`
+	ListEvidenceID   string `json:"list_evidence_id"`
 }
 
 func (s Service) AttachComputerUseRun(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string, expectedVersion int64, runID string) (ControlledExecution, error) {
@@ -70,33 +64,18 @@ func (s Service) CreatePendingPlatformEntityMapping(ctx context.Context, actor c
 	return repo.CreatePlatformEntityMapping(ctx, value)
 }
 
-func (s Service) ConfirmPlatformEntityMapping(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, expectedVersion int64, result, list MappingReadback) (PlatformEntityMapping, error) {
+func (s Service) ConfirmPlatformEntityMapping(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, request ConfirmPlatformEntityMappingRequest) (PlatformEntityMapping, error) {
 	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
 		return PlatformEntityMapping{}, err
 	}
-	if expectedVersion < 1 || result.PlatformObjectID == "" || result.PlatformStatus == "" || result.EvidenceID == "" || list.EvidenceID == "" || result.EvidenceID == list.EvidenceID {
-		return PlatformEntityMapping{}, ErrInvalidRequest
-	}
-	if result.PlatformObjectID != list.PlatformObjectID || result.PlatformStatus != list.PlatformStatus {
+	if request.ExpectedVersion < 1 || strings.TrimSpace(request.ResultEvidenceID) == "" || strings.TrimSpace(request.ListEvidenceID) == "" || request.ResultEvidenceID == request.ListEvidenceID {
 		return PlatformEntityMapping{}, ErrApprovalContentMismatch
 	}
 	repo, ok := s.Repository.(controlledAuthorityRepository)
 	if !ok {
 		return PlatformEntityMapping{}, ErrUnsupportedConfigurationWorkflow
 	}
-	value, err := repo.GetPlatformEntityMapping(ctx, actor.OrganizationID, projectID, id)
-	if err != nil {
-		return PlatformEntityMapping{}, err
-	}
-	value.PlatformObjectID = result.PlatformObjectID
-	value.PlatformStatus = result.PlatformStatus
-	value.ResultEvidenceID = result.EvidenceID
-	value.ListEvidenceID = list.EvidenceID
-	value.Status = PlatformEntityMappingConfirmed
-	if err := value.Validate(); err != nil {
-		return PlatformEntityMapping{}, err
-	}
-	return repo.ConfirmPlatformEntityMapping(ctx, value, expectedVersion)
+	return repo.ConfirmPlatformEntityMapping(ctx, actor.OrganizationID, projectID, id, request.ExpectedVersion, request.ResultEvidenceID, request.ListEvidenceID)
 }
 
 func (s Service) GetPlatformEntityMapping(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string) (PlatformEntityMapping, error) {

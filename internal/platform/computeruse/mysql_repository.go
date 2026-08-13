@@ -460,6 +460,9 @@ func (r MySQLRepository) AuthorizeTakeoverAction(ctx context.Context, run Comput
 	if confirmation.RunID != identity.RunID || confirmation.BindingHash != identity.BindingHash || confirmation.TokenDigest != digest || !confirmation.UsableAt(now) {
 		return ComputerUseRun{}, ControlledActionAttempt{}, ErrConfirmationInvalid
 	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO computer_use_run_steps (id,organization_id,project_id,run_id,sequence_number,workflow_step_id,action,status,blocking_reason,attempt,version) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, step.ID, run.OrganizationID, run.ProjectID, run.ID, step.Sequence, step.WorkflowStepID, step.Action, step.Status, nil, step.Attempt, step.Version); err != nil {
+		return ComputerUseRun{}, ControlledActionAttempt{}, ErrIdempotencyConflict
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO computer_use_controlled_action_attempts (id,organization_id,project_id,run_id,step_id,confirmation_id,approval_id,lease_id,fencing_token,action_hash,idempotency_key,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, attempt.ID, attempt.OrganizationID, attempt.ProjectID, attempt.RunID, attempt.StepID, attempt.ConfirmationID, attempt.ApprovalID, attempt.LeaseID, attempt.FencingToken, attempt.ActionHash, attempt.IdempotencyKey, attempt.Status, attempt.CreatedAt)
 	if err != nil {
 		return ComputerUseRun{}, ControlledActionAttempt{}, ErrIdempotencyConflict
@@ -479,9 +482,6 @@ func (r MySQLRepository) AuthorizeTakeoverAction(ctx context.Context, run Comput
 	affected, _ = result.RowsAffected()
 	if affected != 1 {
 		return ComputerUseRun{}, ControlledActionAttempt{}, ErrVersionConflict
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO computer_use_run_steps (id,organization_id,project_id,run_id,sequence_number,workflow_step_id,action,status,blocking_reason,attempt,version) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, step.ID, run.OrganizationID, run.ProjectID, run.ID, step.Sequence, step.WorkflowStepID, step.Action, step.Status, nil, step.Attempt, step.Version); err != nil {
-		return ComputerUseRun{}, ControlledActionAttempt{}, ErrIdempotencyConflict
 	}
 	payload, err := json.Marshal(evidence)
 	if err != nil {
@@ -552,20 +552,33 @@ func (r MySQLRepository) RecordTakeoverEvidence(ctx context.Context, run Compute
 	return r.GetRun(ctx, run.OrganizationID, run.ProjectID, run.ID)
 }
 
-func (r MySQLRepository) RecordTakeoverOutcome(ctx context.Context, run ComputerUseRun, expected int64, attemptID string, next RunState, reason BlockingReason, step RunStep, evidence Evidence, event RunEvent, now time.Time) (ComputerUseRun, error) {
+func (r MySQLRepository) RecordTakeoverOutcome(ctx context.Context, run ComputerUseRun, expected int64, attemptID, attemptStatus string, next RunState, reason BlockingReason, step RunStep, evidence Evidence, event RunEvent, now time.Time) (ComputerUseRun, error) {
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return ComputerUseRun{}, err
 	}
 	defer tx.Rollback()
-	var storedAttemptID, storedLeaseID string
+	var storedAttemptID, storedLeaseID, storedAttemptStatus string
 	var storedFencingToken int64
-	if err := tx.QueryRowContext(ctx, `SELECT id,lease_id,fencing_token FROM computer_use_controlled_action_attempts WHERE organization_id=? AND project_id=? AND id=? AND run_id=? AND lease_id=? FOR UPDATE`, run.OrganizationID, run.ProjectID, attemptID, run.ID, run.LeaseID).Scan(&storedAttemptID, &storedLeaseID, &storedFencingToken); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id,lease_id,fencing_token,status FROM computer_use_controlled_action_attempts WHERE organization_id=? AND project_id=? AND id=? AND run_id=? AND lease_id=? FOR UPDATE`, run.OrganizationID, run.ProjectID, attemptID, run.ID, run.LeaseID).Scan(&storedAttemptID, &storedLeaseID, &storedFencingToken, &storedAttemptStatus); err != nil {
 		return ComputerUseRun{}, ErrNotFound
+	}
+	if (storedAttemptStatus != ControlledActionAuthorized && storedAttemptStatus != ControlledActionVerified) || (attemptStatus != ControlledActionVerified && attemptStatus != ControlledActionFailed && attemptStatus != ControlledActionResultUnknown) {
+		return ComputerUseRun{}, ErrInvalidTransition
 	}
 	storedLease, err := scanLease(tx.QueryRowContext(ctx, leaseSelect+` WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, run.OrganizationID, run.ProjectID, storedLeaseID))
 	if err != nil || storedLease.FencingToken != storedFencingToken || !storedLease.ValidAt(now) {
 		return ComputerUseRun{}, ErrLeaseUnavailable
+	}
+	if storedAttemptStatus != attemptStatus {
+		result, err := tx.ExecContext(ctx, `UPDATE computer_use_controlled_action_attempts SET status=? WHERE organization_id=? AND project_id=? AND id=? AND status=?`, attemptStatus, run.OrganizationID, run.ProjectID, attemptID, storedAttemptStatus)
+		if err != nil {
+			return ComputerUseRun{}, err
+		}
+		affected, _ := result.RowsAffected()
+		if affected != 1 {
+			return ComputerUseRun{}, ErrVersionConflict
+		}
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE computer_use_runs SET state=?,blocking_reason=?,version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND state=? AND paused=TRUE AND takeover_active=TRUE`, next, nullableString(string(reason)), now, run.OrganizationID, run.ProjectID, run.ID, expected, run.State)
 	if err != nil {

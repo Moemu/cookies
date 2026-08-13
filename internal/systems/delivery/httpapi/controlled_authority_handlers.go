@@ -172,7 +172,7 @@ func (s *Server) platformEntityMappingAction(w http.ResponseWriter, r *http.Requ
 	if !decode(w, r, &body) {
 		return
 	}
-	value, err := app.ConfirmPlatformEntityMapping(r.Context(), mustActor(r), projectID(r), r.PathValue("mapping_id"), body.ExpectedVersion, body.Result, body.List)
+	value, err := app.ConfirmPlatformEntityMapping(r.Context(), mustActor(r), projectID(r), r.PathValue("mapping_id"), body)
 	if err != nil {
 		writeError(w, r, err)
 		return

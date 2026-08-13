@@ -397,6 +397,13 @@ type ControlledActionAttempt struct {
 	CreatedAt      time.Time               `json:"created_at"`
 }
 
+const (
+	ControlledActionAuthorized    = "authorized"
+	ControlledActionVerified      = "verified"
+	ControlledActionFailed        = "failed"
+	ControlledActionResultUnknown = "result_unknown"
+)
+
 func isSHA256(value string) bool {
 	if len(value) != 64 {
 		return false
