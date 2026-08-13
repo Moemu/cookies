@@ -488,14 +488,14 @@ type OceanEngineCopyItem struct {
 }
 
 type OceanEnginePromotionSettings struct {
-	CallToAction             string           `json:"call_to_action,omitempty"`
-	SourceLabel              string           `json:"source_label,omitempty"`
-	CommentsEnabled          *bool            `json:"comments_enabled,omitempty"`
-	SmartGenerationEnabled   *bool            `json:"smart_generation_enabled,omitempty"`
-	ClientDownloadEnabled    *bool            `json:"client_download_enabled,omitempty"`
-	DirectLinkMode           string           `json:"direct_link_mode,omitempty"`
-	CategoryReference        *StableReference `json:"category_reference,omitempty"`
-	BrandReference           *StableReference `json:"brand_reference,omitempty"`
+	CallToAction           string           `json:"call_to_action,omitempty"`
+	SourceLabel            string           `json:"source_label,omitempty"`
+	CommentsEnabled        *bool            `json:"comments_enabled,omitempty"`
+	SmartGenerationEnabled *bool            `json:"smart_generation_enabled,omitempty"`
+	ClientDownloadEnabled  *bool            `json:"client_download_enabled,omitempty"`
+	DirectLinkMode         string           `json:"direct_link_mode,omitempty"`
+	CategoryReference      *StableReference `json:"category_reference,omitempty"`
+	BrandReference         *StableReference `json:"brand_reference,omitempty"`
 }
 
 type OceanEnginePromotionDraft struct {
