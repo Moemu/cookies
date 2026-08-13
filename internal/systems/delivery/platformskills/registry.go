@@ -105,9 +105,9 @@ func (d Definition) Validate() error {
 		d.Owner != "delivery" ||
 		d.Executable || d.RealBrowserDriver || d.SubmitAllowed ||
 		d.EvidenceObserved != "2026-08-06" ||
-		d.UIBaseline.RevalidatedAt != "2026-08-12" ||
+		d.UIBaseline.RevalidatedAt != "2026-08-13" ||
 		d.UIBaseline.LocatorContract != "project_form_live_dom_partial" ||
-		d.UIBaseline.DriftCheck != "project_form_revalidated_promotion_form_pending" ||
+		d.UIBaseline.DriftCheck != "project_form_revalidated_promotion_form_page_drift_observed" ||
 		!d.RuntimePolicy.ProjectFormLiveCalibrated ||
 		d.RuntimePolicy.PromotionFormLiveCalibrated ||
 		d.RuntimePolicy.ControlPlaneEvidenceRecorded ||

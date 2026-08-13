@@ -10,7 +10,7 @@ func TestOceanEngineEcommerceManualFreezesStageBBaselineWithoutClaimingDriverRea
 	if definition.Executable || definition.RealBrowserDriver || definition.SubmitAllowed || definition.GateOne.Ready {
 		t.Fatalf("calibration baseline claims runtime readiness: %#v", definition)
 	}
-	if definition.EvidenceObserved != "2026-08-06" || definition.UIBaseline.RevalidatedAt != "2026-08-12" || definition.UIBaseline.DriftCheck != "project_form_revalidated_promotion_form_pending" {
+	if definition.EvidenceObserved != "2026-08-06" || definition.UIBaseline.RevalidatedAt != "2026-08-13" || definition.UIBaseline.DriftCheck != "project_form_revalidated_promotion_form_page_drift_observed" {
 		t.Fatalf("stage B provenance was not preserved: %#v", definition)
 	}
 	if len(definition.PageTypes) < 9 || len(definition.Capabilities.Allowed) == 0 || len(definition.Capabilities.Forbidden) == 0 || len(definition.DynamicConditionKeys) < 6 {

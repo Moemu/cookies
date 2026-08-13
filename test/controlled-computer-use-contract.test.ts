@@ -64,7 +64,11 @@ test("OceanEngine SkillDefinition binds stage B evidence without claiming Browse
   assert.equal((definition.gate_one as Record<string, unknown>).project_form_status, "passed");
   assert.equal((definition.gate_one as Record<string, unknown>).promotion_form_status, "pending");
   assert.equal((definition.ui_baseline as Record<string, unknown>).observed_at, "2026-08-06");
-  assert.equal((definition.ui_baseline as Record<string, unknown>).revalidated_at, "2026-08-12");
+  assert.equal((definition.ui_baseline as Record<string, unknown>).revalidated_at, "2026-08-13");
+  assert.equal(
+    (definition.ui_baseline as Record<string, unknown>).drift_check,
+    "project_form_revalidated_promotion_form_page_drift_observed",
+  );
   for (const reference of [definition.schema_ref, ...(definition.evidence_refs as string[])]) {
     assert.equal(existsSync(join(root, String(reference))), true, `missing stage B evidence ${reference}`);
   }
@@ -148,6 +152,37 @@ test("promotion locator capture remains an empty template rather than fabricated
   assert.equal((template.safe_exit as Record<string, unknown>).observed, false);
   assert.ok((template.fields_to_capture as string[]).includes("promotion_name"));
   assert.ok((template.selector_surfaces_to_capture as string[]).includes("landing_page_hybrid"));
+});
+
+test("promotion live calibration stops before form fill when the stage B page has drifted", () => {
+  const evidencePath = join(
+    root,
+    "docs",
+    "delivery",
+    "evidence",
+    "oceanengine-gate-one-promotion-drift-2026-08-13.json",
+  );
+  const rawEvidence = readFileSync(evidencePath, "utf8");
+  const evidence = JSON.parse(rawEvidence) as Record<string, unknown>;
+  assert.doesNotMatch(rawEvidence, /\b\d{16}\b/);
+  assert.equal(evidence.status, "page_drift_observed_fill_not_started");
+  assert.equal(evidence.stop_reason, "PAGE_DRIFT");
+  assert.equal(evidence.gate_one_result, "partial");
+  assert.equal(evidence.real_browser_driver_calibrated, false);
+  assert.equal(evidence.submit_allowed, false);
+  const actions = evidence.actions as Record<string, unknown>;
+  assert.equal(actions.form_fill_started, false);
+  assert.equal(actions.field_values_changed, false);
+  assert.deepEqual(actions.write_boundaries_clicked, []);
+  assert.equal(actions.remote_side_effect_detected, false);
+  const locators = evidence.stable_live_locators as Array<Record<string, unknown>>;
+  assert.ok(locators.some((locator) => locator.field === "final_write_boundary" && locator.action_allowed === false));
+  assert.ok((evidence.locator_gaps as string[]).includes("budget_and_bid_share_ambiguous_number_inputs"));
+  assert.ok(
+    (evidence.drift_findings as Array<Record<string, unknown>>).some(
+      (finding) => finding.key === "base_material_capacity",
+    ),
+  );
 });
 
 test("run-time blocks cannot reuse the Phase C compile-time prohibition", () => {

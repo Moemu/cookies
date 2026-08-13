@@ -25,10 +25,10 @@
       "required": ["observed_at", "revalidated_at", "platform_build", "locator_contract", "drift_check"],
       "properties": {
         "observed_at": { "const": "2026-08-06" },
-        "revalidated_at": { "const": "2026-08-12" },
+        "revalidated_at": { "const": "2026-08-13" },
         "platform_build": { "const": "unknown" },
         "locator_contract": { "const": "project_form_live_dom_partial" },
-        "drift_check": { "const": "project_form_revalidated_promotion_form_pending" }
+        "drift_check": { "const": "project_form_revalidated_promotion_form_page_drift_observed" }
       }
     },
     "schema_ref": { "const": "docs/delivery/schemas/oceanengine-bidding-schema-v0.1.json" },

@@ -11,13 +11,13 @@
   "real_browser_driver": false,
   "submit_allowed": false,
   "evidence_observed_at": "2026-08-06",
-  "last_reviewed_at": "2026-08-12",
+  "last_reviewed_at": "2026-08-13",
   "ui_baseline": {
     "observed_at": "2026-08-06",
-    "revalidated_at": "2026-08-12",
+    "revalidated_at": "2026-08-13",
     "platform_build": "unknown",
     "locator_contract": "project_form_live_dom_partial",
-    "drift_check": "project_form_revalidated_promotion_form_pending"
+    "drift_check": "project_form_revalidated_promotion_form_page_drift_observed"
   },
   "schema_ref": "docs/delivery/schemas/oceanengine-bidding-schema-v0.1.json",
   "evidence_refs": [
@@ -31,7 +31,8 @@
     "docs/delivery/fixtures/oceanengine-leads-short-video-v0.1-draft.json",
     "docs/delivery/fixtures/oceanengine-app-download-android-v0.1-draft.json",
     "docs/delivery/fixtures/oceanengine-ecommerce-manual-live-locators-v0.1.json",
-    "docs/delivery/evidence/oceanengine-gate-one-project-form-2026-08-12.json"
+    "docs/delivery/evidence/oceanengine-gate-one-project-form-2026-08-12.json",
+    "docs/delivery/evidence/oceanengine-gate-one-promotion-drift-2026-08-13.json"
   ],
   "page_types": [
     { "kind": "account_context", "evidence_state": "observed" },

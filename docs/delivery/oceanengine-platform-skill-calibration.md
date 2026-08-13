@@ -74,18 +74,29 @@ Acceptance requires all of the following:
 7. Return to a known read-only page and prove that no platform object or status
    change was created.
 
-The project-form portion passed items 1–7. The promotion-form portion and
-control-plane evidence recording remain pending, so gate one is `partial`, not
-passed, and the real Browser Driver is still uncalibrated as a complete Skill.
+The project-form portion passed items 1–7. On 2026-08-13, the promotion-form
+page was reidentified in the authorized test account and an allowlisted
+existing test project. Before any field was changed, the live page diverged
+from the stage B fixture: video/image capacities were `10/10` instead of
+`30/50`, the landing-page label was `橙子落地页` instead of `自研落地页`, and
+a `单元预算与出价` section was present. The replay therefore stopped with
+`PAGE_DRIFT` before form fill. The redacted observation is recorded in
+`evidence/oceanengine-gate-one-promotion-drift-2026-08-13.json`.
+
+The promotion-form portion and control-plane evidence recording remain pending,
+so gate one is `partial`, not passed, and the real Browser Driver is still
+uncalibrated as a complete Skill.
 
 The non-live preparation for a persisted replay is frozen in
 `oceanengine-gate-one-replay-runbook.md` and
 `fixtures/oceanengine-gate-one-replay-plan-v0.1.json`. Promotion locator
 capture uses
 `fixtures/oceanengine-promotion-live-locator-capture-v0.1-template.json`.
-That file is deliberately an empty `template_not_observed` record: it lists
+That file remains an empty `template_not_observed` record: it lists
 the stage B fields and selector surfaces to inspect but contains no invented
-DOM locator and is not evidence of calibration.
+DOM locator and is not evidence of calibration. The separate 2026-08-13 drift
+observation contains only locators confirmed on the live page; ambiguous or
+unvisited controls remain explicit gaps.
 
 Agent final-submit behavior must not be added to a `SKILL.md` until the complete
 project → promotion flow has been validated. Even after gate one passes, save,
