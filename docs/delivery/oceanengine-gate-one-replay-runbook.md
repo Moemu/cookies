@@ -8,6 +8,7 @@
 
 - `fixtures/oceanengine-gate-one-replay-plan-v0.1.json`：控制面和证据步骤；
 - `fixtures/oceanengine-promotion-live-locator-capture-v0.1-template.json`：推广单元实时定位记录模板；
+- `fixtures/oceanengine-promotion-live-locators-v0.1.json`：2026-08-13 已观察的推广单元部分定位基线；
 - `fixtures/oceanengine-ecommerce-manual-live-locators-v0.1.json`：已复核的项目表单定位基线。
 
 ## 角色边界
@@ -60,6 +61,8 @@
 
 本流程不签发一次性最终确认，也不调用任何 prepare、submit 或其他写入端口。
 
+截至 2026-08-13，项目表单和推广单元未提交表单均已完成实时定位、完整引用配置、逐字段回读、安全退出和精确名称零结果验证。正式 ChangeSet、Approval、ControlledExecution、Environment/Profile/SitePolicy 以及五步 fenced takeover evidence 均已落库；Lease 已释放，Run 已取消。复跑计划状态为 `completed_no_write`。
+
 ## 页面身份与漂移判定
 
 页面身份必须由 URL 结构和可见事实共同确认，单一标题或按钮不足以识别页面。
@@ -86,22 +89,22 @@
 稳定字段容器内的语义文本；禁止坐标、`nth-child`、构建生成 class 和未限定的重复文本。
 
 对每个字段同时记录：页面/字段组归属、可见条件、唯一性、读回方式、取消行为、相邻写操作、
-敏感值处理和漂移时的停止原因。选择器弹窗只验证搜索、空状态、容量、取消和无变化返回；
-不选择真实素材、不上传、不新建品牌/落地页/锚点，也不进入授权管理。
+敏感值处理和漂移时的停止原因。测试账户内已有素材、落地页、类目和品牌均获操作人授权，
+可在未提交表单中选择并回读；不上传、不新建品牌/落地页/锚点，也不进入授权管理。
 
 ## 门一验收清单
 
-- [ ] 正式 Delivery Authority 由服务端解析并成功绑定唯一 Run。
-- [ ] Environment/Profile/Policy、Lease 和 Kill Switch 预检通过。
-- [ ] 当前账户、页面类型和 allowlisted 巨量项目均重新识别。
-- [ ] 项目与推广单元 locator 均有实时 DOM 证据，且没有坐标回退。
-- [ ] 所有批准字段已填写到未提交表单并逐字段回读。
-- [ ] 动态显示、重置和默认值与阶段 B 基线一致。
-- [ ] 每个步骤均形成 Run/Step/Event/脱敏 Evidence 链。
-- [ ] 草稿已通过实时确认的安全路径放弃。
-- [ ] 返回只读页后二次确认没有新增对象、状态变化或残留临时名称。
-- [ ] Lease 已释放，Run 已取消或进入明确的非写终态。
-- [ ] 未签发最终确认，未触达任何写边界。
+- [x] 正式 Delivery Authority 由服务端解析并成功绑定唯一 Run。
+- [x] Environment/Profile/Policy、Lease 和 Kill Switch 预检通过。
+- [x] 当前账户、页面类型和 allowlisted 巨量项目均重新识别。
+- [x] 项目与推广单元 locator 均有实时 DOM 证据，且没有坐标回退。
+- [x] 所有批准字段已填写到未提交表单并逐字段回读。
+- [x] 动态显示、重置和默认值与阶段 B 基线一致。
+- [x] 每个步骤均形成 Run/Step/Event/脱敏 Evidence 链。
+- [x] 草稿已通过实时确认的安全路径放弃。
+- [x] 返回只读页后二次确认没有新增对象、状态变化或残留临时名称。
+- [x] Lease 已释放，Run 已取消或进入明确的非写终态。
+- [x] 未签发最终确认，未触达任何写边界。
 
-只有全部项目通过，门一才可从 `partial` 改为 `passed`。这仍不改变
+上述项目已全部通过，门一状态为 `passed`。这仍不改变
 `submit_allowed=false`，也不能据此把 Agent 最终提交行为写入 `SKILL.md`。

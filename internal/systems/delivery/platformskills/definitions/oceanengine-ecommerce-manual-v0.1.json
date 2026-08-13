@@ -5,7 +5,7 @@
   "display_name": "巨量引擎·电商手动投放",
   "platform": "ocean_engine",
   "capability": "ecommerce_manual_delivery",
-  "status": "gate_one_partial_live_calibration",
+  "status": "gate_one_passed_takeover_calibration",
   "owner": "delivery",
   "executable": false,
   "real_browser_driver": false,
@@ -16,8 +16,8 @@
     "observed_at": "2026-08-06",
     "revalidated_at": "2026-08-13",
     "platform_build": "unknown",
-    "locator_contract": "project_form_live_dom_partial",
-    "drift_check": "project_form_revalidated_promotion_form_page_drift_observed"
+    "locator_contract": "project_and_promotion_forms_live_dom",
+    "drift_check": "promotion_configuration_branches_revalidated"
   },
   "schema_ref": "docs/delivery/schemas/oceanengine-bidding-schema-v0.1.json",
   "evidence_refs": [
@@ -32,7 +32,9 @@
     "docs/delivery/fixtures/oceanengine-app-download-android-v0.1-draft.json",
     "docs/delivery/fixtures/oceanengine-ecommerce-manual-live-locators-v0.1.json",
     "docs/delivery/evidence/oceanengine-gate-one-project-form-2026-08-12.json",
-    "docs/delivery/evidence/oceanengine-gate-one-promotion-drift-2026-08-13.json"
+    "docs/delivery/evidence/oceanengine-gate-one-promotion-drift-2026-08-13.json",
+    "docs/delivery/fixtures/oceanengine-promotion-live-locators-v0.1.json",
+    "docs/delivery/evidence/oceanengine-gate-one-promotion-form-2026-08-13.json"
   ],
   "page_types": [
     { "kind": "account_context", "evidence_state": "observed" },
@@ -57,8 +59,8 @@
   "write_validation_pending": ["save", "submit", "write_idempotency", "platform_object_id_readback", "server_validation", "post_write_status"],
   "runtime_policy": {
     "project_form_live_calibrated": true,
-    "promotion_form_live_calibrated": false,
-    "control_plane_evidence_recorded": false,
+    "promotion_form_live_calibrated": true,
+    "control_plane_evidence_recorded": true,
     "agent_final_submit_documentation": "deferred_until_end_to_end_flow_validated"
   },
   "rollback": {
@@ -67,12 +69,12 @@
   },
   "gate_one": {
     "purpose": "revalidate_stage_b_evidence_and_calibrate_realtime_dom_locators",
-    "ready": false,
-    "result": "partial",
+    "ready": true,
+    "result": "passed",
     "project_form_status": "passed",
-    "promotion_form_status": "pending",
-    "control_plane_evidence_status": "pending",
-    "live_evidence_ref": "docs/delivery/evidence/oceanengine-gate-one-project-form-2026-08-12.json",
+    "promotion_form_status": "passed",
+    "control_plane_evidence_status": "passed",
+    "live_evidence_ref": "docs/delivery/evidence/oceanengine-gate-one-promotion-form-2026-08-13.json",
     "required_scope": ["test_account_reference", "allowed_platform_project_ids", "action_fill_unsubmitted_form", "budget_ceiling_cny"],
     "acceptance_checklist": ["reidentify_current_page_and_account", "confirm_ui_has_not_drifted", "establish_stable_dom_locators", "fill_only_unsubmitted_fields", "read_back_every_field", "discard_draft", "confirm_no_platform_write"]
   }

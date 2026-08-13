@@ -12,7 +12,7 @@
     "display_name": { "const": "巨量引擎·电商手动投放" },
     "platform": { "const": "ocean_engine" },
     "capability": { "const": "ecommerce_manual_delivery" },
-    "status": { "const": "gate_one_partial_live_calibration" },
+    "status": { "const": "gate_one_passed_takeover_calibration" },
     "owner": { "const": "delivery" },
     "executable": { "const": false },
     "real_browser_driver": { "const": false },
@@ -27,8 +27,8 @@
         "observed_at": { "const": "2026-08-06" },
         "revalidated_at": { "const": "2026-08-13" },
         "platform_build": { "const": "unknown" },
-        "locator_contract": { "const": "project_form_live_dom_partial" },
-        "drift_check": { "const": "project_form_revalidated_promotion_form_page_drift_observed" }
+        "locator_contract": { "const": "project_and_promotion_forms_live_dom" },
+        "drift_check": { "const": "promotion_configuration_branches_revalidated" }
       }
     },
     "schema_ref": { "const": "docs/delivery/schemas/oceanengine-bidding-schema-v0.1.json" },
@@ -72,8 +72,8 @@
       "required": ["project_form_live_calibrated", "promotion_form_live_calibrated", "control_plane_evidence_recorded", "agent_final_submit_documentation"],
       "properties": {
         "project_form_live_calibrated": { "const": true },
-        "promotion_form_live_calibrated": { "const": false },
-        "control_plane_evidence_recorded": { "const": false },
+        "promotion_form_live_calibrated": { "const": true },
+        "control_plane_evidence_recorded": { "const": true },
         "agent_final_submit_documentation": { "const": "deferred_until_end_to_end_flow_validated" }
       }
     },
@@ -92,12 +92,12 @@
       "required": ["purpose", "ready", "result", "project_form_status", "promotion_form_status", "control_plane_evidence_status", "live_evidence_ref", "required_scope", "acceptance_checklist"],
       "properties": {
         "purpose": { "const": "revalidate_stage_b_evidence_and_calibrate_realtime_dom_locators" },
-        "ready": { "const": false },
-        "result": { "const": "partial" },
+        "ready": { "const": true },
+        "result": { "const": "passed" },
         "project_form_status": { "const": "passed" },
-        "promotion_form_status": { "const": "pending" },
-        "control_plane_evidence_status": { "const": "pending" },
-        "live_evidence_ref": { "const": "docs/delivery/evidence/oceanengine-gate-one-project-form-2026-08-12.json" },
+        "promotion_form_status": { "const": "passed" },
+        "control_plane_evidence_status": { "const": "passed" },
+        "live_evidence_ref": { "const": "docs/delivery/evidence/oceanengine-gate-one-promotion-form-2026-08-13.json" },
         "required_scope": { "type": "array", "items": { "enum": ["test_account_reference", "allowed_platform_project_ids", "action_fill_unsubmitted_form", "budget_ceiling_cny"] }, "minItems": 4, "uniqueItems": true },
         "acceptance_checklist": { "type": "array", "items": { "enum": ["reidentify_current_page_and_account", "confirm_ui_has_not_drifted", "establish_stable_dom_locators", "fill_only_unsubmitted_fields", "read_back_every_field", "discard_draft", "confirm_no_platform_write"] }, "minItems": 7, "uniqueItems": true }
       }

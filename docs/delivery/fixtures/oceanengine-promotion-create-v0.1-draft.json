@@ -29,6 +29,7 @@
     "product_information",
     "creative_components",
     "promotion_settings",
+    "promotion_budget_and_bid",
     "promotion_name"
   ],
   "observed_initial_absence": [
@@ -73,11 +74,17 @@
       "value_type": "reference[]",
       "required_state": "observed_required",
       "editable_state": "observed_editable",
-      "sample_capacity_labels": {
+      "historical_sample_capacity_labels": {
         "video": 30,
         "image": 50,
         "image_text": 10
       },
+      "current_manual_app_order_sample_capacity_labels": {
+        "video": 10,
+        "image": 10,
+        "image_text": 10
+      },
+      "capacity_semantics": "conditional_read_current_page_do_not_freeze_global_constant",
       "evidence_state": "observed"
     },
     {
@@ -177,6 +184,21 @@
       "required_state": "observed_required",
       "editable_state": "conditional",
       "evidence_state": "observed"
+    },
+    {
+      "key": "promotion_budget_and_bid",
+      "value_type": "object",
+      "source_value": {
+        "budget_mode": "daily",
+        "budget_cny": null,
+        "bid_cny": null
+      },
+      "budget_modes": ["daily", "total"],
+      "budget_locator_ref": "createad_adBudget",
+      "bid_locator_ref": "createad_adBid",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "evidence_state": "operator_reviewed"
     },
     {
       "key": "promotion_name",

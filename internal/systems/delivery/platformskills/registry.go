@@ -101,23 +101,23 @@ func (d Definition) Validate() error {
 		d.DisplayName != "巨量引擎·电商手动投放" ||
 		d.Platform != "ocean_engine" ||
 		d.Capability != "ecommerce_manual_delivery" ||
-		d.Status != "gate_one_partial_live_calibration" ||
+		d.Status != "gate_one_passed_takeover_calibration" ||
 		d.Owner != "delivery" ||
 		d.Executable || d.RealBrowserDriver || d.SubmitAllowed ||
 		d.EvidenceObserved != "2026-08-06" ||
 		d.UIBaseline.RevalidatedAt != "2026-08-13" ||
-		d.UIBaseline.LocatorContract != "project_form_live_dom_partial" ||
-		d.UIBaseline.DriftCheck != "project_form_revalidated_promotion_form_page_drift_observed" ||
+		d.UIBaseline.LocatorContract != "project_and_promotion_forms_live_dom" ||
+		d.UIBaseline.DriftCheck != "promotion_configuration_branches_revalidated" ||
 		!d.RuntimePolicy.ProjectFormLiveCalibrated ||
-		d.RuntimePolicy.PromotionFormLiveCalibrated ||
-		d.RuntimePolicy.ControlPlaneEvidenceRecorded ||
+		!d.RuntimePolicy.PromotionFormLiveCalibrated ||
+		!d.RuntimePolicy.ControlPlaneEvidenceRecorded ||
 		d.RuntimePolicy.AgentFinalSubmitDocumentation != "deferred_until_end_to_end_flow_validated" ||
 		d.Rollback.Method != "disable_skill_version_and_fall_back_to_human_takeover" ||
-		d.GateOne.Ready ||
-		d.GateOne.Result != "partial" ||
+		!d.GateOne.Ready ||
+		d.GateOne.Result != "passed" ||
 		d.GateOne.ProjectFormStatus != "passed" ||
-		d.GateOne.PromotionFormStatus != "pending" ||
-		d.GateOne.ControlPlaneEvidenceStatus != "pending" ||
+		d.GateOne.PromotionFormStatus != "passed" ||
+		d.GateOne.ControlPlaneEvidenceStatus != "passed" ||
 		d.GateOne.LiveEvidenceRef == "" ||
 		len(d.EvidenceRefs) < 11 ||
 		len(d.PageTypes) < 9 ||

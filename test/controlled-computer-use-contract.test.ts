@@ -48,7 +48,7 @@ test("stage B Skill calibration is bound and partial Skill identity is rejected"
   }
 });
 
-test("OceanEngine SkillDefinition binds stage B evidence without claiming Browser Driver readiness", () => {
+test("OceanEngine SkillDefinition records passed gate-one takeover calibration without enabling execution", () => {
   const definitionPath = join(root, "internal", "systems", "delivery", "platformskills", "definitions", "oceanengine-ecommerce-manual-v0.1.json");
   const definition = readJSON(definitionPath);
   const schema = readJSON(join(contracts, "delivery-platform-skill-definition-v1.schema.json"));
@@ -58,28 +58,28 @@ test("OceanEngine SkillDefinition binds stage B evidence without claiming Browse
   assert.equal(definition.executable, false);
   assert.equal(definition.real_browser_driver, false);
   assert.equal(definition.submit_allowed, false);
-  assert.equal(definition.status, "gate_one_partial_live_calibration");
-  assert.equal((definition.gate_one as Record<string, unknown>).ready, false);
-  assert.equal((definition.gate_one as Record<string, unknown>).result, "partial");
+  assert.equal(definition.status, "gate_one_passed_takeover_calibration");
+  assert.equal((definition.gate_one as Record<string, unknown>).ready, true);
+  assert.equal((definition.gate_one as Record<string, unknown>).result, "passed");
   assert.equal((definition.gate_one as Record<string, unknown>).project_form_status, "passed");
-  assert.equal((definition.gate_one as Record<string, unknown>).promotion_form_status, "pending");
+  assert.equal((definition.gate_one as Record<string, unknown>).promotion_form_status, "passed");
   assert.equal((definition.ui_baseline as Record<string, unknown>).observed_at, "2026-08-06");
   assert.equal((definition.ui_baseline as Record<string, unknown>).revalidated_at, "2026-08-13");
   assert.equal(
     (definition.ui_baseline as Record<string, unknown>).drift_check,
-    "project_form_revalidated_promotion_form_page_drift_observed",
+    "promotion_configuration_branches_revalidated",
   );
   for (const reference of [definition.schema_ref, ...(definition.evidence_refs as string[])]) {
     assert.equal(existsSync(join(root, String(reference))), true, `missing stage B evidence ${reference}`);
   }
 });
 
-test("PR 50 preserves partial live calibration without claiming a complete real Browser Driver", () => {
+test("PR 50 preserves passed takeover calibration without claiming an installed automated Browser Driver", () => {
   assert.equal(existsSync(join(root, "internal", "systems", "delivery", "oceanengineskill", "gate_one.go")), false);
   const definition = readFileSync(join(root, "internal", "systems", "delivery", "platformskills", "definitions", "oceanengine-ecommerce-manual-v0.1.json"), "utf8");
-  assert.match(definition, /"locator_contract": "project_form_live_dom_partial"/);
-  assert.match(definition, /"promotion_form_live_calibrated": false/);
-  assert.match(definition, /"control_plane_evidence_recorded": false/);
+  assert.match(definition, /"locator_contract": "project_and_promotion_forms_live_dom"/);
+  assert.match(definition, /"promotion_form_live_calibrated": true/);
+  assert.match(definition, /"control_plane_evidence_recorded": true/);
   assert.match(definition, /"agent_final_submit_documentation": "deferred_until_end_to_end_flow_validated"/);
 });
 
@@ -123,7 +123,11 @@ test("gate-one replay preparation is non-write and uses the exact takeover evide
   const planPath = join(root, "docs", "delivery", "fixtures", "oceanengine-gate-one-replay-plan-v0.1.json");
   const rawPlan = readFileSync(planPath, "utf8");
   const plan = JSON.parse(rawPlan) as Record<string, unknown>;
-  assert.equal(plan.status, "preparation_only");
+  assert.equal(plan.status, "completed_no_write");
+  const liveForm = plan.live_form_calibration as Record<string, unknown>;
+  assert.equal(liveForm.project_form, "passed");
+  assert.equal(liveForm.promotion_form, "passed");
+  assert.equal(liveForm.control_plane_evidence, "passed");
   assert.equal(plan.remote_write_allowed, false);
   assert.equal(plan.final_confirmation_allowed, false);
   assert.equal(plan.automated_prepare_allowed, false);
@@ -154,7 +158,7 @@ test("promotion locator capture remains an empty template rather than fabricated
   assert.ok((template.selector_surfaces_to_capture as string[]).includes("landing_page_hybrid"));
 });
 
-test("promotion live calibration stops before form fill when the stage B page has drifted", () => {
+test("conservative promotion drift stop is retained as a corrected configuration-branch audit record", () => {
   const evidencePath = join(
     root,
     "docs",
@@ -165,8 +169,8 @@ test("promotion live calibration stops before form fill when the stage B page ha
   const rawEvidence = readFileSync(evidencePath, "utf8");
   const evidence = JSON.parse(rawEvidence) as Record<string, unknown>;
   assert.doesNotMatch(rawEvidence, /\b\d{16}\b/);
-  assert.equal(evidence.status, "page_drift_observed_fill_not_started");
-  assert.equal(evidence.stop_reason, "PAGE_DRIFT");
+  assert.equal(evidence.status, "conservative_stop_reclassified_as_configuration_branch");
+  assert.equal(evidence.original_stop_reason, "PAGE_DRIFT");
   assert.equal(evidence.gate_one_result, "partial");
   assert.equal(evidence.real_browser_driver_calibrated, false);
   assert.equal(evidence.submit_allowed, false);
@@ -175,14 +179,70 @@ test("promotion live calibration stops before form fill when the stage B page ha
   assert.equal(actions.field_values_changed, false);
   assert.deepEqual(actions.write_boundaries_clicked, []);
   assert.equal(actions.remote_side_effect_detected, false);
-  const locators = evidence.stable_live_locators as Array<Record<string, unknown>>;
-  assert.ok(locators.some((locator) => locator.field === "final_write_boundary" && locator.action_allowed === false));
-  assert.ok((evidence.locator_gaps as string[]).includes("budget_and_bid_share_ambiguous_number_inputs"));
-  assert.ok(
-    (evidence.drift_findings as Array<Record<string, unknown>>).some(
-      (finding) => finding.key === "base_material_capacity",
-    ),
+  const reclassification = evidence.reclassification as Record<string, unknown>;
+  assert.equal(reclassification.landing_page_label, "parent_project_delivery_carrier_branch");
+  assert.equal(reclassification.material_capacity, "conditional_platform_limit_not_frozen_constant");
+});
+
+test("promotion form pass proves semantic readback, fenced evidence, safe exit, and exact no-write search", () => {
+  const evidencePath = join(
+    root,
+    "docs",
+    "delivery",
+    "evidence",
+    "oceanengine-gate-one-promotion-form-2026-08-13.json",
   );
+  const rawEvidence = readFileSync(evidencePath, "utf8");
+  const evidence = JSON.parse(rawEvidence) as Record<string, unknown>;
+  assert.doesNotMatch(rawEvidence, /\b\d{16}\b/);
+  assert.equal(evidence.gate_one_result, "passed");
+  assert.equal(evidence.real_browser_driver_calibrated, true);
+  assert.equal(evidence.submit_allowed, false);
+  const promotionForm = evidence.promotion_form as Record<string, unknown>;
+  assert.equal(promotionForm.status, "passed");
+  assert.equal(promotionForm.safe_exit_exercised, true);
+  assert.deepEqual(promotionForm.write_boundaries_clicked, []);
+  for (const field of promotionForm.approved_field_readback as Array<Record<string, unknown>>) {
+    assert.equal(field.matched, true, `unmatched promotion readback for ${String(field.field)}`);
+  }
+  assert.ok((promotionForm.approved_field_readback as Array<Record<string, unknown>>).some((field) => field.field === "base_material_ref"));
+  assert.ok((promotionForm.approved_field_readback as Array<Record<string, unknown>>).some((field) => field.field === "landing_page_ref"));
+  const noWrite = evidence.no_write_verification as Record<string, unknown>;
+  assert.equal(noWrite.exact_temporary_name_search_executed, true);
+  assert.equal(noWrite.matching_platform_objects, 0);
+  assert.equal(noWrite.remote_side_effect_detected, false);
+  const recording = evidence.control_plane_recording as Record<string, unknown>;
+  assert.equal(recording.status, "passed");
+  assert.equal(recording.lease_released, true);
+  assert.equal(recording.run_final_state, "cancelled");
+  assert.equal(recording.final_confirmation_issued, false);
+  assert.deepEqual(recording.recorded_actions, ["observe_page", "begin_form_fill", "field_readback", "discard_draft", "verify_no_write"]);
+});
+
+test("promotion live locators use stable semantics and retain the write boundary", () => {
+  const locatorPath = join(
+    root,
+    "docs",
+    "delivery",
+    "fixtures",
+    "oceanengine-promotion-live-locators-v0.1.json",
+  );
+  const rawLocators = readFileSync(locatorPath, "utf8");
+  const locators = JSON.parse(rawLocators) as Record<string, unknown>;
+  assert.equal(locators.status, "live_form_calibrated");
+  assert.equal(locators.coordinate_fallback_allowed, false);
+  assert.doesNotMatch(rawLocators, /\b\d{16}\b/);
+  const captured = locators.captured_locators as Array<Record<string, unknown>>;
+  const accountInfo = captured.find((locator) => locator.field === "delivery_identity.account_info");
+  assert.equal(accountInfo?.selector, "[data-e2e='createad_nativetype_0']");
+  assert.equal(accountInfo?.selected_state, "class_contains_ovui-radio-item--checked");
+  assert.ok(captured.some((locator) => locator.field === "safe_exit" && locator.action_allowed === true));
+  assert.ok(captured.some((locator) => locator.field === "final_write_boundary" && locator.action_allowed === false));
+  assert.ok((locators.dynamic_behaviors as string[]).includes("copy_library_auto_preselects_one_recommended_title_on_open"));
+  const crossBranch = locators.cross_branch_observations as Array<Record<string, unknown>>;
+  assert.ok(crossBranch.some((observation) => observation.delivery_carrier === "orange_landing_page" && observation.remote_side_effect_detected === false));
+  assert.equal((locators.reference_configuration as Record<string, unknown>).status, "complete_for_observed_unsubmitted_form");
+  assert.deepEqual(locators.reference_gaps, []);
 });
 
 test("run-time blocks cannot reuse the Phase C compile-time prohibition", () => {

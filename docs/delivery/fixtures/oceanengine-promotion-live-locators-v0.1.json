@@ -1,0 +1,113 @@
+{
+  "schema_version": "oceanengine-live-locator-capture/v0.1",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "page_kind": "promotion_create",
+  "status": "live_form_calibrated",
+  "evidence": true,
+  "observed_at": "2026-08-13",
+  "platform_build": "unknown",
+  "coordinate_fallback_allowed": false,
+  "page_identity": {
+    "https_host": "ad.oceanengine.com",
+    "pathname": "/superior/ads",
+    "required_query_keys": ["aadvid", "is_create", "fromPage", "project_id", "temp_id", "uuid"],
+    "required_visible_facts": [
+      "account_identity_matches_in_memory",
+      "allowlisted_parent_project_matches_in_memory",
+      "promotion_form_heading",
+      "parent_configuration_summary",
+      "safe_exit",
+      "final_write_boundary"
+    ],
+    "observed": true
+  },
+  "configuration_branch": {
+    "marketing_purpose": "ecommerce",
+    "marketing_scenario": "short_video_and_image_text",
+    "marketing_product_ref": "redacted_immutable_reference",
+    "delivery_carrier": "self_hosted_landing_page",
+    "optimization_target": "app_order",
+    "deep_optimization": "disabled",
+    "delivery_mode": "manual"
+  },
+  "captured_locators": [
+    { "field": "delivery_identity.account_info", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_nativetype_0']", "unique_visible_before_selection": true, "selected_state": "class_contains_ovui-radio-item--checked" },
+    { "field": "delivery_identity.douyin_account", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_nativetype_1']", "unique_visible": true },
+    { "field": "base_material_refs.video", "kind": "role_and_accessible_name", "role": "button", "name": "添加视频", "exact": true, "unique_visible": true },
+    { "field": "base_material_refs.image", "kind": "role_and_accessible_name", "role": "button", "name": "添加图片", "exact": true, "unique_visible": true },
+    { "field": "base_material_refs.image_text", "kind": "role_and_accessible_name", "role": "button", "name": "添加图文", "exact": true, "unique_visible": true },
+    { "field": "copy_items[0]", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_creativeTitles__creativeTitleGroup_title_input_component'] input", "unique_visible": true },
+    { "field": "landing_page_ref.input", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_thirdPageUrl__createExternalUrl_input_component'] input", "unique_visible": true },
+    { "field": "landing_page_ref.selector", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_normalPageUrl_select']", "unique_visible": true },
+    { "field": "direct_link", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_openUrl_input_input_component'] input", "unique_visible": true },
+    { "field": "backup_link", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_uLinkUrl_input_component'] input", "unique_visible": true },
+    { "field": "product_information.primary_product_name", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_productName_input_component'] input[disabled]", "unique_visible": true },
+    { "field": "product_information.additional_product_name", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_productName_input_component'] input:not([disabled])", "unique_visible": true },
+    { "field": "product_information.selling_points", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_productSelling__createRecommendTag__ocTagInput'] input", "unique_visible": true },
+    { "field": "creative_component_smart_generation", "kind": "stable_test_attribute", "selector": "[data-auto-id='actionTextAutoCheckbox'] input", "unique_visible": true },
+    { "field": "promotion_settings.source_label", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_source'] input", "unique_visible": true },
+    { "field": "promotion_settings.comment_enabled", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_comment_0']", "unique_visible": true },
+    { "field": "promotion_settings.category_ref", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_yuntuCategory__ocCascader'] input", "unique_visible": true },
+    { "field": "promotion_settings.brand_ref", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_cdpBrand'] input", "unique_visible": true },
+    { "field": "budget_mode.daily", "kind": "stable_test_attribute", "selector": "[new-landing-id='NONE']", "unique_visible": true },
+    { "field": "budget", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_adBudget_input_component'] input", "unique_visible": true },
+    { "field": "bid", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_adBid'] input", "unique_visible": true },
+    { "field": "promotion_name", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_adName'] textarea", "unique_visible": true },
+    { "field": "safe_exit", "kind": "stable_test_attribute", "selector": "[data-e2e='createad_save_cancel']", "unique_visible": true, "action_allowed": true },
+    { "field": "final_write_boundary", "kind": "role_and_accessible_name", "role": "button", "name": "保存并关闭", "exact": true, "unique_visible": true, "action_allowed": false }
+  ],
+  "dynamic_behaviors": [
+    "account_info_hides_but_does_not_remove_douyin_identity_selector_dom",
+    "copy_library_auto_preselects_one_recommended_title_on_open",
+    "copy_library_cancel_discards_auto_preselection",
+    "material_capacity_is_conditional_and_current_branch_shows_10_10_10",
+    "manual_direct_link_mode_is_selected_while_auto_mode_is_disabled_without_landing_page",
+    "low_bid_displays_advisory_without_preventing_local_readback"
+  ],
+  "selector_observations": {
+    "video_asset_library": "opened_selected_one_approved_existing_video_confirmed_and_read_back",
+    "image_asset_library": "opened_and_cancelled_without_selection",
+    "image_text_asset_library": "opened_and_cancelled_without_selection",
+    "copy_library": "opened_auto_preselected_one_and_cancelled_without_apply",
+    "landing_page_hybrid": "opened_selected_one_approved_existing_self_hosted_landing_page_confirmed_and_read_back",
+    "category_tree": "opened_selected_approved_existing_category_and_read_back; orange_landing_button_jump_branch_also_opened_and_escape_cancelled",
+    "brand_search_or_custom": "opened_selected_approved_existing_brand_and_read_back",
+    "authorized_identity_list": "not_opened_after_account_info_selected",
+    "native_anchor_asset_library": "not_present_on_observed_branch"
+  },
+  "cross_branch_observations": [
+    {
+      "delivery_carrier": "orange_landing_page",
+      "optimization_target": "button_jump",
+      "delivery_mode": "manual",
+      "account_info_identity": "selected_and_read_back_from_stable_test_attribute_checked_class",
+      "category_tree": "search_and_top_level_options_observed_then_escape_cancelled",
+      "safe_exit": "discarded_to_readonly_project_list",
+      "remote_side_effect_detected": false
+    }
+  ],
+  "reference_configuration": {
+    "authorization": "all_existing_test_account_assets_approved_by_operator",
+    "base_material_ref": "approved_existing_video_selected_value_redacted",
+    "landing_page_ref": "approved_existing_self_hosted_landing_page_selected_value_redacted",
+    "category_ref": "approved_existing_category_selected_value_redacted",
+    "brand_ref": "approved_existing_brand_selected_value_redacted",
+    "native_anchor_ref": "not_present_on_observed_branch",
+    "status": "complete_for_observed_unsubmitted_form"
+  },
+  "reference_gaps": [],
+  "safe_exit": {
+    "locator": "[data-e2e='createad_save_cancel']",
+    "cancel_behavior": "discard_unsubmitted_form_and_return_to_readonly_project_list",
+    "returns_to_page_kind": "project_list",
+    "no_write_proof": "exact_temporary_promotion_name_search_returned_zero_results",
+    "observed": true
+  },
+  "write_boundary": {
+    "locator": { "kind": "role_and_accessible_name", "role": "button", "name": "保存并关闭", "exact": true },
+    "action_allowed": false,
+    "observed": true,
+    "clicked": false
+  }
+}

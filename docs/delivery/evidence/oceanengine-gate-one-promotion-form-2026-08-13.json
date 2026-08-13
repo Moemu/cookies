@@ -1,0 +1,87 @@
+{
+  "schema_version": "oceanengine-gate-one-promotion-evidence/v0.1",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "observed_at": "2026-08-13",
+  "gate_one_result": "passed",
+  "real_browser_driver_calibrated": true,
+  "submit_allowed": false,
+  "account_ref": "redacted_in_memory_match",
+  "parent_project_ref": "allowlisted_existing_test_project_redacted",
+  "promotion_form": {
+    "status": "passed",
+    "page_identity_matched": true,
+    "coordinate_fallback_used": false,
+    "approved_field_readback": [
+      { "field": "delivery_identity", "expected": "account_info", "actual": "account_info", "matched": true },
+      { "field": "copy_items[0]", "expected": "synthetic_gate_one_title", "actual": "synthetic_gate_one_title", "matched": true },
+      { "field": "additional_product_name", "expected": "synthetic_gate_one_product", "actual": "synthetic_gate_one_product", "matched": true },
+      { "field": "selling_point_input", "expected": "synthetic_gate_one_selling_point", "actual": "synthetic_gate_one_selling_point", "matched": true },
+      { "field": "source_label", "expected": "redacted_inherited_default", "actual": "redacted_inherited_default", "matched": true },
+      { "field": "budget_mode", "expected": "daily", "actual": "daily", "matched": true },
+      { "field": "budget", "expected": "300.00", "actual": "300.00", "matched": true },
+      { "field": "bid", "expected": "0.01", "actual": "0.01", "matched": true },
+      { "field": "promotion_name", "expected": "synthetic_gate_one_temporary_name", "actual": "synthetic_gate_one_temporary_name", "matched": true },
+      { "field": "base_material_ref", "expected": "approved_existing_test_account_asset", "actual": "approved_existing_video_value_redacted", "matched": true },
+      { "field": "landing_page_ref", "expected": "approved_existing_test_account_asset", "actual": "approved_existing_self_hosted_landing_page_value_redacted", "matched": true },
+      { "field": "category_ref", "expected": "approved_existing_test_account_reference", "actual": "approved_existing_category_value_redacted", "matched": true },
+      { "field": "brand_ref", "expected": "approved_existing_test_account_reference", "actual": "approved_existing_brand_value_redacted", "matched": true }
+    ],
+    "observed_defaults": {
+      "comment_setting": "enabled",
+      "direct_link_mode": "manual",
+      "smart_generation": true,
+      "primary_product_name": "inherited_readonly_redacted"
+    },
+    "intentionally_unset_references": [
+      "direct_link",
+      "backup_link"
+    ],
+    "selector_actions": [
+      "video_asset_library_open_cancel_no_selection",
+      "image_asset_library_open_cancel_no_selection",
+      "image_text_asset_library_open_cancel_no_selection",
+      "copy_library_open_auto_preselection_cancel_no_apply",
+      "landing_page_library_open_cancel_no_selection",
+      "brand_selector_open_escape_no_selection",
+      "category_selector_open_observe_escape_no_selection_on_orange_landing_button_jump_branch",
+      "account_info_identity_selected_and_read_back_on_orange_landing_button_jump_branch",
+      "video_asset_library_initial_zero_result_recovered_after_tab_refresh",
+      "approved_existing_video_selected_confirmed_and_read_back",
+      "approved_existing_landing_page_selected_confirmed_and_read_back",
+      "approved_existing_category_and_brand_selected_and_read_back"
+    ],
+    "safe_exit_exercised": true,
+    "write_boundaries_clicked": [],
+    "final_confirmation_issued": false
+  },
+  "no_write_verification": {
+    "returned_to_page_kind": "project_list",
+    "readonly_unit_list_path_confirmed": true,
+    "exact_temporary_name_search_executed": true,
+    "matching_platform_objects": 0,
+    "remote_side_effect_detected": false
+  },
+  "remaining_gate_one_work": [],
+  "control_plane_recording": {
+    "status": "passed",
+    "observatory_run_id": "observatory_76936322b4c2d812661b1424ab36667e",
+    "controlled_change_set_id": "controlledchangeset_09e067fb0106d768dbef7b37dcbdf8bb",
+    "controlled_execution_id": "controlledexecution_2c072463ffada24895cfcddcf6e87b83",
+    "computer_use_run_id": "curun_9cb2768810481b5b5bfbb56ce5b83027998cc216896cfea17683b948b5ea1fc2",
+    "recorded_actions": ["observe_page", "begin_form_fill", "field_readback", "discard_draft", "verify_no_write"],
+    "lease_released": true,
+    "run_final_state": "cancelled",
+    "final_confirmation_issued": false,
+    "automated_worker_mounted": false
+  },
+  "privacy": {
+    "raw_account_id_persisted": false,
+    "raw_project_id_persisted": false,
+    "raw_product_id_persisted": false,
+    "raw_asset_ids_persisted": false,
+    "business_names_persisted": false,
+    "landing_urls_persisted": false,
+    "screenshots_persisted": false
+  }
+}

@@ -2,7 +2,15 @@
   "schema_version": "oceanengine-gate-one-replay-plan/v0.1",
   "skill_id": "oceanengine-ecommerce-manual",
   "skill_version": "v0.1-calibration",
-  "status": "preparation_only",
+  "status": "completed_no_write",
+  "live_form_calibration": {
+    "project_form": "passed",
+    "promotion_form": "passed",
+    "complete_reference_configuration": true,
+    "safe_exit": "passed",
+    "exact_name_no_write_verification": "passed",
+    "control_plane_evidence": "passed"
+  },
   "remote_write_allowed": false,
   "final_confirmation_allowed": false,
   "automated_prepare_allowed": false,
@@ -24,6 +32,7 @@
       "browser_profile": "ready"
     }
   },
+  "remaining_start_requirements": [],
   "page_identity_requirements": [
     "https_exact_host_and_path",
     "required_query_keys",

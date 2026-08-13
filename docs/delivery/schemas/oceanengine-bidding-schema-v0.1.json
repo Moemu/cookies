@@ -156,6 +156,15 @@
         "product_information": { "type": "object" },
         "creative_components": { "type": "array", "items": { "type": "object" } },
         "promotion_settings": { "type": "object" },
+        "budget_and_bidding": {
+          "type": "object",
+          "properties": {
+            "budget_mode": { "enum": ["daily", "total"] },
+            "budget_cny": { "type": ["number", "null"], "minimum": 0 },
+            "bid_cny": { "type": ["number", "null"], "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
         "promotion_name": { "type": "string", "minLength": 1 },
         "evidence_states": {
           "type": "array",

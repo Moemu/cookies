@@ -3,71 +3,31 @@
   "skill_id": "oceanengine-ecommerce-manual",
   "skill_version": "v0.1-calibration",
   "observed_at": "2026-08-13",
-  "status": "page_drift_observed_fill_not_started",
+  "status": "conservative_stop_reclassified_as_configuration_branch",
   "gate_one_result": "partial",
   "real_browser_driver_calibrated": false,
   "submit_allowed": false,
-  "account_ref": "redacted:6391",
+  "account_ref": "redacted_in_memory_match",
   "parent_project_ref": "allowlisted_existing_test_project_redacted",
-  "page_identity": {
-    "https_host": "ad.oceanengine.com",
-    "pathname": "/superior/ads",
-    "required_query_keys": ["aadvid", "is_create", "search_pkg", "fromPage", "cascade_id", "project_id", "temp_id", "uuid"],
-    "visible_facts": [
-      "account_identity_matches_authorized_test_account_in_memory",
-      "page_heading_new_promotion",
-      "existing_parent_project_visible",
-      "promotion_form_sections_visible",
-      "safe_exit_visible",
-      "final_write_boundary_visible"
-    ],
-    "observed": true
+  "original_stop_reason": "PAGE_DRIFT",
+  "reclassification": {
+    "landing_page_label": "parent_project_delivery_carrier_branch",
+    "material_capacity": "conditional_platform_limit_not_frozen_constant",
+    "promotion_budget_and_bid": "promotion_field_ownership_observed_on_current_manual_branch",
+    "operator_explanation_received": true
   },
-  "stable_live_locators": [
-    { "field": "base_material_refs.video", "kind": "role_and_accessible_name", "role": "button", "name": "添加视频", "exact": true, "visible_unique": true },
-    { "field": "base_material_refs.image", "kind": "role_and_accessible_name", "role": "button", "name": "添加图片", "exact": true, "visible_unique": true },
-    { "field": "base_material_refs.image_text", "kind": "role_and_accessible_name", "role": "button", "name": "添加图文", "exact": true, "visible_unique": true },
-    { "field": "copy_items", "kind": "placeholder", "placeholder": "请输入5-55个字的标题或输入关键词后选择推荐标题", "visible_unique": true },
-    { "field": "landing_page_ref", "kind": "placeholder", "placeholder": "请选择橙子落地页链接", "visible_unique": true },
-    { "field": "direct_link", "kind": "placeholder", "placeholder": "请填写Schema直达链接，保证可跳转并打开APP", "visible_unique": true },
-    { "field": "backup_link", "kind": "placeholder", "placeholder": "请填写Universal link直达链接，保证可跳转并打开APP", "visible_unique": true },
-    { "field": "product_information.selling_points", "kind": "placeholder", "placeholder": "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交", "visible_unique": true },
-    { "field": "promotion_settings.source_label", "kind": "placeholder", "placeholder": "请输入来源", "visible_unique": true },
-    { "field": "promotion_settings.category_ref", "kind": "placeholder", "placeholder": "请选择", "visible_unique": true },
-    { "field": "promotion_settings.brand_ref", "kind": "placeholder", "placeholder": "选择或手动输入品牌", "visible_unique": true },
-    { "field": "safe_exit", "kind": "role_and_accessible_name", "role": "button", "name": "取消", "exact": true, "visible_unique": true, "action_allowed": true, "action_exercised": false },
-    { "field": "final_write_boundary", "kind": "role_and_accessible_name", "role": "button", "name": "保存并关闭", "exact": true, "visible_unique": true, "action_allowed": false, "action_exercised": false }
-  ],
-  "locator_gaps": [
-    "delivery_identity_mode_controls_not_yet_uniquely_scoped",
-    "additional_product_name_uses_ambiguous_placeholder",
-    "call_to_action_controls_lack_confirmed_accessible_roles",
-    "comment_setting_controls_lack_confirmed_accessible_roles",
-    "budget_and_bid_share_ambiguous_number_inputs",
-    "promotion_name_uses_ambiguous_placeholder",
-    "selector_modal_locators_not_revalidated"
-  ],
-  "drift_findings": [
-    { "key": "base_material_capacity", "stage_b": { "video": 30, "image": 50, "image_text": 10 }, "current_visible": { "video": 10, "image": 10, "image_text": 10 } },
-    { "key": "landing_page_label", "stage_b": "自研落地页", "current_visible": "橙子落地页" },
-    { "key": "promotion_budget_and_bid_section", "stage_b": "not_in_frozen_promotion_field_fixture", "current_visible": "单元预算与出价" }
-  ],
   "actions": {
     "form_fill_started": false,
     "field_values_changed": false,
     "selector_opened": false,
-    "safe_exit_exercised": false,
     "write_boundaries_clicked": [],
     "remote_side_effect_detected": false
   },
-  "stop_reason": "PAGE_DRIFT",
-  "control_plane_recording": {
-    "status": "not_started",
-    "reason": "replay_stopped_before_form_fill_due_to_page_drift"
-  },
+  "superseded_by": "docs/delivery/evidence/oceanengine-gate-one-promotion-form-2026-08-13.json",
   "privacy": {
     "raw_account_id_persisted": false,
     "raw_project_id_persisted": false,
+    "raw_product_id_persisted": false,
     "business_names_persisted": false,
     "screenshots_persisted": false
   }

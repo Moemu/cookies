@@ -332,6 +332,7 @@ carrier
 | `comment_setting` | 单元评论 | `dynamic_enum` | 单元设置 | 显式必填；当前集合为不启用/启用，黄金路径新建初始为启用 | `observed` / `sample_only` |
 | `category_ref` | 所属类别 | `dynamic_reference` | 单元设置 | 新建页有显式必填标记且初始为空；选择器支持搜索和分级类别，当前只观察到顶层样例，完整树待确认 | `observed` / `sample_only` |
 | `brand_ref` | 品牌名称 | `dynamic_reference_or_custom` | 单元设置 | 新建页有显式必填标记且初始为空；选择器支持搜索、平台候选和“自定义品牌名称”分支 | `observed` / `sample_only` |
+| `budget_and_bidding` | 单元预算与出价 | `object` | Promotion 自有字段；与父项目预算/出价分开 | 当前手动 `app内下单` 分支支持每日/总预算、单元预算和单元出价；范围仍按当前页面校验 | `observed` / `operator_reviewed` |
 | `promotion_name` | 单元名称 | `string` | 单元设置 | 新建页有显式必填标记，按产品/时间生成初始名称且可编辑；长度与唯一性待确认 | `observed` |
 | `platform_status` | 单元投放状态 | `dynamic_enum` | 列表/详情，不等于审核或诊断状态 | `observed_readonly / sample_only` | `sample_only` |
 | `review_status` | 平台审核状态 | `dynamic_enum` | 与投放状态独立 | `observed_readonly / unknown` | `platform_pending` |
@@ -427,6 +428,20 @@ PlatformPromotionDraft
 - 身份内联编辑器可通过点击选择器旁空白区域无更改退出；整表取消仍可作为异常兜底，但不应作为正常流程步骤。
 
 上述两个资产弹层的“管理落地页/管理原生锚点”均是写入相邻入口，本阶段没有进入。机器契约已同步到 selector fixture。
+
+### 5.4.1 2026-08-13 条件分支复核
+
+本次复核纠正了把不同父项目分支误判为页面漂移的问题：单元表单的落地页标签由父项目的“投放载体”决定。父项目选择“橙子落地页”时显示橙子落地页输入；选择“自研落地页”时显示自研落地页输入。两者是受配置驱动的合法页面分支，不是可互换的固定标签。
+
+素材容量同样不能冻结为跨场景常量。阶段 B 曾观察到视频/图片/图文 `30/50/10`，本次“电商 + 短视频/图文 + 自研落地页 + app内下单 + 手动投放”分支显示 `10/10/10`；平台页面说明基础素材通常上限 10，部分场景可达 30。因此 Skill 必须读取当前页面容量并与受批准配置做上限检查，不能把任一历史样本写成全局能力矩阵。
+
+本分支还确认“单元预算与出价”属于 Promotion：当前显示每日/总预算、单元预算输入和单元出价输入。稳定定位分别为 `new-landing-id=NONE|SELECT`、`createad_adBudget` 和 `createad_adBid`。这些字段不应继续遗漏在 Promotion Schema，也不能错误归入父项目预算/出价。
+
+标题库存在新的动态行为：打开推荐标题弹层时会自动预选一条候选，但只有点击“确定”才会应用；点击弹层自身的“取消”会保留主表原始标题。Skill 必须记录这一自动预选并始终使用弹层范围内的取消入口，不能用页面上未限定范围的重复“取消”文本。
+
+橙子落地页/按钮跳转分支的补充复核确认，`账户信息` 对应稳定控件 `createad_nativetype_0`；选中态由控件的 `ovui-radio-item--checked` 类回读，选中后抖音号配置区隐藏但相关 DOM 仍可能存在。类别级联选择器必须点击 `createad_yuntuCategory__ocCascader` 内的输入容器，而不是只点击只读 `input`；弹层显示搜索框和顶层类别后可用 Escape 无选择退出。该观察仅证明跨分支控件语义，不提供获批类别引用，也不把橙子落地页分支等同于自研落地页分支。
+
+投手随后授权使用测试账户中的全部既有资产。素材库和落地页库首次打开均短暂返回 0 条，切换页签并等待后分别恢复为数百条视频和多条落地页；因此“0 条”只能作为瞬时加载状态，不能直接冻结为账户无资产。自研落地页分支最终选择并回读了一条既有视频、一条既有自研落地页、一个类别和一个既有品牌。自研落地页输入的实际稳定容器为 `createad_thirdPageUrl__createExternalUrl_input_component`；早先记录的 `createad_normalPageUrl__createExternalUrl_input_component` 不适用于该分支。资产名称、URL、平台 ID 和品牌原值仍按敏感数据策略脱敏。
 
 ### 5.5 最终提交事件的只读定位
 
