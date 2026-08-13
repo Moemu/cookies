@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
@@ -24,6 +25,13 @@ func (r MySQLRepository) CreateRun(ctx context.Context, value ComputerUseRun) (C
 	if err == nil {
 		return value, false, nil
 	}
+	existingByID, idErr := r.GetRun(ctx, value.OrganizationID, value.ProjectID, value.ID)
+	if idErr == nil {
+		if existingByID.IdempotencyKey != value.IdempotencyKey || existingByID.RequestHash != value.RequestHash {
+			return ComputerUseRun{}, false, ErrIdempotencyConflict
+		}
+		return existingByID, true, nil
+	}
 	existing, getErr := r.getRunByIdempotency(ctx, value.OrganizationID, value.ProjectID, value.IdempotencyKey)
 	if getErr != nil {
 		return ComputerUseRun{}, false, err
@@ -38,6 +46,21 @@ func (r MySQLRepository) GetRun(ctx context.Context, org contract.OrganizationID
 	return scanRun(r.DB.QueryRowContext(ctx, runSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
 }
 
+func (r MySQLRepository) CreateEnvironment(ctx context.Context, value ExecutionEnvironment) (ExecutionEnvironment, error) {
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO computer_use_environments (id,organization_id,project_id,platform,account_id,mode,browser_version,region,healthy,version) VALUES (?,?,?,?,?,?,?,?,?,?)`, value.ID, value.OrganizationID, value.ProjectID, value.Platform, value.AccountID, value.Mode, value.BrowserVersion, value.Region, value.Healthy, value.Version)
+	if err == nil {
+		return value, nil
+	}
+	existing, getErr := r.GetEnvironment(ctx, value.OrganizationID, value.ProjectID, value.ID)
+	if getErr != nil {
+		return ExecutionEnvironment{}, err
+	}
+	if !reflect.DeepEqual(existing, value) {
+		return ExecutionEnvironment{}, ErrIdempotencyConflict
+	}
+	return existing, nil
+}
+
 func (r MySQLRepository) GetEnvironment(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (ExecutionEnvironment, error) {
 	var value ExecutionEnvironment
 	err := r.DB.QueryRowContext(ctx, `SELECT id,organization_id,project_id,platform,account_id,mode,browser_version,region,healthy,version FROM computer_use_environments WHERE organization_id=? AND project_id=? AND id=?`, org, project, id).Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.Platform, &value.AccountID, &value.Mode, &value.BrowserVersion, &value.Region, &value.Healthy, &value.Version)
@@ -47,6 +70,21 @@ func (r MySQLRepository) GetEnvironment(ctx context.Context, org contract.Organi
 	return value, err
 }
 
+func (r MySQLRepository) CreateBrowserProfile(ctx context.Context, value BrowserProfile) (BrowserProfile, error) {
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO computer_use_browser_profiles (id,organization_id,project_id,environment_id,platform,account_id,state,version) VALUES (?,?,?,?,?,?,?,?)`, value.ID, value.OrganizationID, value.ProjectID, value.EnvironmentID, value.Platform, value.AccountID, value.State, value.Version)
+	if err == nil {
+		return value, nil
+	}
+	existing, getErr := r.GetBrowserProfile(ctx, value.OrganizationID, value.ProjectID, value.ID)
+	if getErr != nil {
+		return BrowserProfile{}, err
+	}
+	if !reflect.DeepEqual(existing, value) {
+		return BrowserProfile{}, ErrIdempotencyConflict
+	}
+	return existing, nil
+}
+
 func (r MySQLRepository) GetBrowserProfile(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (BrowserProfile, error) {
 	var value BrowserProfile
 	err := r.DB.QueryRowContext(ctx, `SELECT id,organization_id,project_id,environment_id,platform,account_id,state,version FROM computer_use_browser_profiles WHERE organization_id=? AND project_id=? AND id=?`, org, project, id).Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.EnvironmentID, &value.Platform, &value.AccountID, &value.State, &value.Version)
@@ -54,6 +92,37 @@ func (r MySQLRepository) GetBrowserProfile(ctx context.Context, org contract.Org
 		return BrowserProfile{}, ErrNotFound
 	}
 	return value, err
+}
+
+func (r MySQLRepository) CreateSitePolicy(ctx context.Context, value SitePolicy) (SitePolicy, error) {
+	protocols, err := json.Marshal(value.AllowedProtocols)
+	if err != nil {
+		return SitePolicy{}, err
+	}
+	hosts, err := json.Marshal(value.AllowedHosts)
+	if err != nil {
+		return SitePolicy{}, err
+	}
+	pageKinds, err := json.Marshal(value.AllowedPageKinds)
+	if err != nil {
+		return SitePolicy{}, err
+	}
+	platformProjects, err := json.Marshal(value.AllowedPlatformProjects)
+	if err != nil {
+		return SitePolicy{}, err
+	}
+	_, err = r.DB.ExecContext(ctx, `INSERT INTO computer_use_site_policies (id,organization_id,project_id,platform,account_id,allowed_protocols,allowed_hosts,allowed_page_kinds,allowed_platform_project_ids,version) VALUES (?,?,?,?,?,?,?,?,?,?)`, value.ID, value.OrganizationID, value.ProjectID, value.Platform, value.AccountID, protocols, hosts, pageKinds, platformProjects, value.Version)
+	if err == nil {
+		return value, nil
+	}
+	existing, getErr := r.GetSitePolicy(ctx, value.OrganizationID, value.ProjectID, value.ID)
+	if getErr != nil {
+		return SitePolicy{}, err
+	}
+	if !reflect.DeepEqual(existing, value) {
+		return SitePolicy{}, ErrIdempotencyConflict
+	}
+	return existing, nil
 }
 
 func (r MySQLRepository) GetSitePolicy(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (SitePolicy, error) {

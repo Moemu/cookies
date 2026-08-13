@@ -14,14 +14,34 @@ import (
 const maxBody = 1 << 20
 
 type Server struct {
-	service  computeruse.Service
-	worker   computeruse.Worker
-	projects identity.ProjectAuthorizer
-	mux      *http.ServeMux
+	service         computeruse.Service
+	worker          computeruse.Worker
+	projects        identity.ProjectAuthorizer
+	mux             *http.ServeMux
+	automatedWorker bool
 }
 
 func New(service computeruse.Service, worker computeruse.Worker, projects identity.ProjectAuthorizer) *Server {
-	s := &Server{service: service, worker: worker, projects: projects, mux: http.NewServeMux()}
+	return newServer(service, worker, projects, true)
+}
+
+// NewTakeoverOnly exposes the production-visible control plane without
+// mounting a fake or unattended browser adapter. Real page actions advance
+// only through the fenced takeover-evidence port.
+func NewTakeoverOnly(service computeruse.Service, projects identity.ProjectAuthorizer) *Server {
+	return newServer(service, computeruse.Worker{}, projects, false)
+}
+
+func newServer(service computeruse.Service, worker computeruse.Worker, projects identity.ProjectAuthorizer, automatedWorker bool) *Server {
+	s := &Server{service: service, worker: worker, projects: projects, mux: http.NewServeMux(), automatedWorker: automatedWorker}
+	s.mux.HandleFunc("PUT /api/platform/v1/computer-use/kill-switches/{scope}", s.setKillSwitch)
+	s.mux.HandleFunc("POST /api/platform/v1/computer-use/projects/{project_id}/environments", s.registerEnvironment)
+	s.mux.HandleFunc("GET /api/platform/v1/computer-use/projects/{project_id}/environments/{environment_id}", s.getEnvironment)
+	s.mux.HandleFunc("POST /api/platform/v1/computer-use/projects/{project_id}/browser-profiles", s.registerBrowserProfile)
+	s.mux.HandleFunc("GET /api/platform/v1/computer-use/projects/{project_id}/browser-profiles/{profile_id}", s.getBrowserProfile)
+	s.mux.HandleFunc("POST /api/platform/v1/computer-use/projects/{project_id}/site-policies", s.registerSitePolicy)
+	s.mux.HandleFunc("GET /api/platform/v1/computer-use/projects/{project_id}/site-policies/{policy_id}", s.getSitePolicy)
+	s.mux.HandleFunc("GET /api/platform/v1/computer-use/projects/{project_id}/kill-switches/active", s.getActiveKillSwitch)
 	s.mux.HandleFunc("POST /api/platform/v1/computer-use/projects/{project_id}/runs", s.createRun)
 	s.mux.HandleFunc("GET /api/platform/v1/computer-use/projects/{project_id}/runs/{run_id}", s.getRun)
 	s.mux.HandleFunc("GET /api/platform/v1/computer-use/projects/{project_id}/runs/{run_id}/events", s.listEvents)
@@ -44,8 +64,16 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	r.SetPathValue("action", parts[1])
 	switch parts[1] {
 	case "prepare":
+		if !s.automatedWorker {
+			writeError(w, http.StatusNotFound, "automated worker is not mounted")
+			return
+		}
 		s.prepare(w, r)
 	case "submit":
+		if !s.automatedWorker {
+			writeError(w, http.StatusNotFound, "automated worker is not mounted")
+			return
+		}
 		s.submit(w, r)
 	case "pause", "resume", "cancel", "takeover", "release_takeover":
 		s.control(w, r)
@@ -55,19 +83,134 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
 
+func (s *Server) setKillSwitch(w http.ResponseWriter, r *http.Request) {
+	rc, ok := contract.RequestContextFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	var body struct {
+		Platform        computeruse.Platform `json:"platform"`
+		Active          bool                 `json:"active"`
+		Reason          string               `json:"reason"`
+		ExpectedVersion int64                `json:"expected_version"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	value, err := s.service.SetKillSwitch(r.Context(), rc.Actor, computeruse.KillSwitchScope(r.PathValue("scope")), body.Platform, body.Active, body.Reason, body.ExpectedVersion)
+	writeResult(w, value, err)
+}
+
+func (s *Server) getActiveKillSwitch(w http.ResponseWriter, r *http.Request) {
+	actor, _, ok := s.authorize(w, r, "delivery.read")
+	if !ok {
+		return
+	}
+	platform := computeruse.Platform(r.URL.Query().Get("platform"))
+	if platform != computeruse.PlatformOceanEngine {
+		writeError(w, http.StatusBadRequest, "invalid platform")
+		return
+	}
+	value, active, err := s.service.Repository.ActiveKillSwitch(r.Context(), actor.OrganizationID, platform)
+	var selected any
+	if active {
+		selected = value
+	}
+	writeResult(w, map[string]any{"active": active, "kill_switch": selected}, err)
+}
+
+func (s *Server) registerEnvironment(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.execute")
+	if !ok {
+		return
+	}
+	var body computeruse.ExecutionEnvironment
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.OrganizationID != "" || body.ProjectID != "" || body.Version != 0 {
+		writeError(w, http.StatusBadRequest, "server-owned fields are not accepted")
+		return
+	}
+	value, err := s.service.RegisterEnvironment(r.Context(), actor.OrganizationID, project, body)
+	writeCreated(w, value, err)
+}
+
+func (s *Server) getEnvironment(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.read")
+	if !ok {
+		return
+	}
+	value, err := s.service.Repository.GetEnvironment(r.Context(), actor.OrganizationID, project, r.PathValue("environment_id"))
+	writeResult(w, value, err)
+}
+
+func (s *Server) registerBrowserProfile(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.execute")
+	if !ok {
+		return
+	}
+	var body computeruse.BrowserProfile
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.OrganizationID != "" || body.ProjectID != "" || body.Version != 0 {
+		writeError(w, http.StatusBadRequest, "server-owned fields are not accepted")
+		return
+	}
+	value, err := s.service.RegisterBrowserProfile(r.Context(), actor.OrganizationID, project, body)
+	writeCreated(w, value, err)
+}
+
+func (s *Server) getBrowserProfile(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.read")
+	if !ok {
+		return
+	}
+	value, err := s.service.Repository.GetBrowserProfile(r.Context(), actor.OrganizationID, project, r.PathValue("profile_id"))
+	writeResult(w, value, err)
+}
+
+func (s *Server) registerSitePolicy(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.execute")
+	if !ok {
+		return
+	}
+	var body computeruse.SitePolicy
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.OrganizationID != "" || body.ProjectID != "" || body.Version != 0 {
+		writeError(w, http.StatusBadRequest, "server-owned fields are not accepted")
+		return
+	}
+	value, err := s.service.RegisterSitePolicy(r.Context(), actor.OrganizationID, project, body)
+	writeCreated(w, value, err)
+}
+
+func (s *Server) getSitePolicy(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.read")
+	if !ok {
+		return
+	}
+	value, err := s.service.Repository.GetSitePolicy(r.Context(), actor.OrganizationID, project, r.PathValue("policy_id"))
+	writeResult(w, value, err)
+}
+
 func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 	actor, project, ok := s.authorize(w, r, "delivery.execute")
 	if !ok {
 		return
 	}
 	var body struct {
-		ProjectID     contract.ProjectID           `json:"project_id"`
-		Platform      computeruse.Platform         `json:"platform"`
-		AccountID     string                       `json:"account_id"`
-		EnvironmentID string                       `json:"environment_id"`
-		ProfileID     string                       `json:"profile_id"`
-		PolicyID      string                       `json:"policy_id"`
-		Authority     computeruse.AuthorityBinding `json:"authority"`
+		ProjectID     contract.ProjectID   `json:"project_id"`
+		Platform      computeruse.Platform `json:"platform"`
+		AccountID     string               `json:"account_id"`
+		ExecutionID   string               `json:"business_execution_id"`
+		EnvironmentID string               `json:"environment_id"`
+		ProfileID     string               `json:"profile_id"`
+		PolicyID      string               `json:"policy_id"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -76,7 +219,7 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "project mismatch")
 		return
 	}
-	value, replayed, err := s.service.CreateBoundRun(r.Context(), computeruse.CreateBoundRunRequest{OrganizationID: actor.OrganizationID, ProjectID: project, Platform: body.Platform, AccountID: body.AccountID, Authority: body.Authority, EnvironmentID: body.EnvironmentID, ProfileID: body.ProfileID, PolicyID: body.PolicyID, IdempotencyKey: r.Header.Get("Idempotency-Key"), CreatedBy: actor.Principal.ID})
+	value, replayed, err := s.service.CreateBoundRun(r.Context(), computeruse.CreateBoundRunRequest{OrganizationID: actor.OrganizationID, ProjectID: project, Platform: body.Platform, AccountID: body.AccountID, ExecutionID: body.ExecutionID, EnvironmentID: body.EnvironmentID, ProfileID: body.ProfileID, PolicyID: body.PolicyID, IdempotencyKey: r.Header.Get("Idempotency-Key"), CreatedBy: actor.Principal.ID})
 	if err != nil {
 		writeResult(w, computeruse.ComputerUseRun{}, err)
 		return
@@ -296,6 +439,16 @@ func writeResult(w http.ResponseWriter, value any, err error) {
 		status = http.StatusLocked
 	}
 	writeError(w, status, err.Error())
+}
+
+func writeCreated(w http.ResponseWriter, value any, err error) {
+	if err != nil {
+		writeResult(w, value, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(value)
 }
 func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")

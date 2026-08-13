@@ -113,6 +113,13 @@ type ExecutionEnvironment struct {
 	Version        int64                   `json:"version"`
 }
 
+func (e ExecutionEnvironment) Validate() error {
+	if e.ID == "" || e.OrganizationID == "" || e.ProjectID == "" || e.Platform != PlatformOceanEngine || strings.TrimSpace(e.AccountID) == "" || e.Mode != "local_visible" || strings.TrimSpace(e.BrowserVersion) == "" || strings.TrimSpace(e.Region) == "" || e.Version < 1 {
+		return ErrInvalidContract
+	}
+	return nil
+}
+
 type BrowserProfile struct {
 	ID             string                  `json:"id"`
 	OrganizationID contract.OrganizationID `json:"organization_id"`
@@ -122,6 +129,16 @@ type BrowserProfile struct {
 	AccountID      string                  `json:"account_id"`
 	State          string                  `json:"state"`
 	Version        int64                   `json:"version"`
+}
+
+func (p BrowserProfile) Validate() error {
+	if p.ID == "" || p.OrganizationID == "" || p.ProjectID == "" || p.EnvironmentID == "" || p.Platform != PlatformOceanEngine || strings.TrimSpace(p.AccountID) == "" || p.Version < 1 {
+		return ErrInvalidContract
+	}
+	if p.State != "ready" && p.State != "takeover_required" && p.State != "disabled" {
+		return ErrInvalidContract
+	}
+	return nil
 }
 
 type SessionLease struct {
@@ -156,6 +173,30 @@ type SitePolicy struct {
 	AllowedPageKinds        []string                `json:"allowed_page_kinds"`
 	AllowedPlatformProjects []string                `json:"allowed_platform_project_ids"`
 	Version                 int64                   `json:"version"`
+}
+
+func (p SitePolicy) Validate() error {
+	if p.ID == "" || p.OrganizationID == "" || p.ProjectID == "" || p.Platform != PlatformOceanEngine || strings.TrimSpace(p.AccountID) == "" || p.Version < 1 || len(p.AllowedProtocols) == 0 || len(p.AllowedHosts) == 0 || len(p.AllowedPageKinds) == 0 || len(p.AllowedPlatformProjects) == 0 {
+		return ErrInvalidContract
+	}
+	for _, protocol := range p.AllowedProtocols {
+		if protocol != "https" {
+			return ErrInvalidContract
+		}
+	}
+	for _, host := range p.AllowedHosts {
+		if host == "" || host != strings.ToLower(host) || strings.ContainsAny(host, "*/:@") {
+			return ErrInvalidContract
+		}
+	}
+	for _, values := range [][]string{p.AllowedPageKinds, p.AllowedPlatformProjects} {
+		for _, value := range values {
+			if strings.TrimSpace(value) == "" {
+				return ErrInvalidContract
+			}
+		}
+	}
+	return nil
 }
 
 func (p SitePolicy) Allows(rawURL, pageKind, platformProjectID string) bool {

@@ -2,6 +2,7 @@ package computeruse
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"time"
 
@@ -37,6 +38,13 @@ func killKey(scope KillSwitchScope, value string) string { return string(scope) 
 func (r *MemoryRepository) CreateRun(_ context.Context, value ComputerUseRun) (ComputerUseRun, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	runKey := scopeKey(value.OrganizationID, value.ProjectID, value.ID)
+	if existing, ok := r.runs[runKey]; ok {
+		if existing.IdempotencyKey != value.IdempotencyKey || existing.RequestHash != value.RequestHash {
+			return ComputerUseRun{}, false, ErrIdempotencyConflict
+		}
+		return existing, true, nil
+	}
 	key := scopeKey(value.OrganizationID, value.ProjectID, value.IdempotencyKey)
 	if id, ok := r.runKeys[key]; ok {
 		existing := r.runs[scopeKey(value.OrganizationID, value.ProjectID, id)]
@@ -45,7 +53,7 @@ func (r *MemoryRepository) CreateRun(_ context.Context, value ComputerUseRun) (C
 		}
 		return existing, true, nil
 	}
-	r.runs[scopeKey(value.OrganizationID, value.ProjectID, value.ID)] = value
+	r.runs[runKey] = value
 	r.runKeys[key] = value.ID
 	return value, false, nil
 }
@@ -104,6 +112,20 @@ func (r *MemoryRepository) PutEnvironment(value ExecutionEnvironment) {
 	r.environments[scopeKey(value.OrganizationID, value.ProjectID, value.ID)] = value
 }
 
+func (r *MemoryRepository) CreateEnvironment(_ context.Context, value ExecutionEnvironment) (ExecutionEnvironment, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := scopeKey(value.OrganizationID, value.ProjectID, value.ID)
+	if existing, ok := r.environments[key]; ok {
+		if reflect.DeepEqual(existing, value) {
+			return existing, nil
+		}
+		return ExecutionEnvironment{}, ErrIdempotencyConflict
+	}
+	r.environments[key] = value
+	return value, nil
+}
+
 func (r *MemoryRepository) GetEnvironment(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (ExecutionEnvironment, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -118,6 +140,20 @@ func (r *MemoryRepository) PutBrowserProfile(value BrowserProfile) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.browserProfiles[scopeKey(value.OrganizationID, value.ProjectID, value.ID)] = value
+}
+
+func (r *MemoryRepository) CreateBrowserProfile(_ context.Context, value BrowserProfile) (BrowserProfile, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := scopeKey(value.OrganizationID, value.ProjectID, value.ID)
+	if existing, ok := r.browserProfiles[key]; ok {
+		if reflect.DeepEqual(existing, value) {
+			return existing, nil
+		}
+		return BrowserProfile{}, ErrIdempotencyConflict
+	}
+	r.browserProfiles[key] = value
+	return value, nil
 }
 
 func (r *MemoryRepository) GetBrowserProfile(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (BrowserProfile, error) {
@@ -137,6 +173,20 @@ func (r *MemoryRepository) GetSitePolicy(_ context.Context, org contract.Organiz
 	if !ok {
 		return SitePolicy{}, ErrNotFound
 	}
+	return value, nil
+}
+
+func (r *MemoryRepository) CreateSitePolicy(_ context.Context, value SitePolicy) (SitePolicy, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := scopeKey(value.OrganizationID, value.ProjectID, value.ID)
+	if existing, ok := r.policies[key]; ok {
+		if reflect.DeepEqual(existing, value) {
+			return existing, nil
+		}
+		return SitePolicy{}, ErrIdempotencyConflict
+	}
+	r.policies[key] = value
 	return value, nil
 }
 

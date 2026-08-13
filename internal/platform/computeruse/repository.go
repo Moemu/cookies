@@ -22,8 +22,11 @@ type Repository interface {
 	GetRun(context.Context, contract.OrganizationID, contract.ProjectID, string) (ComputerUseRun, error)
 	TransitionRun(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, RunState, BlockingReason, time.Time) (ComputerUseRun, error)
 	SetRunControl(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, RunState, bool, bool, BlockingReason, time.Time) (ComputerUseRun, error)
+	CreateEnvironment(context.Context, ExecutionEnvironment) (ExecutionEnvironment, error)
 	GetEnvironment(context.Context, contract.OrganizationID, contract.ProjectID, string) (ExecutionEnvironment, error)
+	CreateBrowserProfile(context.Context, BrowserProfile) (BrowserProfile, error)
 	GetBrowserProfile(context.Context, contract.OrganizationID, contract.ProjectID, string) (BrowserProfile, error)
+	CreateSitePolicy(context.Context, SitePolicy) (SitePolicy, error)
 	GetSitePolicy(context.Context, contract.OrganizationID, contract.ProjectID, string) (SitePolicy, error)
 	PutStep(context.Context, contract.OrganizationID, contract.ProjectID, RunStep) error
 	ListSteps(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]RunStep, error)

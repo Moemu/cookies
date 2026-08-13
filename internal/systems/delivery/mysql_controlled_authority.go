@@ -97,6 +97,7 @@ func (r MySQLRepository) GetRemoteWriteApproval(ctx context.Context, org contrac
 	if err := json.Unmarshal(binding, &v.Binding); err != nil {
 		return RemoteWriteApproval{}, fmt.Errorf("decode controlled approval binding: %w", err)
 	}
+	v.SchemaVersion = RemoteWriteApprovalSchemaV1
 	return v, nil
 }
 
@@ -208,5 +209,6 @@ func scanControlledChangeSet(row rowScanner) (ControlledChangeSet, error) {
 	if err := json.Unmarshal(binding, &v.Binding); err != nil {
 		return ControlledChangeSet{}, fmt.Errorf("decode controlled change-set binding: %w", err)
 	}
+	v.SchemaVersion = ControlledChangeSetSchemaV1
 	return v, nil
 }

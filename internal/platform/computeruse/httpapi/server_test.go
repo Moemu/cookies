@@ -16,6 +16,31 @@ import (
 
 type projectAuthorizer struct{}
 
+type authorityProvider struct {
+	binding    computeruse.AuthorityBinding
+	boundRunID string
+}
+
+func (p *authorityProvider) ResolveAuthority(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, executionID string, _ time.Time) (computeruse.AuthorityResolution, error) {
+	if executionID != p.binding.BusinessExecutionID {
+		return computeruse.AuthorityResolution{}, computeruse.ErrNotFound
+	}
+	return computeruse.AuthorityResolution{Binding: p.binding, BoundRunID: p.boundRunID}, nil
+}
+func (p *authorityProvider) BindRun(_ context.Context, _ computeruse.AuthorityBinding, runID string, _ time.Time) error {
+	if p.boundRunID != "" && p.boundRunID != runID {
+		return computeruse.ErrIdempotencyConflict
+	}
+	p.boundRunID = runID
+	return nil
+}
+func (p *authorityProvider) VerifyAuthority(_ context.Context, binding computeruse.AuthorityBinding, runID string, _ time.Time) error {
+	if binding != p.binding || runID != p.boundRunID {
+		return computeruse.ErrInvalidContract
+	}
+	return nil
+}
+
 func (projectAuthorizer) AuthorizeProject(_ context.Context, actor contract.ActorContext, project contract.ProjectID) error {
 	if actor.OrganizationID != "org_1" || project != "project_1" {
 		return computeruse.ErrNotFound
@@ -46,6 +71,70 @@ func TestRunEndpointsRequireScopeAndProjectIsolation(t *testing.T) {
 	server.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("cross-org status=%d", response.Code)
+	}
+}
+
+func TestTakeoverOnlyServerRegistersScopedResourcesWithoutMountingFakeWorker(t *testing.T) {
+	repo := computeruse.NewMemoryRepository()
+	service := computeruse.Service{Repository: repo}
+	server := NewTakeoverOnly(service, projectAuthorizer{})
+	call := func(method, path, body string, scopes ...contract.Scope) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, path, strings.NewReader(body))
+		request = request.WithContext(contract.WithRequestContext(request.Context(), contract.RequestContext{RequestID: "req", TraceID: "trace", Actor: contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user"}, Scopes: scopes}}))
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		return response
+	}
+	environment := call(http.MethodPost, "/api/platform/v1/computer-use/projects/project_1/environments", `{"id":"env","platform":"ocean_engine","account_id":"account","mode":"local_visible","browser_version":"edge-test","region":"local","healthy":true}`, "delivery.execute")
+	if environment.Code != http.StatusCreated {
+		t.Fatalf("environment status=%d body=%s", environment.Code, environment.Body.String())
+	}
+	profile := call(http.MethodPost, "/api/platform/v1/computer-use/projects/project_1/browser-profiles", `{"id":"profile","environment_id":"env","platform":"ocean_engine","account_id":"account","state":"ready"}`, "delivery.execute")
+	if profile.Code != http.StatusCreated {
+		t.Fatalf("profile status=%d body=%s", profile.Code, profile.Body.String())
+	}
+	policy := call(http.MethodPost, "/api/platform/v1/computer-use/projects/project_1/site-policies", `{"id":"policy","platform":"ocean_engine","account_id":"account","allowed_protocols":["https"],"allowed_hosts":["ad.oceanengine.com"],"allowed_page_kinds":["project_create"],"allowed_platform_project_ids":["test_project"]}`, "delivery.execute")
+	if policy.Code != http.StatusCreated {
+		t.Fatalf("policy status=%d body=%s", policy.Code, policy.Body.String())
+	}
+	read := call(http.MethodGet, "/api/platform/v1/computer-use/projects/project_1/site-policies/policy", "", "delivery.read")
+	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), `"ad.oceanengine.com"`) {
+		t.Fatalf("read status=%d body=%s", read.Code, read.Body.String())
+	}
+	run := validHTTPRun(time.Now().UTC())
+	_, _, _ = repo.CreateRun(context.Background(), run)
+	prepare := call(http.MethodPost, "/api/platform/v1/computer-use/projects/project_1/runs/run_1:prepare", `{}`, "delivery.execute")
+	if prepare.Code != http.StatusNotFound {
+		t.Fatalf("fake worker unexpectedly mounted: status=%d body=%s", prepare.Code, prepare.Body.String())
+	}
+}
+
+func TestKillSwitchAdministrationRequiresServicePrincipalAndRemainsReadable(t *testing.T) {
+	repo := computeruse.NewMemoryRepository()
+	service := computeruse.Service{Repository: repo, Now: func() time.Time { return time.Date(2026, 8, 13, 9, 0, 0, 0, time.UTC) }}
+	server := NewTakeoverOnly(service, projectAuthorizer{})
+	call := func(path, body string, actor contract.ActorContext) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPut, path, strings.NewReader(body))
+		request = request.WithContext(contract.WithRequestContext(request.Context(), contract.RequestContext{RequestID: "req", TraceID: "trace", Actor: actor}))
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		return response
+	}
+	user := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user"}, Scopes: []contract.Scope{"platform.computer-use.admin"}}
+	if response := call("/api/platform/v1/computer-use/kill-switches/organization", `{"active":true,"reason":"incident","expected_version":0}`, user); response.Code != http.StatusBadRequest {
+		t.Fatalf("user admin status=%d body=%s", response.Code, response.Body.String())
+	}
+	admin := user
+	admin.Principal = contract.Principal{Kind: contract.PrincipalService, ID: "safety-controller"}
+	if response := call("/api/platform/v1/computer-use/kill-switches/organization", `{"active":true,"reason":"incident","expected_version":0}`, admin); response.Code != http.StatusOK {
+		t.Fatalf("service admin status=%d body=%s", response.Code, response.Body.String())
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/platform/v1/computer-use/projects/project_1/kill-switches/active?platform=ocean_engine", nil)
+	request = request.WithContext(contract.WithRequestContext(request.Context(), contract.RequestContext{RequestID: "req", TraceID: "trace", Actor: contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user"}, Scopes: []contract.Scope{"delivery.read"}}}))
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"active":true`) {
+		t.Fatalf("active status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -123,13 +212,15 @@ func TestCreateRunEndpointIsProjectScopedAndIdempotent(t *testing.T) {
 	repo.PutEnvironment(computeruse.ExecutionEnvironment{ID: template.EnvironmentID, OrganizationID: template.OrganizationID, ProjectID: template.ProjectID, Platform: template.Platform, AccountID: template.AccountID, Mode: "local_visible", BrowserVersion: "test", Region: "local", Healthy: true, Version: 1})
 	repo.PutBrowserProfile(computeruse.BrowserProfile{ID: template.ProfileID, OrganizationID: template.OrganizationID, ProjectID: template.ProjectID, EnvironmentID: template.EnvironmentID, Platform: template.Platform, AccountID: template.AccountID, State: "ready", Version: 1})
 	repo.PutSitePolicy(computeruse.SitePolicy{ID: template.PolicyID, OrganizationID: template.OrganizationID, ProjectID: template.ProjectID, Platform: template.Platform, AccountID: template.AccountID, AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create"}, AllowedPlatformProjects: []string{"test_project"}, Version: 1})
+	repo.PutSitePolicy(computeruse.SitePolicy{ID: "policy_drift", OrganizationID: template.OrganizationID, ProjectID: template.ProjectID, Platform: template.Platform, AccountID: template.AccountID, AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create"}, AllowedPlatformProjects: []string{"test_project"}, Version: 1})
 	idSequence := 0
-	service := computeruse.Service{Repository: repo, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) {
+	provider := &authorityProvider{binding: template.Authority}
+	service := computeruse.Service{Repository: repo, AuthorityProvider: provider, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) {
 		idSequence++
 		return fmt.Sprintf("%s_create_%d", prefix, idSequence), nil
 	}}
 	server := New(service, computeruse.Worker{Service: service, Adapter: computeruse.DeterministicFakeAdapter{}}, projectAuthorizer{})
-	body := fmt.Sprintf(`{"project_id":"project_1","platform":"ocean_engine","account_id":"account","environment_id":"env","profile_id":"profile","policy_id":"policy","authority":%s}`, mustJSON(t, template.Authority))
+	body := `{"project_id":"project_1","platform":"ocean_engine","account_id":"account","business_execution_id":"exec","environment_id":"env","profile_id":"profile","policy_id":"policy"}`
 	call := func(payload, key string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost, "/api/platform/v1/computer-use/projects/project_1/runs", strings.NewReader(payload))
 		request.Header.Set("Idempotency-Key", key)
@@ -146,10 +237,14 @@ func TestCreateRunEndpointIsProjectScopedAndIdempotent(t *testing.T) {
 	if replayed.Code != http.StatusOK || replayed.Body.String() != created.Body.String() {
 		t.Fatalf("replayed status=%d body=%s", replayed.Code, replayed.Body.String())
 	}
-	drifted := strings.Replace(body, `"workflow_step_id":"submit"`, `"workflow_step_id":"review"`, 1)
+	drifted := strings.Replace(body, `"policy_id":"policy"`, `"policy_id":"policy_drift"`, 1)
 	conflict := call(drifted, "run-key")
 	if conflict.Code != http.StatusConflict {
 		t.Fatalf("conflict status=%d body=%s", conflict.Code, conflict.Body.String())
+	}
+	secondKey := call(body, "different-run-key")
+	if secondKey.Code != http.StatusConflict {
+		t.Fatalf("same execution with a second key status=%d body=%s", secondKey.Code, secondKey.Body.String())
 	}
 }
 

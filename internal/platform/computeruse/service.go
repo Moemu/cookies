@@ -22,13 +22,92 @@ const (
 type IDGenerator func(string) (string, error)
 
 type Service struct {
-	Repository Repository
-	NewID      IDGenerator
-	Now        func() time.Time
+	Repository        Repository
+	AuthorityProvider AuthorityProvider
+	NewID             IDGenerator
+	Now               func() time.Time
+}
+
+type AuthorityProvider interface {
+	ResolveAuthority(context.Context, contract.OrganizationID, contract.ProjectID, string, time.Time) (AuthorityResolution, error)
+	BindRun(context.Context, AuthorityBinding, string, time.Time) error
+	VerifyAuthority(context.Context, AuthorityBinding, string, time.Time) error
+}
+
+type AuthorityResolution struct {
+	Binding    AuthorityBinding
+	BoundRunID string
 }
 
 type CreateRunRequest struct {
 	Run ComputerUseRun
+}
+
+func (s Service) RegisterEnvironment(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, value ExecutionEnvironment) (ExecutionEnvironment, error) {
+	value.OrganizationID = organizationID
+	value.ProjectID = projectID
+	value.Version = 1
+	if s.Repository == nil || value.Validate() != nil {
+		return ExecutionEnvironment{}, ErrInvalidContract
+	}
+	return s.Repository.CreateEnvironment(ctx, value)
+}
+
+func (s Service) RegisterBrowserProfile(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, value BrowserProfile) (BrowserProfile, error) {
+	value.OrganizationID = organizationID
+	value.ProjectID = projectID
+	value.Version = 1
+	if s.Repository == nil || value.Validate() != nil {
+		return BrowserProfile{}, ErrInvalidContract
+	}
+	environment, err := s.Repository.GetEnvironment(ctx, organizationID, projectID, value.EnvironmentID)
+	if err != nil {
+		return BrowserProfile{}, err
+	}
+	if environment.Platform != value.Platform || environment.AccountID != value.AccountID {
+		return BrowserProfile{}, ErrInvalidContract
+	}
+	return s.Repository.CreateBrowserProfile(ctx, value)
+}
+
+func (s Service) RegisterSitePolicy(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, value SitePolicy) (SitePolicy, error) {
+	value.OrganizationID = organizationID
+	value.ProjectID = projectID
+	value.Version = 1
+	if s.Repository == nil || value.Validate() != nil {
+		return SitePolicy{}, ErrInvalidContract
+	}
+	return s.Repository.CreateSitePolicy(ctx, value)
+}
+
+func (s Service) SetKillSwitch(ctx context.Context, actor contract.ActorContext, scope KillSwitchScope, platform Platform, active bool, reason string, expectedVersion int64) (KillSwitch, error) {
+	if s.Repository == nil || actor.Principal.Kind != contract.PrincipalService || !actor.HasScope("platform.computer-use.admin") || strings.TrimSpace(reason) == "" || expectedVersion < 0 {
+		return KillSwitch{}, ErrInvalidContract
+	}
+	value := KillSwitch{Scope: scope, Active: active, Reason: reason, UpdatedBy: actor.Principal.ID, UpdatedAt: s.now()}
+	switch scope {
+	case KillSwitchGlobal:
+		if platform != "" {
+			return KillSwitch{}, ErrInvalidContract
+		}
+		value.ID = "computer-use-kill-global"
+	case KillSwitchPlatform:
+		if platform != PlatformOceanEngine {
+			return KillSwitch{}, ErrInvalidContract
+		}
+		value.ID = "computer-use-kill-platform-" + string(platform)
+		value.Platform = platform
+	case KillSwitchOrganization:
+		if actor.OrganizationID == "" || platform != "" {
+			return KillSwitch{}, ErrInvalidContract
+		}
+		value.ID = "computer-use-kill-organization-" + string(actor.OrganizationID)
+		value.OrganizationID = actor.OrganizationID
+	default:
+		return KillSwitch{}, ErrInvalidContract
+	}
+	value.Version = expectedVersion + 1
+	return s.Repository.PutKillSwitch(ctx, value, expectedVersion)
 }
 
 type CreateBoundRunRequest struct {
@@ -36,7 +115,7 @@ type CreateBoundRunRequest struct {
 	ProjectID      contract.ProjectID
 	Platform       Platform
 	AccountID      string
-	Authority      AuthorityBinding
+	ExecutionID    string
 	EnvironmentID  string
 	ProfileID      string
 	PolicyID       string
@@ -45,10 +124,16 @@ type CreateBoundRunRequest struct {
 }
 
 func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunRequest) (ComputerUseRun, bool, error) {
-	if s.Repository == nil || request.OrganizationID == "" || request.ProjectID == "" || request.Platform != PlatformOceanEngine || strings.TrimSpace(request.AccountID) == "" || strings.TrimSpace(request.EnvironmentID) == "" || strings.TrimSpace(request.ProfileID) == "" || strings.TrimSpace(request.PolicyID) == "" || strings.TrimSpace(request.IdempotencyKey) == "" || len(request.IdempotencyKey) > 160 || strings.TrimSpace(request.CreatedBy) == "" {
+	if s.Repository == nil || s.AuthorityProvider == nil || request.OrganizationID == "" || request.ProjectID == "" || request.Platform != PlatformOceanEngine || strings.TrimSpace(request.AccountID) == "" || strings.TrimSpace(request.ExecutionID) == "" || strings.TrimSpace(request.EnvironmentID) == "" || strings.TrimSpace(request.ProfileID) == "" || strings.TrimSpace(request.PolicyID) == "" || strings.TrimSpace(request.IdempotencyKey) == "" || len(request.IdempotencyKey) > 160 || strings.TrimSpace(request.CreatedBy) == "" {
 		return ComputerUseRun{}, false, ErrInvalidContract
 	}
-	if err := request.Authority.Validate(); err != nil || request.Authority.OrganizationID != request.OrganizationID || request.Authority.ProjectID != request.ProjectID || request.Authority.AccountReferenceID != request.AccountID {
+	now := s.now()
+	resolution, err := s.AuthorityProvider.ResolveAuthority(ctx, request.OrganizationID, request.ProjectID, request.ExecutionID, now)
+	if err != nil {
+		return ComputerUseRun{}, false, err
+	}
+	authority := resolution.Binding
+	if err := authority.Validate(); err != nil || authority.OrganizationID != request.OrganizationID || authority.ProjectID != request.ProjectID || authority.BusinessExecutionID != request.ExecutionID || authority.AccountReferenceID != request.AccountID {
 		return ComputerUseRun{}, false, ErrInvalidContract
 	}
 	environment, err := s.Repository.GetEnvironment(ctx, request.OrganizationID, request.ProjectID, request.EnvironmentID)
@@ -71,21 +156,28 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 		ProjectID      contract.ProjectID      `json:"project_id"`
 		Platform       Platform                `json:"platform"`
 		AccountID      string                  `json:"account_id"`
-		Authority      AuthorityBinding        `json:"authority"`
+		ExecutionID    string                  `json:"business_execution_id"`
 		EnvironmentID  string                  `json:"environment_id"`
 		ProfileID      string                  `json:"profile_id"`
 		PolicyID       string                  `json:"policy_id"`
-	}{OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, Platform: request.Platform, AccountID: request.AccountID, Authority: request.Authority, EnvironmentID: request.EnvironmentID, ProfileID: request.ProfileID, PolicyID: request.PolicyID})
+	}{OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, Platform: request.Platform, AccountID: request.AccountID, ExecutionID: request.ExecutionID, EnvironmentID: request.EnvironmentID, ProfileID: request.ProfileID, PolicyID: request.PolicyID})
 	if err != nil {
 		return ComputerUseRun{}, false, err
 	}
 	digest := sha256.Sum256(hashInput)
-	id, err := s.newID("curun")
-	if err != nil {
-		return ComputerUseRun{}, false, err
+	requestHash := hex.EncodeToString(digest[:])
+	if resolution.BoundRunID != "" {
+		existing, err := s.Repository.GetRun(ctx, request.OrganizationID, request.ProjectID, resolution.BoundRunID)
+		if err != nil {
+			return ComputerUseRun{}, false, err
+		}
+		if existing.IdempotencyKey != request.IdempotencyKey || existing.RequestHash != requestHash || existing.Authority != authority {
+			return ComputerUseRun{}, false, ErrIdempotencyConflict
+		}
+		return existing, true, nil
 	}
-	now := s.now()
-	run := ComputerUseRun{SchemaVersion: RunSchemaV1, ID: id, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, Platform: request.Platform, AccountID: request.AccountID, Authority: request.Authority, EnvironmentID: request.EnvironmentID, ProfileID: request.ProfileID, PolicyID: request.PolicyID, State: RunQueued, Version: 1, IdempotencyKey: request.IdempotencyKey, RequestHash: hex.EncodeToString(digest[:]), CreatedBy: request.CreatedBy, CreatedAt: now, UpdatedAt: now}
+	id := boundRunID(request.OrganizationID, request.ProjectID, request.ExecutionID)
+	run := ComputerUseRun{SchemaVersion: RunSchemaV1, ID: id, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, Platform: request.Platform, AccountID: request.AccountID, Authority: authority, EnvironmentID: request.EnvironmentID, ProfileID: request.ProfileID, PolicyID: request.PolicyID, State: RunQueued, Version: 1, IdempotencyKey: request.IdempotencyKey, RequestHash: requestHash, CreatedBy: request.CreatedBy, CreatedAt: now, UpdatedAt: now}
 	created, replayed, err := s.CreateRun(ctx, CreateRunRequest{Run: run})
 	if err != nil {
 		return ComputerUseRun{}, false, err
@@ -95,7 +187,15 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 			return ComputerUseRun{}, false, err
 		}
 	}
+	if err := s.AuthorityProvider.BindRun(ctx, created.Authority, created.ID, now); err != nil {
+		return ComputerUseRun{}, false, err
+	}
 	return created, replayed, nil
+}
+
+func boundRunID(organizationID contract.OrganizationID, projectID contract.ProjectID, executionID string) string {
+	digest := sha256.Sum256([]byte(string(organizationID) + "\x00" + string(projectID) + "\x00" + executionID))
+	return "curun_" + hex.EncodeToString(digest[:])
 }
 
 type RecordTakeoverEvidenceRequest struct {
@@ -263,6 +363,11 @@ func (s Service) IssueFinalConfirmation(ctx context.Context, organizationID cont
 	if run.State != RunAwaitingConfirmation || bindingHash != run.Authority.ApprovalActionHash || strings.TrimSpace(actor) == "" {
 		return IssuedConfirmation{}, ErrConfirmationInvalid
 	}
+	if s.AuthorityProvider != nil {
+		if err := s.AuthorityProvider.VerifyAuthority(ctx, run.Authority, run.ID, s.now()); err != nil {
+			return IssuedConfirmation{}, ErrConfirmationInvalid
+		}
+	}
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return IssuedConfirmation{}, err
@@ -304,6 +409,11 @@ func (s Service) AuthorizeAction(ctx context.Context, request AuthorizeActionReq
 	now := s.now()
 	if run.State != RunAwaitingConfirmation || run.Paused || run.TakeoverActive {
 		return ControlledActionAttempt{}, ErrConfirmationInvalid
+	}
+	if s.AuthorityProvider != nil {
+		if err := s.AuthorityProvider.VerifyAuthority(ctx, run.Authority, run.ID, now); err != nil {
+			return ControlledActionAttempt{}, ErrConfirmationInvalid
+		}
 	}
 	if _, active, err := s.Repository.ActiveKillSwitch(ctx, request.OrganizationID, run.Platform); err != nil {
 		return ControlledActionAttempt{}, err
