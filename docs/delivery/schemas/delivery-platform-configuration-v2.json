@@ -94,6 +94,7 @@
       "additionalProperties": false,
       "required": ["currency", "daily_budget_minor", "bidding_strategy", "charging_mode"],
       "properties": {
+        "budget_mode": { "enum": ["daily", "unlimited"] },
         "currency": { "type": "string", "minLength": 1 },
         "daily_budget_minor": { "type": "integer", "minimum": 0 },
         "bidding_strategy": { "type": "string", "minLength": 1 },
@@ -119,6 +120,20 @@
           }
         }
       ]
+    },
+    "OceanEngineProjectBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "daily_budget_minor"],
+      "properties": {
+        "budget_mode": { "enum": ["daily", "unlimited"] },
+        "currency": { "type": "string", "minLength": 1 },
+        "daily_budget_minor": { "type": "integer", "minimum": 0 },
+        "bidding_strategy": { "type": "string" },
+        "charging_mode": { "type": "string" },
+        "bid_minor": { "type": "integer", "minimum": 0 },
+        "roi_coefficient": { "type": "number", "minimum": 0 }
+      }
     },
     "OceanEngineProjectDraft": {
       "type": "object",
@@ -150,7 +165,7 @@
         "delivery_mode": { "type": "string", "minLength": 1 },
         "targeting": { "$ref": "#/$defs/OceanEngineTargeting" },
         "schedule": { "$ref": "#/$defs/OceanEngineSchedule" },
-        "budget_and_bidding": { "$ref": "#/$defs/OceanEngineBudgetAndBidding" },
+        "budget_and_bidding": { "$ref": "#/$defs/OceanEngineProjectBudget" },
         "monitoring_references": {
           "type": "array",
           "items": { "$ref": "#/$defs/StableReference" }
@@ -190,6 +205,9 @@
         "call_to_action": { "type": "string" },
         "source_label": { "type": "string" },
         "comments_enabled": { "type": "boolean" },
+        "smart_generation_enabled": { "type": "boolean" },
+        "client_download_enabled": { "type": "boolean" },
+        "direct_link_mode": { "enum": ["automatic", "manual"] },
         "category_reference": { "$ref": "#/$defs/StableReference" },
         "brand_reference": { "$ref": "#/$defs/StableReference" }
       }
@@ -226,6 +244,7 @@
           "type": "array",
           "items": { "$ref": "#/$defs/StableReference" }
         },
+        "budget_and_bidding": { "$ref": "#/$defs/OceanEngineBudgetAndBidding" },
         "settings": { "$ref": "#/$defs/OceanEnginePromotionSettings" },
         "promotion_name": { "type": "string", "minLength": 1 }
       }

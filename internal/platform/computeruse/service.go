@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -151,6 +152,9 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 	if environment.Platform != request.Platform || environment.AccountID != request.AccountID || environment.Mode != "local_visible" || !environment.Healthy || environment.Version < 1 || profile.EnvironmentID != environment.ID || profile.Platform != request.Platform || profile.AccountID != request.AccountID || profile.State != "ready" || profile.Version < 1 || policy.Platform != request.Platform || policy.AccountID != request.AccountID || policy.Version < 1 {
 		return ComputerUseRun{}, false, ErrInvalidContract
 	}
+	if authority.Action == "create_promotions_in_existing_project" && !slices.Contains(policy.AllowedPlatformProjects, authority.ParentPlatformProjectID) {
+		return ComputerUseRun{}, false, ErrInvalidContract
+	}
 	hashInput, err := json.Marshal(struct {
 		OrganizationID contract.OrganizationID `json:"organization_id"`
 		ProjectID      contract.ProjectID      `json:"project_id"`
@@ -288,7 +292,7 @@ func (s Service) RecordTakeoverEvidence(ctx context.Context, request RecordTakeo
 	if err != nil {
 		return TakeoverEvidenceResult{}, err
 	}
-	if policy.Platform != run.Platform || policy.AccountID != run.AccountID || !policy.Allows(request.PageReference, request.PageKind, request.PlatformProjectID) {
+	if policy.Platform != run.Platform || policy.AccountID != run.AccountID || !run.authorizesPlatformProject(request.PlatformProjectID) || !policy.Allows(request.PageReference, request.PageKind, request.PlatformProjectID) {
 		return TakeoverEvidenceResult{}, ErrInvalidContract
 	}
 	step := RunStep{ID: request.StepID, RunID: run.ID, Sequence: request.Sequence, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(request.Action), Status: request.Status, Attempt: 1, Version: 1}
@@ -454,7 +458,7 @@ func (s Service) AuthorizeTakeoverAction(ctx context.Context, request AuthorizeT
 	if err != nil {
 		return TakeoverActionAuthorization{}, err
 	}
-	if policy.Platform != run.Platform || policy.AccountID != run.AccountID || !policy.Allows(request.PageReference, request.PageKind, request.PlatformProjectID) {
+	if policy.Platform != run.Platform || policy.AccountID != run.AccountID || !run.authorizesPlatformProject(request.PlatformProjectID) || !policy.Allows(request.PageReference, request.PageKind, request.PlatformProjectID) {
 		return TakeoverActionAuthorization{}, ErrInvalidContract
 	}
 	digest := sha256.Sum256([]byte(request.Token))
@@ -571,7 +575,7 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 		return TakeoverEvidenceResult{}, ErrLeaseUnavailable
 	}
 	policy, err := s.Repository.GetSitePolicy(ctx, request.OrganizationID, request.ProjectID, run.PolicyID)
-	if err != nil || !policy.Allows(request.PageReference, request.PageKind, request.PlatformProjectID) {
+	if err != nil || !run.authorizesPlatformProject(request.PlatformProjectID) || !policy.Allows(request.PageReference, request.PageKind, request.PlatformProjectID) {
 		return TakeoverEvidenceResult{}, ErrInvalidContract
 	}
 	step := RunStep{ID: request.StepID, RunID: run.ID, Sequence: request.Sequence, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(request.Outcome), Status: status, BlockingReason: reason, Attempt: 1, Version: 1}

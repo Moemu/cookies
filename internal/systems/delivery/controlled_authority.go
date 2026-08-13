@@ -27,7 +27,14 @@ const (
 
 type ControlledAction string
 
-const ControlledActionCreateProjectAndPromotions ControlledAction = "create_project_and_promotions"
+const (
+	ControlledActionCreateProjectAndPromotions        ControlledAction = "create_project_and_promotions"
+	ControlledActionCreatePromotionsInExistingProject ControlledAction = "create_promotions_in_existing_project"
+)
+
+func (a ControlledAction) Valid() bool {
+	return a == ControlledActionCreateProjectAndPromotions || a == ControlledActionCreatePromotionsInExistingProject
+}
 
 type ControlledAuthorityBinding struct {
 	SelectionID                   string                         `json:"selection_id"`
@@ -50,13 +57,20 @@ type ControlledAuthorityBinding struct {
 	WorkflowID                    string                         `json:"workflow_id"`
 	WorkflowCanonicalHash         string                         `json:"workflow_canonical_hash"`
 	AccountReferenceID            string                         `json:"account_reference_id"`
+	ParentPlatformProjectID       string                         `json:"parent_platform_project_id,omitempty"`
+	ProjectBudgetMode             string                         `json:"project_budget_mode,omitempty"`
+	ProjectBudgetLimitMinor       int64                          `json:"project_budget_limit_minor"`
+	PromotionBudgetLimitMinor     int64                          `json:"promotion_budget_limit_minor"`
 	ObjectFingerprint             string                         `json:"object_fingerprint"`
 	SkillID                       string                         `json:"skill_id,omitempty"`
 	SkillVersion                  string                         `json:"skill_version,omitempty"`
 }
 
 func (b ControlledAuthorityBinding) Validate() error {
-	if b.SelectionID == "" || b.ObservatoryRunID == "" || b.OperatorFeedbackID == "" || b.PlanID == "" || b.PlanVersion < 1 || b.IntentID == "" || b.IntentVersion < 1 || b.DecisionID == "" || b.ConfigurationID == "" || b.ConfigurationVersion < 1 || b.WorkflowID == "" || b.AccountReferenceID == "" || b.ObjectFingerprint == "" || (b.SkillID == "") != (b.SkillVersion == "") {
+	if b.SelectionID == "" || b.ObservatoryRunID == "" || b.OperatorFeedbackID == "" || b.PlanID == "" || b.PlanVersion < 1 || b.IntentID == "" || b.IntentVersion < 1 || b.DecisionID == "" || b.ConfigurationID == "" || b.ConfigurationVersion < 1 || b.WorkflowID == "" || b.AccountReferenceID == "" || b.ObjectFingerprint == "" || b.ProjectBudgetLimitMinor < 0 || b.PromotionBudgetLimitMinor < 0 || (b.SkillID == "") != (b.SkillVersion == "") {
+		return ErrInvalidRequest
+	}
+	if b.ProjectBudgetMode != "" && b.ProjectBudgetMode != OceanEngineBudgetModeDaily && b.ProjectBudgetMode != OceanEngineBudgetModeUnlimited {
 		return ErrInvalidRequest
 	}
 	if b.OperatorFeedbackDisposition != ObservatoryFeedbackAccepted && b.OperatorFeedbackDisposition != ObservatoryFeedbackModified {
@@ -104,10 +118,13 @@ func (c ControlledChangeSet) ComputeCanonicalHash() (string, error) {
 }
 
 func (c ControlledChangeSet) Validate() error {
-	if c.SchemaVersion != ControlledChangeSetSchemaV1 || c.ID == "" || c.OrganizationID == "" || c.ProjectID == "" || c.Action != ControlledActionCreateProjectAndPromotions || c.BudgetLimitMinor < 0 || c.Currency != "CNY" || c.Version < 1 || strings.TrimSpace(c.CreatedBy) == "" || c.CreatedAt.IsZero() || c.UpdatedAt.IsZero() {
+	if c.SchemaVersion != ControlledChangeSetSchemaV1 || c.ID == "" || c.OrganizationID == "" || c.ProjectID == "" || !c.Action.Valid() || c.BudgetLimitMinor < 0 || c.Currency != "CNY" || c.Version < 1 || strings.TrimSpace(c.CreatedBy) == "" || c.CreatedAt.IsZero() || c.UpdatedAt.IsZero() {
 		return ErrInvalidRequest
 	}
 	if err := c.Binding.Validate(); err != nil {
+		return err
+	}
+	if err := validateControlledActionBinding(c.Action, c.Binding, c.BudgetLimitMinor); err != nil {
 		return err
 	}
 	switch c.Status {
@@ -160,10 +177,13 @@ func (a RemoteWriteApproval) ComputeActionHash() (string, error) {
 }
 
 func (a RemoteWriteApproval) Validate(now time.Time) error {
-	if a.SchemaVersion != RemoteWriteApprovalSchemaV1 || a.ID == "" || a.OrganizationID == "" || a.ProjectID == "" || a.ControlledChangeSetID == "" || !isLowercaseSHA256(a.ControlledChangeSetHash) || a.Action != ControlledActionCreateProjectAndPromotions || a.Scope != "controlled_remote_write" || a.BudgetLimitMinor < 0 || a.Currency != "CNY" || a.ApprovedBy == "" || a.ApprovedAt.IsZero() || !a.ExpiresAt.After(a.ApprovedAt) {
+	if a.SchemaVersion != RemoteWriteApprovalSchemaV1 || a.ID == "" || a.OrganizationID == "" || a.ProjectID == "" || a.ControlledChangeSetID == "" || !isLowercaseSHA256(a.ControlledChangeSetHash) || !a.Action.Valid() || a.Scope != "controlled_remote_write" || a.BudgetLimitMinor < 0 || a.Currency != "CNY" || a.ApprovedBy == "" || a.ApprovedAt.IsZero() || !a.ExpiresAt.After(a.ApprovedAt) {
 		return ErrInvalidRequest
 	}
 	if err := a.Binding.Validate(); err != nil {
+		return err
+	}
+	if err := validateControlledActionBinding(a.Action, a.Binding, a.BudgetLimitMinor); err != nil {
 		return err
 	}
 	hash, err := a.ComputeActionHash()
@@ -172,6 +192,22 @@ func (a RemoteWriteApproval) Validate(now time.Time) error {
 	}
 	if !now.Before(a.ExpiresAt) {
 		return ErrApprovalExpired
+	}
+	return nil
+}
+
+func validateControlledActionBinding(action ControlledAction, binding ControlledAuthorityBinding, budgetLimitMinor int64) error {
+	switch action {
+	case ControlledActionCreateProjectAndPromotions:
+		if binding.ParentPlatformProjectID != "" || (binding.ProjectBudgetMode != "" && budgetLimitMinor != binding.ProjectBudgetLimitMinor) {
+			return ErrApprovalContentMismatch
+		}
+	case ControlledActionCreatePromotionsInExistingProject:
+		if strings.TrimSpace(binding.ParentPlatformProjectID) == "" || binding.PromotionBudgetLimitMinor < 1 || budgetLimitMinor != binding.PromotionBudgetLimitMinor {
+			return ErrApprovalContentMismatch
+		}
+	default:
+		return ErrInvalidRequest
 	}
 	return nil
 }

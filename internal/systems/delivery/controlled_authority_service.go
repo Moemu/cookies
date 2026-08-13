@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"math"
 	"strings"
 	"time"
 
@@ -111,7 +112,9 @@ func (s Service) GetControlledExecution(ctx context.Context, actor contract.Acto
 }
 
 type CompileControlledChangeSetRequest struct {
-	ObservatoryRunID string `json:"observatory_run_id"`
+	ObservatoryRunID        string           `json:"observatory_run_id"`
+	Action                  ControlledAction `json:"action,omitempty"`
+	ParentPlatformProjectID string           `json:"parent_platform_project_id,omitempty"`
 }
 
 func (s Service) CompileControlledChangeSet(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CompileControlledChangeSetRequest) (ControlledChangeSet, bool, error) {
@@ -119,6 +122,14 @@ func (s Service) CompileControlledChangeSet(ctx context.Context, actor contract.
 		return ControlledChangeSet{}, false, err
 	}
 	if strings.TrimSpace(request.ObservatoryRunID) == "" {
+		return ControlledChangeSet{}, false, ErrInvalidRequest
+	}
+	action := request.Action
+	if action == "" {
+		action = ControlledActionCreateProjectAndPromotions
+	}
+	parentPlatformProjectID := strings.TrimSpace(request.ParentPlatformProjectID)
+	if !action.Valid() || (action == ControlledActionCreateProjectAndPromotions && parentPlatformProjectID != "") || (action == ControlledActionCreatePromotionsInExistingProject && parentPlatformProjectID == "") {
 		return ControlledChangeSet{}, false, ErrInvalidRequest
 	}
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
@@ -167,14 +178,37 @@ func (s Service) CompileControlledChangeSet(ctx context.Context, actor contract.
 		return ControlledChangeSet{}, false, ErrInvalidState
 	}
 	accountID := selection.Workflow.AccountReference.ID
-	if accountID == "" {
+	if accountID == "" || configuration.Payload.OceanEngine.Project.AccountReference.ID != accountID {
 		return ControlledChangeSet{}, false, ErrInvalidState
+	}
+	if action == ControlledActionCreatePromotionsInExistingProject && configuration.Payload.OceanEngine.Project.ProjectDraftID != parentPlatformProjectID {
+		return ControlledChangeSet{}, false, ErrApprovalContentMismatch
+	}
+	projectBudgetMode := effectiveOceanEngineBudgetMode(configuration.Payload.OceanEngine.Project.BudgetAndBidding)
+	projectBudgetLimitMinor := configuration.Payload.OceanEngine.Project.BudgetAndBidding.DailyBudgetMinor
+	promotionBudgetLimitMinor := int64(0)
+	for _, promotion := range configuration.Payload.OceanEngine.Promotions {
+		if promotion.BudgetAndBidding == nil {
+			if action == ControlledActionCreatePromotionsInExistingProject {
+				return ControlledChangeSet{}, false, ErrInvalidState
+			}
+			continue
+		}
+		if promotion.BudgetAndBidding.Currency != "CNY" || promotion.BudgetAndBidding.DailyBudgetMinor > math.MaxInt64-promotionBudgetLimitMinor {
+			return ControlledChangeSet{}, false, ErrInvalidState
+		}
+		promotionBudgetLimitMinor += promotion.BudgetAndBidding.DailyBudgetMinor
+	}
+	budgetLimitMinor := projectBudgetLimitMinor
+	if action == ControlledActionCreatePromotionsInExistingProject {
+		budgetLimitMinor = promotionBudgetLimitMinor
 	}
 	fingerprint, err := contract.CanonicalJSONHash(struct {
 		AccountID         string           `json:"account_id"`
 		Action            ControlledAction `json:"action"`
+		ParentProjectID   string           `json:"parent_platform_project_id,omitempty"`
 		ConfigurationHash string           `json:"configuration_hash"`
-	}{accountID, ControlledActionCreateProjectAndPromotions, configuration.CanonicalHash})
+	}{accountID, action, parentPlatformProjectID, configuration.CanonicalHash})
 	if err != nil {
 		return ControlledChangeSet{}, false, err
 	}
@@ -185,13 +219,13 @@ func (s Service) CompileControlledChangeSet(ctx context.Context, actor contract.
 	// The immutable approval binds the stage B calibration definition. Its
 	// definition remains non-executable until gate one revalidates live DOM
 	// locators and a real Browser Driver is delivered.
-	binding := ControlledAuthorityBinding{SelectionID: selection.ID, ObservatoryRunID: run.ID, ObservatoryRunCanonicalHash: run.CanonicalHash, OperatorFeedbackID: feedback.ID, OperatorFeedbackCanonicalHash: feedback.CanonicalHash, OperatorFeedbackDisposition: feedback.Disposition, PlanID: decision.Inputs.PlanID, PlanVersion: decision.Inputs.PlanVersion, PlanCanonicalHash: decision.Inputs.PlanCanonicalHash, IntentID: decision.Inputs.IntentID, IntentVersion: decision.Inputs.IntentVersion, IntentCanonicalHash: decision.Inputs.IntentCanonicalHash, DecisionID: decision.ID, DecisionCanonicalHash: decision.CanonicalHash, ConfigurationID: configuration.ConfigurationID, ConfigurationVersion: configuration.VersionNumber, ConfigurationCanonicalHash: configuration.CanonicalHash, WorkflowID: selection.Workflow.ID, WorkflowCanonicalHash: selection.Workflow.CanonicalHash, AccountReferenceID: accountID, ObjectFingerprint: fingerprint, SkillID: skill.ID, SkillVersion: skill.Version}
+	binding := ControlledAuthorityBinding{SelectionID: selection.ID, ObservatoryRunID: run.ID, ObservatoryRunCanonicalHash: run.CanonicalHash, OperatorFeedbackID: feedback.ID, OperatorFeedbackCanonicalHash: feedback.CanonicalHash, OperatorFeedbackDisposition: feedback.Disposition, PlanID: decision.Inputs.PlanID, PlanVersion: decision.Inputs.PlanVersion, PlanCanonicalHash: decision.Inputs.PlanCanonicalHash, IntentID: decision.Inputs.IntentID, IntentVersion: decision.Inputs.IntentVersion, IntentCanonicalHash: decision.Inputs.IntentCanonicalHash, DecisionID: decision.ID, DecisionCanonicalHash: decision.CanonicalHash, ConfigurationID: configuration.ConfigurationID, ConfigurationVersion: configuration.VersionNumber, ConfigurationCanonicalHash: configuration.CanonicalHash, WorkflowID: selection.Workflow.ID, WorkflowCanonicalHash: selection.Workflow.CanonicalHash, AccountReferenceID: accountID, ParentPlatformProjectID: parentPlatformProjectID, ProjectBudgetMode: projectBudgetMode, ProjectBudgetLimitMinor: projectBudgetLimitMinor, PromotionBudgetLimitMinor: promotionBudgetLimitMinor, ObjectFingerprint: fingerprint, SkillID: skill.ID, SkillVersion: skill.Version}
 	id, err := s.idGenerator()("controlledchangeset")
 	if err != nil {
 		return ControlledChangeSet{}, false, err
 	}
 	now := s.now()
-	change := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, Binding: binding, Action: ControlledActionCreateProjectAndPromotions, BudgetLimitMinor: configuration.Payload.OceanEngine.Project.BudgetAndBidding.DailyBudgetMinor, Currency: "CNY", Status: ControlledChangeSetReady, Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now}
+	change := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, Binding: binding, Action: action, BudgetLimitMinor: budgetLimitMinor, Currency: "CNY", Status: ControlledChangeSetReady, Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now}
 	hash, err := change.ComputeCanonicalHash()
 	if err != nil {
 		return ControlledChangeSet{}, false, err

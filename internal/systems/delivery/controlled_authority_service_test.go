@@ -132,10 +132,26 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 		t.Fatal(err)
 	}
 	repo.observatoryRuns[repositoryKey(actor.OrganizationID, "project_a", run.ID)] = run
-	feedback := DeliveryObservatoryFeedback{SchemaVersion: ObservatoryFeedbackSchemaV1, ID: "feedback_1", OrganizationID: actor.OrganizationID, ProjectID: "project_a", RunID: run.ID, RunCanonicalHash: run.CanonicalHash, RunOutcome: run.Outcome, Disposition: ObservatoryFeedbackAccepted, Reason: "reviewed", DiffKeys: []string{}, CreatedBy: actor.Principal.ID, CreatedAt: now}
+	liveConfiguration := selection.Configuration
+	liveConfiguration.Payload.OceanEngine.Project.ProjectDraftID = "platform-project-1"
+	liveConfiguration.Payload.OceanEngine.Project.BudgetAndBidding.BudgetMode = OceanEngineBudgetModeUnlimited
+	liveConfiguration.Payload.OceanEngine.Project.BudgetAndBidding.DailyBudgetMinor = 0
+	promotionBid := int64(1)
+	liveConfiguration.Payload.OceanEngine.Promotions[0].BudgetAndBidding = &OceanEngineBudgetAndBidding{BudgetMode: OceanEngineBudgetModeDaily, Currency: "CNY", DailyBudgetMinor: 30000, BiddingStrategy: "stable_cost", ChargingMode: "oCPM", BidMinor: &promotionBid}
+	liveConfiguration, err = FinalizePlatformConfiguration(liveConfiguration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feedback := DeliveryObservatoryFeedback{SchemaVersion: ObservatoryFeedbackSchemaV1, ID: "feedback_1", OrganizationID: actor.OrganizationID, ProjectID: "project_a", RunID: run.ID, RunCanonicalHash: run.CanonicalHash, RunOutcome: run.Outcome, Disposition: ObservatoryFeedbackModified, Reason: "reviewed", DiffKeys: []string{"project.budget_and_bidding", "promotions.0.budget_and_bidding"}, FinalConfiguration: &liveConfiguration, FinalConfigurationCanonicalHash: liveConfiguration.CanonicalHash, CreatedBy: actor.Principal.ID, CreatedAt: now}
 	feedback.CanonicalHash, _ = feedback.ComputeCanonicalHash()
 	repo.observatoryFeedback[repositoryKey(actor.OrganizationID, "project_a", feedback.ID)] = feedback
-	change, replay, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID})
+	if _, _, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID, Action: ControlledActionCreatePromotionsInExistingProject}); err != ErrInvalidRequest {
+		t.Fatalf("existing-project action without parent id err=%v", err)
+	}
+	if _, _, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID, Action: ControlledActionCreatePromotionsInExistingProject, ParentPlatformProjectID: "other-project"}); err != ErrApprovalContentMismatch {
+		t.Fatalf("existing-project action with mismatched parent id err=%v", err)
+	}
+	change, replay, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID, Action: ControlledActionCreatePromotionsInExistingProject, ParentPlatformProjectID: "platform-project-1"})
 	if err != nil || replay {
 		t.Fatalf("compile replay=%t err=%v", replay, err)
 	}
@@ -144,6 +160,9 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	}
 	if change.Binding.SkillID != "oceanengine-ecommerce-manual" || change.Binding.SkillVersion != "v0.1-calibration" {
 		t.Fatalf("stage B Platform Skill calibration was not bound: %#v", change.Binding)
+	}
+	if change.Action != ControlledActionCreatePromotionsInExistingProject || change.Binding.ParentPlatformProjectID != "platform-project-1" || change.Binding.ProjectBudgetMode != OceanEngineBudgetModeUnlimited || change.Binding.ProjectBudgetLimitMinor != 0 || change.Binding.PromotionBudgetLimitMinor != 30000 || change.BudgetLimitMinor != 30000 {
+		t.Fatalf("existing-project authority boundary=%#v change=%#v", change.Binding, change)
 	}
 	approved, approval, err := service.ApproveControlledChangeSet(context.Background(), actor, "project_a", change.ID, ApproveControlledChangeSetRequest{ExpectedVersion: 1})
 	if err != nil {

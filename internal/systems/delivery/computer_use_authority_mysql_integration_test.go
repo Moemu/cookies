@@ -42,7 +42,10 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	deliveryRepo := MySQLRepository{DB: db}
 	binding := validControlledBinding()
-	change := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: "change_" + suffix, OrganizationID: org, ProjectID: project, Binding: binding, Action: ControlledActionCreateProjectAndPromotions, BudgetLimitMinor: 30000, Currency: "CNY", Status: ControlledChangeSetReady, Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	binding.ParentPlatformProjectID = "platform_project_1"
+	binding.ProjectBudgetMode = OceanEngineBudgetModeUnlimited
+	binding.PromotionBudgetLimitMinor = 30000
+	change := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: "change_" + suffix, OrganizationID: org, ProjectID: project, Binding: binding, Action: ControlledActionCreatePromotionsInExistingProject, BudgetLimitMinor: 30000, Currency: "CNY", Status: ControlledChangeSetReady, Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
 	change.CanonicalHash, _ = change.ComputeCanonicalHash()
 	change, _, err = deliveryRepo.CreateControlledChangeSet(ctx, change)
 	if err != nil {
@@ -78,7 +81,7 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, err := computerUseService.RegisterSitePolicy(ctx, org, project, computeruse.SitePolicy{ID: "policy_" + suffix, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create"}, AllowedPlatformProjects: []string{"new-project:" + binding.ObjectFingerprint}})
+	policy, err := computerUseService.RegisterSitePolicy(ctx, org, project, computeruse.SitePolicy{ID: "policy_" + suffix, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"promotion_create"}, AllowedPlatformProjects: []string{binding.ParentPlatformProjectID}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -69,8 +69,12 @@ type AuthorityBinding struct {
 	ApprovalID                 string                  `json:"approval_id"`
 	ApprovalActionHash         string                  `json:"approval_action_hash"`
 	AccountReferenceID         string                  `json:"account_reference_id"`
+	ParentPlatformProjectID    string                  `json:"parent_platform_project_id,omitempty"`
 	ObjectFingerprint          string                  `json:"object_fingerprint"`
 	Action                     string                  `json:"action"`
+	ProjectBudgetMode          string                  `json:"project_budget_mode,omitempty"`
+	ProjectBudgetLimitMinor    int64                   `json:"project_budget_limit_minor"`
+	PromotionBudgetLimitMinor  int64                   `json:"promotion_budget_limit_minor"`
 	BudgetLimitMinor           int64                   `json:"budget_limit_minor"`
 	Currency                   string                  `json:"currency"`
 	PlanCanonicalHash          string                  `json:"plan_canonical_hash"`
@@ -88,8 +92,11 @@ type AuthorityBinding struct {
 func (b AuthorityBinding) Validate() error {
 	if b.SchemaVersion != AuthoritySchemaV1 || b.OrganizationID == "" || b.ProjectID == "" ||
 		b.BusinessExecutionID == "" || b.ChangeSetID == "" || b.ApprovalID == "" || b.AccountReferenceID == "" ||
-		b.ObjectFingerprint == "" || b.Action == "" || b.BudgetLimitMinor < 0 || b.Currency != "CNY" ||
+		b.ObjectFingerprint == "" || b.Action == "" || b.ProjectBudgetLimitMinor < 0 || b.PromotionBudgetLimitMinor < 0 || b.BudgetLimitMinor < 0 || b.Currency != "CNY" ||
 		b.WorkflowID == "" || b.WorkflowStepID == "" || (b.SkillID == "") != (b.SkillVersion == "") {
+		return ErrInvalidContract
+	}
+	if b.Action == "create_promotions_in_existing_project" && (strings.TrimSpace(b.ParentPlatformProjectID) == "" || b.PromotionBudgetLimitMinor < 1 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor) {
 		return ErrInvalidContract
 	}
 	for _, hash := range []string{b.ApprovalActionHash, b.PlanCanonicalHash, b.IntentCanonicalHash, b.FeedbackCanonicalHash, b.DecisionCanonicalHash, b.ConfigurationCanonicalHash, b.WorkflowCanonicalHash} {
@@ -249,6 +256,10 @@ type ComputerUseRun struct {
 	CreatedBy      string                  `json:"created_by"`
 	CreatedAt      time.Time               `json:"created_at"`
 	UpdatedAt      time.Time               `json:"updated_at"`
+}
+
+func (r ComputerUseRun) authorizesPlatformProject(platformProjectID string) bool {
+	return r.Authority.Action != "create_promotions_in_existing_project" || (r.Authority.ParentPlatformProjectID != "" && platformProjectID == r.Authority.ParentPlatformProjectID)
 }
 
 func (r ComputerUseRun) Validate() error {

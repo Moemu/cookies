@@ -1335,6 +1335,10 @@ components:
         workflow_id: { type: string }
         workflow_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
         account_reference_id: { type: string }
+        parent_platform_project_id: { type: string }
+        project_budget_mode: { type: string, enum: [daily, unlimited] }
+        project_budget_limit_minor: { type: integer, minimum: 0 }
+        promotion_budget_limit_minor: { type: integer, minimum: 0 }
         object_fingerprint: { type: string }
         skill_id: { type: string }
         skill_version: { type: string }
@@ -1344,6 +1348,8 @@ components:
       required: [observatory_run_id]
       properties:
         observatory_run_id: { type: string, minLength: 1 }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project] }
+        parent_platform_project_id: { type: string, minLength: 1 }
     ControlledChangeSet:
       type: object
       additionalProperties: false
@@ -1354,7 +1360,7 @@ components:
         organization_id: { type: string }
         project_id: { type: string }
         binding: { $ref: '#/components/schemas/ControlledAuthorityBinding' }
-        action: { type: string, const: create_project_and_promotions }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project] }
         budget_limit_minor: { type: integer, minimum: 0 }
         currency: { type: string, const: CNY }
         status: { type: string, enum: [ready_for_approval, approved, rejected, executing, executed, invalidated] }
@@ -1376,7 +1382,7 @@ components:
         controlled_change_set_id: { type: string }
         controlled_change_set_hash: { $ref: '#/components/schemas/CanonicalHash' }
         binding: { $ref: '#/components/schemas/ControlledAuthorityBinding' }
-        action: { type: string, const: create_project_and_promotions }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project] }
         scope: { type: string, const: controlled_remote_write }
         budget_limit_minor: { type: integer, minimum: 0 }
         currency: { type: string, const: CNY }

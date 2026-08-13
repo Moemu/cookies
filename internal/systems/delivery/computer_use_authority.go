@@ -43,8 +43,12 @@ func (p ComputerUseAuthorityProvider) ResolveAuthority(ctx context.Context, orga
 		ApprovalID:                 approval.ID,
 		ApprovalActionHash:         approval.ActionHash,
 		AccountReferenceID:         binding.AccountReferenceID,
+		ParentPlatformProjectID:    binding.ParentPlatformProjectID,
 		ObjectFingerprint:          binding.ObjectFingerprint,
 		Action:                     string(approval.Action),
+		ProjectBudgetMode:          binding.ProjectBudgetMode,
+		ProjectBudgetLimitMinor:    binding.ProjectBudgetLimitMinor,
+		PromotionBudgetLimitMinor:  binding.PromotionBudgetLimitMinor,
 		BudgetLimitMinor:           approval.BudgetLimitMinor,
 		Currency:                   approval.Currency,
 		PlanCanonicalHash:          binding.PlanCanonicalHash,
@@ -120,7 +124,7 @@ func (p ComputerUseAuthorityProvider) load(ctx context.Context, organizationID c
 
 func (p ComputerUseAuthorityProvider) authorityFromLoaded(execution ControlledExecution, change ControlledChangeSet, approval RemoteWriteApproval) (computeruse.AuthorityBinding, error) {
 	binding := approval.Binding
-	value := computeruse.AuthorityBinding{SchemaVersion: computeruse.AuthoritySchemaV1, OrganizationID: execution.OrganizationID, ProjectID: execution.ProjectID, BusinessExecutionID: execution.ID, ChangeSetID: change.ID, ApprovalID: approval.ID, ApprovalActionHash: approval.ActionHash, AccountReferenceID: binding.AccountReferenceID, ObjectFingerprint: binding.ObjectFingerprint, Action: string(approval.Action), BudgetLimitMinor: approval.BudgetLimitMinor, Currency: approval.Currency, PlanCanonicalHash: binding.PlanCanonicalHash, IntentCanonicalHash: binding.IntentCanonicalHash, FeedbackCanonicalHash: binding.OperatorFeedbackCanonicalHash, DecisionCanonicalHash: binding.DecisionCanonicalHash, ConfigurationCanonicalHash: binding.ConfigurationCanonicalHash, WorkflowID: binding.WorkflowID, WorkflowCanonicalHash: binding.WorkflowCanonicalHash, WorkflowStepID: computerUseRemoteWriteStepID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion}
+	value := computeruse.AuthorityBinding{SchemaVersion: computeruse.AuthoritySchemaV1, OrganizationID: execution.OrganizationID, ProjectID: execution.ProjectID, BusinessExecutionID: execution.ID, ChangeSetID: change.ID, ApprovalID: approval.ID, ApprovalActionHash: approval.ActionHash, AccountReferenceID: binding.AccountReferenceID, ParentPlatformProjectID: binding.ParentPlatformProjectID, ObjectFingerprint: binding.ObjectFingerprint, Action: string(approval.Action), ProjectBudgetMode: binding.ProjectBudgetMode, ProjectBudgetLimitMinor: binding.ProjectBudgetLimitMinor, PromotionBudgetLimitMinor: binding.PromotionBudgetLimitMinor, BudgetLimitMinor: approval.BudgetLimitMinor, Currency: approval.Currency, PlanCanonicalHash: binding.PlanCanonicalHash, IntentCanonicalHash: binding.IntentCanonicalHash, FeedbackCanonicalHash: binding.OperatorFeedbackCanonicalHash, DecisionCanonicalHash: binding.DecisionCanonicalHash, ConfigurationCanonicalHash: binding.ConfigurationCanonicalHash, WorkflowID: binding.WorkflowID, WorkflowCanonicalHash: binding.WorkflowCanonicalHash, WorkflowStepID: computerUseRemoteWriteStepID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion}
 	return value, value.Validate()
 }
 

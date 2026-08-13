@@ -47,6 +47,30 @@ func validControlledBinding() ControlledAuthorityBinding {
 	return ControlledAuthorityBinding{SelectionID: "selection_1", ObservatoryRunID: "run_1", ObservatoryRunCanonicalHash: testHash("a"), OperatorFeedbackID: "feedback_1", OperatorFeedbackCanonicalHash: testHash("b"), OperatorFeedbackDisposition: ObservatoryFeedbackAccepted, PlanID: "plan_1", PlanVersion: 2, PlanCanonicalHash: testHash("c"), IntentID: "intent_1", IntentVersion: 1, IntentCanonicalHash: testHash("d"), DecisionID: "decision_1", DecisionCanonicalHash: testHash("e"), ConfigurationID: "configuration_1", ConfigurationVersion: 3, ConfigurationCanonicalHash: testHash("f"), WorkflowID: "workflow_1", WorkflowCanonicalHash: testHash("1"), AccountReferenceID: "account_1", ObjectFingerprint: "fingerprint_1", SkillID: "oceanengine-ecommerce-manual", SkillVersion: "v0.1-calibration"}
 }
 
+func TestExistingProjectControlledActionRequiresBoundParentAndPromotionBudget(t *testing.T) {
+	now := time.Date(2026, 8, 13, 9, 0, 0, 0, time.UTC)
+	binding := validControlledBinding()
+	binding.ProjectBudgetMode = OceanEngineBudgetModeUnlimited
+	binding.ParentPlatformProjectID = "platform-project-1"
+	binding.PromotionBudgetLimitMinor = 30000
+	change := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: "change-existing", OrganizationID: "org_1", ProjectID: "project_1", Binding: binding, Action: ControlledActionCreatePromotionsInExistingProject, BudgetLimitMinor: 30000, Currency: "CNY", Status: ControlledChangeSetReady, Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	change.CanonicalHash, _ = change.ComputeCanonicalHash()
+	if err := change.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	change.Binding.ParentPlatformProjectID = ""
+	change.CanonicalHash, _ = change.ComputeCanonicalHash()
+	if err := change.Validate(); err != ErrApprovalContentMismatch {
+		t.Fatalf("missing parent project err=%v", err)
+	}
+	change.Binding.ParentPlatformProjectID = "platform-project-1"
+	change.Binding.PromotionBudgetLimitMinor = 0
+	change.CanonicalHash, _ = change.ComputeCanonicalHash()
+	if err := change.Validate(); err != ErrApprovalContentMismatch {
+		t.Fatalf("missing promotion budget err=%v", err)
+	}
+}
+
 func testHash(character string) string {
 	value := ""
 	for len(value) < 64 {
