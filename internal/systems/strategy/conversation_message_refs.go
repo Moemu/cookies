@@ -99,7 +99,7 @@ func (v MySQLMessageReferenceValidator) ValidateMessageReferences(ctx context.Co
 			if err != nil {
 				return err
 			}
-			if contentHash != block.ExpectedContentHash || runStatus != "succeeded" {
+			if contentHash != block.ExpectedContentHash || runStatus != "completed" {
 				return ErrInvalidRequest
 			}
 		default:

@@ -1,0 +1,18 @@
+{
+  "contract_version": "platform-document-vision-reconciliation/v1",
+  "id": "visionreconciliation_01",
+  "organization_id": "org_01",
+  "project_id": "project_01",
+  "document_id": "document_01",
+  "attempt_id": "visionattempt_01",
+  "task_index": 0,
+  "intent_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "decision": "accepted",
+  "external_task_id": "las-task-01",
+  "evidence_ref": "ticket:LAS-2026-001",
+  "status": "proposed",
+  "proposed_by": "admin_01",
+  "proposed_at": "2026-08-11T03:00:00Z",
+  "created_at": "2026-08-11T03:00:00Z",
+  "updated_at": "2026-08-11T03:00:00Z"
+}

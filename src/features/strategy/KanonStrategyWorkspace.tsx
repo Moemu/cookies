@@ -6,10 +6,10 @@ import {
   Check,
   ChevronRight,
   CircleCheck,
+  Download,
   ExternalLink,
   FileText,
   LoaderCircle,
-  LockKeyhole,
   MessageSquare,
   Plus,
   RefreshCw,
@@ -19,45 +19,205 @@ import {
   Sparkles,
   Upload,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useProject } from '../../context/ProjectContext'
-import type { SystemKey } from '../../types'
-import { CreativeTaskPlanner } from './CreativeTaskPlanner'
+import { useAuth } from '../../context/AuthContext'
+import { AssistantProposalList, ProjectAssistantDock } from './assistant/ProjectAssistantDock'
+import { useAssistantProposals } from './assistant/useAssistantProposals'
+import { useProjectContextManifest } from './assistant/useProjectContextManifest'
+import { useResearchAdoptionProposals } from './research/useResearchAdoptionProposals'
+import { CreativeHandoffWorkspace } from './CreativeTaskPlanner'
 import { StrategyConversationPane } from './StrategyConversationPane'
+import { MaterialsDrawer } from './documents/MaterialsDrawer'
 import { fullStrategyFieldLabels, getFullStrategyDraftReadiness, getFullStrategyReadiness } from './strategyBriefReadiness'
 import { useStrategyWorkspace } from './useStrategyWorkspace'
+import { StageRail, type StageRailItem } from './workspace/StageRail'
+import { StrategyWorkspaceShell } from './workspace/StrategyWorkspaceShell'
+import { useStrategyWorkspaceRoute } from './workspace/WorkspaceProvider'
+import { WorkspaceTopbar } from './workspace/WorkspaceTopbar'
+import type { StrategyPanel, StrategyStage } from './workspace/workspaceRoute'
+import {
+  clearWorkspaceSessionValue,
+  readWorkspaceSessionValue,
+  stageScrollSessionKey,
+  workspaceSessionKey,
+  writeWorkspaceSessionValue,
+} from './workspace/workspaceSessionState'
 import type {
   BriefDraft,
   BriefProductCandidate,
   BriefVersion,
+  CreativeStrategy,
   DraftRevision,
   KnowledgeDocument,
   Review,
   StrategyDocument,
   StrategyDraft,
+  TaskActivity,
+  ActivityConnection,
+	ArtifactProposal,
+	BriefPatchOperation,
 } from './types'
 
 type Props = {
-  activeView: string
-  workspaceId?: string
-  onOpenWorkspace: (workspaceId: string, view: string) => void
   onOpenCreative: (navId: string, view: string, contextId: string) => void
-  onOpenProject: (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string) => void
 }
 
 export function KanonStrategyWorkspace({
-  activeView,
-  workspaceId,
-  onOpenWorkspace,
   onOpenCreative,
-  onOpenProject,
 }: Props) {
   const { currentProject } = useProject()
-  const { state, actions } = useStrategyWorkspace(currentProject.id, workspaceId)
+  const { session } = useAuth()
+  const workspaceSessionOwner = `${session.organization?.id ?? 'organization-unknown'}:${session.user?.id ?? 'user-unknown'}:${currentProject.id}`
+  return <KanonStrategyWorkspaceSession
+    key={workspaceSessionOwner}
+    onOpenCreative={onOpenCreative}
+  />
+}
+
+function KanonStrategyWorkspaceSession({
+  onOpenCreative,
+}: Props) {
+  const { currentProject } = useProject()
+  const { session } = useAuth()
+  const workspaceRoute = useStrategyWorkspaceRoute()
+  const { location, workspaceId } = workspaceRoute
+  const activeStage = location.stage
+  const workspaceSessionOwner = `${session.organization?.id ?? 'organization-unknown'}:${session.user?.id ?? 'user-unknown'}:${currentProject.id}`
+  const { state, actions } = useStrategyWorkspace(currentProject.id, workspaceId, workspaceSessionOwner)
   const mainRef = useRef<HTMLElement>(null)
+  const stageHeadingRef = useRef<HTMLHeadingElement>(null)
+  const assistantStorageKey = `cookies.strategy.assistant-open.v1:${workspaceSessionOwner}`
+  const assistantExpandedStorageKey = `cookies.strategy.assistant-expanded.v1:${workspaceSessionOwner}`
+  const assistantWidthStorageKey = `cookies.strategy.assistant-width.v1:${workspaceSessionOwner}`
+  const [assistantOpen, setAssistantOpen] = useState(() => location.panel === 'assistant' || (!location.panel && readStoredAssistantState(assistantStorageKey)))
+  const [assistantExpanded, setAssistantExpanded] = useState(() => readStoredAssistantState(assistantExpandedStorageKey))
+  const [assistantWidth, setAssistantWidth] = useState(() => readStoredAssistantWidth(assistantWidthStorageKey))
+  const [assistantResizing, setAssistantResizing] = useState(false)
+  const assistantResizeStart = useRef({ clientX: 0, width: 356 })
+  const assistantWorkspaceId = state.detail?.workspace.id ?? workspaceId ?? ''
+  const [assistantExcludedSourceIds, setAssistantExcludedSourceIds] = useState<string[]>([])
+  const workspaceSessionId = assistantWorkspaceId || 'workspace-pending'
+  const workspaceRenderReady = Boolean(state.detail?.current_task)
+  const assistantContextRevisionKey = [
+    state.brief?.version ?? 0,
+    state.briefVersion?.version ?? 0,
+    state.draft?.current_revision ?? 0,
+    state.memory?.version ?? 0,
+    state.documents.length,
+  ].join(':')
+  const { manifest: assistantManifest, error: assistantContextError } = useProjectContextManifest(
+    assistantWorkspaceId,
+    activeStage,
+    assistantContextRevisionKey,
+  )
+  const activeAssistantExcludedSourceIds = useMemo(() => {
+    const available = new Set(assistantManifest?.selected_source_refs.map(ref => ref.id) ?? [])
+    return assistantExcludedSourceIds.filter(id => available.has(id))
+  }, [assistantExcludedSourceIds, assistantManifest])
+  const assistantSeenStorageKey = `cookies.strategy.assistant-seen.v1:${workspaceSessionOwner}:${assistantWorkspaceId || 'workspace-pending'}`
+  const latestAssistantMessageId = [...state.messages].reverse().find(message => message.role === 'assistant')?.id ?? ''
+  const assistantProposals = useAssistantProposals(
+    assistantWorkspaceId,
+    `${assistantContextRevisionKey}:${latestAssistantMessageId}`,
+    actions.reload,
+  )
+	const researchAdoption = useResearchAdoptionProposals(
+		assistantWorkspaceId,
+		state.researchRun?.id ?? '',
+		`${assistantContextRevisionKey}:${state.researchRun?.updated_at ?? ''}`,
+		actions.reload,
+	)
+  const [lastSeenAssistantMessageId, setLastSeenAssistantMessageId] = useState(() => readStoredString(assistantSeenStorageKey))
+  const assistantUnread = Boolean(!assistantOpen && latestAssistantMessageId && latestAssistantMessageId !== lastSeenAssistantMessageId)
+
+  useLayoutEffect(() => {
+    const main = mainRef.current
+    if (!main) return
+    const storageKey = stageScrollSessionKey(workspaceSessionOwner, workspaceSessionId, activeStage)
+    const storedScrollTop = readWorkspaceSessionValue<number>(storageKey)
+    let lastScrollTop = typeof storedScrollTop === 'number' && Number.isFinite(storedScrollTop)
+      ? Math.max(0, storedScrollTop)
+      : 0
+    main.scrollTo({ top: lastScrollTop })
+    const trackScroll = () => { lastScrollTop = main.scrollTop }
+    const rememberScroll = () => writeWorkspaceSessionValue(storageKey, lastScrollTop)
+    main.addEventListener('scroll', trackScroll, { passive: true })
+    window.addEventListener('pagehide', rememberScroll)
+    const frame = window.requestAnimationFrame(() => {
+      main.scrollTo({ top: lastScrollTop })
+      stageHeadingRef.current?.focus({ preventScroll: true })
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      rememberScroll()
+      main.removeEventListener('scroll', trackScroll)
+      window.removeEventListener('pagehide', rememberScroll)
+    }
+  }, [activeStage, workspaceRenderReady, workspaceSessionId, workspaceSessionOwner])
+
   useEffect(() => {
-    mainRef.current?.scrollTo({ top: 0 })
-  }, [activeView])
+    if (location.panel === 'assistant') setAssistantOpen(true)
+    else if (location.panel) setAssistantOpen(false)
+  }, [location.panel])
+
+  useEffect(() => {
+    setAssistantExcludedSourceIds([])
+  }, [assistantWorkspaceId])
+
+  useEffect(() => {
+    storeAssistantState(assistantStorageKey, assistantOpen)
+  }, [assistantOpen, assistantStorageKey])
+
+  useEffect(() => {
+    storeAssistantState(assistantExpandedStorageKey, assistantExpanded)
+  }, [assistantExpanded, assistantExpandedStorageKey])
+
+  useEffect(() => {
+    if (!assistantOpen || !assistantExpanded) return
+    const exitExpandedMode = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAssistantExpanded(false)
+    }
+    window.addEventListener('keydown', exitExpandedMode)
+    return () => window.removeEventListener('keydown', exitExpandedMode)
+  }, [assistantExpanded, assistantOpen])
+
+  useEffect(() => {
+    setLastSeenAssistantMessageId(readStoredString(assistantSeenStorageKey))
+  }, [assistantSeenStorageKey])
+
+  useEffect(() => {
+    if (!assistantOpen || !latestAssistantMessageId) return
+    setLastSeenAssistantMessageId(latestAssistantMessageId)
+    storeString(assistantSeenStorageKey, latestAssistantMessageId)
+  }, [assistantOpen, assistantSeenStorageKey, latestAssistantMessageId])
+
+  useEffect(() => {
+    if (!assistantResizing) return
+    const move = (event: PointerEvent) => {
+      const delta = assistantResizeStart.current.clientX - event.clientX
+      const maxWidth = Math.max(360, Math.min(560, window.innerWidth - 720))
+      setAssistantWidth(Math.max(320, Math.min(maxWidth, assistantResizeStart.current.width + delta)))
+    }
+    const stop = () => setAssistantResizing(false)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop, { once: true })
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+    }
+  }, [assistantResizing])
+
+  useEffect(() => {
+    if (assistantResizing) return
+    storeAssistantWidth(assistantWidthStorageKey, assistantWidth)
+  }, [assistantResizing, assistantWidth, assistantWidthStorageKey])
+
+  useEffect(() => {
+    if (!workspaceId && state.detail?.workspace.id) {
+      workspaceRoute.navigateWorkspace(state.detail.workspace.id, location, true)
+    }
+  }, [location, state.detail?.workspace.id, workspaceId, workspaceRoute])
 
   if (state.isLoading) {
     return <div className="kanon-strategy-state" role="status">
@@ -80,79 +240,281 @@ export function KanonStrategyWorkspace({
   }
 
   if (!state.detail.current_conversation || !state.detail.current_task) {
-    return <div className="kanon-strategy-state">
-      <Sparkles size={28}/>
-      <h2>开始需求对话</h2>
-      <p>系统将创建持久对话和 Brief 草稿；刷新页面后可以继续。</p>
-      {state.error ? <div className="kanon-strategy-alert" role="alert"><AlertCircle size={15}/>{state.error}</div> : null}
-      <button className="primary-button" disabled={Boolean(state.busy)} onClick={() => void actions.startConversation()}>
-        <MessageSquare size={16}/>{state.busy === 'conversation' ? '正在启动…' : '开始策略梳理'}
-      </button>
-    </div>
+    const bootstrapItems: StageRailItem[] = [
+      { stage: 'intake', status: 'current', detail: '等待开始对话' },
+      { stage: 'brief', status: 'blocked', detail: '等待需求输入' },
+      { stage: 'strategy', status: 'blocked', detail: '等待 Brief' },
+      { stage: 'review', status: 'blocked', detail: '等待策略' },
+      { stage: 'handoff', status: 'blocked', detail: '等待确认' },
+    ]
+    return <StrategyWorkspaceShell
+      assistant={null}
+      assistantOpen={false}
+      topbar={<WorkspaceTopbar
+        activeWorkspaceId={state.detail.workspace.id}
+        activityDisabled
+        assistantDisabled
+        assistantOpen={false}
+        backgroundTaskCount={0}
+        busy={Boolean(state.busy)}
+        onAssistantToggle={() => undefined}
+        onOpenActivity={() => undefined}
+        onRefresh={() => void actions.reload()}
+        onWorkspaceChange={nextWorkspaceId => workspaceRoute.navigateWorkspace(nextWorkspaceId, { stage: activeStage })}
+        workspaceName={state.detail.workspace.name}
+        workspaces={state.workspaces}
+      />}
+      rail={<StageRail
+        activeStage={activeStage}
+        items={bootstrapItems}
+        onSelect={stage => workspaceRoute.navigate({ stage })}
+      />}
+    >
+      <div className="kanon-strategy-root">
+        <div className="kanon-strategy-state">
+          <Sparkles size={28}/>
+          <h2>开始需求对话</h2>
+          <p>系统将创建持久对话和 Brief 草稿；刷新页面后可以继续。</p>
+          {state.error ? <div className="kanon-strategy-alert" role="alert"><AlertCircle size={15}/>{state.error}</div> : null}
+          <button className="primary-button" disabled={Boolean(state.busy)} onClick={() => void actions.startConversation()}>
+            <MessageSquare size={16}/>{state.busy === 'conversation' ? '正在启动…' : '开始策略梳理'}
+          </button>
+        </div>
+      </div>
+    </StrategyWorkspaceShell>
   }
 
   const lifecycleLocked = Boolean(state.detail.current_task.discarded_at || state.draft?.archived_at)
-  const showSummaryRail = activeView === '评审'
   const hasEvidence = Boolean(
     state.documents.length ||
     state.brief?.document.reference_ids?.length ||
     state.researchRun?.artifacts.length,
   )
-  const showEvidenceRail = activeView === '研究' || (activeView === '策略' && hasEvidence)
-  const railMode = showSummaryRail ? 'rail-summary' : showEvidenceRail ? 'rail-evidence' : 'rails-none'
-  return <div className={`kanon-strategy-root${activeView === '对话' ? ' conversation-active' : ''}`}>
-    {state.error ? <div className="kanon-strategy-alert" role="alert">
-      <AlertCircle size={15}/><span>{state.error}</span>
-      <button aria-label="重新加载策略工作区" onClick={() => void actions.reload()}><RefreshCw size={14}/></button>
-    </div> : null}
-    {lifecycleLocked ? <div className="kanon-lifecycle-banner" role="status"><Archive size={15}/><span><b>{state.detail.current_task.discarded_at ? '任务已废弃' : '策略已归档'}</b>当前工作区为只读，完整对话、Brief、策略版本和评审记录均已保留。请从“策略任务 → 已归档”恢复后继续操作。</span></div> : null}
-    <div className="kanon-workspace-contextbar">
-      <div><span>当前工作链</span><strong>{state.detail.workspace.name}</strong><small><LockKeyhole size={12}/>已锁定到当前 Project</small></div>
-      <label><span>切换工作区</span><select
-        aria-label="切换策略工作区"
-        value={state.detail.workspace.id}
-        onChange={event => onOpenWorkspace(event.target.value, activeView)}
-      >{state.workspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.name}{workspace.is_primary ? ' · 主工作区' : ''}</option>)}</select></label>
-      <button className="icon-button" aria-label="刷新当前策略工作区" disabled={Boolean(state.busy)} onClick={() => void actions.reload()}><RefreshCw size={15}/></button>
-    </div>
-    <div className={`kanon-strategy-workspace ${railMode}`}>
-      <main className="kanon-strategy-main" ref={mainRef}>
-        <fieldset className="kanon-lifecycle-lock" disabled={lifecycleLocked}>
-        {activeView === '概览' ? <OverviewPane
-          state={state}
-          onNavigate={view => onOpenProject(
-            currentProject.id,
-            'strategy',
-            'workspaces',
-            state.detail?.workspace.id,
-            view,
-          )}
-        /> : null}
-        {activeView === '对话' ? <StrategyConversationPane
+  const backgroundTaskCount = state.activities.filter(activity =>
+    ['queued', 'running', 'waiting_user', 'stalled'].includes(activity.status),
+  ).length + state.mediaArtifacts.filter(artifact => artifact.status === 'running').length
+  const stageItems: StageRailItem[] = [
+    {
+      stage: 'intake',
+      status: state.messages.some(message => message.role === 'assistant') ? 'complete' : activeStage === 'intake' ? 'current' : 'available',
+      detail: state.messages.length ? `${state.messages.length} 条消息` : '等待需求输入',
+    },
+    {
+      stage: 'brief',
+      status: state.brief?.status === 'confirmed' ? 'complete' : state.brief?.completeness.ready ? 'available' : 'blocked',
+      detail: state.brief?.status === 'confirmed'
+        ? `已确认 v${state.briefVersion?.version ?? state.brief.version}`
+        : state.brief?.completeness.ready ? '可以确认' : `${state.brief?.completeness.blockers.length ?? 0} 个待补项`,
+    },
+    {
+      stage: 'strategy',
+      status: state.draft?.current_revision ? 'complete' : state.brief?.status === 'confirmed' ? 'available' : 'blocked',
+      detail: state.draft?.current_revision
+        ? `修订 ${state.draft.current_revision}`
+        : state.brief?.status === 'confirmed' ? '可以生成' : '等待 Brief',
+    },
+    {
+      stage: 'review',
+      status: state.review?.status === 'approved' ? 'complete' : state.draft?.current_revision ? 'available' : 'blocked',
+      detail: state.review?.status === 'approved' ? '已确认' : state.review?.status === 'open' ? '等待决定' : '尚未提交',
+    },
+    {
+      stage: 'handoff',
+      status: state.published ? 'complete' : state.review?.status === 'approved' ? 'available' : 'blocked',
+      detail: state.published ? `Package v${state.published.version}` : '等待确认',
+    },
+  ]
+  const contextLabels = [
+    state.brief?.status === 'confirmed' ? `Brief v${state.briefVersion?.version ?? state.brief.version}` : 'Brief 草稿',
+    state.draft?.current_revision ? `策略修订 ${state.draft.current_revision}` : '策略未生成',
+    hasEvidence ? `${state.documents.length + (state.researchRun?.artifacts.length ?? 0)} 份资料/研究` : '暂无引用资料',
+  ]
+  const closeSupportingPanel = () => workspaceRoute.navigate({ stage: activeStage })
+  const supportingPanel = location.panel === 'research' ? <WorkspaceSupportingPanel title="研究" detail="研究与 Brief 保持同一工作区上下文" disabled={lifecycleLocked} onClose={closeSupportingPanel}>
+    <ResearchPane
+      brief={state.brief}
+      busy={state.busy}
+	  contextError={assistantContextError}
+	  contextReady={Boolean(assistantManifest)}
+      documents={state.documents}
+	  draft={state.draft}
+      researchRun={state.researchRun}
+      key={workspaceSessionId}
+	  proposals={researchAdoption.items}
+	  proposalBusyId={researchAdoption.busyId}
+	  proposalError={researchAdoption.error}
+	  onApplyProposal={researchAdoption.apply}
+	  onIgnoreProposal={researchAdoption.ignore}
+	  onRemapProposal={researchAdoption.remap}
+	  onCancelResearch={actions.cancelResearchRun}
+	  onRetryResearch={actions.retryResearchRun}
+	  onResearch={(category, query, documentIds) => actions.runResearch(category, query, documentIds, assistantManifest)}
+      onUpload={actions.uploadDocument}
+      sessionProjectId={workspaceSessionOwner}
+      sessionWorkspaceId={workspaceSessionId}
+    />
+  </WorkspaceSupportingPanel> : location.panel === 'history' ? <WorkspaceSupportingPanel title="版本与变更" detail="只读查看当前工作区的修订事实" disabled={lifecycleLocked} onClose={closeSupportingPanel}>
+    <ChangeLogPane comments={state.comments} revisions={state.revisions} review={state.review}/>
+  </WorkspaceSupportingPanel> : location.panel === 'materials' ? <WorkspaceSupportingPanel title="项目资料" detail="当前 Brief 和策略可引用的来源" disabled={lifecycleLocked} onClose={closeSupportingPanel}>
+	<MaterialsDrawer
+		busy={state.busy}
+		documents={state.documents}
+		initialDocumentId={location.resource}
+		onCancel={actions.cancelDocumentParse}
+		onRetry={actions.retryDocumentParse}
+		onVisualFallback={actions.runDocumentVisionFallback}
+		onUpload={actions.uploadDocument}
+		projectId={currentProject.id}
+		referenceIds={state.brief?.document.reference_ids ?? []}
+		researchArtifacts={state.researchRun?.artifacts ?? []}
+	/>
+  </WorkspaceSupportingPanel> : location.panel === 'activity' ? <WorkspaceSupportingPanel title="后台任务" detail="切换阶段不会取消这些任务" onClose={closeSupportingPanel}>
+    <WorkspaceActivityPanel
+      activities={state.activities}
+      busy={state.busy}
+      connection={state.activityConnection}
+      error={state.activityError}
+      onCancel={actions.cancelActivity}
+      onOpen={activity => {
+        setAssistantOpen(false)
+        if (activity.resource_ref.type === 'knowledge_document') {
+          workspaceRoute.navigate({ stage: activeStage, panel: 'materials', resource: activity.resource_ref.id })
+          return
+        }
+        if (activity.resource_ref.type === 'knowledge_research_run') {
+          workspaceRoute.navigate({ stage: activeStage === 'intake' ? 'brief' : activeStage, panel: 'research', resource: activity.resource_ref.id })
+          return
+        }
+        workspaceRoute.navigate({
+          stage: activity.kind === 'assistant' ? 'intake' : activity.kind === 'deep_review' && activity.resource_ref.type === 'strategy_review' ? 'review' : 'strategy',
+        })
+      }}
+      onRetry={actions.retryActivity}
+    />
+  </WorkspaceSupportingPanel> : activeStage === 'review' ? <SummaryRail
+    brief={state.brief}
+    briefVersion={state.briefVersion?.version}
+    draft={state.draft}
+    publishedVersion={state.published?.version}
+    review={state.review}
+    workspaceName={state.detail.workspace.name}
+  /> : null
+
+  const assistant = <ProjectAssistantDock
+    brief={state.brief}
+    contextLabels={contextLabels}
+    contextError={assistantContextError}
+    disabled={lifecycleLocked}
+    excludedSourceIds={activeAssistantExcludedSourceIds}
+    expanded={assistantExpanded}
+    manifest={assistantManifest}
+    messages={state.messages}
+    onClose={() => {
+      setAssistantOpen(false)
+      if (location.panel === 'assistant') workspaceRoute.navigate({ stage: activeStage }, true)
+    }}
+    onExpandedChange={setAssistantExpanded}
+    onSend={async content => {
+      const accepted = await actions.sendMessage(
+        content, [], [], undefined, activeStage, 'assistant', activeAssistantExcludedSourceIds,
+      )
+      if (accepted) setAssistantExcludedSourceIds([])
+      return accepted
+    }}
+    onToggleSource={sourceId => setAssistantExcludedSourceIds(current => current.includes(sourceId)
+      ? current.filter(id => id !== sourceId)
+      : [...current, sourceId])}
+    onResizeStart={clientX => {
+      assistantResizeStart.current = { clientX, width: assistantWidth }
+      setAssistantResizing(true)
+    }}
+    onApplyProposal={assistantProposals.apply}
+    onIgnoreProposal={assistantProposals.ignore}
+    pending={Boolean(state.pendingAgentTaskId)}
+    proposalBusyId={assistantProposals.busyId}
+    proposalError={assistantProposals.error}
+    proposals={assistantProposals.proposals}
+    stage={activeStage}
+  />
+
+  return <StrategyWorkspaceShell
+    assistant={assistant}
+    assistantExpanded={assistantExpanded}
+    assistantOpen={assistantOpen}
+    assistantWidth={assistantWidth}
+    topbar={<WorkspaceTopbar
+      activeWorkspaceId={state.detail.workspace.id}
+      assistantOpen={assistantOpen}
+      assistantUnread={assistantUnread}
+      backgroundTaskCount={backgroundTaskCount}
+      busy={Boolean(state.busy)}
+      onAssistantToggle={() => {
+        const nextOpen = !assistantOpen
+        setAssistantOpen(nextOpen)
+        if (nextOpen && location.panel && location.panel !== 'assistant') {
+          workspaceRoute.navigate({ stage: activeStage }, true)
+        }
+        if (!nextOpen && location.panel === 'assistant') workspaceRoute.navigate({ stage: activeStage }, true)
+      }}
+      onOpenActivity={() => {
+        setAssistantOpen(false)
+        workspaceRoute.navigate({
+          stage: activeStage,
+          panel: location.panel === 'activity' ? undefined : 'activity',
+        })
+      }}
+      onRefresh={() => void Promise.all([actions.reload(), assistantProposals.reload()])}
+      onWorkspaceChange={nextWorkspaceId => workspaceRoute.navigateWorkspace(nextWorkspaceId, { stage: activeStage })}
+      workspaceName={state.detail.workspace.name}
+      workspaces={state.workspaces}
+    />}
+    rail={<StageRail
+      activeStage={activeStage}
+      items={stageItems}
+      onSelect={stage => workspaceRoute.navigate({
+        stage,
+        panel: location.panel === 'assistant' ? 'assistant' : undefined,
+      })}
+    />}
+  >
+    <div className={`kanon-strategy-root strategy-stage-${activeStage}${activeStage === 'intake' ? ' conversation-active' : ''}`}>
+      {state.error ? <div className="kanon-strategy-alert" role="alert">
+        <AlertCircle size={15}/><span>{state.error}</span>
+        <button aria-label="重新加载策略工作区" onClick={() => void actions.reload()}><RefreshCw size={14}/></button>
+      </div> : null}
+      {lifecycleLocked ? <div className="kanon-lifecycle-banner" role="status"><Archive size={15}/><span><b>{state.detail.current_task.discarded_at ? '任务已废弃' : '策略已归档'}</b>当前工作区为只读，完整对话、Brief、策略版本和评审记录均已保留。请从“策略任务 → 已归档”恢复后继续操作。</span></div> : null}
+      <div className={`kanon-strategy-workspace ${supportingPanel ? 'with-supporting-panel' : 'rails-none'}`}>
+        <main className="kanon-strategy-main" ref={mainRef}>
+          <h2 ref={stageHeadingRef} className="strategy-stage-focus-heading" tabIndex={-1}>
+            {activeStage === 'intake' ? '理解需求' : activeStage === 'brief' ? '确认 Brief' : activeStage === 'strategy' ? '制定策略' : activeStage === 'review' ? '确认与评审' : '创意交接'}
+          </h2>
+          {activeStage !== 'intake' ? <StageContextToolbar
+            activePanel={location.panel}
+            stage={activeStage}
+            onPanel={panel => {
+              setAssistantOpen(false)
+              workspaceRoute.navigate({
+                stage: activeStage,
+                panel: location.panel === panel ? undefined : panel,
+              })
+            }}
+          /> : null}
+          <fieldset className="kanon-lifecycle-lock" disabled={lifecycleLocked}>
+        {activeStage === 'intake' ? <StrategyConversationPane
           brief={state.brief}
           briefVersion={state.briefVersion}
           busy={state.busy}
           conversationCapabilities={state.conversationCapabilities}
+          draftStorageKey={workspaceSessionKey(workspaceSessionOwner, workspaceSessionId, 'intake-composer')}
           documents={state.documents}
+          key={workspaceSessionId}
           mediaArtifacts={state.mediaArtifacts}
           messages={state.messages}
           notice={state.conversationNotice}
           researchRuns={state.researchRuns}
           onConfirmRequirement={actions.confirmRequirement}
-          onOpenBrief={() => onOpenProject(
-            currentProject.id,
-            'strategy',
-            'workspaces',
-            state.detail?.workspace.id,
-            'Brief',
-          )}
-          onOpenFullStrategy={() => onOpenProject(
-            currentProject.id,
-            'strategy',
-            'workspaces',
-            state.detail?.workspace.id,
-            '策略',
-          )}
+          onOpenBrief={() => workspaceRoute.navigate({ stage: 'brief' })}
+          onOpenFullStrategy={() => workspaceRoute.navigate({ stage: 'strategy' })}
           onReadyViralRemake={taskId => onOpenCreative('video', '效果广告', taskId)}
           onSend={actions.sendMessage}
           onStartViralRemake={actions.createRequirementViralRemake}
@@ -160,104 +522,258 @@ export function KanonStrategyWorkspace({
           onUploadMedia={actions.uploadConversationMedia}
           pending={Boolean(state.pendingAgentTaskId)}
         /> : null}
-        {activeView === 'Brief' ? <BriefPane
+        {activeStage === 'brief' ? <BriefPane
+          assistantBusyId={assistantProposals.busyId}
+          assistantError={assistantProposals.error}
+          assistantProposals={assistantProposals.proposals}
           brief={state.brief}
           busy={state.busy}
+          onApplyProposal={assistantProposals.apply}
+          onAutosaveField={actions.autosaveBriefField}
           onConfirm={actions.confirmBrief}
           onConfirmFields={actions.confirmBriefFields}
           onField={actions.patchBriefField}
+          onIgnoreProposal={assistantProposals.ignore}
+          onOpenAssistant={() => setAssistantOpen(true)}
           onSelectProduct={actions.selectBriefProductCandidate}
+          sessionProjectId={workspaceSessionOwner}
+          sessionWorkspaceId={workspaceSessionId}
         /> : null}
-        {activeView === '策略' ? <StrategyPane
+        {activeStage === 'strategy' ? <StrategyPane
           briefVersion={state.briefVersion}
           busy={state.busy}
+          deepReview={state.deepReview}
+          deepReviewError={state.deepReviewError}
           draft={state.draft}
+          key={workspaceSessionId}
+          reviewPolicy={state.reviewPolicy}
           readiness={state.readiness}
+          sessionProjectId={workspaceSessionOwner}
+          sessionWorkspaceId={workspaceSessionId}
           probe={state.probe}
           onCreateBriefRevision={async () => {
             const created = await actions.createBriefRevision()
             if (created) {
-              onOpenProject(currentProject.id, 'strategy', 'workspaces', state.detail?.workspace.id, 'Brief')
+              workspaceRoute.navigate({ stage: 'brief' })
             }
             return created
           }}
           onGenerate={actions.generateStrategy}
+          onDeepReview={actions.startDeepReview}
           onPatch={actions.patchStrategySection}
           onProbe={actions.probeGeneration}
           onRetry={actions.retryStrategy}
           onRevise={actions.reviseStrategy}
           onSubmit={actions.submitStrategy}
           pending={Boolean(state.pendingAgentTaskId)}
-        /> : null}
-        {activeView === '创意任务策略' ? <CreativeTaskPlanner
+          /> : null}
+        {activeStage === 'handoff' ? <CreativeHandoffWorkspace
           briefVersion={state.briefVersion}
           draft={state.draft}
-          onCreateRouteRevision={value => actions.patchStrategySection('channel_strategy', value)}
+          draftStorageKey={workspaceSessionKey(workspaceSessionOwner, workspaceSessionId, 'handoff-answers')}
           onOpenCreative={onOpenCreative}
-          onOpenStrategy={() => onOpenProject(
-            currentProject.id,
-            'strategy',
-            'workspaces',
-            state.detail?.workspace.id,
-            '策略',
-          )}
+          onOpenStrategy={() => workspaceRoute.navigate({ stage: 'strategy' })}
           projectId={currentProject.id}
         /> : null}
-        {activeView === '评审' ? <ReviewPane
+        {activeStage === 'review' ? <ReviewPane
           busy={state.busy}
           comments={state.comments}
           deepReview={state.deepReview}
           deepReviewError={state.deepReviewError}
           draft={state.draft}
+          draftStorageKey={workspaceSessionKey(workspaceSessionOwner, workspaceSessionId, 'review-draft', state.review?.id ?? `revision-${state.draft?.current_revision ?? 0}`)}
+          key={`${workspaceSessionId}:${state.review?.id ?? state.draft?.current_revision ?? 0}`}
           review={state.review}
           revisions={state.revisions}
           onAddComment={actions.addComment}
           onApprove={actions.approveReview}
           onDeepReview={actions.startDeepReview}
           onReturn={actions.returnReview}
-          onOpenCreative={() => onOpenProject(
-            currentProject.id,
-            'strategy',
-            'workspaces',
-            state.detail?.workspace.id,
-            '创意任务策略',
-          )}
+          onOpenCreative={() => workspaceRoute.navigate({ stage: 'handoff' })}
+          onConfirm={actions.submitStrategy}
+          reviewPolicy={state.reviewPolicy}
         /> : null}
-        {activeView === '研究' ? <ResearchPane
-          brief={state.brief}
-          busy={state.busy}
-          documents={state.documents}
-          researchRun={state.researchRun}
-          onAdoption={actions.setResearchArtifactAdoption}
-          onResearch={actions.runResearch}
-          onUpload={actions.uploadDocument}
-        /> : null}
-        {activeView === '实验' ? <UnavailablePane
-          title="实验编排尚未开放"
-          detail="当前不会用静态实验结果冒充真实数据。策略中的实验矩阵会如实保留，后续接入素材与投放实验执行。"
-        /> : null}
-        {activeView === '变更记录' ? <ChangeLogPane
-          comments={state.comments}
-          revisions={state.revisions}
-          review={state.review}
-        /> : null}
-        </fieldset>
-      </main>
-      {showSummaryRail ? <SummaryRail
-        brief={state.brief}
-        briefVersion={state.briefVersion?.version}
-        draft={state.draft}
-        publishedVersion={state.published?.version}
-        review={state.review}
-        workspaceName={state.detail.workspace.name}
-      /> : null}
-      {showEvidenceRail ? <EvidenceRail
-        documents={state.documents}
-        referenceIds={state.brief?.document.reference_ids ?? []}
-        researchArtifacts={state.researchRun?.artifacts ?? []}
-      /> : null}
+          </fieldset>
+        </main>
+        {supportingPanel}
+      </div>
     </div>
+  </StrategyWorkspaceShell>
+}
+
+function WorkspaceSupportingPanel({ children, detail, disabled = false, onClose, title }: {
+  children: ReactNode
+  detail: string
+  disabled?: boolean
+  onClose: () => void
+  title: string
+}) {
+  return <aside className="strategy-supporting-panel" aria-label={title}>
+    <header><div><b>{title}</b><small>{detail}</small></div><button type="button" aria-label={`关闭${title}`} onClick={onClose}>×</button></header>
+    <fieldset disabled={disabled}>{children}</fieldset>
+  </aside>
+}
+
+function WorkspaceActivityPanel({ activities, busy, connection, error, onCancel, onOpen, onRetry }: {
+  activities: TaskActivity[]
+  busy: string
+  connection: ActivityConnection
+  error: string
+  onCancel: (activity: TaskActivity) => Promise<boolean>
+  onOpen: (activity: TaskActivity) => void
+  onRetry: (activity: TaskActivity) => Promise<boolean>
+}) {
+  const connectionLabel = connection === 'live'
+    ? '状态实时同步'
+    : connection === 'connecting'
+      ? '正在连接任务状态'
+      : connection === 'reconnecting'
+        ? '连接恢复中，已核对服务端快照'
+        : '暂时离线，系统会自动重试'
+  return <div className="strategy-activity-panel">
+    <div className="strategy-activity-connection" data-connection={connection} role="status">
+      <span aria-hidden="true"/>
+      <div><b>{connectionLabel}</b>{error ? <small>{error}</small> : null}</div>
+    </div>
+    {busy.startsWith('activity:') ? <div className="strategy-activity-command" role="status">
+      <LoaderCircle className="spin" size={15}/><span><b>正在提交任务操作</b><small>服务端确认后会自动更新这里的状态。</small></span>
+    </div> : null}
+    {!activities.length ? <div className="strategy-activity-empty">
+      <CircleCheck size={22}/><b>当前没有后台任务</b><p>上传资料、启动研究或运行 AI 后，进度和恢复操作会出现在这里。</p>
+    </div> : <div className="strategy-activity-list">
+      {activities.map(activity => {
+        const progress = activity.progress.value
+        const commandBusy = busy === `activity:cancel:${activity.id}` || busy === `activity:retry:${activity.id}`
+        return <article className="strategy-activity-card" data-status={activity.status} key={activity.id}>
+          <header>
+            <div><span className="strategy-activity-kind">{activityKindLabel(activity.kind)}</span><b>{activityStatusLabel(activity.status)}</b></div>
+            <small>{activity.phase === 'cancelling' ? '正在取消' : activityPhaseLabel(activity.phase)}</small>
+          </header>
+          <p>{activity.summary}</p>
+          {progress !== null ? <div className="strategy-activity-progress">
+            <progress max="100" value={progress} aria-label={`${activityKindLabel(activity.kind)}进度 ${progress}%`}/>
+            <span>{progress}%</span>
+          </div> : <div className="strategy-activity-indeterminate"><span/><small>等待下一里程碑</small></div>}
+          <div className="strategy-activity-meta">
+            {activity.round ? <span>循环 {activity.round.current} / {activity.round.max}</span> : null}
+            <span>{activity.heartbeat_at ? `心跳 ${activityTimeLabel(activity.heartbeat_at)}` : `更新 ${activityTimeLabel(activity.updated_at)}`}</span>
+            {activity.cancel_requested ? <span>取消请求已接收</span> : null}
+          </div>
+          {activity.confirmed_conclusions.length ? <div className="strategy-activity-conclusions">
+            <b>已确定结论</b>
+            {activity.confirmed_conclusions.slice(0, 3).map(conclusion => <p key={conclusion.id}>{conclusion.text}</p>)}
+          </div> : null}
+          {activity.failure ? <div className="strategy-activity-failure" role="alert">
+            <AlertCircle size={14}/><span><b>{activity.status === 'stalled' ? '执行可能中断' : '当前阶段未完成'}</b><small>{activity.failure.message}</small></span>
+          </div> : null}
+          <footer>
+            <button type="button" onClick={() => onOpen(activity)}>打开</button>
+            {activity.actions.includes('cancel') ? <button type="button" disabled={commandBusy} onClick={() => void onCancel(activity)}>取消</button> : null}
+            {activity.actions.includes('retry') ? <button type="button" disabled={commandBusy} onClick={() => void onRetry(activity)}>重试</button> : null}
+          </footer>
+        </article>
+      })}
+    </div>}
   </div>
+}
+
+function activityKindLabel(kind: TaskActivity['kind']) {
+  return {
+    assistant: '项目 AI 助手',
+    quick_research: '联网搜索',
+    deep_research: '深度研究',
+    document_parse: '文档解析',
+    brief_generation: 'Brief 补全',
+    strategy_generation: '策略生成',
+    deep_review: '第二视角',
+  }[kind]
+}
+
+function activityStatusLabel(status: TaskActivity['status']) {
+  return {
+    queued: '等待执行', running: '正在运行', waiting_user: '等待输入',
+    partially_completed: '部分完成', succeeded: '已完成', failed: '未完成',
+    cancelled: '已取消', stalled: '需要恢复',
+  }[status]
+}
+
+function activityPhaseLabel(phase: string) {
+  return ({
+    queued: '排队', scanning: '文件检查', extracting: '正文提取', chunking: '生成片段',
+    planning: '规划', reading: '读取资料', searching: '联网检索', saving: '保存结果',
+    understanding: '理解需求', drafting: '形成初稿', revising: '修订', reviewing: '检查',
+    completed: '完成', failed: '失败', cancelled: '取消',
+  } as Record<string, string>)[phase] ?? phase
+}
+
+function activityTimeLabel(value: string) {
+  const elapsed = Math.max(0, Date.now() - new Date(value).getTime())
+  if (elapsed < 60_000) return '刚刚'
+  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)} 分钟前`
+  return new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function StageContextToolbar({ activePanel, onPanel, stage }: {
+  activePanel?: StrategyPanel
+  onPanel: (panel: StrategyPanel) => void
+  stage: StrategyStage
+}) {
+  const actions: Array<{ panel: StrategyPanel; label: string; icon: ReactNode }> = []
+  if (stage === 'brief' || stage === 'strategy') actions.push({ panel: 'research', label: '研究', icon: <Search size={14}/> })
+  actions.push({ panel: 'materials', label: '资料', icon: <FileText size={14}/> })
+  if (stage === 'strategy' || stage === 'review' || stage === 'handoff') {
+    actions.push({ panel: 'history', label: '版本历史', icon: <RotateCcw size={14}/> })
+  }
+  return <nav className="strategy-stage-context-toolbar" aria-label="当前阶段辅助面板">
+    <span>按需打开</span>
+    {actions.map(action => <button
+      key={action.panel}
+      type="button"
+      aria-pressed={activePanel === action.panel}
+      onClick={() => onPanel(action.panel)}
+    >{action.icon}{action.label}</button>)}
+  </nav>
+}
+
+function readStoredAssistantState(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) === 'open'
+  } catch {
+    return false
+  }
+}
+
+function storeAssistantState(key: string, open: boolean) {
+  try {
+    window.localStorage.setItem(key, open ? 'open' : 'closed')
+  } catch {
+    // Dock visibility is a convenience setting and must never block the workspace.
+  }
+}
+
+function readStoredAssistantWidth(key: string) {
+  const value = Number(readStoredString(key))
+  return Number.isFinite(value) ? Math.max(320, Math.min(560, value)) : 356
+}
+
+function storeAssistantWidth(key: string, width: number) {
+  storeString(key, String(Math.round(width)))
+}
+
+function readStoredString(key: string) {
+  try {
+    return window.localStorage.getItem(key) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function storeString(key: string, value: string) {
+  try {
+    window.localStorage.setItem(key, value)
+  } catch {
+    // Assistant presentation state is recoverable and never blocks work.
+  }
 }
 
 type WorkspaceState = ReturnType<typeof useStrategyWorkspace>['state']
@@ -425,8 +941,8 @@ function OverviewPane({ state, onNavigate }: { state: WorkspaceState; onNavigate
       </article>
       <article className="kanon-decision-card ideas">
         <span className="section-label">可进入创意的方向</span>
-        {document?.creative_recommendations?.length
-          ? <ol>{document.creative_recommendations.slice(0, 3).map((idea, index) => <li key={idea}><span>{String(index + 1).padStart(2, '0')}</span><p>{idea}</p></li>)}</ol>
+        {(document?.creative_strategy?.territories?.length || document?.creative_recommendations?.length)
+          ? <ol>{(document.creative_strategy?.territories.map(territory => territory.core_idea) ?? document.creative_recommendations ?? []).slice(0, 3).map((idea, index) => <li key={idea}><span>{String(index + 1).padStart(2, '0')}</span><p>{idea}</p></li>)}</ol>
           : <p>策略确认后，将在这里展示最值得进入创意生产的三个方向。</p>}
       </article>
     </div>
@@ -473,13 +989,45 @@ const briefFields: Array<{
   { path: 'creative.prohibited_claims', label: '禁用表达', value: brief => brief.document.creative?.prohibited_claims?.join('\n') ?? '', parse: splitValues, multiline: true },
 ]
 
-function BriefPane({ brief, busy, onConfirm, onConfirmFields, onField, onSelectProduct }: {
+const briefHighRiskFields = new Set([
+  'proposition',
+  'product.evidence',
+  'budget.total',
+  'constraints',
+  'creative.mandatory_elements',
+  'creative.prohibited_claims',
+])
+
+const briefDecisionGroups: Array<{
+  id: string
+  title: string
+  description: string
+  fields: string[]
+}> = [
+  { id: 'goal', title: '业务目标', description: '先对齐要解决的问题和对外核心主张。', fields: ['campaign.objective', 'proposition'] },
+  { id: 'product', title: '产品与证据', description: '明确本次主推对象、可用卖点和证据边界。', fields: ['brand.name', 'product.name', 'product.category', 'product.selling_points', 'product.evidence'] },
+  { id: 'audience', title: '受众与情境', description: '说明为谁沟通，以及所在行业、地区和语言环境。', fields: ['audience.primary', 'industry', 'region', 'language'] },
+  { id: 'channel', title: '渠道与转化', description: '确定触达阵地和最终衡量方式。', fields: ['channels', 'measurement.primary_kpi'] },
+  { id: 'resource', title: '资源与约束', description: '锁定预算、周期和必须遵守的执行条件。', fields: ['budget.total', 'schedule.window', 'constraints'] },
+  { id: 'creative', title: '创意边界', description: '定义表达调性、必提内容和禁用表述。', fields: ['creative.tone', 'creative.mandatory_elements', 'creative.prohibited_claims'] },
+]
+
+function BriefPane({ assistantBusyId, assistantError, assistantProposals, brief, busy, onApplyProposal, onAutosaveField, onConfirm, onConfirmFields, onField, onIgnoreProposal, onOpenAssistant, onSelectProduct, sessionProjectId, sessionWorkspaceId }: {
+  assistantBusyId: string
+  assistantError: string
+  assistantProposals: ArtifactProposal[]
   brief: BriefDraft | null
   busy: string
+  onApplyProposal: (proposal: ArtifactProposal, operations?: BriefPatchOperation[]) => Promise<boolean>
+  onAutosaveField: (path: string, value: unknown) => Promise<boolean>
   onConfirm: () => Promise<boolean>
   onConfirmFields: (operations: Array<{ fieldPath: string; value: unknown }>) => Promise<boolean>
   onField: (path: string, value: unknown) => Promise<boolean>
+  onIgnoreProposal: (proposal: ArtifactProposal) => Promise<boolean>
+  onOpenAssistant: () => void
   onSelectProduct: (candidate: BriefProductCandidate) => Promise<boolean>
+  sessionProjectId: string
+  sessionWorkspaceId: string
 }) {
   if (!brief) return <UnavailablePane title="Brief 尚未创建" detail="请先进入对话并发送第一条需求信息。"/>
   const frozen = brief.status === 'confirmed'
@@ -488,15 +1036,13 @@ function BriefPane({ brief, busy, onConfirm, onConfirmFields, onField, onSelectP
   const confirmedCount = briefFields.filter(field => field.value(brief).trim() && brief.field_states[field.path]?.confirmation === 'confirmed').length
   const optionalCreativeContext = briefFields.filter(field => ['brand.name', 'industry', 'region', 'language'].includes(field.path) && !field.value(brief).trim())
   const confirmationReadiness = brief.base_brief_version ? getFullStrategyDraftReadiness(brief) : brief.completeness
-  const unconfirmedFields = briefFields.flatMap(field => {
-    const value = field.value(brief)
-    if (!value.trim() || brief.field_states[field.path]?.confirmation === 'confirmed') return []
-    return [{ fieldPath: field.path, value: field.parse ? field.parse(value) : value }]
-  })
   return <section className="kanon-brief-pane">
     <div className="kanon-strategy-heading">
       <div><span className="section-label">{brief.base_brief_version ? `BRIEF REVISION · 基于 v${brief.base_brief_version}` : `BRIEF DRAFT v${brief.version}`}</span><h2>{brief.base_brief_version ? '补充完整策略输入' : '确认策略输入'}</h2><p>{brief.base_brief_version ? '原冻结版本保持不变；这里只补充完整策略缺少的信息，确认后将冻结为新的 BriefVersion。' : '字段修改使用服务端版本校验，确认后冻结为不可变 BriefVersion。'}</p></div>
-      <span className={`source-chip ${confirmationReadiness.ready ? '' : 'alert'}`}>{frozen ? '已冻结' : confirmationReadiness.ready ? '可以确认' : `${confirmationReadiness.blockers.length} 个阻断项`}</span>
+      <div className="kanon-brief-heading-actions">
+        {!frozen ? <button className="secondary-button" disabled={Boolean(busy)} onClick={onOpenAssistant} type="button"><Sparkles size={14}/>让 AI 帮我补充</button> : null}
+        <span className={`source-chip ${confirmationReadiness.ready ? '' : 'alert'}`}>{frozen ? '已冻结' : confirmationReadiness.ready ? '可以确认' : `${confirmationReadiness.blockers.length} 个阻断项`}</span>
+      </div>
     </div>
     <div className="kanon-brief-health" role="status">
       <div><b>{populatedCount}<small> / {briefFields.length}</small></b><span>已填写</span></div>
@@ -512,18 +1058,53 @@ function BriefPane({ brief, busy, onConfirm, onConfirmFields, onField, onSelectP
       onSelect={onSelectProduct}
       selectedName={brief.document.product?.name ?? ''}
     /> : null}
-    <div className="kanon-field-grid">
-      {briefFields.map(field => <EditableField
-        busy={busy === `brief:${field.path}`}
+    {assistantProposals.length || assistantError ? <div className="kanon-brief-ai-proposals">
+      <div className="kanon-brief-ai-proposals-copy"><Sparkles size={16}/><span><b>AI 候选补充</b><small>来自当前项目上下文；采用前可以编辑，任何建议都不会自动写入。</small></span></div>
+      <AssistantProposalList
+        brief={brief}
+        busyId={assistantBusyId}
         disabled={frozen || Boolean(busy)}
-        frozen={frozen}
-        key={field.path}
-        label={field.label}
-        multiline={field.multiline}
-        onSave={value => onField(field.path, field.parse ? field.parse(value) : value)}
-        state={brief.field_states[field.path]}
-        value={field.value(brief)}
-      />)}
+        error={assistantError}
+        onApply={onApplyProposal}
+        onIgnore={onIgnoreProposal}
+        proposals={assistantProposals}
+      />
+    </div> : null}
+    <div className="kanon-brief-groups">
+      {briefDecisionGroups.map((group, groupIndex) => {
+        const fields = group.fields.map(path => briefFields.find(field => field.path === path)).filter((field): field is typeof briefFields[number] => Boolean(field))
+        const populated = fields.filter(field => field.value(brief).trim()).length
+        const confirmed = fields.filter(field => field.value(brief).trim() && brief.field_states[field.path]?.confirmation === 'confirmed').length
+        const bulkConfirmable = fields.flatMap(field => {
+          const value = field.value(brief)
+          if (briefHighRiskFields.has(field.path) || !value.trim() || brief.field_states[field.path]?.confirmation === 'confirmed') return []
+          return [{ fieldPath: field.path, value: field.parse ? field.parse(value) : value }]
+        })
+        return <section className="kanon-brief-group" key={group.id} aria-labelledby={`brief-group-${group.id}`}>
+          <header>
+            <div className="kanon-brief-group-index">{String(groupIndex + 1).padStart(2, '0')}</div>
+            <div><h3 id={`brief-group-${group.id}`}>{group.title}</h3><p>{group.description}</p></div>
+            <span>{confirmed}/{populated} 已确认</span>
+          </header>
+          <div className="kanon-field-grid">
+            {fields.map(field => <EditableField
+              busy={busy === `brief:${field.path}`}
+              disabled={frozen || Boolean(busy)}
+              frozen={frozen}
+              highRisk={briefHighRiskFields.has(field.path)}
+              key={field.path}
+              label={field.label}
+              multiline={field.multiline}
+              onAutosave={value => onAutosaveField(field.path, field.parse ? field.parse(value) : value)}
+              onSave={value => onField(field.path, field.parse ? field.parse(value) : value)}
+              draftStorageKey={workspaceSessionKey(sessionProjectId, sessionWorkspaceId, 'brief-field', brief.id, field.path)}
+              state={brief.field_states[field.path]}
+              value={field.value(brief)}
+            />)}
+          </div>
+          {!frozen && bulkConfirmable.length ? <footer><small>普通信息可一次确认；标记“需单独确认”的字段仍需逐项核对。</small><button className="secondary-button" disabled={Boolean(busy)} onClick={() => void onConfirmFields(bulkConfirmable)} type="button"><Check size={14}/>{busy === 'confirm-brief-fields' ? '确认中…' : `确认本组普通信息（${bulkConfirmable.length}）`}</button></footer> : null}
+        </section>
+      })}
     </div>
     <div className="kanon-brief-footer">
       <div>
@@ -531,9 +1112,6 @@ function BriefPane({ brief, busy, onConfirm, onConfirmFields, onField, onSelectP
         {!confirmationReadiness.blockers.length ? <span><CircleCheck size={13}/>必填信息与确认状态满足冻结条件</span> : null}
       </div>
       <div className="kanon-brief-actions">
-        {!frozen && unconfirmedFields.length ? <button className="secondary-button" disabled={Boolean(busy)} onClick={() => void onConfirmFields(unconfirmedFields)}>
-          <Check size={15}/>{busy === 'confirm-brief-fields' ? '确认中…' : `确认全部已填写字段（${unconfirmedFields.length}）`}
-        </button> : null}
         <button className="primary-button" disabled={frozen || !confirmationReadiness.ready || Boolean(busy)} onClick={() => void onConfirm()}>
           <BadgeCheck size={16}/>{busy === 'confirm-brief' ? '确认中…' : frozen ? 'Brief 已冻结' : '确认并冻结 Brief'}
         </button>
@@ -570,37 +1148,190 @@ function ProductCandidatePanel({ busy, candidates, disabled, onSelect, selectedN
   </section>
 }
 
-function EditableField({ busy, disabled, frozen, label, multiline, onSave, state, value }: {
+type EditableFieldSessionDraft = {
+  baseValue: string
+  draftValue: string
+}
+
+function EditableField({ busy, disabled, draftStorageKey, frozen, highRisk, label, multiline, onAutosave, onSave, state, value }: {
   busy: boolean
   disabled: boolean
+  draftStorageKey: string
   frozen: boolean
+  highRisk: boolean
   label: string
   multiline?: boolean
+  onAutosave: (value: string) => Promise<boolean>
   onSave: (value: string) => Promise<boolean>
   state?: BriefDraft['field_states'][string]
   value: string
 }) {
-  const [draftValue, setDraftValue] = useState(value)
-  useEffect(() => setDraftValue(value), [value])
+  const [initialDraft] = useState<EditableFieldSessionDraft | null>(() => frozen ? null : readEditableFieldDraft(draftStorageKey))
+  const [draftValue, setDraftValue] = useState(() => initialDraft?.draftValue ?? value)
+  const [serverChangedWhileEditing, setServerChangedWhileEditing] = useState(() => Boolean(
+    initialDraft && initialDraft.baseValue !== value && initialDraft.draftValue !== value,
+  ))
+  const [saveState, setSaveState] = useState<'idle' | 'waiting' | 'saving' | 'saved' | 'error'>('idle')
+  const autosaveGenerationRef = useRef(0)
+  const autosaveSubmittedValueRef = useRef<string | null>(null)
+  const onAutosaveRef = useRef(onAutosave)
+  onAutosaveRef.current = onAutosave
+  const draftValueRef = useRef(draftValue)
+  const serverValueRef = useRef(value)
+  useEffect(() => {
+    if (frozen) {
+      clearWorkspaceSessionValue(draftStorageKey)
+      draftValueRef.current = value
+      serverValueRef.current = value
+      setDraftValue(value)
+      setServerChangedWhileEditing(false)
+      setSaveState('idle')
+      return
+    }
+    const restored = readEditableFieldDraft(draftStorageKey)
+    serverValueRef.current = value
+    draftValueRef.current = restored?.draftValue ?? value
+    setDraftValue(draftValueRef.current)
+    setServerChangedWhileEditing(Boolean(restored && restored.baseValue !== value && restored.draftValue !== value))
+    setSaveState(restored?.draftValue !== undefined && restored.draftValue.trim() !== value.trim() ? 'waiting' : 'idle')
+  }, [draftStorageKey, frozen])
+  useEffect(() => {
+    const previousServerValue = serverValueRef.current
+    if (previousServerValue === value) return
+    serverValueRef.current = value
+    const current = draftValueRef.current
+    const acknowledgesOwnAutosave = autosaveSubmittedValueRef.current !== null &&
+      autosaveSubmittedValueRef.current.trim() === value.trim()
+    if (acknowledgesOwnAutosave) {
+      autosaveSubmittedValueRef.current = null
+      setServerChangedWhileEditing(false)
+      if (current.trim() === value.trim()) {
+        clearWorkspaceSessionValue(draftStorageKey)
+        draftValueRef.current = value
+        setDraftValue(value)
+      } else {
+        writeWorkspaceSessionValue<EditableFieldSessionDraft>(draftStorageKey, {
+          baseValue: value,
+          draftValue: current,
+        })
+        setSaveState('waiting')
+      }
+      return
+    }
+    if (frozen || current === previousServerValue || current === value) {
+      clearWorkspaceSessionValue(draftStorageKey)
+      draftValueRef.current = value
+      setDraftValue(value)
+      setServerChangedWhileEditing(false)
+      return
+    }
+    setServerChangedWhileEditing(true)
+    writeWorkspaceSessionValue<EditableFieldSessionDraft>(draftStorageKey, {
+      baseValue: value,
+      draftValue: current,
+    })
+  }, [draftStorageKey, frozen, value])
   const changed = draftValue.trim() !== value.trim()
   const needsConfirmation = Boolean(value.trim()) && state?.confirmation !== 'confirmed'
   const empty = !draftValue.trim()
+  const changeDraft = (nextValue: string) => {
+    autosaveGenerationRef.current += 1
+    draftValueRef.current = nextValue
+    setDraftValue(nextValue)
+    if (nextValue.trim() === value.trim()) {
+      clearWorkspaceSessionValue(draftStorageKey)
+      setServerChangedWhileEditing(false)
+      setSaveState('idle')
+      return
+    }
+    setSaveState('waiting')
+    writeWorkspaceSessionValue<EditableFieldSessionDraft>(draftStorageKey, {
+      baseValue: value,
+      draftValue: nextValue,
+    })
+  }
+  useEffect(() => {
+    if (frozen || disabled || serverChangedWhileEditing || !changed) return
+    const generation = ++autosaveGenerationRef.current
+    setSaveState('waiting')
+    const timer = window.setTimeout(() => {
+      if (generation !== autosaveGenerationRef.current) return
+      setSaveState('saving')
+      const submittedValue = draftValueRef.current
+      autosaveSubmittedValueRef.current = submittedValue
+      void onAutosaveRef.current(submittedValue).then(saved => {
+        if (generation !== autosaveGenerationRef.current) return
+        if (!saved) autosaveSubmittedValueRef.current = null
+        setSaveState(saved ? 'saved' : 'error')
+      })
+    }, 750)
+    return () => window.clearTimeout(timer)
+  }, [changed, disabled, frozen, serverChangedWhileEditing, draftValue])
+  const saveDraft = async () => {
+    autosaveGenerationRef.current += 1
+    if (!await onSave(draftValue)) return
+    clearWorkspaceSessionValue(draftStorageKey)
+    setServerChangedWhileEditing(false)
+    setSaveState('saved')
+  }
+  const saveLabel = serverChangedWhileEditing
+    ? '服务端已更新，请核对保留的输入'
+    : saveState === 'waiting'
+      ? '等待自动保存…'
+      : saveState === 'saving'
+        ? '正在自动保存…'
+        : saveState === 'error'
+          ? '自动保存失败 · 输入已保留'
+          : saveState === 'saved'
+            ? state?.confirmation === 'confirmed' ? '已保存 · 已确认' : highRisk ? '已自动保存 · 需单独确认' : '已自动保存 · 待确认'
+            : empty
+              ? '待补充'
+              : state?.confirmation === 'confirmed'
+                ? '服务端已保存 · 已确认'
+                : highRisk
+                  ? '服务端已保存 · 需单独确认'
+                  : state
+                    ? `服务端已保存 · ${state.confidence} 置信度`
+                    : '服务端已保存 · 待确认'
   return <label className={`kanon-field ${multiline ? 'wide' : ''}${empty ? ' empty' : ''}`}>
-    <span>{label}<small>{state?.confirmation === 'confirmed' ? '已确认' : state ? `${state.confidence} 置信度` : '待补充'}</small></span>
+    <span>{label}<small aria-live="polite">{saveLabel}</small></span>
     {frozen
       ? <output>{empty ? '未提供' : draftValue}</output>
       : multiline
-      ? <textarea disabled={disabled} rows={3} value={draftValue} onChange={event => setDraftValue(event.target.value)}/>
-      : <input disabled={disabled} value={draftValue} onChange={event => setDraftValue(event.target.value)}/>}
-    {(changed || needsConfirmation) && !disabled ? <button disabled={busy} type="button" onClick={() => void onSave(draftValue)}>{busy ? '处理中…' : changed ? '保存并确认' : '确认此字段'}</button> : null}
+      ? <textarea disabled={disabled} rows={3} value={draftValue} onChange={event => changeDraft(event.target.value)}/>
+      : <input disabled={disabled} value={draftValue} onChange={event => changeDraft(event.target.value)}/>}
+    {(changed || (needsConfirmation && highRisk)) && !disabled ? <button disabled={busy} type="button" onClick={() => void saveDraft()}>{busy ? '处理中…' : serverChangedWhileEditing ? '核对后保存' : changed ? '保存并确认' : '确认此字段'}</button> : null}
   </label>
 }
 
-function StrategyPane({ briefVersion, busy, draft, onCreateBriefRevision, onGenerate, onPatch, onProbe, onRetry, onRevise, onSubmit, pending, probe, readiness }: {
+function readEditableFieldDraft(key: string): EditableFieldSessionDraft | null {
+  const value = readWorkspaceSessionValue<Partial<EditableFieldSessionDraft>>(key)
+  return value && typeof value.baseValue === 'string' && typeof value.draftValue === 'string'
+    ? { baseValue: value.baseValue, draftValue: value.draftValue }
+    : null
+}
+
+function isCompatibleWorkspaceDraft(restored: unknown, original: unknown) {
+  if (restored === null || restored === undefined || original === undefined) return false
+  if (Array.isArray(original)) return Array.isArray(restored)
+  if (original === null) return restored === null
+  return typeof restored === typeof original && (typeof original !== 'object' || !Array.isArray(restored))
+}
+
+function readDirtyStrategySections(key: string) {
+  const value = readWorkspaceSessionValue<unknown>(key)
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function StrategyPane({ briefVersion, busy, deepReview, deepReviewError, draft, onCreateBriefRevision, onDeepReview, onGenerate, onPatch, onProbe, onRetry, onRevise, onSubmit, pending, probe, readiness, reviewPolicy, sessionProjectId, sessionWorkspaceId }: {
   briefVersion: BriefVersion | null
   busy: string
+  deepReview: WorkspaceState['deepReview']
+  deepReviewError: string
   draft: StrategyDraft | null
+  reviewPolicy: WorkspaceState['reviewPolicy']
   onCreateBriefRevision: () => Promise<boolean>
+  onDeepReview: () => Promise<boolean>
   onGenerate: () => Promise<boolean>
   onPatch: (section: string, value: unknown) => Promise<boolean>
   onProbe: () => Promise<boolean>
@@ -610,21 +1341,100 @@ function StrategyPane({ briefVersion, busy, draft, onCreateBriefRevision, onGene
   pending: boolean
   probe: WorkspaceState['probe']
   readiness: WorkspaceState['readiness']
+  sessionProjectId: string
+  sessionWorkspaceId: string
 }) {
-  const [section, setSection] = useState('objective')
+  const sectionSelectionKey = workspaceSessionKey(sessionProjectId, sessionWorkspaceId, 'strategy-section-selection')
+  const [section, setSection] = useState(() => {
+    const restored = readWorkspaceSessionValue<string>(sectionSelectionKey)
+    return typeof restored === 'string' && restored ? restored : 'objective'
+  })
   const [sectionValue, setSectionValue] = useState<unknown>('')
-  const [instruction, setInstruction] = useState('')
   const document = draft?.revision?.document
+  const revisionIdentity = draft ? `${draft.id}:${draft.current_revision}` : 'pending'
+  const instructionStorageKey = workspaceSessionKey(sessionProjectId, sessionWorkspaceId, 'strategy-instruction', revisionIdentity)
+  const sectionDraftStorageKey = workspaceSessionKey(sessionProjectId, sessionWorkspaceId, 'strategy-section-draft', revisionIdentity, section)
+  const dirtySectionsStorageKey = workspaceSessionKey(sessionProjectId, sessionWorkspaceId, 'strategy-dirty-sections', revisionIdentity)
+  const [instruction, setInstruction] = useState(() => {
+    const restored = readWorkspaceSessionValue<string>(instructionStorageKey)
+    return typeof restored === 'string' ? restored : ''
+  })
+  const [dirtySections, setDirtySections] = useState<string[]>(() => readDirtyStrategySections(dirtySectionsStorageKey))
   const strategyReadiness = briefVersion ? getFullStrategyReadiness(briefVersion) : null
   const briefReady = Boolean(strategyReadiness?.ready)
+  const availableSections = document
+    ? strategyEditorSectionGroups.flatMap(group => group.sections).filter(value => Object.prototype.hasOwnProperty.call(document, value))
+    : []
+  useEffect(() => {
+    if (!availableSections.length || availableSections.includes(section)) return
+    setSection(availableSections[0])
+  }, [availableSections.join('|'), section])
+  useEffect(() => {
+    writeWorkspaceSessionValue(sectionSelectionKey, section)
+  }, [section, sectionSelectionKey])
+  useEffect(() => {
+    setDirtySections(readDirtyStrategySections(dirtySectionsStorageKey))
+  }, [dirtySectionsStorageKey])
+  const markSectionDirty = (sectionName: string, dirty: boolean) => {
+    setDirtySections(current => {
+      const next = dirty
+        ? current.includes(sectionName) ? current : [...current, sectionName]
+        : current.filter(value => value !== sectionName)
+      if (next.length) writeWorkspaceSessionValue(dirtySectionsStorageKey, next)
+      else clearWorkspaceSessionValue(dirtySectionsStorageKey)
+      return next
+    })
+  }
   useEffect(() => {
     if (!document) {
       setSectionValue('')
       return
     }
-    const value = (document as unknown as Record<string, unknown>)[section]
-    setSectionValue(structuredClone(value))
-  }, [document, section])
+    const originalValue = (document as unknown as Record<string, unknown>)[section]
+    const restored = readWorkspaceSessionValue<unknown>(sectionDraftStorageKey)
+    const hasCompatibleDraft = isCompatibleWorkspaceDraft(restored, originalValue)
+      && JSON.stringify(restored) !== JSON.stringify(originalValue)
+    setSectionValue(structuredClone(hasCompatibleDraft ? restored : originalValue))
+    markSectionDirty(section, hasCompatibleDraft)
+  }, [sectionDraftStorageKey])
+  useEffect(() => {
+    const restored = readWorkspaceSessionValue<string>(instructionStorageKey)
+    setInstruction(typeof restored === 'string' ? restored : '')
+  }, [instructionStorageKey])
+
+  const changeSectionValue = (value: unknown) => {
+    setSectionValue(value)
+    const originalValue = document ? (document as unknown as Record<string, unknown>)[section] : undefined
+    if (JSON.stringify(value) === JSON.stringify(originalValue)) {
+      clearWorkspaceSessionValue(sectionDraftStorageKey)
+      markSectionDirty(section, false)
+      return
+    }
+    writeWorkspaceSessionValue(sectionDraftStorageKey, value)
+    markSectionDirty(section, true)
+  }
+  const resetSectionValue = () => {
+    if (!document) return
+    clearWorkspaceSessionValue(sectionDraftStorageKey)
+    markSectionDirty(section, false)
+    setSectionValue(structuredClone((document as unknown as Record<string, unknown>)[section]))
+  }
+  const saveSectionValue = async () => {
+    if (!await onPatch(section, sectionValue)) return false
+    clearWorkspaceSessionValue(sectionDraftStorageKey)
+    markSectionDirty(section, false)
+    return true
+  }
+  const changeInstruction = (value: string) => {
+    setInstruction(value)
+    if (value) writeWorkspaceSessionValue(instructionStorageKey, value)
+    else clearWorkspaceSessionValue(instructionStorageKey)
+  }
+  const submitInstruction = async () => {
+    if (!await onRevise(instruction)) return
+    clearWorkspaceSessionValue(instructionStorageKey)
+    setInstruction('')
+  }
 
   if (!draft) {
     return <section className="kanon-strategy-generate">
@@ -664,12 +1474,19 @@ function StrategyPane({ briefVersion, busy, draft, onCreateBriefRevision, onGene
     return <UnavailablePane title="策略没有可用 Revision" detail={`当前状态：${statusLabel(draft.status)}。请重新加载或检查 AgentTask。`}/>
   }
 
-  const sections = Object.keys(document).filter(key => !['contract_version', 'compliance', 'lineage'].includes(key))
+  const sectionGroups = strategyEditorSectionGroups.map(group => ({
+    ...group,
+    sections: group.sections.filter(value => Object.prototype.hasOwnProperty.call(document, value)),
+  })).filter(group => group.sections.length)
+  const sectionCodes = new Map(sectionGroups.flatMap(group => group.sections).map((value, index) => [value, String(index + 1).padStart(2, '0')]))
   const original = (document as unknown as Record<string, unknown>)[section]
   const changed = JSON.stringify(sectionValue) !== JSON.stringify(original)
   // Editing an approved draft creates a new revision and leaves the published
   // StrategyPackage immutable. The backend already enforces that boundary.
-  const canEdit = draft.status === 'draft' || draft.status === 'returned' || draft.status === 'approved'
+  const legacyContract = document.contract_version !== 'strategy-draft/v3'
+  const canEdit = !legacyContract && (draft.status === 'draft' || draft.status === 'returned' || draft.status === 'approved')
+  const canDecide = !legacyContract && (draft.status === 'draft' || draft.status === 'returned')
+  const selfConfirmation = reviewPolicy?.mode === 'self_confirmation'
 
   return <section className="kanon-strategy-editor-pane">
     <div className="kanon-strategy-heading kanon-strategy-document-heading">
@@ -683,26 +1500,51 @@ function StrategyPane({ briefVersion, busy, draft, onCreateBriefRevision, onGene
         <small title={draft.revision?.content_hash}>{draft.revision?.content_hash.slice(0, 18)}…</small>
       </div>
     </div>
+    {legacyContract ? <div className="kanon-strategy-upgrade-banner" role="status"><Archive size={16}/><span><b>该策略使用旧版只读契约</b><small>{document.contract_version} 不再接受修订写入；请先运行 v3 successor 升级。历史 Revision 和已发布 Package 不会被改写。</small></span></div> : null}
     <div className="kanon-strategy-section-editor">
-      <nav aria-label="策略区块">{sections.map((value, index) => <button className={value === section ? 'active' : ''} key={value} onClick={() => setSection(value)}>
-        <span>{String(index + 1).padStart(2, '0')}</span>{strategySectionLabel(value)}
-      </button>)}</nav>
+      <nav aria-label="策略区块">{sectionGroups.map(group => <section key={group.id}>
+        <header><b>{group.title}</b><small>{group.description}</small></header>
+        {group.sections.map(value => <button className={`${value === section ? 'active' : ''}${dirtySections.includes(value) ? ' has-draft' : ''}`} key={value} onClick={() => setSection(value)}>
+          <span>{sectionCodes.get(value)}</span>{strategySectionLabel(value)}{dirtySections.includes(value) ? <em>未保存</em> : null}
+        </button>)}
+      </section>)}</nav>
       <div>
-        <div className="surface-toolbar"><div><h3>{strategySectionLabel(section)}</h3><small>编辑当前区块</small></div><small>保存将创建 Revision {draft.current_revision + 1}</small></div>
-        <StructuredStrategyEditor disabled={!canEdit || Boolean(busy)} onChange={setSectionValue} section={section} value={sectionValue}/>
-        <button className="secondary-button" disabled={!canEdit || Boolean(busy) || !changed} onClick={() => void onPatch(section, sectionValue)}>
-          {busy === `strategy:${section}` ? '保存中…' : '保存为新 Revision'}
-        </button>
+        <div className="surface-toolbar"><div><h3>{strategySectionLabel(section)}</h3><small>{strategySectionDescription(section)}</small></div><small>{legacyContract ? '旧版只读' : `当前 Revision ${draft.current_revision}`}</small></div>
+        {section === 'creative_strategy'
+          ? <CreativeStrategyEditor disabled={!canEdit || Boolean(busy)} onChange={changeSectionValue} value={sectionValue}/>
+          : <StructuredStrategyEditor disabled={!canEdit || Boolean(busy)} onChange={changeSectionValue} section={section} value={sectionValue}/>}
+        {changed ? <StrategySectionChangeImpact
+          busy={busy === `strategy:${section}`}
+          nextRevision={draft.current_revision + 1}
+          onReset={resetSectionValue}
+          onSave={saveSectionValue}
+          original={original}
+          section={section}
+          value={sectionValue}
+        /> : <div className="kanon-strategy-no-change"><CircleCheck size={14}/><span>当前章节与 Revision {draft.current_revision} 一致</span></div>}
       </div>
     </div>
+    <StrategyPerspectivePanel
+      analysis={deepReview}
+      busy={busy}
+      error={deepReviewError}
+      onRun={onDeepReview}
+      revision={draft.current_revision}
+    />
     <div className="kanon-revise-box">
       <label htmlFor="strategy-revise">用自然语言修订</label>
-      <textarea id="strategy-revise" disabled={!canEdit || Boolean(busy)} rows={2} value={instruction} onChange={event => setInstruction(event.target.value)} placeholder="例如：把小红书的内容节奏调整为首周种草、第二周测评扩散。"/>
-      <button className="secondary-button" disabled={!canEdit || Boolean(busy) || !instruction.trim()} onClick={() => { void onRevise(instruction).then(ok => { if (ok) setInstruction('') }) }}><RotateCcw size={14}/>{busy === 'revise-strategy' ? '修订中…' : '生成修订'}</button>
+      <textarea id="strategy-revise" disabled={!canEdit || Boolean(busy)} rows={2} value={instruction} onChange={event => changeInstruction(event.target.value)} placeholder="例如：把小红书的内容节奏调整为首周种草、第二周测评扩散。"/>
+      <button className="secondary-button" disabled={!canEdit || Boolean(busy) || !instruction.trim()} onClick={() => void submitInstruction()}><RotateCcw size={14}/>{busy === 'revise-strategy' ? '修订中…' : '生成修订'}</button>
     </div>
     <div className="kanon-brief-footer">
-      <span>候选内容保存后才可提交评审；批准会绑定 Revision 与内容哈希。</span>
-      <button className="primary-button" disabled={!canEdit || Boolean(busy)} onClick={() => void onSubmit()}><BadgeCheck size={16}/>{busy === 'submit-review' ? '提交中…' : '提交评审'}</button>
+      <span>{dirtySections.length
+        ? `还有 ${dirtySections.length} 个章节的修改未保存；可切换章节继续核对，但提交前必须保存或撤销。`
+        : selfConfirmation
+        ? '个人模式无需提交给自己评审；确认后将直接发布绑定当前 Revision 与哈希的不可变策略包。'
+        : '候选内容保存后提交给指定角色；评审与批准始终绑定 Revision 与内容哈希。'}</span>
+      <button className="primary-button" disabled={!canDecide || Boolean(busy) || Boolean(dirtySections.length)} onClick={() => void onSubmit()}><BadgeCheck size={16}/>{selfConfirmation
+        ? busy === 'confirm-publish' ? '正在确认并发布…' : '确认并发布策略包'
+        : busy === 'submit-review' ? '正在提交…' : '提交正式评审'}</button>
     </div>
   </section>
 }
@@ -754,28 +1596,87 @@ function strategyArrayTemplate(section: string): unknown {
   return ''
 }
 
-function ReviewPane({ busy, comments, deepReview, deepReviewError, draft, onAddComment, onApprove, onDeepReview, onOpenCreative, onReturn, review, revisions }: {
+type ReviewSessionDraft = {
+  comment: string
+  reason: string
+}
+
+function ReviewPane({ busy, comments, deepReview, deepReviewError, draft, draftStorageKey, onAddComment, onApprove, onConfirm, onDeepReview, onOpenCreative, onReturn, review, reviewPolicy, revisions }: {
   busy: string
   comments: WorkspaceState['comments']
   deepReview: WorkspaceState['deepReview']
   deepReviewError: string
   draft: StrategyDraft | null
+  draftStorageKey: string
   onAddComment: (body: string) => Promise<boolean>
   onApprove: () => Promise<boolean>
+  onConfirm: () => Promise<boolean>
   onDeepReview: () => Promise<boolean>
   onOpenCreative: () => void
   onReturn: (reason: string) => Promise<boolean>
   review: Review | null
+  reviewPolicy: WorkspaceState['reviewPolicy']
   revisions: DraftRevision[]
 }) {
-  const [comment, setComment] = useState('')
-  const [reason, setReason] = useState('')
+  const [restoredDraft] = useState<ReviewSessionDraft>(() => readReviewSessionDraft(draftStorageKey) ?? { comment: '', reason: '' })
+  const [comment, setComment] = useState(restoredDraft.comment)
+  const [reason, setReason] = useState(restoredDraft.reason)
   const candidate = revisions.find(item => item.revision === review?.candidate_revision) ?? draft?.revision
   const previous = revisions.find(item => item.revision === (review?.candidate_revision ?? 1) - 1)
   const diffs = useMemo(() => strategyDiff(previous, candidate), [candidate, previous])
   const document = candidate?.document
+  useEffect(() => {
+    if (!comment && !reason) {
+      clearWorkspaceSessionValue(draftStorageKey)
+      return
+    }
+    writeWorkspaceSessionValue<ReviewSessionDraft>(draftStorageKey, { comment, reason })
+  }, [comment, draftStorageKey, reason])
 
-  if (!review) return <UnavailablePane title="尚未提交评审" detail="在“策略”页签完成候选 Revision 后提交评审。"/>
+  const addComment = async () => {
+    if (!await onAddComment(comment)) return
+    setComment('')
+  }
+  const returnForChanges = async () => {
+    if (!await onReturn(reason)) return
+    clearWorkspaceSessionValue(draftStorageKey)
+    setReason('')
+  }
+
+  if (!review && reviewPolicy?.mode === 'self_confirmation' && candidate?.document && draft) {
+    const riskCount = candidate.document.assumptions_and_gaps.length + (candidate.document.compliance?.issues.length ?? 0)
+    return <section className="kanon-review-pane kanon-self-confirmation">
+      <div className="kanon-strategy-heading">
+        <div><span className="section-label">SELF CONFIRMATION</span><h2>确认 Revision {candidate.revision}</h2><p>个人模式不会创建“提交给自己评审”的中间步骤。</p></div>
+        <span className="source-chip">个人确认</span>
+      </div>
+      <section className="kanon-review-brief" aria-label="待确认的核心策略判断">
+        <div><span className="section-label">一句话决策</span><h3>{candidate.document.proposition}</h3><p>{candidate.document.executive_summary || candidate.document.objective}</p></div>
+        <dl>
+          <div><dt>核心人群</dt><dd>{candidate.document.audience.primary}</dd></div>
+          <div><dt>渠道方案</dt><dd>{candidate.document.channel_strategy.length} 个</dd></div>
+          <div><dt>证据引用</dt><dd>{candidate.document.evidence_refs?.length ?? 0} 条</dd></div>
+          <div><dt>待关注</dt><dd className={riskCount ? 'warn' : ''}>{riskCount} 项</dd></div>
+        </dl>
+        <small>确认动作会原子发布不可变 StrategyPackage；失败时不会留下半完成评审。</small>
+      </section>
+      <StrategyPerspectivePanel analysis={deepReview} busy={busy} error={deepReviewError} onRun={onDeepReview} revision={candidate.revision}/>
+      <div className="kanon-self-confirm-action">
+        <div><ShieldCheck size={19}/><span><b>确认后仍可继续修订</b><small>后续修改会创建 successor Revision 和新 Package，当前历史包及其哈希保持不变。</small></span></div>
+        <button className="primary-button" disabled={Boolean(busy) || draft.status === 'approved'} onClick={() => void onConfirm()}><BadgeCheck size={15}/>{busy === 'confirm-publish' ? '正在确认并发布…' : '确认并发布策略包'}</button>
+      </div>
+      <details className="kanon-technical-details kanon-review-proof"><summary>版本与完整性校验</summary><code>{candidate.content_hash}</code></details>
+    </section>
+  }
+
+  if (!review && reviewPolicy?.mode === 'self_confirmation') {
+    return <UnavailablePane
+      title="尚无可确认的策略版本"
+      detail="请先在“策略”阶段生成或完善候选 Revision；个人模式会在这里直接确认并发布，不需要提交给自己评审。"
+    />
+  }
+
+  if (!review) return <UnavailablePane title="尚未提交正式评审" detail="当前项目启用了多人评审。请在“策略”阶段完成候选 Revision 后提交给指定角色。"/>
 
   return <section className="kanon-review-pane">
     <div className="kanon-strategy-heading">
@@ -783,10 +1684,7 @@ function ReviewPane({ busy, comments, deepReview, deepReviewError, draft, onAddC
       <span className={`source-chip ${review.status === 'returned' ? 'alert' : ''}`}>{statusLabel(review.status)}</span>
     </div>
     {document ? <StrategyDecisionBrief document={document} review={review}/> : null}
-    <section className="kanon-deep-review">
-      <div className="surface-toolbar"><div><h3>第二视角检查</h3><small>模型辅助检查证据、渠道协同、衡量方式与执行风险</small></div>{deepReview?.status === 'succeeded' ? <span className="source-chip">已完成 · {deepReview.model_version}</span> : null}</div>
-      {deepReviewError && !deepReview ? <DeepReviewFailure busy={busy} message={deepReviewError} onRetry={onDeepReview} reviewOpen={review.status === 'open'}/> : !deepReview ? <div className="kanon-deep-review-empty"><p>这一步是可选辅助，不会阻断人工确认。运行后会把问题整理为可执行建议。</p><button className="secondary-button" disabled={Boolean(busy) || review.status !== 'open'} onClick={() => void onDeepReview()}><Sparkles size={14}/>{busy === 'deep-review' ? '正在启动…' : '运行第二视角检查'}</button></div> : deepReview.status === 'pending' ? <div className="kanon-deep-review-pending" role="status"><LoaderCircle className="spin" size={16}/><span><b>第二视角正在后台检查</b><small>可以离开页面；完成后会自动恢复结果，不影响人工评审。</small></span></div> : deepReview.status === 'failed' ? <DeepReviewFailure busy={busy} message={deepReviewError || '本次模型任务未完成，请稍后重试。'} onRetry={onDeepReview} reviewOpen={review.status === 'open'}/> : <><p className="kanon-deep-review-summary">{deepReview.summary}</p><div className="kanon-deep-findings">{deepReview.findings.map((finding, index) => <article className={finding.severity} key={`${finding.section}-${index}`}><header><span>{finding.severity === 'blocker' ? '阻断风险' : finding.severity === 'warning' ? '需要关注' : '优化机会'}</span><small>{strategySectionLabel(finding.section)}</small></header><h4>{finding.title}</h4><p>{finding.detail}</p><div><b>建议</b>{finding.recommendation}</div></article>)}</div><details className="kanon-technical-details"><summary>查看运行信息</summary><code>{deepReview.api_mode} · background={String(deepReview.background)} · {deepReview.latency_ms ?? 0} ms{deepReview.usage ? ` · ${deepReview.usage.total_tokens} tokens` : ''}</code></details></>}
-    </section>
+    <StrategyPerspectivePanel analysis={deepReview} busy={busy} error={deepReviewError} onRun={onDeepReview} revision={review.candidate_revision}/>
     <div className="kanon-review-content">
       <div className="kanon-review-diffs">
         {!diffs.length && candidate ? <details className="kanon-review-full kanon-review-details"><summary>查看完整候选策略</summary><ReviewValue value={candidate.document}/></details> : diffs.map(diff => <article key={diff.section}>
@@ -801,10 +1699,11 @@ function ReviewPane({ busy, comments, deepReview, deepReviewError, draft, onAddC
         {!comments.length ? <p className="panel-empty">尚无评论。</p> : null}
         {review.status === 'open' ? <>
           <textarea disabled={Boolean(busy)} rows={3} value={comment} onChange={event => setComment(event.target.value)} placeholder="留下可执行评论"/>
-          <button className="secondary-button full" disabled={Boolean(busy) || !comment.trim()} onClick={() => { void onAddComment(comment).then(ok => { if (ok) setComment('') }) }}>添加评论</button>
-          <button className="primary-button full" disabled={Boolean(busy)} onClick={() => void onApprove()}><BadgeCheck size={15}/>{busy === 'approve-review' ? '处理中…' : review.review_mode === 'self_confirmation' ? '确认并发布策略包' : '批准并发布策略包'}</button>
+          <small>{comment || reason ? '未提交内容仅在当前浏览器会话保留；决策前需先提交评论或清空无关输入。' : '评论、批准和退回是三个独立动作。'}</small>
+          <button className="secondary-button full" disabled={Boolean(busy) || !comment.trim()} onClick={() => void addComment()}>添加评论</button>
+          <button className="primary-button full" disabled={Boolean(busy) || Boolean(comment.trim()) || Boolean(reason.trim())} onClick={() => void onApprove()}><BadgeCheck size={15}/>{busy === 'approve-review' ? '处理中…' : review.review_mode === 'self_confirmation' ? '确认并发布策略包' : '批准并发布策略包'}</button>
           <textarea disabled={Boolean(busy)} rows={2} value={reason} onChange={event => setReason(event.target.value)} placeholder="退回原因（必填）"/>
-          <button className="secondary-button full" disabled={Boolean(busy) || !reason.trim()} onClick={() => void onReturn(reason)}>退回修改</button>
+          <button className="secondary-button full" disabled={Boolean(busy) || !reason.trim() || Boolean(comment.trim())} onClick={() => void returnForChanges()}>退回修改</button>
         </> : review.status === 'approved' ? <div className="kanon-review-approved">
           <CircleCheck size={18}/>
           <span><b>策略已确认并发布</b><small>下一步将冻结的判断转换成可执行创意任务。</small></span>
@@ -835,46 +1734,130 @@ function StrategyDecisionBrief({ document, review }: { document: StrategyDocumen
   </section>
 }
 
-function DeepReviewFailure({ busy, message, onRetry, reviewOpen }: {
+function readReviewSessionDraft(key: string): ReviewSessionDraft | null {
+  const value = readWorkspaceSessionValue<Partial<ReviewSessionDraft>>(key)
+  return value && typeof value.comment === 'string' && typeof value.reason === 'string'
+    ? { comment: value.comment, reason: value.reason }
+    : null
+}
+
+function StrategyPerspectivePanel({ analysis, busy, error, onRun, revision }: {
+  analysis: WorkspaceState['deepReview']
+  busy: string
+  error: string
+  onRun: () => Promise<boolean>
+  revision: number
+}) {
+  return <section className="kanon-deep-review">
+    <div className="surface-toolbar"><div><h3>AI 第二视角</h3><small>针对 Revision {revision} 检查证据、渠道协同、衡量方式与执行风险；不改变人工评审状态</small></div>{analysis?.status === 'succeeded' ? <span className="source-chip">已完成 · {analysis.model_version}</span> : null}</div>
+    {error && !analysis ? <DeepReviewFailure busy={busy} message={error} onRetry={onRun}/> : !analysis ? <div className="kanon-deep-review-empty"><p>这是可选的异步建议，不会阻止继续编辑、提交或确认。结果只绑定当前 Revision。</p><button className="secondary-button" disabled={Boolean(busy)} onClick={() => void onRun()}><Sparkles size={14}/>{busy === 'deep-review' ? '正在启动…' : '运行第二视角检查'}</button></div> : analysis.status === 'pending' ? <div className="kanon-deep-review-pending" role="status"><LoaderCircle className="spin" size={16}/><span><b>第二视角正在后台检查 Revision {analysis.candidate_revision}</b><small>可以切换阶段或继续工作；完成后会自动恢复结果，不影响人工评审。</small></span></div> : analysis.status === 'failed' ? <DeepReviewFailure busy={busy} message={error || '本次模型任务未完成，请稍后重试。'} onRetry={onRun}/> : <><p className="kanon-deep-review-summary">{analysis.summary}</p><div className="kanon-deep-findings">{analysis.findings.map((finding, index) => <article className={finding.severity} key={`${finding.section}-${index}`}><header><span>{finding.severity === 'blocker' ? '阻断风险' : finding.severity === 'warning' ? '需要关注' : '优化机会'}</span><small>{strategySectionLabel(finding.section)}</small></header><h4>{finding.title}</h4><p>{finding.detail}</p><div><b>建议</b>{finding.recommendation}</div></article>)}</div><details className="kanon-technical-details"><summary>查看运行信息</summary><code>revision={analysis.candidate_revision} · {analysis.api_mode} · background={String(analysis.background)} · {analysis.latency_ms ?? 0} ms{analysis.usage ? ` · ${analysis.usage.total_tokens} tokens` : ''}</code></details></>}
+  </section>
+}
+
+function DeepReviewFailure({ busy, message, onRetry }: {
   busy: string
   message: string
   onRetry: () => Promise<boolean>
-  reviewOpen: boolean
 }) {
-  return <div className="kanon-deep-review-failed" role="status"><AlertCircle size={17}/><span><b>第二视角暂时没有完成</b><small>策略和已有评审内容均已保留，你仍可人工确认，或稍后重试。</small><details className="kanon-technical-details"><summary>查看技术原因</summary><code>{message}</code></details></span><button className="secondary-button" disabled={Boolean(busy) || !reviewOpen} onClick={() => void onRetry()}><RefreshCw size={14}/>重新运行</button></div>
+  return <div className="kanon-deep-review-failed" role="status"><AlertCircle size={17}/><span><b>第二视角暂时没有完成</b><small>策略内容和人工评审状态均未改变，你可以继续工作或稍后重试。</small><details className="kanon-technical-details"><summary>查看技术原因</summary><code>{message}</code></details></span><button className="secondary-button" disabled={Boolean(busy)} onClick={() => void onRetry()}><RefreshCw size={14}/>重新运行</button></div>
 }
 
-function ResearchPane({ brief, busy, documents, onAdoption, onResearch, onUpload, researchRun }: {
+type ResearchComposerSessionDraft = {
+  category: 'general' | 'audience' | 'competitor' | 'industry'
+  editedProposalValue: string
+  editingProposalId: string
+  query: string
+  selectedDocumentIds: string[]
+}
+
+function ResearchPane({
+	brief,
+	busy,
+	contextError,
+	contextReady,
+	documents,
+	draft,
+	onApplyProposal,
+	onCancelResearch,
+	onIgnoreProposal,
+	onRemapProposal,
+	onResearch,
+	onRetryResearch,
+	onUpload,
+	proposalBusyId,
+	proposalError,
+	proposals,
+	researchRun,
+	sessionProjectId,
+	sessionWorkspaceId,
+}: {
   brief: BriefDraft | null
   busy: string
+	contextError: string
+	contextReady: boolean
   documents: WorkspaceState['documents']
+	draft: StrategyDraft | null
   onResearch: (
     category: 'general' | 'audience' | 'competitor' | 'industry',
     query: string,
     documentIds: string[],
   ) => Promise<boolean>
-  onAdoption: (artifactId: string, adopted: boolean) => Promise<boolean>
+	onApplyProposal: (proposal: ArtifactProposal, operations?: BriefPatchOperation[]) => Promise<boolean>
+	onIgnoreProposal: (proposal: ArtifactProposal) => Promise<boolean>
+	onRemapProposal: (proposal: ArtifactProposal) => Promise<boolean>
+	onCancelResearch: (researchRunId: string) => Promise<boolean>
+	onRetryResearch: (researchRunId: string) => Promise<boolean>
   onUpload: (file: File) => Promise<boolean>
+	proposalBusyId: string
+	proposalError: string
+	proposals: ArtifactProposal[]
   researchRun: WorkspaceState['researchRun']
+  sessionProjectId: string
+  sessionWorkspaceId: string
 }) {
-  const [query, setQuery] = useState('')
-  const [category, setCategory] = useState<'general' | 'audience' | 'competitor' | 'industry'>('general')
-  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([])
-  const frozen = brief?.status === 'confirmed'
-  const referenceIds = brief?.document.reference_ids ?? []
+  const composerStorageKey = workspaceSessionKey(sessionProjectId, sessionWorkspaceId, 'research-composer')
+  const [restoredDraft] = useState<ResearchComposerSessionDraft>(() => readResearchComposerDraft(composerStorageKey) ?? {
+    category: 'general',
+    editedProposalValue: '',
+    editingProposalId: '',
+    query: '',
+    selectedDocumentIds: [],
+  })
+  const [query, setQuery] = useState(restoredDraft.query)
+  const [category, setCategory] = useState<ResearchComposerSessionDraft['category']>(restoredDraft.category)
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>(restoredDraft.selectedDocumentIds)
+	const [editingProposalId, setEditingProposalId] = useState(restoredDraft.editingProposalId)
+	const [editedProposalValue, setEditedProposalValue] = useState(restoredDraft.editedProposalValue)
+	const [proposalEditError, setProposalEditError] = useState('')
+	const activeStatuses = new Set(['queued', 'planning', 'searching', 'reading', 'cross_checking', 'drafting', 'auditing'])
+	const active = Boolean(researchRun && activeStatuses.has(researchRun.status))
   useEffect(() => {
     const readyIDs = new Set(documents.filter(document => document.status === 'ready').map(document => document.id))
     setSelectedDocumentIds(current => current.filter(id => readyIDs.has(id)))
   }, [documents])
+  useEffect(() => {
+    const value: ResearchComposerSessionDraft = {
+      category,
+      editedProposalValue: editingProposalId ? editedProposalValue : '',
+      editingProposalId,
+      query,
+      selectedDocumentIds,
+    }
+    if (category === 'general' && !query && !selectedDocumentIds.length && !editingProposalId) {
+      clearWorkspaceSessionValue(composerStorageKey)
+      return
+    }
+    writeWorkspaceSessionValue(composerStorageKey, value)
+  }, [category, composerStorageKey, editedProposalValue, editingProposalId, query, selectedDocumentIds])
   return <section className="kanon-research-pane">
     <div className="kanon-strategy-heading">
-      <div><span className="section-label">RESEARCH & EVIDENCE</span><h2>把外部与内部资料变成可引用证据</h2><p>研究结果由后端落为 ResearchArtifact，再写入 Brief reference IDs。</p></div>
+	  <div><span className="section-label">DEEP RESEARCH</span><h2>把外部与内部资料变成决策依据</h2><p>后台多轮搜索、正文核验和交叉引用；只有带目标字段与预览差异的结论才可采纳。</p></div>
       <span className="source-chip">{documents.length} 份项目资料</span>
     </div>
     <div className="kanon-research-grid">
       <section>
         <div className="surface-toolbar"><h3>品牌与项目资料</h3><label className="secondary-button" htmlFor="kanon-knowledge-file"><Upload size={14}/>上传资料</label></div>
-        <input id="kanon-knowledge-file" type="file" accept=".md,.docx,.pdf" disabled={Boolean(busy) || frozen} onChange={event => { const file = event.target.files?.[0]; if (file) void onUpload(file) }}/>
+		<input id="kanon-knowledge-file" type="file" accept=".md,.docx,.pdf" disabled={Boolean(busy)} onChange={event => { const file = event.target.files?.[0]; if (file) void onUpload(file) }}/>
         {documents.map(document => {
           const ready = document.status === 'ready'
           const selected = selectedDocumentIds.includes(document.id)
@@ -888,7 +1871,7 @@ function ResearchPane({ brief, busy, documents, onAdoption, onResearch, onUpload
               <input
                 aria-label={`选择资料 ${document.title || document.filename}`}
                 checked={selected}
-                disabled={!ready || Boolean(busy) || frozen}
+				disabled={!ready || Boolean(busy)}
                 type="checkbox"
                 onChange={event => setSelectedDocumentIds(current => event.target.checked
                   ? [...current, document.id]
@@ -901,36 +1884,279 @@ function ResearchPane({ brief, busy, documents, onAdoption, onResearch, onUpload
         {!documents.length ? <div className="panel-empty">尚未导入品牌或项目资料。</div> : null}
       </section>
       <section className="kanon-research-form">
-        <div className="surface-toolbar"><h3>外部研究</h3><span>Seed 联网搜索</span></div>
-        <label>研究分类<select disabled={Boolean(busy) || frozen} value={category} onChange={event => setCategory(event.target.value as typeof category)}><option value="general">综合研究</option><option value="audience">受众研究</option><option value="competitor">竞品研究</option><option value="industry">行业研究</option></select></label>
-        <label>要验证的问题<textarea disabled={Boolean(busy) || frozen} rows={4} value={query} onChange={event => setQuery(event.target.value)} placeholder="例如：近半年小红书工业品牌内容的有效切入点是什么？"/></label>
-        <p className="kanon-research-disclosure">开始研究会把当前问题发送给 Seed 并记录披露字段。项目文件不会自动发送；若勾选资料，仅披露本地检索命中的最多 8 个片段，并记录实际片段 ID。</p>
-        <button className="primary-button" disabled={Boolean(busy) || frozen || !query.trim()} onClick={() => void onResearch(category, query, selectedDocumentIds)}><Search size={15}/>{busy === 'research' ? '研究中…' : '开始联网研究'}</button>
+		<div className="surface-toolbar"><h3>发起深度研究</h3><span>后台运行 · 可继续编辑</span></div>
+		<label>研究分类<select disabled={Boolean(busy)} value={category} onChange={event => setCategory(event.target.value as typeof category)}><option value="general">综合研究</option><option value="audience">受众研究</option><option value="competitor">竞品研究</option><option value="industry">行业研究</option></select></label>
+		<label>要验证的问题<textarea disabled={Boolean(busy)} rows={4} value={query} onChange={event => setQuery(event.target.value)} placeholder="例如：近半年小红书工业品牌内容的有效切入点是什么？"/></label>
+        <p className="kanon-research-disclosure">未发起的问题、已选资料和采纳编辑仅在当前浏览器会话保留。开始研究会把当前问题发送给 Seed 并记录披露字段；项目文件不会自动发送，若勾选资料，仅披露本地检索命中的最多 8 个片段，并记录实际片段 ID。</p>
+		{!contextReady ? <p className="kanon-research-context-status" role={contextError ? 'alert' : 'status'}>{contextError ? `项目上下文暂不可用：${contextError}` : '正在固定当前 Brief、策略、资料和记忆版本…'}</p> : null}
+		<button className="primary-button" disabled={Boolean(busy) || !query.trim() || !contextReady} onClick={() => void onResearch(category, query, selectedDocumentIds)}><Search size={15}/>{busy === 'research' ? '正在创建任务…' : !contextReady ? '正在准备项目上下文…' : '开始深度研究'}</button>
       </section>
     </div>
-    {researchRun ? <div className="kanon-research-result">
-      <div><b>Research Run {researchRun.id.slice(0, 12)}</b><span>{researchRun.model_version || researchRun.provider_code}</span><span className={`source-chip ${researchRun.status === 'failed' || researchRun.status === 'unavailable' ? 'alert' : ''}`}>{researchRun.status}</span></div>
-      {researchRun.error_message ? <p>{researchRun.error_message}</p> : null}
-      {researchRun.artifacts.map(artifact => {
-        const adopted = referenceIds.includes(artifact.id)
-        return <article key={artifact.id}>
-          <BookOpen size={17}/>
-          <div>
-            <b>{artifact.title}</b>
-            <p>{artifact.content}</p>
-            <div className="kanon-research-sources">
-              {artifact.sources.map(source => <a href={source.url} key={`${source.id}-${source.start_index}-${source.end_index}`} rel="noreferrer" target="_blank">
-                <ExternalLink size={12}/>{source.title || source.domain}<small>{source.verification_status === 'content_verified' ? '已核验' : '模型引用'}</small>
-              </a>)}
-            </div>
-          </div>
-          <button className={adopted ? 'secondary-button' : 'primary-button'} disabled={Boolean(busy) || frozen} onClick={() => void onAdoption(artifact.id, !adopted)}>
-            {adopted ? '取消采纳' : '采纳到 Brief'}
-          </button>
-        </article>
-      })}
-    </div> : null}
+	{researchRun ? <div className="kanon-research-v2">
+		<header className="kanon-research-run-header">
+			<div><span className="section-label">RESEARCH RUN · {researchRun.id.slice(0, 12)}</span><h3>{researchRun.query}</h3><p>{researchStatusCopy(researchRun.status)}</p></div>
+			<div className="kanon-research-run-actions">
+				<span className={`source-chip ${researchRun.status === 'failed' || researchRun.status === 'partially_completed' ? 'alert' : ''}`}>{researchStatusLabel(researchRun.status)}</span>
+				{active ? <button className="secondary-button" disabled={Boolean(busy)} onClick={() => void onCancelResearch(researchRun.id)}>取消研究</button> : null}
+				{researchRun.status === 'failed' || researchRun.status === 'cancelled' || researchRun.status === 'partially_completed' ? <button className="secondary-button" disabled={Boolean(busy)} onClick={() => void onRetryResearch(researchRun.id)}><RotateCcw size={13}/>从断点重试</button> : null}
+			</div>
+		</header>
+		<div className="kanon-research-metrics" aria-label="研究进度摘要">
+			<div><small>循环轮次</small><b>{researchRun.current_round} / {researchRun.max_rounds}</b><span>{active ? researchStatusLabel(researchRun.status) : researchRun.stop_reason || '—'}</span></div>
+			<div><small>来源</small><b>{uniqueResearchSources(researchRun).length}</b><span>{countVerifiedResearchSources(researchRun)} 个正文已核验</span></div>
+			<div><small>已确认结论</small><b>{researchRun.findings.filter(item => item.status === 'verified').length}</b><span>{researchRun.findings.filter(item => item.status === 'conflicting').length} 条存在冲突</span></div>
+			<div><small>待补缺口</small><b>{researchRun.open_gaps.length}</b><span>{researchRun.usage?.total_tokens ? `${researchRun.usage.total_tokens.toLocaleString()} tokens` : '按预算有界执行'}</span></div>
+		</div>
+		<section className="kanon-research-timeline" aria-label="研究循环时间线">
+			<div className="surface-toolbar"><h3>执行过程</h3><span>每轮均已持久化，可从断点恢复</span></div>
+			{researchRun.iterations.map(iteration => <article key={iteration.id} data-status={iteration.status}>
+				<span className="kanon-research-round">{iteration.round}</span>
+				<div><b>第 {iteration.round} 轮 · {iteration.objective}</b><p>{iteration.action_summary || '完成本轮搜索、读取与结构化校验。'}</p><small>{iteration.source_ids.length} 个来源 · {iteration.finding_ids.length} 条发现 · {iteration.open_gaps.length} 个缺口</small></div>
+				<CircleCheck size={16}/>
+			</article>)}
+			{active ? <article data-status="running"><span className="kanon-research-round"><LoaderCircle className="spin" size={14}/></span><div><b>{researchStatusLabel(researchRun.status)}</b><p>{researchStatusCopy(researchRun.status)}</p></div></article> : null}
+		</section>
+		<section className="kanon-finding-ledger">
+			<div className="surface-toolbar"><h3>结论与决策影响</h3><span>{researchRun.findings.length} 条结构化发现</span></div>
+			{researchRun.findings.map(finding => {
+				const proposal = proposals.find(item => item.finding_ids?.includes(finding.id))
+				const operation = proposal?.operations[0]
+				const editing = proposal?.id === editingProposalId
+				const currentValue = operation ? currentResearchTargetValue(brief, draft, proposal, operation.field_path) : undefined
+				return <article className="kanon-finding-card" data-status={finding.status} key={finding.id}>
+					<header><span className={`source-chip ${finding.status === 'conflicting' ? 'alert' : ''}`}>{researchFindingStatusLabel(finding.status)}</span><small>第 {finding.round} 轮 · {finding.confidence} 置信度 · {finding.time_scope}</small></header>
+					<h4>{finding.claim}</h4>
+					<p>{finding.implication}</p>
+					<div className="kanon-finding-evidence"><span>{finding.supporting_source_ids.length} 个支持来源</span><span>{finding.conflicting_source_ids.length} 个反对来源</span><span>目标：{researchTargetLabel(finding.target.artifact, finding.target.field_path)}</span></div>
+					{proposal && operation ? <div className="kanon-research-proposal" data-status={proposal.status}>
+						<div className="kanon-research-diff"><div><small>当前值</small><p>{formatResearchValue(currentValue)}</p></div><ChevronRight size={16}/><div><small>研究建议</small><p>{formatResearchValue(operation.value)}</p></div></div>
+						{proposal.status === 'stale' ? <div className="kanon-proposal-stale"><AlertCircle size={14}/><span><b>目标内容已变化</b><small>{proposal.stale_reason}</small></span><button className="secondary-button" disabled={proposalBusyId === proposal.id} onClick={() => void onRemapProposal(proposal)}>重新映射</button></div> : null}
+						{editing ? <div className="kanon-research-proposal-editor"><label>编辑后采纳<textarea rows={4} value={editedProposalValue} onChange={event => { setEditedProposalValue(event.target.value); setProposalEditError('') }}/></label>{proposalEditError ? <small className="kanon-research-edit-error" role="alert">{proposalEditError}</small> : null}<div><button className="secondary-button" onClick={() => { setEditingProposalId(''); setEditedProposalValue(''); setProposalEditError('') }}>取消</button><button className="primary-button" disabled={proposalBusyId === proposal.id} onClick={() => {
+							const edited = parseResearchEditedValue(operation.value, editedProposalValue)
+							if (edited === undefined) {
+								setProposalEditError('请输入有效的 JSON 对象或数组；文本值可直接填写。')
+								return
+							}
+							setProposalEditError('')
+							void onApplyProposal(proposal, [{ ...operation, value: edited }]).then(ok => { if (ok) { setEditingProposalId(''); setEditedProposalValue('') } })
+						}}>采纳修改值</button></div></div> : null}
+						{proposal.status === 'proposed' && !editing ? <footer><button className="primary-button" disabled={proposalBusyId === proposal.id} onClick={() => void onApplyProposal(proposal)}>采纳</button><button className="secondary-button" disabled={proposalBusyId === proposal.id} onClick={() => { setEditingProposalId(proposal.id); setEditedProposalValue(editableResearchValue(operation.value)); setProposalEditError('') }}>编辑后采纳</button><button className="secondary-button" disabled={proposalBusyId === proposal.id} onClick={() => void onIgnoreProposal(proposal)}>忽略</button></footer> : null}
+						{proposal.status === 'applied' || proposal.status === 'edited' ? <small className="kanon-proposal-applied"><Check size={13}/>已由用户确认并写入新版本</small> : null}
+						{proposal.status === 'ignored' ? <small>已忽略，不会写入业务对象。</small> : null}
+					</div> : <div className="kanon-finding-no-proposal">{finding.status === 'tentative' ? '仅有模型引用或独立来源不足，暂不可采纳。' : finding.status === 'invalid' ? '结构或目标字段校验未通过。' : '当前 Brief/策略版本没有可安全应用的目标；报告保留该结论但不会自动改写。'}</div>}
+				</article>
+			})}
+			{!researchRun.findings.length ? <div className="panel-empty">研究尚未形成结构化结论；可以继续做其他工作，结果会在后台更新。</div> : null}
+			{proposalError ? <div className="kanon-strategy-alert" role="alert"><AlertCircle size={14}/>{proposalError}</div> : null}
+		</section>
+		{researchRun.report_artifact_id ? <ResearchReport run={researchRun}/> : null}
+		{researchRun.error_message ? <div className="kanon-strategy-alert" role="alert"><AlertCircle size={14}/>{researchRun.error_message}</div> : null}
+	</div> : null}
   </section>
+}
+
+function readResearchComposerDraft(key: string): ResearchComposerSessionDraft | null {
+  const value = readWorkspaceSessionValue<Partial<ResearchComposerSessionDraft>>(key)
+  const categories = new Set(['general', 'audience', 'competitor', 'industry'])
+  if (!value || typeof value.category !== 'string' || !categories.has(value.category)) return null
+  if (typeof value.query !== 'string' || typeof value.editingProposalId !== 'string' || typeof value.editedProposalValue !== 'string') return null
+  if (!Array.isArray(value.selectedDocumentIds) || !value.selectedDocumentIds.every(id => typeof id === 'string')) return null
+  return {
+    category: value.category as ResearchComposerSessionDraft['category'],
+    editedProposalValue: value.editedProposalValue,
+    editingProposalId: value.editingProposalId,
+    query: value.query,
+    selectedDocumentIds: value.selectedDocumentIds,
+  }
+}
+
+const strategyEditorSectionGroups = [
+  { id: 'decision', title: '核心判断', description: '方向与取舍', sections: ['executive_summary', 'objective', 'audience', 'proposition'] },
+  { id: 'channel', title: '渠道协同', description: '平台分工与转化', sections: ['cross_platform_role', 'channel_strategy', 'platform_plans'] },
+  { id: 'creative', title: '创意策略', description: '创意母题与适配', sections: ['creative_strategy', 'creative_recommendations'] },
+  { id: 'validation', title: '验证与治理', description: '约束、实验与证据', sections: ['constraints', 'budget_and_cadence', 'experiment_matrix', 'measurement', 'assumptions_and_gaps', 'evidence_refs'] },
+]
+
+function StrategySectionChangeImpact({ busy, nextRevision, onReset, onSave, original, section, value }: {
+  busy: boolean
+  nextRevision: number
+  onReset: () => void
+  onSave: () => Promise<boolean>
+  original: unknown
+  section: string
+  value: unknown
+}) {
+  return <section className="kanon-strategy-change-impact" aria-label="保存影响确认">
+    <header><span><Sparkles size={15}/><span><b>待保存变更</b><small>{strategyChangeSummary(original, value)}</small></span></span><strong>Revision {nextRevision}</strong></header>
+    <ul>
+      <li>只更新“{strategySectionLabel(section)}”章节，其他章节保持不变</li>
+      <li>创建新 Revision；开放中的评审将失效并需要重新提交</li>
+      <li>历史 Revision 与已发布 StrategyPackage 保持不可变</li>
+    </ul>
+    <details><summary>查看保存前后对比</summary><div><section><small>当前版本</small><ReviewValue value={original}/></section><section><small>保存后</small><ReviewValue value={value}/></section></div></details>
+    <footer><button className="text-button" disabled={busy} onClick={onReset} type="button">放弃本次修改</button><button className="primary-button" disabled={busy} onClick={() => void onSave()} type="button">{busy ? '保存中…' : `确认并创建 Revision ${nextRevision}`}</button></footer>
+  </section>
+}
+
+function strategyChangeSummary(before: unknown, after: unknown) {
+  if (Array.isArray(before) && Array.isArray(after)) return `条目从 ${before.length} 项变为 ${after.length} 项`
+  if (typeof before === 'string' && typeof after === 'string') return `文本从 ${before.length} 字调整为 ${after.length} 字`
+  if (before && after && typeof before === 'object' && typeof after === 'object') {
+    const beforeRecord = before as Record<string, unknown>
+    const afterRecord = after as Record<string, unknown>
+    const keys = new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)])
+    const changedKeys = [...keys].filter(key => JSON.stringify(beforeRecord[key]) !== JSON.stringify(afterRecord[key]))
+    return `${changedKeys.length} 个字段有调整：${changedKeys.map(strategyFieldLabel).join('、')}`
+  }
+  return '章节内容已调整'
+}
+
+function CreativeStrategyEditor({ disabled, onChange, value }: {
+  disabled: boolean
+  onChange: (value: unknown) => void
+  value: unknown
+}) {
+  const creative = (value && typeof value === 'object' ? value : {}) as Partial<CreativeStrategy>
+  const normalized: CreativeStrategy = {
+    objective: creative.objective ?? '',
+    message_hierarchy: creative.message_hierarchy ?? [],
+    territories: creative.territories ?? [],
+    tone: creative.tone ?? [],
+    mandatories: creative.mandatories ?? [],
+    avoidances: creative.avoidances ?? [],
+  }
+  const update = <K extends keyof CreativeStrategy,>(key: K, next: CreativeStrategy[K]) => onChange({ ...normalized, [key]: next })
+  return <div className="kanon-creative-strategy-editor">
+    <section className="kanon-creative-strategy-foundation">
+      <label className="kanon-structured-field wide"><span>创意任务目标<small>创意要帮助策略完成什么</small></span><textarea disabled={disabled} rows={3} value={normalized.objective} onChange={event => update('objective', event.target.value)}/></label>
+      <StrategyStringList disabled={disabled} label="信息层级" note="按优先级每行一项" onChange={value => update('message_hierarchy', value)} value={normalized.message_hierarchy}/>
+    </section>
+    <section className="kanon-creative-territories">
+      <header><div><h4>创意母题</h4><small>每个母题都要包含受众张力、核心想法、证据和渠道适配。</small></div><button className="secondary-button" disabled={disabled} onClick={() => update('territories', [...normalized.territories, { name: '', audience_tension: '', core_idea: '', proof: [], channel_adaptations: [] }])} type="button"><Plus size={14}/>新增母题</button></header>
+      {normalized.territories.map((territory, territoryIndex) => <article key={`territory-${territoryIndex}`}>
+        <header><span>{String(territoryIndex + 1).padStart(2, '0')}</span><div><b>{territory.name || `未命名母题 ${territoryIndex + 1}`}</b><small>{territory.core_idea || '填写一个可被团队执行的核心想法'}</small></div><button className="text-button danger" disabled={disabled} onClick={() => update('territories', normalized.territories.filter((_, index) => index !== territoryIndex))} type="button">删除</button></header>
+        <div className="kanon-structured-grid">
+          <label className="kanon-structured-field"><span>母题名称</span><input disabled={disabled} value={territory.name} onChange={event => updateCreativeTerritory(normalized, territoryIndex, { ...territory, name: event.target.value }, onChange)}/></label>
+          <label className="kanon-structured-field"><span>受众张力</span><input disabled={disabled} value={territory.audience_tension} onChange={event => updateCreativeTerritory(normalized, territoryIndex, { ...territory, audience_tension: event.target.value }, onChange)}/></label>
+          <label className="kanon-structured-field wide"><span>核心想法</span><textarea disabled={disabled} rows={3} value={territory.core_idea} onChange={event => updateCreativeTerritory(normalized, territoryIndex, { ...territory, core_idea: event.target.value }, onChange)}/></label>
+          <StrategyStringList disabled={disabled} label="可用证据" note="不要把假设写成事实" onChange={proof => updateCreativeTerritory(normalized, territoryIndex, { ...territory, proof }, onChange)} value={territory.proof}/>
+        </div>
+        <section className="kanon-channel-adaptations"><header><b>渠道适配</b><button className="text-button" disabled={disabled} onClick={() => updateCreativeTerritory(normalized, territoryIndex, { ...territory, channel_adaptations: [...territory.channel_adaptations, { platform: '', role: '', adaptation: '', formats: [] }] }, onChange)} type="button"><Plus size={13}/>新增渠道</button></header>
+          {territory.channel_adaptations.map((adaptation, adaptationIndex) => <div key={`adaptation-${adaptationIndex}`}>
+            <input aria-label="平台" disabled={disabled} placeholder="平台" value={adaptation.platform} onChange={event => updateCreativeAdaptation(normalized, territoryIndex, adaptationIndex, { ...adaptation, platform: event.target.value }, onChange)}/>
+            <input aria-label="渠道角色" disabled={disabled} placeholder="渠道角色" value={adaptation.role} onChange={event => updateCreativeAdaptation(normalized, territoryIndex, adaptationIndex, { ...adaptation, role: event.target.value }, onChange)}/>
+            <textarea aria-label="适配方式" disabled={disabled} placeholder="这个母题在该渠道如何成立" rows={2} value={adaptation.adaptation} onChange={event => updateCreativeAdaptation(normalized, territoryIndex, adaptationIndex, { ...adaptation, adaptation: event.target.value }, onChange)}/>
+            <input aria-label="内容形式" disabled={disabled} placeholder="形式，用顿号分隔" value={(adaptation.formats ?? []).join('、')} onChange={event => updateCreativeAdaptation(normalized, territoryIndex, adaptationIndex, { ...adaptation, formats: splitValues(event.target.value) }, onChange)}/>
+            <button aria-label="删除渠道适配" className="text-button danger" disabled={disabled} onClick={() => updateCreativeTerritory(normalized, territoryIndex, { ...territory, channel_adaptations: territory.channel_adaptations.filter((_, index) => index !== adaptationIndex) }, onChange)} type="button">删除</button>
+          </div>)}
+        </section>
+      </article>)}
+    </section>
+    <section className="kanon-creative-guardrails">
+      <StrategyStringList disabled={disabled} label="表达调性" note="每行一项" onChange={value => update('tone', value)} value={normalized.tone}/>
+      <StrategyStringList disabled={disabled} label="必须包含" note="来自已确认 Brief" onChange={value => update('mandatories', value)} value={normalized.mandatories}/>
+      <StrategyStringList disabled={disabled} label="避免事项" note="合规与品牌边界" onChange={value => update('avoidances', value)} value={normalized.avoidances}/>
+    </section>
+  </div>
+}
+
+function StrategyStringList({ disabled, label, note, onChange, value }: { disabled: boolean; label: string; note: string; onChange: (value: string[]) => void; value: string[] }) {
+  return <label className="kanon-structured-field wide"><span>{label}<small>{note}</small></span><textarea disabled={disabled} rows={Math.max(3, Math.min(7, value.length + 2))} value={value.join('\n')} onChange={event => onChange(event.target.value.split('\n').map(item => item.trim()).filter(Boolean))}/></label>
+}
+
+function updateCreativeTerritory(creative: CreativeStrategy, index: number, territory: CreativeStrategy['territories'][number], onChange: (value: unknown) => void) {
+  onChange({ ...creative, territories: creative.territories.map((current, currentIndex) => currentIndex === index ? territory : current) })
+}
+
+function updateCreativeAdaptation(creative: CreativeStrategy, territoryIndex: number, adaptationIndex: number, adaptation: CreativeStrategy['territories'][number]['channel_adaptations'][number], onChange: (value: unknown) => void) {
+  const territory = creative.territories[territoryIndex]
+  updateCreativeTerritory(creative, territoryIndex, { ...territory, channel_adaptations: territory.channel_adaptations.map((current, currentIndex) => currentIndex === adaptationIndex ? adaptation : current) }, onChange)
+}
+
+function ResearchReport({ run }: { run: NonNullable<WorkspaceState['researchRun']> }) {
+	const report = run.artifacts.find(artifact => artifact.id === run.report_artifact_id)
+	if (!report) return null
+	return <section className="kanon-research-report">
+		<div className="surface-toolbar"><div><h3>研究报告</h3><small>停止原因：{run.stop_reason || '—'}</small></div><div><span>{report.sources.length} 个引用来源</span><button className="secondary-button" onClick={() => downloadResearchReport(report, run.id)} type="button"><Download size={13}/>下载报告</button></div></div>
+		<div className="kanon-research-report-body"><BookOpen size={18}/><p>{report.content}</p></div>
+		<div className="kanon-research-sources">{report.sources.map(source => <a href={source.url} key={`${source.id}-${source.start_index}-${source.end_index}`} rel="noreferrer" target="_blank"><ExternalLink size={12}/>{source.title || source.domain}<small>{researchSourceStatusLabel(source.verification_status)}</small></a>)}</div>
+	</section>
+}
+
+function downloadResearchReport(report: NonNullable<WorkspaceState['researchRun']>['artifacts'][number], runId: string) {
+  const sources = report.sources.map((source, index) =>
+    `${index + 1}. ${source.title || source.domain} — ${source.url} — ${researchSourceStatusLabel(source.verification_status)}`,
+  )
+  const content = [report.content, '', '---', '', '## 引用来源', '', ...sources].join('\n')
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `research-report-${runId}.md`
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+function researchStatusLabel(status: NonNullable<WorkspaceState['researchRun']>['status']) {
+	return ({ queued: '等待执行', planning: '规划研究', searching: '联网搜索', reading: '读取来源', cross_checking: '交叉核验', drafting: '生成报告', auditing: '引用审计', completed: '研究完成', partially_completed: '部分完成', failed: '研究失败', cancelled: '已取消' } as const)[status]
+}
+
+function researchStatusCopy(status: NonNullable<WorkspaceState['researchRun']>['status']) {
+	return ({ queued: '任务已进入后台队列，不影响继续编辑 Brief 或策略。', planning: '正在固定研究问题、上下文快照和预算边界。', searching: '正在按当前高影响缺口搜索候选来源。', reading: '正在读取来源正文并核对可引用片段。', cross_checking: '正在比较独立来源、记录支持与冲突信号。', drafting: '正在把发现组织成报告和字段级建议。', auditing: '正在检查每个结论的引用与目标映射。', completed: '已形成可核验、可定位且可预览采纳的结论。', partially_completed: '已保留可用结果，并明确记录未完成原因与缺口。', failed: '没有生成无来源结论；可以从断点重试。', cancelled: '研究已停止，已保存的轮次和结论仍然可见。' } as const)[status]
+}
+
+function researchFindingStatusLabel(status: NonNullable<WorkspaceState['researchRun']>['findings'][number]['status']) {
+	return ({ tentative: '待核验', verified: '交叉核验通过', conflicting: '存在冲突', invalid: '不可用' } as const)[status]
+}
+
+function researchSourceStatusLabel(status: NonNullable<WorkspaceState['researchRun']>['artifacts'][number]['sources'][number]['verification_status']) {
+	return ({ model_cited: '模型引用 · 未核验正文', content_verified: '正文与摘录已核验', conflicted: '冲突来源', invalid: '来源无效' } as const)[status]
+}
+
+function uniqueResearchSources(run: NonNullable<WorkspaceState['researchRun']>) {
+	const values = new Map<string, NonNullable<WorkspaceState['researchRun']>['artifacts'][number]['sources'][number]>()
+	for (const artifact of run.artifacts) for (const source of artifact.sources) values.set(source.id, source)
+	return [...values.values()]
+}
+
+function countVerifiedResearchSources(run: NonNullable<WorkspaceState['researchRun']>) {
+	return uniqueResearchSources(run).filter(source => source.verification_status === 'content_verified' || source.verification_status === 'conflicted').length
+}
+
+function researchTargetLabel(artifact: 'brief' | 'strategy', fieldPath: string) {
+	return `${artifact === 'brief' ? 'Brief' : '策略'} · ${fullStrategyFieldLabels[fieldPath] ?? strategySectionLabel(fieldPath)}`
+}
+
+function currentResearchTargetValue(brief: BriefDraft | null, draft: StrategyDraft | null, proposal: ArtifactProposal, fieldPath: string) {
+	if (proposal.target_type === 'brief_draft') return briefFieldValue(brief?.document, fieldPath)
+	return draft?.revision?.document?.[fieldPath as keyof StrategyDocument]
+}
+
+function briefFieldValue(document: BriefDraft['document'] | undefined, fieldPath: string): unknown {
+	if (!document) return undefined
+	return fieldPath.split('.').reduce<unknown>((value, key) => value && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined, document)
+}
+
+function formatResearchValue(value: unknown) {
+	if (value === undefined || value === null || value === '') return '尚未填写'
+	if (Array.isArray(value)) return value.length ? value.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('；') : '空列表'
+	if (typeof value === 'object') return JSON.stringify(value, null, 2)
+	return String(value)
+}
+
+function editableResearchValue(value: unknown) {
+	if (Array.isArray(value)) return value.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n')
+	if (value && typeof value === 'object') return JSON.stringify(value, null, 2)
+	return value == null ? '' : String(value)
+}
+
+function parseResearchEditedValue(original: unknown, edited: string): unknown | undefined {
+	if (Array.isArray(original)) return edited.split('\n').map(value => value.trim()).filter(Boolean)
+	if (original && typeof original === 'object') {
+		try { return JSON.parse(edited) } catch { return undefined }
+	}
+	return edited.trim()
 }
 
 function ChangeLogPane({ comments, review, revisions }: {
@@ -1056,6 +2282,7 @@ function strategySectionLabel(value: string) {
     proposition: '核心主张',
     channel_strategy: '渠道策略',
     creative_recommendations: '创意建议',
+    creative_strategy: '创意策略',
     constraints: '约束',
     budget_and_cadence: '预算与节奏',
     experiment_matrix: '实验矩阵',
@@ -1071,6 +2298,27 @@ function strategySectionLabel(value: string) {
   return labels[value] ?? value
 }
 
+function strategySectionDescription(value: string) {
+  const descriptions: Record<string, string> = {
+    executive_summary: '把全篇收敛为团队可以共同复述的策略判断。',
+    objective: '明确策略要改变什么，以及成功意味着什么。',
+    audience: '定义核心受众及驱动其决策的关键洞察。',
+    proposition: '锁定面向受众的唯一核心主张。',
+    cross_platform_role: '说明不同平台如何协同，而不是重复分发。',
+    channel_strategy: '定义每个渠道的角色与适合的内容形式。',
+    platform_plans: '把渠道角色细化为可执行的平台计划。',
+    creative_strategy: '将策略转译为创意母题、证据和渠道适配。',
+    creative_recommendations: '旧版创意建议仅供读取；升级后将转为结构化创意策略。',
+    constraints: '明确执行必须遵守的硬边界。',
+    budget_and_cadence: '对齐预算配置和内容节奏。',
+    experiment_matrix: '定义需要验证的假设、变量与指标。',
+    measurement: '确定用于判断效果的指标体系。',
+    assumptions_and_gaps: '显式标记尚未证实的判断和信息缺口。',
+    evidence_refs: '绑定支撑策略判断的可追溯来源。',
+  }
+  return descriptions[value] ?? '编辑当前策略章节。'
+}
+
 function strategyFieldLabel(value: string) {
   const labels: Record<string, string> = {
     primary: '核心人群', insights: '人群洞察', platform: '平台', role: '平台角色',
@@ -1081,6 +2329,9 @@ function strategyFieldLabel(value: string) {
     brief_id: 'Brief ID', brief_version: 'Brief 版本', project_context_version: 'Project 上下文版本',
     skill_versions: '技能版本', passed: '是否通过', issues: '检查项', rule_id: '规则',
     severity: '级别', message: '说明', checked_at: '检查时间',
+    name: '母题名称', audience_tension: '受众张力', core_idea: '核心想法', proof: '可用证据',
+    channel_adaptations: '渠道适配', adaptation: '适配方式', tone: '表达调性',
+    mandatories: '必须包含', avoidances: '避免事项', message_hierarchy: '信息层级', territories: '创意母题',
   }
   return labels[value] ?? strategySectionLabel(value)
 }

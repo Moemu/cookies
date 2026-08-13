@@ -7,6 +7,7 @@ import {
   conversationSearchRunsByMessage,
   conversationSourceDocuments,
   intakeMissingLabel,
+  requirementConfirmationOperations,
 } from '../src/features/strategy/strategyConversationModel.js'
 import type { BriefDraft, KnowledgeDocument, MediaUnderstandingArtifact, ResearchArtifact, ResearchRun } from '../src/features/strategy/types.js'
 
@@ -51,6 +52,24 @@ test('conversation lens counts only business-critical facts as blockers', () => 
   assert.equal(lens.coreReady, true)
   assert.equal(lens.items.find(item => item.key === 'proposition')?.required, false)
   assert.equal(lens.items.find(item => item.key === 'product')?.sourceLabel, '资料片段 · 正文:2-4')
+})
+
+test('requirement confirmation includes every fact shown in the understanding lens', () => {
+  const draft = brief({
+    product: 'FlowKit',
+    objective: '提升企业试用转化',
+    audience: '科技公司运营负责人',
+    proposition: '跨团队流程透明',
+  })
+  draft.field_states['campaign.objective'] = {
+    confirmation: 'confirmed',
+  } as BriefDraft['field_states'][string]
+
+  assert.deepEqual(requirementConfirmationOperations(draft), [
+    { fieldPath: 'product.name', value: 'FlowKit' },
+    { fieldPath: 'audience.primary', value: '科技公司运营负责人' },
+    { fieldPath: 'proposition', value: '跨团队流程透明' },
+  ])
 })
 
 test('conversation attachments become immutable Message v2 document references', () => {

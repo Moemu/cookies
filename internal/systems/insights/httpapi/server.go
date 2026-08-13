@@ -48,11 +48,17 @@ type Application interface {
 	ImportMiyunHandoffReturnBundle(context.Context, contract.ActorContext, contract.ProjectID, string, contract.IdempotencyKey, insights.ImportMiyunHandoffReturnBundleRequest) (insights.MiyunHandoffReturnBundleResult, error)
 
 	CreateReport(context.Context, contract.ActorContext, contract.ProjectID, insights.CreateReportRequest) (insights.InsightReport, error)
+	// 记一笔（分析页唯一的写操作）。判定不在入参里：能传的话页面上标的三档就是装饰。
+	PinFinding(context.Context, contract.ActorContext, contract.ProjectID, insights.PinFindingRequest) (insights.InsightReport, error)
 	ListReports(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.InsightReport, error)
 	ConfirmReport(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.InsightReport, error)
+	// 提交复盘：补执行、定格系统发现、确认，一次做完。
+	SubmitReview(context.Context, contract.ActorContext, contract.ProjectID, string, insights.SubmitReviewRequest) (insights.InsightReport, error)
 	DropReportFinding(context.Context, contract.ActorContext, contract.ProjectID, string, int64, int, bool) (insights.InsightReport, error)
 	CreateExperience(context.Context, contract.ActorContext, contract.ProjectID, string, int64, insights.CreateExperienceRequest) (insights.Experience, error)
 	ListExperiences(context.Context, contract.ActorContext, contract.ProjectID, insights.ExperienceStatus, int) ([]insights.Experience, error)
+	// 「查」模式：按这一轮的适用条件找以前什么有效。
+	LookupExperiences(context.Context, contract.ActorContext, contract.ProjectID, insights.ExperienceLookup) ([]insights.ExperienceMatch, error)
 	ConfirmExperience(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.Experience, error)
 	RejectExperience(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ExperienceTransitionRequest) (insights.Experience, error)
 	RequestExperienceReview(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ExperienceTransitionRequest) (insights.Experience, error)
@@ -76,12 +82,21 @@ type Application interface {
 	ListAssetMappings(context.Context, contract.ActorContext, contract.ProjectID, insights.AssetMappingFilter) ([]insights.AssetMapping, error)
 	ResolveAssetMapping(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ResolveAssetMappingRequest) (insights.AssetMapping, error)
 	ExtractFeatures(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ExtractFeaturesRequest) ([]insights.AssetFeature, error)
+	// DeriveFeatures 写客观可测层：从素材库读文件已探测的元数据，不调模型。
+	DeriveFeatures(context.Context, contract.ActorContext, contract.ProjectID, string, insights.DeriveFeaturesRequest) ([]insights.AssetFeature, error)
 	PatchFeatures(context.Context, contract.ActorContext, contract.ProjectID, string, insights.PatchFeaturesRequest) ([]insights.AssetFeature, error)
 	ListAssetFeatures(context.Context, contract.ActorContext, contract.ProjectID, string) ([]insights.AssetFeature, error)
 	ConfirmAssetAnalysis(context.Context, contract.ActorContext, contract.ProjectID, string, insights.AssetTransitionRequest) (insights.Asset, error)
 	RequestAssetReview(context.Context, contract.ActorContext, contract.ProjectID, string, insights.AssetTransitionRequest) (insights.Asset, error)
 	RetireAsset(context.Context, contract.ActorContext, contract.ProjectID, string, insights.AssetTransitionRequest) (insights.Asset, error)
 	GetFeatureMatrix(context.Context, contract.ActorContext, contract.ProjectID, []string) (insights.FeatureMatrix, error)
+
+	// 找相似素材：某个变量在本轮样本不够时，从库里把同样取值的素材拉过来。
+	FindSimilarAssets(context.Context, contract.ActorContext, contract.ProjectID, insights.SimilarAssetRequest) (insights.SimilarAssetResult, error)
+
+	// 外部素材是证据，不是资产：单独的接口、单独的表，永不进共享素材库。
+	ImportExternalAsset(context.Context, contract.ActorContext, contract.ProjectID, insights.ImportExternalAssetRequest) (insights.ExternalAsset, error)
+	ListExternalAssets(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.ExternalAsset, error)
 
 	// AI 提特征（03 §9 AM-005）。只有人点按钮才会走到这里：
 	// 登记素材时自动排队会把复核队列灌满没人要看的结果，而复核是唯一的质量闸门。
@@ -117,9 +132,14 @@ type Application interface {
 	StartExperiment(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (insights.Experiment, error)
 	ConcludeExperiment(context.Context, contract.ActorContext, contract.ProjectID, string, insights.ConcludeExperimentRequest) (insights.Experiment, error)
 
-	// 系统设置（03 §78；20 §121）。只读且不读库：返回的每个值都是代码常量本身，
-	// 不是抄过来的副本——抄一份迟早和代码对不上，那时候这一页就从说明变成误导。
+	// 设置（03 §78；20 §121）。整页的值取自正在生效的那份阈值，
+	// 抄一份迟早和代码对不上，那时候这一页就从说明变成误导。
 	GetInsightSettings(context.Context, contract.ActorContext, contract.ProjectID) (insights.InsightSettings, error)
+
+	// 判定阈值。只增版本，所以没有「改第 3 版」这种方法——保存就是追加一版。
+	GetThresholds(context.Context, contract.ActorContext, contract.ProjectID) (insights.ResolvedThresholds, error)
+	SaveThresholds(context.Context, contract.ActorContext, contract.ProjectID, insights.SaveThresholdsRequest) (insights.ResolvedThresholds, error)
+	ListThresholdHistory(context.Context, contract.ActorContext, contract.ProjectID, int) ([]insights.ThresholdSet, error)
 }
 
 type Server struct {
@@ -132,7 +152,13 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/reports", server.listReports)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/reports", server.createReport)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/reports/{report_action}", server.reportAction)
+	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/reports/{report_id}/submit", server.submitReview)
+	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/findings", server.pinFinding)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/experiences", server.listExperiences)
+	// 这一条要排在 {experience_action} 之前读：路径段是字面量 lookup，比通配符更具体，
+	// ServeMux 会挑它。少了它，lookup 会掉进 experienceAction 的动作分发里——那里认的是
+	// 「{id}:动词」这种带冒号的形状，lookup 不带冒号，最后落到 404。
+	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/experiences/lookup", server.lookupExperiences)
 	server.mux.HandleFunc("POST /api/insights/v1/projects/{project_id}/experiences/{experience_action}", server.experienceAction)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/experience-references", server.listProjectExperienceReferences)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/experiences/{experience_id}/references", server.listExperienceReferences)
@@ -142,6 +168,13 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/performance", server.performance)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/capability-operations", server.capabilityOperations)
 	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/settings", server.settings)
+	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/thresholds", server.getThresholds)
+	// 用 PUT 而不是 POST：从调用方看这是「把阈值设成这样」，幂等语义对得上。
+	// 服务端内部追加一版，那是实现细节。
+	server.mux.HandleFunc("PUT /api/insights/v1/projects/{project_id}/thresholds", server.saveThresholds)
+	// 改动史要看得见。看不见的话，一条盖着「第 3 版」的结论，人查不到第 3 版
+	// 当时是什么数、为什么改——那个版本号也就等于没有。
+	server.mux.HandleFunc("GET /api/insights/v1/projects/{project_id}/thresholds/history", server.thresholdHistory)
 	server.registerAssetRoutes()
 	server.registerConnectorRoutes()
 	server.registerExperimentRoutes()
@@ -199,6 +232,41 @@ func (s *Server) createReport(writer http.ResponseWriter, request *http.Request)
 	writeJSON(writer, http.StatusCreated, value)
 }
 
+func (s *Server) pinFinding(writer http.ResponseWriter, request *http.Request) {
+	// 窗口和 createReport 用同一套解码：人看到的是两个日期，记下来的必须是同两个日期。
+	// 中间过一道时区换算就会差一天，而两边显示的还是同一个区间。
+	// 和 createReport 不同的是这里窗口必填——不知道窗口就不知道往哪份复盘草稿记。
+	var body struct {
+		insights.PinFindingRequest
+		Window struct {
+			Start string `json:"start"`
+			End   string `json:"end"`
+		} `json:"window"`
+	}
+	if !decode(writer, request, &body) {
+		return
+	}
+	payload := body.PinFindingRequest
+	start, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(body.Window.Start), time.UTC)
+	if err != nil {
+		writeError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	end, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(body.Window.End), time.UTC)
+	if err != nil {
+		writeError(writer, request, insights.ErrInvalidRequest)
+		return
+	}
+	payload.Window = insights.MetricWindow{Start: start, End: end}
+
+	value, err := s.app.PinFinding(request.Context(), mustActor(request), projectID(request), payload)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
 func (s *Server) listReports(writer http.ResponseWriter, request *http.Request) {
 	values, err := s.app.ListReports(request.Context(), mustActor(request), projectID(request), queryLimit(request))
 	if err != nil {
@@ -206,6 +274,25 @@ func (s *Server) listReports(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+// submitReview 提交复盘。
+//
+// 单独一条路径，不走 reportAction 的 `{id}:submit` 后缀：提交要带请求体
+// （投放执行 + 版本号），和那一串只带版本号的动作不是一回事，挤在同一个
+// switch 里会让「哪些动作要填什么」变成读代码才知道的事。
+func (s *Server) submitReview(writer http.ResponseWriter, request *http.Request) {
+	var body insights.SubmitReviewRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, err := s.app.SubmitReview(request.Context(), mustActor(request), projectID(request),
+		request.PathValue("report_id"), body)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
 }
 
 func (s *Server) reportAction(writer http.ResponseWriter, request *http.Request) {
@@ -269,6 +356,23 @@ func (s *Server) reportAction(writer http.ResponseWriter, request *http.Request)
 func (s *Server) listExperiences(writer http.ResponseWriter, request *http.Request) {
 	status := insights.ExperienceStatus(request.URL.Query().Get("status"))
 	values, err := s.app.ListExperiences(request.Context(), mustActor(request), projectID(request), status, queryLimit(request))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
+}
+
+// lookupExperiences 回答「这一轮的条件下，以前什么有效」。
+//
+// 查询却用 POST：条件有七格，塞进 query string 既难读又容易漏转义，
+// 而且以后要按内容特征查长文本，URL 长度也不够。
+func (s *Server) lookupExperiences(writer http.ResponseWriter, request *http.Request) {
+	var body insights.ExperienceLookup
+	if !decode(writer, request, &body) {
+		return
+	}
+	values, err := s.app.LookupExperiences(request.Context(), mustActor(request), projectID(request), body)
 	if err != nil {
 		writeError(writer, request, err)
 		return
@@ -427,11 +531,10 @@ func (s *Server) capabilityOperations(writer http.ResponseWriter, request *http.
 	writeJSON(writer, http.StatusOK, value)
 }
 
-// settings 返回五组当前生效的阈值与规则。没有 PUT/PATCH 配对：整页只读，
-// 改阈值要走代码评审（03 §17.3 把「最低样本由谁配置」列为待确认，在那条定下来
-// 之前开放写接口，等于先替它选了答案）。
+// settings 返回各组当前生效的阈值与规则，含每一条的影响说明与出厂推荐。
+// 判定阈值那几条带 editable_key，改它们走 PUT /thresholds。
 //
-// 路径上带 project_id 只为沿用同一套鉴权，值本身对整个部署生效，不分 Project。
+// 路径上带 project_id 只为沿用同一套鉴权，值本身按组织生效，不分 Project。
 func (s *Server) settings(writer http.ResponseWriter, request *http.Request) {
 	value, err := s.app.GetInsightSettings(request.Context(), mustActor(request), projectID(request))
 	if err != nil {
@@ -439,6 +542,39 @@ func (s *Server) settings(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) getThresholds(writer http.ResponseWriter, request *http.Request) {
+	value, err := s.app.GetThresholds(request.Context(), mustActor(request), projectID(request))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
+// saveThresholds 追加一版。理由必填，服务层会拦——改判定标准是要负责的事，
+// 写不出理由的改动三个月后没人说得清为什么是这个数。
+func (s *Server) saveThresholds(writer http.ResponseWriter, request *http.Request) {
+	var body insights.SaveThresholdsRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	value, err := s.app.SaveThresholds(request.Context(), mustActor(request), projectID(request), body)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) thresholdHistory(writer http.ResponseWriter, request *http.Request) {
+	values, err := s.app.ListThresholdHistory(request.Context(), mustActor(request), projectID(request), queryLimit(request))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"items": values})
 }
 
 func mustActor(request *http.Request) contract.ActorContext {
@@ -516,6 +652,11 @@ func writeError(writer http.ResponseWriter, request *http.Request, err error) {
 	case errors.Is(err, insights.ErrNotFound):
 		status, code, retryable = http.StatusNotFound, "RESOURCE_NOT_FOUND", false
 		message = detailOr(err, insights.ErrNotFound, "洞察资源不存在")
+	// 放在 ErrInvalidState 之前：这一条也是 409，但 retryable 是 true。
+	// 「正在跑，等会儿再来」和「状态不对，你得改点什么」在界面上是两种东西。
+	case errors.Is(err, insights.ErrUnderstandingPending):
+		status, code, retryable = http.StatusConflict, "UNDERSTANDING_PENDING", true
+		message = detailOr(err, insights.ErrUnderstandingPending, "模型正在看这条素材，稍后再试")
 	case errors.Is(err, insights.ErrInvalidState):
 		status, code, retryable = http.StatusConflict, "INVALID_STATE", false
 		message = detailOr(err, insights.ErrInvalidState, "当前状态不允许该操作")

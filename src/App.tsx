@@ -1,17 +1,25 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Shell } from './components/Shell'
-import { HomePage, ModulePage } from './components/Pages'
 import { ProjectFlowDashboard } from './components/ProjectWorkflow'
 import { ProjectManagementPage } from './components/ProjectManagementPage'
 import { ModelSettingsPage } from './components/ModelSettingsPage'
 import { LoginPage } from './components/LoginPage'
+import { RenderErrorBoundary } from './components/RenderErrorBoundary'
 import { StateBoundary } from './components/StateBoundary'
 import { useAuth } from './context/AuthContext'
 import { useProject } from './context/ProjectContext'
 import { systems } from './data/navigation'
-import { projectHomePath, projectManagePath, projectPath, useAppRoute } from './lib/router'
+import { projectHomePath, projectManagePath, projectPath, useAppRoute, videoEditingPath } from './lib/router'
+import {
+  strategyWorkspacePath,
+  type StrategyWorkspaceLocation,
+} from './features/strategy/workspace/workspaceRoute'
 import type { SystemKey } from './types'
 import { getLatestDeliveryTourRunId } from './components/DeliveryTourPage'
+
+const loadPages = () => import('./components/Pages')
+const HomePage = lazy(() => loadPages().then(module => ({ default: module.HomePage })))
+const ModulePage = lazy(() => loadPages().then(module => ({ default: module.ModulePage })))
 
 export default function App() {
   const { route, navigate } = useAppRoute()
@@ -27,6 +35,13 @@ export default function App() {
     }
   }, [navigate, route])
 
+  if (session.authenticated && route.systemKey === 'strategy' && route.navId === 'workspaces') {
+    // Route intent is already authoritative here. Start both split points now
+    // so the generic module shell and the workspace do not form a waterfall.
+    void loadPages()
+    void import('./features/strategy/workspace/StrategyWorkspaceRoute')
+  }
+
   useEffect(() => {
     if (route.projectId) selectProject(route.projectId)
   }, [route.projectId, selectProject])
@@ -37,20 +52,54 @@ export default function App() {
   }, [currentProject.id, isLoading, navigate, route])
 
   useEffect(() => {
+    if (
+      route.systemKey !== 'strategy' || route.navId !== 'workspaces' ||
+      !route.projectId || !route.objectId || !route.strategyStage ||
+      !route.strategyNeedsCanonicalRedirect
+    ) return
+    navigate(strategyWorkspacePath(route.projectId, route.objectId, {
+      stage: route.strategyStage,
+      panel: route.strategyPanel,
+      resource: route.strategyResource,
+    }), true, true)
+  }, [navigate, route.navId, route.objectId, route.projectId, route.strategyNeedsCanonicalRedirect, route.strategyPanel, route.strategyResource, route.strategyStage, route.systemKey])
+
+  useEffect(() => {
+    if (!route.isLegacyVideoEditingRoute || !route.projectId) return
+    navigate(videoEditingPath(route.projectId, route.contextId), true)
+  }, [navigate, route.contextId, route.isLegacyVideoEditingRoute, route.projectId])
+
+  useEffect(() => {
     if (!route.projectId || route.isHome || route.isProjectHome || route.isProjectManagement || route.isModelSettings) return
-    rememberProjectSystemPath(route.projectId, route.systemKey, projectPath(route.projectId, route.systemKey, route.navId, route.objectId, route.view, route.contextId, route.tourRunId, route.tourCase))
+    const path = route.systemKey === 'strategy' && route.navId === 'workspaces' && route.objectId && route.strategyStage
+      ? strategyWorkspacePath(route.projectId, route.objectId, {
+          stage: route.strategyStage,
+          panel: route.strategyPanel,
+          resource: route.strategyResource,
+        })
+      : projectPath(route.projectId, route.systemKey, route.navId, route.objectId, route.view, route.contextId, route.tourRunId, route.tourCase)
+    rememberProjectSystemPath(route.projectId, route.systemKey, path)
   }, [route])
 
   if (isAuthLoading) return <div className="login-page"><div className="page-notice">正在检查登录状态…</div></div>
   if (!session.authenticated) return <LoginPage/>
 
-  const systemLanding: Record<SystemKey, string> = { strategy: 'tasks', creative: 'tasks', insight: 'prelaunch', delivery: 'plans' }
+  const systemLanding: Record<SystemKey, string> = { strategy: 'tasks', creative: 'tasks', insight: 'analysis', delivery: 'plans' }
   const activeProjectId = route.projectId ?? currentProject.id
   const changeSystem = (next: SystemKey) => navigate(projectPath(activeProjectId, next, systemLanding[next]))
   const openProject = (projectId: string, next?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string, tourRunId?: string, tourCase?: string) => {
     selectProject(projectId)
+    if (next === 'creative' && navId === 'video' && view === '素材剪辑') {
+      navigate(videoEditingPath(projectId, contextId))
+      return
+    }
     const rememberedPath = next && !navId ? getRememberedProjectSystemPath(projectId, next) : undefined
     navigate(next ? rememberedPath ?? projectPath(projectId, next, navId ?? systemLanding[next], objectId, view, contextId, tourRunId, tourCase) : projectHomePath(projectId))
+  }
+
+  const openStrategyWorkspace = (projectId: string, workspaceId: string, location: StrategyWorkspaceLocation, replace = false) => {
+    selectProject(projectId)
+    navigate(strategyWorkspacePath(projectId, workspaceId, location), replace, true)
   }
 
   const manageProject = (projectId: string) => {
@@ -66,7 +115,21 @@ export default function App() {
     : routeNeedsProject && !routeProjectReady ? <ProjectRouteBoundary targetProjectId={route.projectId!} diagnostic={routeDiagnostic} state={projectRouteState} onRetry={() => { void reloadProjects(route.projectId) }}/>
     : route.isProjectHome ? <ProjectFlowDashboard onOpenProject={openProject} onManageProject={manageProject}/>
     : route.isProjectManagement ? <ProjectManagementPage onOpenWorkbench={id => openProject(id)} onOpenProject={openProject}/>
-    : <ModulePage key={`${currentProject.id}-${system.key}-${navItem.id}`} system={system} item={navItem} contextId={route.contextId} objectId={route.objectId} routeView={route.view} tourRunId={route.tourRunId} tourCase={route.tourCase} onOpenProject={openProject}/>
+    : <ModulePage
+        key={`${currentProject.id}-${system.key}-${navItem.id}`}
+        system={system}
+        item={navItem}
+        contextId={route.contextId}
+        objectId={route.objectId}
+        routeView={route.view}
+        strategyStage={route.strategyStage}
+        strategyPanel={route.strategyPanel}
+        strategyResource={route.strategyResource}
+        tourRunId={route.tourRunId}
+        tourCase={route.tourCase}
+        onOpenProject={openProject}
+        onOpenStrategyWorkspace={openStrategyWorkspace}
+      />
 
   const changeNavigation = (id: string) => {
     const runId = system.key === 'delivery' ? route.tourRunId ?? getLatestDeliveryTourRunId(activeProjectId) : undefined
@@ -74,7 +137,15 @@ export default function App() {
   }
 
   return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isProjectHome={route.isProjectHome} isProjectManagement={route.isProjectManagement} isGlobalSettings={route.isModelSettings} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings')} onSystemChange={changeSystem} onProjectChange={openProject} onProjectManage={manageProject} onNavChange={changeNavigation}>
-    {content}
+    {/* 页面级错误边界：某一页渲染炸了，只让它那一块显示成错误，Shell 的导航、
+        Project 切换、系统切换都还能用。切换路由时 resetKey 变化会自动清掉错误。
+        它套在 Suspense 外面：这样懒加载本身失败（chunk 拉不下来）也归它管，
+        而不是把整个 App 白屏。 */}
+    <RenderErrorBoundary contextLabel={navItem.label} resetKey={`${activeProjectId}-${system.key}-${navItem.id}-${route.view ?? ''}`}>
+      <Suspense fallback={<div className="page-notice" role="status">正在加载当前工作区…</div>}>
+        {content}
+      </Suspense>
+    </RenderErrorBoundary>
   </Shell>
 }
 

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "platform-document-parse-v2.schema.json",
+  "title": "Platform Document Parse v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "document_id", "parse_strategy", "parse_phase", "parse_progress", "progress_kind", "processed_pages", "total_pages", "quality_score", "quality_tier", "fallback_reason", "preview_status", "heartbeat_at", "updated_at"],
+  "properties": {
+    "contract_version": {"const": "platform-document-parse/v2"},
+    "document_id": {"type": "string", "minLength": 1, "maxLength": 96},
+    "parse_strategy": {"enum": ["text_native", "tika_text", "hybrid", "visual"]},
+    "parse_phase": {"enum": ["queued", "scanning", "extracting", "quality_checking", "visual_conversion", "visual_fallback", "chunking", "ready", "partial", "failed"]},
+    "parse_progress": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 0, "maximum": 100}]},
+    "progress_kind": {"enum": ["milestone", "pages", "indeterminate"]},
+    "processed_pages": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]},
+    "total_pages": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]},
+    "quality_score": {"oneOf": [{"type": "null"}, {"type": "number", "minimum": 0, "maximum": 1}]},
+    "quality_tier": {"enum": ["unknown", "high", "medium", "low"]},
+    "fallback_reason": {"type": "string", "maxLength": 500},
+    "preview_status": {"enum": ["unavailable", "building", "ready", "partial", "failed"]},
+    "heartbeat_at": {"oneOf": [{"type": "null"}, {"type": "string", "format": "date-time"}]},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "allOf": [
+    {"if": {"properties": {"progress_kind": {"const": "pages"}}}, "then": {"properties": {"processed_pages": {"type": "integer"}, "total_pages": {"type": "integer"}}}},
+    {"if": {"properties": {"parse_phase": {"const": "visual_fallback"}}}, "then": {"properties": {"fallback_reason": {"type": "string", "minLength": 1}}}}
+  ]
+}

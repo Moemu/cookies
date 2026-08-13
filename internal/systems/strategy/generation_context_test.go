@@ -12,6 +12,35 @@ import (
 	strategyskills "github.com/shikanon/cookies/internal/systems/strategy/skills"
 )
 
+func TestUsableConversationMemorySummarySupportsLegacyAndFailsOpenOnCorruption(t *testing.T) {
+	t.Parallel()
+	const summary = "Brand: Cookies; objective: launch"
+	validHash, err := conversationMemorySummaryHash(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content, calculated, backfill, err := usableConversationMemorySummary(summary, "deterministic", validHash)
+	if err != nil || content != summary || backfill || !calculated.Equal(validHash) {
+		t.Fatalf("valid memory: content=%q calculated=%q backfill=%v err=%v", content, calculated, backfill, err)
+	}
+
+	content, calculated, backfill, err = usableConversationMemorySummary(summary, "deterministic", "")
+	if err != nil || content != summary || !backfill || !calculated.Equal(validHash) {
+		t.Fatalf("legacy memory: content=%q calculated=%q backfill=%v err=%v", content, calculated, backfill, err)
+	}
+
+	content, _, backfill, err = usableConversationMemorySummary(summary, "deterministic", contract.ContentHash("sha256:"+strings.Repeat("0", 64)))
+	if err != nil || content != "" || backfill {
+		t.Fatalf("corrupt memory: content=%q backfill=%v err=%v", content, backfill, err)
+	}
+
+	content, _, backfill, err = usableConversationMemorySummary(summary, "unknown", validHash)
+	if err != nil || content != "" || backfill {
+		t.Fatalf("unknown memory kind: content=%q backfill=%v err=%v", content, backfill, err)
+	}
+}
+
 func TestEvidenceFromBriefPreservesConfirmationBoundary(t *testing.T) {
 	t.Parallel()
 	brief := BriefVersion{
@@ -252,7 +281,7 @@ func TestNormalizeGeneratedStrategyRepairsCommonModelDriftLocally(t *testing.T) 
 	if document.ChannelStrategy[0].Platform != "xiaohongshu" {
 		t.Fatalf("channel = %q", document.ChannelStrategy[0].Platform)
 	}
-	if len(document.Audience.Insights) == 0 || len(document.CreativeRecommendations) < 3 ||
+	if len(document.Audience.Insights) == 0 || document.CreativeStrategy == nil || len(document.CreativeStrategy.Territories) < 3 ||
 		len(document.ExperimentMatrix) == 0 || document.Measurement[0] != "40条有效销售线索" {
 		t.Fatalf("local repair incomplete: %#v", document)
 	}
@@ -408,11 +437,11 @@ func TestDeterministicStrategyBuildsDistinctPlansForEveryV2Platform(t *testing.T
 			Measurement:     BriefMeasurement{PrimaryKPI: "有效成交数"},
 		},
 	}
-	document := deterministicStrategy(brief, Draft{ProjectContextVersion: 3, SkillVersions: map[string]string{"strategy.strategy.generate": "v2.0.0"}})
+	document := deterministicStrategy(brief, Draft{ProjectContextVersion: 3, SkillVersions: map[string]string{"strategy.strategy.generate": "v3.0.0"}})
 	if err := document.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if document.ContractVersion != "strategy-draft/v2" || len(document.PlatformPlans) != 4 {
+	if document.ContractVersion != "strategy-draft/v3" || document.CreativeStrategy == nil || len(document.PlatformPlans) != 4 {
 		t.Fatalf("strategy document = %#v", document)
 	}
 	roles := map[string]string{}
@@ -423,9 +452,9 @@ func TestDeterministicStrategyBuildsDistinctPlansForEveryV2Platform(t *testing.T
 		roles["douyin"] == roles["taobao_tmall"] || roles["taobao_tmall"] == roles["wechat_ecosystem"] {
 		t.Fatalf("platform roles are not distinct: %#v", roles)
 	}
-	quality := evaluateStrategyQuality(document, GenerationContext{Brief: brief, PromptVersion: promptkit.GenerateV4})
+	quality := evaluateStrategyQuality(document, GenerationContext{Brief: brief, PromptVersion: promptkit.GenerateV5})
 	if !quality.Passed {
-		t.Fatalf("deterministic strategy does not satisfy GenerateV4 quality: %#v", quality)
+		t.Fatalf("deterministic strategy does not satisfy GenerateV5 quality: %#v", quality)
 	}
 }
 

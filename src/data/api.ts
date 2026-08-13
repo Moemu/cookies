@@ -19,6 +19,9 @@ import {
   unsupportedKanonWrite,
 } from '../backend/kanon-api.js'
 import type { CreativeIntakeStatus, CreativeTaskStatus } from '../contracts/creative'
+// 纯类型的循环引用：verdict.ts 反过来从这里取 ApiConfidenceLevel。
+// import type 会被 TS 完全擦除，运行时不成环。
+import type { Judgement, UpgradePath, Verdict } from './verdict'
 import { platformClient } from './platformClient.js'
 
 export type ApiProject = {
@@ -267,7 +270,7 @@ export type ApiAssetVersionPointer = {
   organizationId: string
   projectId: string
   assetId: string
-  mediaKind?: 'image' | 'video'
+  mediaKind?: 'image' | 'video' | 'audio'
   contentUrl?: string
   sourceJobId?: string
   workingVersion: number
@@ -316,7 +319,7 @@ export type ApiProjectMediaAsset = {
   id: string
   projectId: string
   version: number
-  kind: 'video' | 'image' | 'document'
+  kind: 'video' | 'image' | 'audio' | 'document'
   sourceType?: 'upload' | 'provider_generated' | 'imported' | 'captured' | 'rendered'
   mimeType: string
   sizeBytes: number
@@ -325,6 +328,9 @@ export type ApiProjectMediaAsset = {
   height?: number
   createdAt: string
   contentUrl: string
+  rightsStatus?: 'unverified' | 'active' | 'revoked'
+  useAllowed?: boolean
+  useDenialCode?: string
 }
 
 export type ApiAssetFeature = {
@@ -636,6 +642,7 @@ export type ApiCreativeIntakeBootstrap = {
   id: string
   source: string
   status: string
+  input_identity_hash?: string
   selected_route_id?: string
   request?: {
     objective?: string
@@ -664,8 +671,30 @@ export type ApiCreativeIntakeBootstrap = {
   }
 }
 
+/**
+ * 一个创意版本。字段只取洞察这边用得上的那几个，完整结构在
+ * internal/systems/creative/model.go 的 CreativeVersion。
+ *
+ * 洞察要它只为一件事：把创意组已经批准的素材登记进分析索引。批准过的版本是
+ * 不可变的，所以拿它当分析对象不会出现「分析完了原件又改了」。
+ */
+export type ApiCreativeVersionSummary = {
+  id: string
+  creative_task_id: string
+  format: 'image_text' | 'video'
+  version: number
+  status: 'created' | 'checked' | 'approved' | 'superseded'
+  created_at: string
+  snapshot?: { selected_title?: string; title_candidates?: string[] }
+  // 视频版本才有成品文件引用。图文版本的正文和配图存在 snapshot 里，
+  // 没有单一的媒体资产 ID——所以导进来的图文素材不带 platform_asset_id。
+  video_snapshot?: { final_video?: { asset_id: string; version: number } }
+  approval?: { approved_by?: string; approved_at?: string }
+}
+
 export type ApiCreativeTaskSummary = {
   id: string
+  display_name: string
   organization_id: string
   project_id: string
   intake_id: string
@@ -689,6 +718,19 @@ export type ApiCreativeTaskSummary = {
   version: number
   created_at: string
   updated_at: string
+}
+
+export type ApiStrategyBrandWorkflow = {
+  contract_version: 'creative-strategy-brand-workflow/v1'
+  mode: 'brief_review_required' | 'direction_ready' | 'direction_selection_required' | 'task_ready' | 'legacy_task_upgrade_required'
+  intake_id: string
+  input_identity_hash: string
+  brand_brief?: ApiBrandBriefReview
+  latest_direction_batch?: ApiCreativeDirectionBatch
+  confirmed_direction?: ApiCreativeDirection
+  task?: ApiCreativeTaskSummary
+  issues: Array<{ code: string; stage: string; path?: string; message: string; source: string }>
+  next_action: 'prepare_brief' | 'review_brief' | 'generate_directions' | 'wait_for_directions' | 'retry_directions' | 'select_direction' | 'create_task' | 'open_task' | 'review_legacy_task'
 }
 
 export type ApiCreateManualImageTextInput = {
@@ -1149,8 +1191,10 @@ export type ApiBrandFilmQualityRun = {
 export type ApiBrandFilmWorkspace = {
   task: {
     id: string
+    display_name: string
     status: string
     performance_mode: 'brand_video'
+    version: number
     updated_at: string
   }
   intake: {
@@ -1523,12 +1567,21 @@ export type ApiShortDramaV2Workspace = {
     last_frame_asset_id: string
   }
   latest_video_attempt_id?: string
+  video_error?: { code: string; message: string; retryable: boolean }
   raw_output_asset?: ApiShortDramaV2ProjectAssetRef
   output_asset?: ApiShortDramaV2ProjectAssetRef
 }
 
 export type ApiShortDramaV2TaskDetail = {
-  task: { id: string; performance_mode: 'short_drama_preroll'; status: string }
+  task: {
+    id: string
+    display_name: string
+    performance_mode: 'short_drama_preroll'
+    status: string
+    version: number
+    created_at: string
+    updated_at: string
+  }
   video_draft: { revision: number; short_drama_preroll_v2: ApiShortDramaV2Workspace }
 }
 
@@ -1883,11 +1936,28 @@ export type ApiReportSectionKind = 'asset_performance' | 'experiment' | 'experie
 export type ApiReportFinding = {
   kind: ApiReportSectionKind
   text: string
+  // pinned 是人在分析页记的，system 是复盘时按规则补的。复盘页要把两者分开标
+  // （● 我记的 / ○ 系统补的）：混在一起，人就分不清哪几条是自己挑的。
+  origin: 'system' | 'pinned'
   // 出自素材对比的发现才有。可归因的排在方向性前面。
   strength?: ApiVariantVerdict
   confidence?: ApiConfidenceLevel
-  // 这条发现的来源 ID（实验或经验），供人跳回去核对。
+  // 三档判定平铺在这里（后端是内嵌结构体）。档位文案由后端给，前端不自己翻译。
+  verdict?: Verdict
+  verdict_label?: string
+  upgrade?: UpgradePath
+  note?: string
+  // 判出这条时生效的阈值版本。定格在发现上，之后改阈值也不会改写它——
+  // 一份复盘里的发现可能来自不同时间的分析，报告顶部标一个号是不够的。
+  threshold_version?: number
+  // 这条出自哪个视图、说的哪个变量。两者构成去重键：人记过的，系统不再补一条。
+  dimension?: string
+  variable?: string
+  // 这条发现的来源 ID（素材、实验或经验），供人跳回去核对。
   source_ref?: string
+  // 记这一笔的人和时刻。origin 是 pinned 才有。
+  pinned_by?: string
+  pinned_at?: string
   // 被人工删掉的条目留在数组里，只是标记为 true——报告要能说清
   // 「系统给了什么、人拿掉了哪几条」。
   dropped: boolean
@@ -1923,7 +1993,11 @@ export type ApiInsightReport = {
   updated_at: string
 }
 
-export type ApiExperienceStatus = 'pending' | 'confirmed' | 'needs_review' | 'retired'
+// 三态：待定 → 在用 → 停用。
+// 「待复审」不在这里，它是「在用」上的一个标记（见 ApiExperience.needs_review）：
+// 被标记的经验仍然在用、仍然能被引用，只是该重新看一眼。做成状态的话，每个读
+// 经验的地方都得判断「confirmed 或者 needs_review」，漏一处它就凭空消失。
+export type ApiExperienceStatus = 'pending' | 'confirmed' | 'retired'
 
 export type ApiExperience = {
   id: string
@@ -1944,11 +2018,18 @@ export type ApiExperience = {
   // 经验库详情要靠这几项判断一条结论该不该确认，缺了就只能看结论一句话点确认。
   card_type: ApiInsightCardType
   confidence: ApiConfidenceLevel
+  // 三档判定平铺在这里（后端是内嵌结构体）。档位文案由后端给，前端不自己翻译。
+  verdict: Verdict
+  verdict_label: string
+  upgrade: UpgradePath
+  note: string
   recommended_action: string
   applicability: ApiApplicability
   data_basis: ApiDataBasis
   content_basis: ApiContentBasis
   status: ApiExperienceStatus
+  // 「该看一眼了」。它不影响这条经验能不能用，只影响界面上要不要挂个提示。
+  needs_review: boolean
   status_reason: string
   status_changed_by: string
   status_changed_at?: string
@@ -1958,6 +2039,32 @@ export type ApiExperience = {
   created_by: string
   created_at: string
   updated_at: string
+}
+
+// 一条命中。matched 说清「凭什么推给你」，default 说清「能不能直接照着做」。
+//
+// default 是后端算的两道闸（状态在用 + 判定 ✅ 能归因），前端不重算：
+// 重算一次就多一套规则，两边哪天不一致，同一条经验会在两个页面上一个能用一个不能用。
+export type ApiExperienceMatch = {
+  experience: ApiExperience
+  matched: string[]
+  default: boolean
+  // 抄到别处时的完整说法（结论 + 适用条件 + 来源）。后端拼好发过来，
+  // 前端不自己再拼一遍——两处拼法迟早对不上，而对不上的时候没人知道该信哪个。
+  citation_text: string
+}
+
+// 「查」的条件。每一格空着表示不限。字段名跟后端 ExperienceLookup 逐字对齐。
+export type ApiExperienceLookup = {
+  brand?: string
+  product?: string
+  channel?: string
+  ad_type?: string
+  objective?: string
+  audience?: string
+  feature?: string
+  include_observed?: boolean
+  limit?: number
 }
 
 export type ApiExperienceAudit = {
@@ -2112,8 +2219,14 @@ export type ApiInsightAssetType =
 
 export type ApiAssetSourceKind = 'creative' | 'upload' | 'external'
 
-/** AI 推断与人工结论是两层，互不覆盖（03 §14）。 */
-export type ApiFeatureSource = 'ai' | 'human'
+/**
+ * AI 推断与人工结论是两层，互不覆盖（03 §14）。
+ *
+ * 三类的可信度不是一回事：derived 客观可测（从文件本身算出来的时长、分辨率、镜头数，
+ * 同一个文件算两遍结果一样）、human 人工标注、ai 模型推断。只有前两类能进归因结论；
+ * ai 行被人复核认可之后按 human 算。这条规则由后端执行，前端只读 admissible。
+ */
+export type ApiFeatureSource = 'ai' | 'human' | 'derived'
 
 export type ApiConfidence = 'low' | 'medium' | 'high'
 
@@ -2170,6 +2283,10 @@ export type IndexInsightAssetBody = {
   source_kind: ApiAssetSourceKind
   source_ref?: string
   lineage_id?: string
+  // 媒体资产引用。后端要求这两个要么都给要么都不给（assets.go 的 validate），
+  // 给了才能从洞察点回素材库看原件。
+  platform_asset_id?: string
+  platform_asset_version?: number
   asset_type?: ApiInsightAssetType
   asset_type_source?: ApiFeatureSource
   asset_type_confidence?: ApiConfidence
@@ -2274,6 +2391,10 @@ export type ApiFeatureSchema = {
   label: string
   source: string
   fields: ApiFeatureField[]
+  // 这类素材的本体是不是一段视频。是的话，提取时人不用再写一遍画面描述——
+  // 后端把视频交给多模态自己去看。判断放在后端（insights.AssetType.IsVideo），
+  // 这里只读结果，不再自己列一份类型清单。
+  is_video: boolean
 }
 
 export type ApiFeatureMatrixCell = {
@@ -2297,6 +2418,57 @@ export type ApiFeatureMatrix = {
   asset_types: ApiInsightAssetType[]
   rows: ApiFeatureMatrixRow[]
   disclosure: string
+}
+
+// 相似素材（internal/systems/insights/similar.go）。
+//
+// 「像在哪」必须说得出来，所以每条结果都带 reasons；带 source 是因为读的人有权
+// 知道这一条相似是量出来的、人标的，还是模型猜的——三者在复盘会上的分量不一样。
+export type ApiSimilarityReason = {
+  key: string
+  label: string
+  value: string
+  source: ApiFeatureSource
+}
+
+export type ApiSimilarAsset = {
+  asset_id: string
+  title: string
+  // overlap 是重叠的变量数，admissible_overlap 是其中能进归因的那些（量出来的 + 人标的）。
+  // 前者回答「像不像」，后者回答「拉进来之后能不能真的做归因」。
+  overlap: number
+  admissible_overlap: number
+  score: number
+  reasons: ApiSimilarityReason[]
+}
+
+export type ApiSimilarAssetResult = {
+  // probe 是这次检索按哪几个变量找的。不给出来，人没法判断结果值不值得信。
+  probe: ApiSimilarityReason[]
+  items: ApiSimilarAsset[]
+  note?: string
+}
+
+// 外部素材（internal/systems/insights/external.go）。没有版本、没有血缘、没有状态。
+export type ApiExternalPurpose = 'benchmark' | 'reference'
+
+export type ApiExternalAsset = {
+  id: string
+  organization_id: string
+  project_id: string
+  title: string
+  source_note?: string
+  asset_type?: ApiInsightAssetType
+  purpose: ApiExternalPurpose
+  purpose_note?: string
+  storage_key?: string
+  // original_purged 为 true 表示原件已按留存期清掉，只剩下人标的变量。
+  original_purged: boolean
+  features: Record<string, ApiFeatureValue>
+  retention_until: string
+  created_by: string
+  created_at: string
+  updated_at: string
 }
 
 export type ApiInsightAssetFilter = {
@@ -2408,6 +2580,11 @@ export type ApiImportBatch = {
   updated_at: string
 }
 
+/**
+ * 带三档判定的类型一律写成 `{...} & Judgement`：后端那边是 embedded struct，
+ * 四个字段在 JSON 里平铺在宿主对象上。抄八遍字段的话，改一次要改八处，
+ * 改漏一处就有一页在说另一套话——这正是这轮重构要消灭的东西。
+ */
 export type ApiAssetMetricPerformance = {
   asset_id?: string
   asset_title: string
@@ -2416,8 +2593,7 @@ export type ApiAssetMetricPerformance = {
   counts: ApiMetricCounts
   rates: ApiMetricRates
   attributable: boolean
-  confidence: ApiConfidenceLevel
-}
+} & Judgement
 
 export type ApiPerformancePoint = {
   date: string
@@ -2451,8 +2627,6 @@ export type ApiMetricOverview = {
   totals: ApiMetricCounts
   rates: ApiMetricRates
   ctr_interval?: ApiRateInterval
-  confidence: ApiConfidenceLevel
-  confidence_note: string
   series: ApiPerformancePoint[]
   assets: ApiAssetMetricPerformance[]
   unmatched_objects: number
@@ -2460,7 +2634,8 @@ export type ApiMetricOverview = {
   sources: ApiSourceHealth[]
   warnings?: string[]
   platforms: ApiPlatformTotal[]
-}
+  /** note 原来叫 confidence_note。同一个意思两个键名，前端要写两套渲染，已统一。 */
+} & Judgement
 
 /**
  * AM-009 的判定阶梯，从严到松。**只有 attributable 是「能归到这个变量」**，
@@ -2475,8 +2650,16 @@ export type ApiFeatureDiff = {
   group: string
   baseline: string
   variant: string
-  /** 该特征只能人工判定（AM-006），AI 不产出，缺失属正常。 */
-  human_only: boolean
+  /**
+   * 变量来源。derived 从文件算出、human 人工标注、ai 模型推断。
+   * 两侧来源不同时取更弱的那一个——只要有一边是猜的，这条差异就是猜的。
+   */
+  source: ApiFeatureSource
+  /**
+   * 这条差异能否进入归因结论。ai 来源恒为 false。为 false 的差异照样要显示出来，
+   * 只是不参与「改了几个变量」的计数——准入规则由后端定，前端不要再实现一遍。
+   */
+  admissible: boolean
 }
 
 /**
@@ -2501,10 +2684,13 @@ export type ApiVariantComparison = {
   /** 任一侧区间算不出来时为 true——不知道差异是否显著，就不能说它显著。 */
   intervals_overlap: boolean
   ctr_lift?: number
-  verdict: ApiVariantVerdict
-  confidence: ApiConfidenceLevel
-  note: string
-}
+  /**
+   * 素材对比专有的五档，比三档更细：它还回答「归不了因是因为变量太多，
+   * 还是因为压根没有特征数据」。**键名不是 verdict**——那个键归三档
+   * （见后端 internal/systems/insights/verdict.go）。
+   */
+  variant_verdict: ApiVariantVerdict
+} & Judgement
 
 /** direction 为 unknown 表示天数不足或前半段无曝光，不能当成持平。 */
 export type ApiAssetTrend = {
@@ -2516,9 +2702,7 @@ export type ApiAssetTrend = {
   active_days: number
   direction: 'rising' | 'flat' | 'declining' | 'unknown'
   ctr_change?: number
-  confidence: ApiConfidenceLevel
-  note: string
-}
+} & Judgement
 
 /** likely 需要两项条件同时成立；单项恶化只到 watch。 */
 export type ApiFatigueSeverity = 'none' | 'watch' | 'likely'
@@ -2537,9 +2721,7 @@ export type ApiFatigueSignal = {
   severity: ApiFatigueSeverity
   /** 没能排除的其他解释。这里列的是「排除不了」，不是「已排除」。 */
   alternative_explanations?: string[]
-  confidence: ApiConfidenceLevel
-  note: string
-}
+} & Judgement
 
 export type ApiAnomalyKind = 'spike' | 'drop' | 'gap'
 
@@ -2555,8 +2737,8 @@ export type ApiMetricAnomaly = {
   median: number
   /** 偏离中位数多少个 MAD。 */
   deviation: number
-  note: string
-}
+  /** 异常永远只到 👁：这一天不对劲是事实，为什么不对劲这里答不了。 */
+} & Judgement
 
 /**
  * 驱动因素：某个特征取值的素材组与其余素材的对比。**这不是因果**——
@@ -2580,9 +2762,7 @@ export type ApiFeatureDriver = {
   ctr_lift?: number
   /** 与本特征完全同向变化的其他特征，分不开谁在起作用。 */
   covarying_features?: string[]
-  confidence: ApiConfidenceLevel
-  note: string
-}
+} & Judgement
 
 /**
  * 投后分析五个二级视图（素材对比 / 趋势 / 疲劳 / 异常 / 驱动因素）的共用载荷。
@@ -2602,6 +2782,11 @@ export type ApiPerformanceAnalysis = {
   assets_in_window: number
   /** 其中有内容特征的素材数。远小于 assets_in_window 时，对比和驱动因素都会大面积空着。 */
   assets_with_features: number
+  /**
+   * 整屏的档位，取五类结论里最弱的那一档。这是唯一一处 judgement 以嵌套对象
+   * 出现的地方（后端那边它是具名字段而非 embedded），其余都平铺。
+   */
+  judgement: Judgement
   notes?: string[]
 }
 
@@ -2719,6 +2904,13 @@ export type ApiFeatureFieldUsage = ApiFeatureField & {
   /** 全项目只有一条素材用过的取值。是候选不是结论——系统不做语义猜测。 */
   merge_candidates?: string[]
   off_vocabulary?: string[]
+  /**
+   * 生效取值分别由谁写的，键是来源，值是素材条数。没人填过这个字段时缺省。
+   *
+   * 归因只认量出来的和人标的。一个八成取值都是模型猜的字段，拿它分组比出来的差异
+   * 说明不了问题，而只看 asset_count 看不出这一点——填得越满反而越像可信。
+   */
+  source_counts?: Partial<Record<ApiFeatureSource, number>>
 }
 
 export type ApiFeatureSystemHealth = {
@@ -2836,6 +3028,14 @@ export type ApiSettingItem = {
   source: string
   /** 文档依据；没有依据会显式写「无文档指定值」，不会留空。 */
   basis: string
+  /**
+   * 非空表示这一条可以改，值是它在保存请求 values 里的键名。
+   *
+   * 可写与否标在**条**上而不是标在组上：同一组里既有能改的判定阈值，也有不能改的
+   * 保护性上限（导入行数、异常判定倍数这类）。标在组上只能整组开或整组关——
+   * 要么把防呆开关暴露出去，要么把该调的锁死。
+   */
+  editable_key?: string
 }
 
 /**
@@ -2992,11 +3192,24 @@ export type ApiAttachExperimentAssetResult = {
   warnings: string[]
 }
 
+/**
+ * 这一组落在设置页的哪一段。空串表示不单开一段（后端只有 not_built 的组才允许为空）。
+ *
+ * 后端六个组和页面四个视图不是一一对应：样本门槛和观察窗口都归「判定阈值」，
+ * 通知和报告模板还没建设，不上页面。由后端给而不是前端映射，是因为「哪一组该出现在
+ * 哪一段」是设置本身的属性——前端另写一张表，加一个组就要改两处，漏改的那一处
+ * 会让新组在页面上凭空消失。
+ */
+export type ApiSettingsView = '' | 'thresholds' | 'health' | 'dictionary' | 'permission'
+
 export type ApiSettingGroup = {
   key: string
   label: string
   /** in_effect 现在真的在生效；not_built 还没有任何东西，此时 items 为空。 */
   state: 'in_effect' | 'not_built'
+  view: ApiSettingsView
+  /** 这一组里有至少一条 editable_key 非空。由后端汇总，前端不要自己数。 */
+  editable: boolean
   summary: string
   /** 只在 not_built 时有内容。 */
   missing: string[]
@@ -3005,12 +3218,40 @@ export type ApiSettingGroup = {
 
 export type ApiInsightSettings = {
   generated_at: string
-  /** 恒为 false。不要因此渲染禁用输入框——改不动的输入框比一句「这里改不了」更恼人。 */
+  /** 有东西可改。为 false 时整页只读，不要渲染禁用输入框。 */
   editable: boolean
   editable_note: string
-  /** 恒为 false：这些值对整个部署生效，路径上的 project 只用于鉴权。 */
+  /** 恒为 false：这些值对整个组织生效，路径上的 project 只用于鉴权。 */
   project_scoped: boolean
   groups: ApiSettingGroup[]
+}
+
+/**
+ * 现在生效的那一份阈值：每格都有值，且带着版本号。
+ *
+ * version 0 = 一版都没存过，跑的是代码里的出厂设定。
+ */
+export type ApiResolvedThresholds = {
+  version: number
+  sufficient_impressions: number
+  directional_impressions: number
+  min_trend_days: number
+  min_anomaly_days: number
+  min_driver_assets: number
+  max_comparison_assets: number
+  quality_window_days: number
+}
+
+/** 落库的一版。改动史用它，看的是「谁在什么时候、为什么改的」。 */
+export type ApiThresholdSet = {
+  id: string
+  organization_id: string
+  version: number
+  /** 只有被调过的格子有值；没有的格子跑出厂设定。 */
+  values: Partial<Omit<ApiResolvedThresholds, 'version'>>
+  reason: string
+  changed_by: string
+  changed_at: string
 }
 
 /** 一行 canonical 日指标。stat_date 是数据源时区下的当地日期 YYYY-MM-DD。 */
@@ -3770,6 +4011,28 @@ function prepareBrandBriefReview(projectId: string, intakeId: string) {
   )
 }
 
+function getStrategyBrandWorkflow(projectId: string, intakeId: string) {
+  return creativeRequest<ApiStrategyBrandWorkflow>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}/brand-workflow`,
+  )
+}
+
+function prepareStrategyBrandWorkflow(projectId: string, intake: ApiCreativeIntakeBootstrap) {
+  const selectedRouteId = intake.selected_route_id || intake.request?.selected_route_id || ''
+  const inputIdentityHash = intake.input_identity_hash || ''
+  if (!selectedRouteId || !inputIdentityHash) throw new Error('品牌策略交接缺少冻结 Route 或输入身份。')
+  return creativeRequest<ApiStrategyBrandWorkflow>(
+    `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intake.id)}/brand-workflow:prepare`,
+    'POST',
+    {
+      expected_input_identity_hash: inputIdentityHash,
+      selected_route_id: selectedRouteId,
+      accept_strategy_projection: true,
+    },
+    { 'Idempotency-Key': `strategy-brand-prepare-${inputIdentityHash}` },
+  )
+}
+
 function updateBrandBriefReview(projectId: string, intakeId: string, review: ApiBrandBriefReview) {
   return creativeRequest<ApiBrandBriefReview>(
     `/projects/${encodeURIComponent(projectId)}/creative-intakes/${encodeURIComponent(intakeId)}/brand-brief`,
@@ -3792,6 +4055,38 @@ function listCreativeTasks(projectId: string, limit = 100) {
   )
 }
 
+export type ApiExtractedDocumentMedia = {
+  filename: string
+  mime_type: 'image/png' | 'image/jpeg'
+  page_number: number
+  page_text?: string
+  width: number
+  height: number
+  size_bytes: number
+  sha256: string
+  content: string
+}
+
+function renameCreativeTask(projectId: string, taskId: string, expectedVersion: number, displayName: string) {
+  return creativeRequest<ApiCreativeTaskSummary>(
+    `/projects/${encodeURIComponent(projectId)}/creative-tasks/${encodeURIComponent(taskId)}/metadata`,
+    'PATCH',
+    { expected_version: expectedVersion, display_name: displayName },
+  )
+}
+
+/**
+ * 列这个 Project 的创意版本。不传 task_id 就是全项目。
+ *
+ * 后端不按状态筛（creative_handlers.go 的 listCreativeVersions 只认 task_id 和
+ * limit），要「只看已批准的」得在调用方自己过一遍。
+ */
+function listCreativeVersions(projectId: string, limit = 100) {
+  return creativeRequest<{ items: ApiCreativeVersionSummary[] }>(
+    `/projects/${encodeURIComponent(projectId)}/creative-versions?limit=${limit}`,
+  )
+}
+
 function listCreativeIntakes(projectId: string, limit = 100) {
   return creativeRequest<{ items: ApiCreativeIntakeBootstrap[] }>(
     `/projects/${encodeURIComponent(projectId)}/creative-intakes?limit=${limit}`,
@@ -3808,7 +4103,11 @@ async function uploadKnowledgeDocument(projectId: string, file: File): Promise<A
   })
   const payload = await response.json() as ApiKnowledgeDocument | { error?: { message?: string } }
   if (!response.ok) throw new Error('error' in payload ? payload.error?.message ?? 'Brief 上传失败' : 'Brief 上传失败')
-  return payload as ApiKnowledgeDocument
+  const document = payload as ApiKnowledgeDocument
+  if (document.status === 'ready' && !document.extracted_text?.trim()) {
+    return getKnowledgeDocument(projectId, document.id)
+  }
+  return document
 }
 
 function getKnowledgeDocument(projectId: string, documentId: string) {
@@ -3817,7 +4116,14 @@ function getKnowledgeDocument(projectId: string, documentId: string) {
   )
 }
 
-function createManualBrandFilmIntake(projectId: string, document: ApiKnowledgeDocument, durationSeconds = 15) {
+function extractKnowledgeDocumentMedia(projectId: string, documentId: string) {
+  return platformRequest<{ items: ApiExtractedDocumentMedia[] }>(
+    `/projects/${encodeURIComponent(projectId)}/knowledge/documents/${encodeURIComponent(documentId)}/media:extract`,
+    'POST',
+  )
+}
+
+function createManualBrandFilmIntake(projectId: string, document: ApiKnowledgeDocument, durationSeconds = 15, assetCandidates: ApiBrandBriefAssetCandidate[] = []) {
   const filename = document.filename || document.title || '品牌 Brief.pdf'
   const productName = filename.replace(/\.(pdf|docx|md)$/i, '').trim() || '未命名品牌项目'
   const briefText = document.extracted_text?.trim() || ''
@@ -3848,7 +4154,7 @@ function createManualBrandFilmIntake(projectId: string, document: ApiKnowledgeDo
         reason: '用户上传 PDF Brief 后创建的品牌广告制作路线',
         target_duration_seconds: durationSeconds,
         aspect_ratio: '9:16',
-        source_asset_refs: [],
+        source_asset_refs: assetCandidates.flatMap(candidate => candidate.asset_ref ? [candidate.asset_ref] : []),
         evidence_refs: [`knowledge://documents/${document.id}`],
         requires_human_confirmation: true,
       }],
@@ -3860,8 +4166,10 @@ function createManualBrandFilmIntake(projectId: string, document: ApiKnowledgeDo
         brief_name: filename,
         brief_text: briefText,
         product_name: productName,
+        asset_candidates: assetCandidates,
       },
     },
+    { 'Idempotency-Key': `manual-brand-film-${document.id}-${durationSeconds}` },
   )
 }
 
@@ -4155,7 +4463,7 @@ async function createManualShortDramaPrerollV2Workspace(
         video_purpose: 'performance',
         channels: ['douyin'],
         reason: '用户在短剧前贴工作区选择项目视频并确认生成',
-        target_duration_seconds: 6,
+        target_duration_seconds: 10,
         aspect_ratio: '9:16',
         resolution: '720p',
         source_asset_refs: [sourceVideo],
@@ -5674,12 +5982,15 @@ export const api = {
   getTaskStrategyCreativeIntake,
   getCreativeTaskHandoffDetail,
   listCreativeTasks,
+  renameCreativeTask,
+  listCreativeVersions,
   getBrandFilmWorkspace,
   initializeStrategyBrandFilmWorkspace,
   restoreBrandFilmWorkspace,
   listCreativeIntakes,
   uploadKnowledgeDocument,
   getKnowledgeDocument,
+  extractKnowledgeDocumentMedia,
   createManualBrandFilmIntake,
   ensureBrandFilmFixtureWorkspace,
   analyzeBrandFilmBrief,
@@ -5712,6 +6023,8 @@ export const api = {
   getImageTextWorkspace,
   getCreativeIntake,
   prepareBrandBriefReview,
+  getStrategyBrandWorkflow,
+  prepareStrategyBrandWorkflow,
   updateBrandBriefReview,
   confirmBrandBriefReview,
   createManualImageTextIntake,
@@ -5814,8 +6127,22 @@ export const api = {
   // 人看到什么就定格什么，不让后端另挑一个窗口。
   createReport: (projectId: string, body: { execution_id: string; window: { start: string; end: string } }) =>
     request<ApiInsightReport>(`${insightProjectPath(projectId)}/reports`, 'POST', body),
-  // 人工删减。加不了新的一条：写进报告的每条发现都得能回溯到某次对比、
-  // 某个实验或某条经验，手打一条就断了这个链子。
+  // 记一笔：把分析页上的一条结论钉进本轮复盘草稿。
+  //
+  // 请求里**没有** confidence / verdict——判定由后端拿 (window, dimension,
+  // source_ref, variable) 回到那次分析结果里找回来。能从这里传的话，页面上标的
+  // 三档就是装饰：改一个字段就能把「算不出来」记成「能归因」。
+  //
+  // 目标草稿按 (项目 + 窗口) 自动 find-or-create，不需要先建复盘。
+  pinFinding: (projectId: string, body: {
+    window: { start: string; end: string }
+    dimension: string
+    source_ref?: string
+    variable?: string
+    text?: string
+  }) => request<ApiInsightReport>(`${insightProjectPath(projectId)}/findings`, 'POST', body),
+  // 人工删减。报告页上加不了新的一条：写进报告的每条发现都得能回溯到某次对比、
+  // 某个实验或某条经验，手打一条就断了这个链子。要加只能回分析页记一笔。
   dropReportFinding: (
     projectId: string,
     reportId: string,
@@ -5824,6 +6151,15 @@ export const api = {
     request<ApiInsightReport>(
       `${insightProjectPath(projectId)}/reports/${encodeURIComponent(reportId)}:drop-finding`, 'POST', body,
     ),
+  // 提交这一轮复盘：补上「算哪次投放」、把系统发现定格进去、置为已确认，后端一次做完。
+  // 和 confirmReport 的区别是它带 execution_id——草稿是记一笔时自动建的，那会儿
+  // 还没到「这算哪次投放」这个问题，提交才是全流程唯一必须回答它的地方。
+  submitReview: (projectId: string, reportId: string, body: {
+    execution_id: string
+    expected_version: number
+  }) => request<ApiInsightReport>(
+    `${insightProjectPath(projectId)}/reports/${encodeURIComponent(reportId)}/submit`, 'POST', body,
+  ),
   confirmReport: (projectId: string, reportId: string, expectedVersion: number) =>
     request<ApiInsightReport>(
       `${insightProjectPath(projectId)}/reports/${encodeURIComponent(reportId)}:confirm`, 'POST',
@@ -5856,6 +6192,11 @@ export const api = {
       `${insightProjectPath(projectId)}/experiences?${search.toString()}`,
     )
   },
+  // 「查」用 POST：条件有七格、好几格是自由文本，塞 query string 里既难读也容易漏转义。
+  lookupExperiences: (projectId: string, body: ApiExperienceLookup) =>
+    request<{ items: ApiExperienceMatch[] }>(
+      `${insightProjectPath(projectId)}/experiences/lookup`, 'POST', body,
+    ),
   listExperienceAudits: (projectId: string, experienceId: string, limit = 50) =>
     request<{ items: ApiExperienceAudit[] }>(
       `${insightExperiencePath(projectId, experienceId)}/audits?limit=${limit}`,
@@ -5943,6 +6284,17 @@ export const api = {
     assetId: string,
     body: { expected_version: number; content: string; note?: string },
   ) => request<ApiAnalyzeAssetResult>(`${insightAssetPath(projectId, assetId)}:analyze`, 'POST', body),
+  // 量客观变量：时长、画幅。和 analyze 是两回事——不调模型，不花钱，读的是素材库
+  // 上传这个文件时就探测好的数，同一条素材按几次结果都一样，所以按钮可以随便点。
+  // 落成「客观可测」层，直接能进归因，不进复核队列。
+  // 只对**从创意导入**的素材有效：手工登记的那些洞察这边只有一条索引，没有文件。
+  deriveInsightAssetFeatures: (
+    projectId: string,
+    assetId: string,
+    body: { expected_version: number },
+  ) => request<{ items: ApiInsightAssetFeature[] }>(
+    `${insightAssetPath(projectId, assetId)}:derive-features`, 'POST', body,
+  ),
   // 分析历史。失败的也在里面：只列成功的话，成功率永远是 100%。
   listInsightAssetAnalysisRuns: (projectId: string, assetId: string, limit = 20) =>
     request<{ items: ApiAnalysisRun[] }>(
@@ -5974,6 +6326,26 @@ export const api = {
     request<ApiFeatureMatrix>(
       `${insightProjectPath(projectId)}/feature-matrix?asset_ids=${encodeURIComponent(assetIds.join(','))}`,
     ),
+  // 找相似素材。两种问法：给素材 ID 问「和它像的还有哪些」，或者给一组变量取值问
+  // 「时长 15 秒的还有哪些」。后一种是 ❓「算不出来」的升级通道。
+  findSimilarAssets: (projectId: string, body: {
+    asset_id?: string
+    features?: Record<string, string>
+    limit?: number
+  }) => request<ApiSimilarAssetResult>(`${insightProjectPath(projectId)}/assets/similar`, 'POST', body),
+  // 外部素材。它们**永远不进共享素材库**：那里的素材可以被拿去投放，而这些没有
+  // 那份授权。收它们只有一个用处——解释本轮结果时有个参照。
+  importExternalAsset: (projectId: string, body: {
+    title: string
+    source_note: string
+    purpose: 'benchmark' | 'reference'
+    purpose_note?: string
+    asset_type?: string
+    window_end: string
+    features?: Record<string, string>
+  }) => request<ApiExternalAsset>(`${insightProjectPath(projectId)}/external-assets`, 'POST', body),
+  listExternalAssets: (projectId: string, limit = 50) =>
+    request<{ items: ApiExternalAsset[] }>(`${insightProjectPath(projectId)}/external-assets?limit=${limit}`),
   // 数据接入（doc10）。五个视图各自是一次不同的查询：数据源与字段映射读同一批行
   // 但看不同字段，导入任务与同步记录是同一张表按 kind 过滤（22 §8.3）。
   listDataSources: (projectId: string, filter: ApiDataSourceFilter = {}) => {
@@ -6092,10 +6464,24 @@ export const api = {
       `${insightProjectPath(projectId)}/capability-operations${query ? `?${query}` : ''}`,
     )
   },
-  // 系统设置整页只读，所以只有 get 没有 put。这些值不来自数据库，全部是代码常量本身，
-  // 每次请求现算——中间隔一层存储，就会有页面和代码对不上的那一天。
+  // 设置页的说明文本全部由后端现算：判定阈值那几条取当前生效的值，其余仍是代码常量本身。
+  // 前端抄一份的话，改了 Go 忘了改这里，这一页就从说明变成误导——那比不做更糟。
   getInsightSettings: (projectId: string) =>
     request<ApiInsightSettings>(`${insightProjectPath(projectId)}/settings`),
+  getThresholds: (projectId: string) =>
+    request<ApiResolvedThresholds>(`${insightProjectPath(projectId)}/thresholds`),
+  // 用 PUT 而不是 POST：从调用方看这是「把阈值设成这样」。落库仍是追加一版，
+  // 不改任何已有的行——已经判过的结论保持它当初按的那一版。
+  //
+  // values 里的 null 表示「这一格改回出厂设定」，不是 0；reason 必填。
+  saveThresholds: (projectId: string, body: {
+    values: Record<string, number | null>
+    reason: string
+  }) => request<ApiResolvedThresholds>(`${insightProjectPath(projectId)}/thresholds`, 'PUT', body),
+  listThresholdHistory: (projectId: string, limit = 20) =>
+    request<{ items: ApiThresholdSet[] }>(
+      `${insightProjectPath(projectId)}/thresholds/history?limit=${limit}`,
+    ),
   getMiyunConnection: (projectId: string) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`),
   updateMiyunConnection: (projectId: string, body: { session: string; session_expires_at?: string; expected_version?: number }) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`, 'PUT', body),
   verifyMiyunConnection: (projectId: string, expectedVersion: number) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection:verify`, 'POST', { expected_version: expectedVersion }),

@@ -49,6 +49,14 @@ type ConversationResearchRunner interface {
 	RunConversationWebSearch(context.Context, contract.ActorContext, contract.ProjectID, string, string) (knowledge.ResearchRun, error)
 }
 
+type ResearchRouteInspector interface {
+	InspectResearchRoute(context.Context, contract.OrganizationID, string) (provider.CapabilityRouteInspection, error)
+}
+
+type DocumentVisionRouteInspector interface {
+	Inspect(context.Context, contract.OrganizationID, string) (knowledge.DocumentVisionCapability, error)
+}
+
 type ConversationMediaReader interface {
 	GetLatestForAsset(context.Context, contract.ActorContext, contract.ProjectID, contract.AssetVersionRef) (mediaunderstanding.Artifact, error)
 }
@@ -65,13 +73,19 @@ type Service struct {
 	Knowledge                    KnowledgeReader
 	ConversationKnowledge        ConversationKnowledgeReader
 	ConversationResearch         ConversationResearchRunner
+	ResearchRoutes               ResearchRouteInspector
+	DocumentVisionRoutes         DocumentVisionRouteInspector
 	ConversationMedia            ConversationMediaReader
 	CreativeAssets               CreativeAssetReader
 	MessageReferences            MessageReferenceValidator
 	Agents                       agent.TransactionalTaskWriter
+	ProductEvents                ProductEventWriter
 	Text                         *provider.Service
 	TextModelAlias               string
+	LiteTextModelAlias           string
 	DeepReviewModelAlias         string
+	ResearchModelAlias           string
+	DocumentVisionModelAlias     string
 	PromptVersion                string
 	ConversationPromptVersion    string
 	RevisePromptVersion          string
@@ -747,6 +761,8 @@ func (s Service) SendMessage(ctx context.Context, actor contract.ActorContext, k
 	}{conversationID, content}
 	return s.sendMessage(ctx, actor, key, conversationID, messageCreateInput{
 		Content:          content,
+		ContextStage:     "intake",
+		ContextSurface:   "workspace",
 		RequestHashShape: request,
 	})
 }
@@ -760,26 +776,35 @@ func (s Service) SendMessageV2(ctx context.Context, actor contract.ActorContext,
 		return SendMessageResult{}, false, err
 	}
 	hashShape := struct {
-		ConversationID  string                  `json:"conversation_id"`
-		ContractVersion string                  `json:"contract_version"`
-		Content         []MessageContentBlock   `json:"content"`
-		RequestedPolicy *MessageRequestedPolicy `json:"requested_policy,omitempty"`
-	}{conversationID, MessageCreateContractV2, normalized.ContentBlocks, normalized.RequestedPolicy}
+		ConversationID    string                  `json:"conversation_id"`
+		ContractVersion   string                  `json:"contract_version"`
+		Content           []MessageContentBlock   `json:"content"`
+		RequestedPolicy   *MessageRequestedPolicy `json:"requested_policy,omitempty"`
+		ContextStage      string                  `json:"context_stage"`
+		ContextSurface    string                  `json:"context_surface"`
+		ExcludedSourceIDs []string                `json:"excluded_source_ids,omitempty"`
+	}{conversationID, MessageCreateContractV2, normalized.ContentBlocks, normalized.RequestedPolicy, normalized.ContextStage, normalized.ContextSurface, normalized.ExcludedSourceIDs}
 	return s.sendMessage(ctx, actor, key, conversationID, messageCreateInput{
-		ContractVersion:  MessageCreateContractV2,
-		Content:          normalized.Projection,
-		ContentBlocks:    normalized.ContentBlocks,
-		RequestedPolicy:  normalized.RequestedPolicy,
-		RequestHashShape: hashShape,
+		ContractVersion:   MessageCreateContractV2,
+		Content:           normalized.Projection,
+		ContentBlocks:     normalized.ContentBlocks,
+		RequestedPolicy:   normalized.RequestedPolicy,
+		ContextStage:      normalized.ContextStage,
+		ContextSurface:    normalized.ContextSurface,
+		ExcludedSourceIDs: normalized.ExcludedSourceIDs,
+		RequestHashShape:  hashShape,
 	})
 }
 
 type messageCreateInput struct {
-	ContractVersion  string
-	Content          string
-	ContentBlocks    []MessageContentBlock
-	RequestedPolicy  *MessageRequestedPolicy
-	RequestHashShape any
+	ContractVersion   string
+	Content           string
+	ContentBlocks     []MessageContentBlock
+	RequestedPolicy   *MessageRequestedPolicy
+	ContextStage      string
+	ContextSurface    string
+	ExcludedSourceIDs []string
+	RequestHashShape  any
 }
 
 func (s Service) sendMessage(ctx context.Context, actor contract.ActorContext, key contract.IdempotencyKey, conversationID string, input messageCreateInput) (SendMessageResult, bool, error) {
@@ -810,6 +835,14 @@ func (s Service) sendMessage(ctx context.Context, actor contract.ActorContext, k
 	if task.DiscardedAt != nil {
 		return SendMessageResult{}, false, ErrInvalidState
 	}
+	manifest, err := s.BuildProjectContextManifest(ctx, actor, conversation.WorkspaceID, input.ContextStage)
+	if err != nil {
+		return SendMessageResult{}, false, err
+	}
+	manifest.SelectedSourceRefs = contextSourcesWithout(manifest.SelectedSourceRefs, input.ExcludedSourceIDs)
+	if err := manifest.Validate(); err != nil {
+		return SendMessageResult{}, false, err
+	}
 	hash, _ := contract.CanonicalJSONHash(input.RequestHashShape)
 	var prior SendMessageResult
 	found, err := s.loadReceipt(ctx, actor, conversation.ProjectID, "message.create", key, hash, &prior)
@@ -837,10 +870,21 @@ func (s Service) sendMessage(ctx context.Context, actor contract.ActorContext, k
 		return SendMessageResult{}, false, err
 	}
 	turnEventID := ""
+	commandProductEventID, ackProductEventID := "", ""
 	if input.ContractVersion == MessageCreateContractV2 {
 		turnEventID, err = s.newID("stratevent")
 		if err != nil {
 			return SendMessageResult{}, false, err
+		}
+		if s.ProductEvents != nil {
+			commandProductEventID, err = s.newID("strategyproductevent")
+			if err != nil {
+				return SendMessageResult{}, false, err
+			}
+			ackProductEventID, err = s.newID("strategyproductevent")
+			if err != nil {
+				return SendMessageResult{}, false, err
+			}
 		}
 	}
 	now := s.now()
@@ -849,6 +893,8 @@ func (s Service) sendMessage(ctx context.Context, actor contract.ActorContext, k
 		"strategy_task_id": task.ID,
 		"message_id":       message.ID,
 		"prompt_version":   s.conversationPromptVersion(),
+		"context_manifest": manifest,
+		"context_surface":  input.ContextSurface,
 	}
 	if input.ContractVersion != "" {
 		agentInput["message_contract_version"] = input.ContractVersion
@@ -893,6 +939,26 @@ func (s Service) sendMessage(ctx context.Context, actor contract.ActorContext, k
 		version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ?`,
 		agentTask.ID, now, actor.OrganizationID, conversation.ProjectID, task.ID); err != nil {
 		return SendMessageResult{}, false, err
+	}
+	if commandProductEventID != "" {
+		if err := s.appendProductEventIn(ctx, tx, NewProductEventInput{
+			ID: commandProductEventID, Actor: actor, ProjectID: conversation.ProjectID,
+			WorkspaceID: conversation.WorkspaceID, EventType: ProductEventAssistantCommandSubmitted,
+			Stage: input.ContextStage, Resource: ProductEventResource{Type: "conversation_message", ID: message.ID},
+			Outcome: "accepted", Attributes: map[string]any{"capability": "assistant.command"}, OccurredAt: now,
+		}); err != nil {
+			return SendMessageResult{}, false, err
+		}
+		ackAt := s.now()
+		ackDuration := max(int64(0), ackAt.Sub(now).Milliseconds())
+		if err := s.appendProductEventIn(ctx, tx, NewProductEventInput{
+			ID: ackProductEventID, Actor: actor, ProjectID: conversation.ProjectID,
+			WorkspaceID: conversation.WorkspaceID, EventType: ProductEventAssistantFirstAck,
+			Stage: input.ContextStage, Resource: ProductEventResource{Type: "conversation_message", ID: message.ID},
+			DurationMS: &ackDuration, Outcome: "succeeded", Attributes: map[string]any{"capability": "assistant.command"}, OccurredAt: ackAt,
+		}); err != nil {
+			return SendMessageResult{}, false, err
+		}
 	}
 	result := SendMessageResult{Message: message, AgentTask: agentTask}
 	if err := insertReceipt(ctx, tx, actor, conversation.ProjectID, "message.create", key, hash, 202, result, now); err != nil {
@@ -1031,7 +1097,15 @@ func (s Service) PatchBriefDraft(ctx context.Context, actor contract.ActorContex
 	if err != nil {
 		return BriefDraft{}, false, err
 	}
-	updated, err := ApplyBriefPatch(draft, patch, PatchFromUser, actor.Principal.ID, s.now())
+	origin := PatchFromUser
+	switch patch.ConfirmationMode {
+	case "", "confirm":
+	case "draft":
+		origin = PatchFromUserDraft
+	default:
+		return BriefDraft{}, false, ErrInvalidRequest
+	}
+	updated, err := ApplyBriefPatch(draft, patch, origin, actor.Principal.ID, s.now())
 	if err != nil {
 		return BriefDraft{}, false, err
 	}

@@ -338,6 +338,31 @@ func TestConversationTurnMergesExplicitLabeledBriefFields(t *testing.T) {
 	}
 }
 
+func TestDeterministicConversationKeepsExplicitLabeledFacts(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{
+		ID: "brief_draft_1", Status: "open", Version: 4,
+		Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}
+	message := Message{ID: "msg_1", CreatedBy: "user_1", Content: "品牌：轻氧"}
+	decision := sanitizeConversationDecisionWithGrounding(draft, message, ConversationTurnDecision{
+		Intent:         "provide_requirements",
+		Patch:          deterministicBriefPatch(draft, message),
+		AssistantReply: "已记录。",
+	}, nil)
+	decision, err := finalizeDeterministicConversationDecision(draft, message, nil, decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decision.Patch.Operations) != 1 || decision.Patch.Operations[0].FieldPath != "brand.name" || decision.Patch.Operations[0].Confidence != "high" {
+		t.Fatalf("deterministic operations=%#v", decision.Patch.Operations)
+	}
+	updated, err := ApplyBriefPatch(draft, decision.Patch, PatchFromModel, "agent_1", time.Now())
+	if err != nil || updated.Document.Brand.Name != "轻氧" {
+		t.Fatalf("updated brand=%q err=%v", updated.Document.Brand.Name, err)
+	}
+}
+
 func TestConversationTurnMergesExplicitNarrativeCNCBriefFields(t *testing.T) {
 	t.Parallel()
 	draft := BriefDraft{
@@ -381,6 +406,44 @@ func TestConversationTurnMergesExplicitNarrativeCNCBriefFields(t *testing.T) {
 	}
 	if len(updated.Document.Product.Evidence) != 2 {
 		t.Fatalf("evidence = %#v", updated.Document.Product.Evidence)
+	}
+}
+
+func TestConversationTurnCapturesCompactNaturalLanguageBrief(t *testing.T) {
+	t.Parallel()
+	draft := BriefDraft{
+		ID: "brief_draft_1", Status: "open", Version: 1,
+		Document: EmptyBriefDocumentV2(), FieldStates: map[string]FieldState{},
+	}
+	message := Message{
+		ID: "msg_compact", CreatedBy: "user_1",
+		Content: "推广 FlowKit 团队协作工具，目标是提升 30 天企业试用转化，核心受众是 20-200 人科技公司的运营负责人；强调跨团队流程透明和减少重复沟通。",
+	}
+	decision := sanitizeConversationDecisionWithGrounding(draft, message, ConversationTurnDecision{
+		Intent: "provide_requirements", Patch: deterministicBriefPatch(draft, message),
+	}, nil)
+	decision, err := finalizeDeterministicConversationDecision(draft, message, nil, decision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := ApplyBriefPatch(draft, decision.Patch, PatchFromModel, "agent_1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Document.Product.Name != "FlowKit 团队协作工具" {
+		t.Fatalf("product name = %q", updated.Document.Product.Name)
+	}
+	if updated.Document.Campaign.Objective != "提升 30 天企业试用转化" {
+		t.Fatalf("objective = %q", updated.Document.Campaign.Objective)
+	}
+	if updated.Document.Audience.Primary != "20-200 人科技公司的运营负责人" {
+		t.Fatalf("audience = %q", updated.Document.Audience.Primary)
+	}
+	if updated.Document.Proposition != "跨团队流程透明和减少重复沟通" {
+		t.Fatalf("proposition = %q", updated.Document.Proposition)
+	}
+	if missing := missingConversationFields(updated); len(missing) != 0 {
+		t.Fatalf("compact explicit brief still has missing fields: %#v", missing)
 	}
 }
 

@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -202,6 +203,60 @@ func (s Service) generationConversationExcluding(
 	return values, rows.Err()
 }
 
+func (s Service) generationMemorySummary(ctx context.Context, task agent.Task, conversationID string) (string, error) {
+	var summary, kind string
+	var storedHash contract.ContentHash
+	err := s.DB.QueryRowContext(ctx, `SELECT summary, summary_kind, summary_content_hash
+		FROM strategy_conversation_memories WHERE organization_id = ? AND project_id = ? AND conversation_id = ?`,
+		task.OrganizationID, task.ProjectID, conversationID).Scan(&summary, &kind, &storedHash)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	content, calculated, backfill, err := usableConversationMemorySummary(summary, kind, storedHash)
+	if err != nil {
+		return "", err
+	}
+	if backfill {
+		// summary_content_hash was introduced after conversation memories already
+		// existed. Repair those legacy rows opportunistically, but never make this
+		// optional context a new availability dependency for the conversation.
+		_, _ = s.DB.ExecContext(ctx, `UPDATE strategy_conversation_memories
+			SET summary_content_hash = ?
+			WHERE organization_id = ? AND project_id = ? AND conversation_id = ?
+			  AND summary_content_hash = '' AND summary_kind = ? AND summary = ?`,
+			calculated, task.OrganizationID, task.ProjectID, conversationID, kind, summary)
+	}
+	return content, nil
+}
+
+func usableConversationMemorySummary(
+	summary string,
+	kind string,
+	storedHash contract.ContentHash,
+) (string, contract.ContentHash, bool, error) {
+	if kind != "deterministic" && kind != "model" {
+		return "", "", false, nil
+	}
+	calculated, err := conversationMemorySummaryHash(summary)
+	if err != nil {
+		return "", "", false, err
+	}
+	legacy := strings.TrimSpace(string(storedHash)) == ""
+	if !legacy && !storedHash.Equal(calculated) {
+		// Memory is compressed, optional context. Ignore an integrity failure so
+		// the current Brief and recent messages can still drive the next turn.
+		return "", calculated, false, nil
+	}
+	content := []rune(strings.TrimSpace(summary))
+	if len(content) > 4_000 {
+		content = content[:4_000]
+	}
+	return string(content), calculated, legacy, nil
+}
+
 func evidenceFromBrief(brief BriefVersion) []EvidenceItem {
 	document := brief.Snapshot
 	values := map[string]any{
@@ -246,7 +301,7 @@ func emptyEvidence(value any) bool {
 
 func skillVersions(values []strategyskills.Snapshot) map[string]string {
 	versions := make(map[string]string, len(values)+1)
-	versions["strategy.strategy.generate"] = "v2.0.0"
+	versions["strategy.strategy.generate"] = "v3.0.0"
 	for _, value := range values {
 		versions[value.Name] = value.Version
 	}
@@ -427,16 +482,16 @@ func evaluateStrategyQuality(document StrategyDocument, generation GenerationCon
 	if missingChannels(document.ChannelStrategy, brief.Channels) {
 		report.Errors = append(report.Errors, "channel strategy does not cover the confirmed Brief")
 	}
-	if document.ContractVersion == "strategy-draft/v2" && missingPlatformPlans(document.PlatformPlans, brief.Channels) {
+	if (document.ContractVersion == "strategy-draft/v2" || document.ContractVersion == "strategy-draft/v3") && missingPlatformPlans(document.PlatformPlans, brief.Channels) {
 		report.Errors = append(report.Errors, "platform plans do not cover the confirmed Brief")
 	}
-	if document.ContractVersion == "strategy-draft/v2" && duplicatedPlatformPlans(document.PlatformPlans) {
+	if (document.ContractVersion == "strategy-draft/v2" || document.ContractVersion == "strategy-draft/v3") && duplicatedPlatformPlans(document.PlatformPlans) {
 		report.Errors = append(report.Errors, "platform plans are not meaningfully distinct")
 	}
 	if !hasNonEmptyStrings(document.Audience.Insights) {
 		report.Errors = append(report.Errors, "audience.insights must not be empty")
 	}
-	if len(document.CreativeRecommendations) < 3 || !hasNonEmptyStrings(document.CreativeRecommendations) {
+	if document.ContractVersion != "strategy-draft/v3" && (len(document.CreativeRecommendations) < 3 || !hasNonEmptyStrings(document.CreativeRecommendations)) {
 		report.Errors = append(report.Errors, "at least three creative recommendations are required")
 	}
 	if generation.PromptVersion == promptkit.GenerateV4 && len(document.CreativeRecommendations) != 3 {
@@ -454,10 +509,13 @@ func evaluateStrategyQuality(document StrategyDocument, generation GenerationCon
 			report.Errors = append(report.Errors, "creative recommendation is missing decision anatomy: "+strings.TrimSpace(recommendation))
 		}
 	}
-	if generation.PromptVersion == promptkit.GenerateV4 && len([]rune(strings.TrimSpace(document.ExecutiveSummary))) > 220 {
+	if generation.PromptVersion == promptkit.GenerateV5 {
+		validateCreativeStrategyQuality(document, brief.Channels, &report)
+	}
+	if (generation.PromptVersion == promptkit.GenerateV4 || generation.PromptVersion == promptkit.GenerateV5) && len([]rune(strings.TrimSpace(document.ExecutiveSummary))) > 220 {
 		report.Warnings = append(report.Warnings, "executive_summary is too long for a decision brief")
 	}
-	if generation.PromptVersion == promptkit.GenerateV4 {
+	if generation.PromptVersion == promptkit.GenerateV4 || generation.PromptVersion == promptkit.GenerateV5 {
 		report.Errors = append(report.Errors, unsupportedQuantitativeClaims(document, generation)...)
 	}
 	if len(document.ExperimentMatrix) == 0 {
@@ -483,7 +541,7 @@ func evaluateStrategyQuality(document StrategyDocument, generation GenerationCon
 	if unknown := unknownEvidenceRefs(document.EvidenceRefs, generation); len(unknown) > 0 {
 		report.Errors = append(report.Errors, "evidence_refs contain unknown references: "+strings.Join(unknown, ", "))
 	}
-	if generation.PromptVersion == promptkit.GenerateV4 && document.ContractVersion == "strategy-draft/v2" &&
+	if (generation.PromptVersion == promptkit.GenerateV4 || generation.PromptVersion == promptkit.GenerateV5) &&
 		len(generation.Brief.Snapshot.ReferenceIDs) > 0 && len(document.EvidenceRefs) == 0 {
 		report.Errors = append(report.Errors, "evidence_refs omitted all confirmed Brief references")
 	}
@@ -494,6 +552,40 @@ func evaluateStrategyQuality(document StrategyDocument, generation GenerationCon
 	}
 	report.Passed = len(report.Errors) == 0
 	return report
+}
+
+func validateCreativeStrategyQuality(document StrategyDocument, channels []string, report *QualityReport) {
+	if document.ContractVersion != "strategy-draft/v3" || document.CreativeStrategy == nil {
+		report.Errors = append(report.Errors, "strategy-draft/v3 creative_strategy is required")
+		return
+	}
+	seenNames := map[string]struct{}{}
+	seenIdeas := map[string]struct{}{}
+	for index, territory := range document.CreativeStrategy.Territories {
+		name := normalizeStrategyText(territory.Name)
+		idea := normalizeStrategyText(territory.CoreIdea)
+		if _, exists := seenNames[name]; name == "" || exists {
+			report.Errors = append(report.Errors, fmt.Sprintf("creative territory %d has a missing or duplicated name", index+1))
+		}
+		if _, exists := seenIdeas[idea]; idea == "" || exists {
+			report.Errors = append(report.Errors, fmt.Sprintf("creative territory %d has a missing or duplicated core idea", index+1))
+		}
+		seenNames[name] = struct{}{}
+		seenIdeas[idea] = struct{}{}
+		covered := map[string]bool{}
+		for _, adaptation := range territory.ChannelAdaptations {
+			covered[adaptation.Platform] = true
+		}
+		for _, channel := range channels {
+			if !covered[channel] {
+				report.Errors = append(report.Errors, fmt.Sprintf("creative territory %d does not adapt to %s", index+1, channel))
+			}
+		}
+	}
+}
+
+func normalizeStrategyText(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(value), ""))
 }
 
 var quantitativeClaimPattern = regexp.MustCompile(`(?i)[0-9]+(\.[0-9]+)?\s*(%|％|mm|毫米|μm|um|天|小时|分钟|件|项|条|台|万元|万|元|年|个月|月|周|倍)`)
@@ -523,6 +615,20 @@ func unsupportedQuantitativeClaims(document StrategyDocument, generation Generat
 	}
 	check("audience.insights", document.Audience.Insights...)
 	check("creative recommendations", document.CreativeRecommendations...)
+	if document.CreativeStrategy != nil {
+		check("creative strategy", append(
+			append([]string{document.CreativeStrategy.Objective}, document.CreativeStrategy.MessageHierarchy...),
+			document.CreativeStrategy.Tone...,
+		)...)
+		for _, territory := range document.CreativeStrategy.Territories {
+			values := []string{territory.Name, territory.AudienceTension, territory.CoreIdea}
+			values = append(values, territory.Proof...)
+			for _, adaptation := range territory.ChannelAdaptations {
+				values = append(values, adaptation.Role, adaptation.Adaptation)
+			}
+			check("creative territories", values...)
+		}
+	}
 	check("executive summary", document.ExecutiveSummary)
 	for _, plan := range document.PlatformPlans {
 		values := []string{plan.Role, plan.AudienceAngle}
@@ -751,7 +857,7 @@ func resolveRevisionScope(instruction string) RevisionScope {
 		{"audience", []string{"受众", "人群", "audience"}},
 		{"proposition", []string{"卖点", "主张", "proposition"}},
 		{"channel_strategy", []string{"渠道", "平台", "channel", "platform"}},
-		{"creative_recommendations", []string{"创意", "内容", "选题", "creative", "content"}},
+		{"creative_strategy", []string{"创意", "内容", "选题", "creative", "content"}},
 		{"constraints", []string{"约束", "合规", "禁用", "constraint"}},
 		{"budget_and_cadence", []string{"预算", "节奏", "排期", "budget", "cadence"}},
 		{"experiment_matrix", []string{"实验", "测试", "experiment"}},
@@ -830,7 +936,7 @@ func repairSectionsForErrors(errors []string) []string {
 		case strings.Contains(value, "channel"):
 			add("channel_strategy")
 		case strings.Contains(value, "creative"):
-			add("creative_recommendations")
+			add("creative_strategy")
 		case strings.Contains(value, "executive summary"):
 			add("executive_summary")
 		case strings.Contains(value, "evidence"):
@@ -846,7 +952,7 @@ func repairSectionsForErrors(errors []string) []string {
 	}
 	return []string{
 		"objective", "audience", "proposition", "channel_strategy",
-		"creative_recommendations", "constraints", "budget_and_cadence",
+		"creative_strategy", "constraints", "budget_and_cadence",
 		"experiment_matrix", "measurement", "assumptions_and_gaps",
 		"executive_summary", "cross_platform_role", "platform_plans", "evidence_refs",
 	}
@@ -869,8 +975,9 @@ func retainAllowedRevisionSections(before StrategyDocument, after *StrategyDocum
 	if _, ok := allowedSet["channel_strategy"]; !ok {
 		after.ChannelStrategy = before.ChannelStrategy
 	}
-	if _, ok := allowedSet["creative_recommendations"]; !ok {
+	if _, ok := allowedSet["creative_strategy"]; !ok {
 		after.CreativeRecommendations = before.CreativeRecommendations
+		after.CreativeStrategy = before.CreativeStrategy
 	}
 	if _, ok := allowedSet["constraints"]; !ok {
 		after.Constraints = before.Constraints
@@ -913,6 +1020,7 @@ func changedStrategySections(before, after StrategyDocument) []string {
 		{"proposition", before.Proposition, after.Proposition},
 		{"channel_strategy", before.ChannelStrategy, after.ChannelStrategy},
 		{"creative_recommendations", before.CreativeRecommendations, after.CreativeRecommendations},
+		{"creative_strategy", before.CreativeStrategy, after.CreativeStrategy},
 		{"constraints", before.Constraints, after.Constraints},
 		{"budget_and_cadence", before.BudgetAndCadence, after.BudgetAndCadence},
 		{"experiment_matrix", before.ExperimentMatrix, after.ExperimentMatrix},

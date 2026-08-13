@@ -122,7 +122,7 @@ func (s ExternalImportService) Import(ctx context.Context, requestContext contra
 		return s.fail(ctx, stored, "SOURCE_UNAVAILABLE", fmt.Errorf("external import opener returned nil reader"))
 	}
 	defer reader.Close()
-	staged, err := s.Upload.Blobs.Put(ctx, s.QuarantineBucket, quarantineKey(stored.OrganizationID, stored.ID), io.LimitReader(reader, MaxVideoBytes+1), request.SizeBytes, "video/mp4")
+	staged, err := s.Upload.Blobs.Put(ctx, s.QuarantineBucket, quarantineKey(stored.OrganizationID, stored.ProjectID, stored.ID), io.LimitReader(reader, MaxVideoBytes+1), request.SizeBytes, "video/mp4")
 	if err != nil {
 		return s.fail(ctx, stored, "INVALID_CONTENT", err)
 	}

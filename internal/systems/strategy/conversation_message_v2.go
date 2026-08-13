@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"encoding/hex"
+	"sort"
 	"strings"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
@@ -42,12 +43,20 @@ type SendMessageV2Request struct {
 	ContractVersion string                  `json:"contract_version"`
 	Content         []MessageContentBlock   `json:"content"`
 	RequestedPolicy *MessageRequestedPolicy `json:"requested_policy,omitempty"`
+	// ContextStage is transport context supplied by the authenticated Strategy
+	// workspace. It is not accepted inside the frozen message v2 JSON body.
+	ContextStage      string   `json:"-"`
+	ContextSurface    string   `json:"-"`
+	ExcludedSourceIDs []string `json:"-"`
 }
 
 type normalizedMessageV2 struct {
-	ContentBlocks   []MessageContentBlock
-	Projection      string
-	RequestedPolicy *MessageRequestedPolicy
+	ContentBlocks     []MessageContentBlock
+	Projection        string
+	RequestedPolicy   *MessageRequestedPolicy
+	ContextStage      string
+	ContextSurface    string
+	ExcludedSourceIDs []string
 }
 
 func normalizeMessageV2(request SendMessageV2Request) (normalizedMessageV2, error) {
@@ -152,7 +161,52 @@ func normalizeMessageV2(request SendMessageV2Request) (normalizedMessageV2, erro
 	if plainText == "" || len(plainText) > messageTextLimit {
 		return normalizedMessageV2{}, ErrInvalidRequest
 	}
-	return normalizedMessageV2{ContentBlocks: blocks, Projection: plainText, RequestedPolicy: policy}, nil
+	stage := strings.TrimSpace(request.ContextStage)
+	if stage == "" {
+		stage = "intake"
+	}
+	if !validStrategyStage(stage) {
+		return normalizedMessageV2{}, ErrInvalidRequest
+	}
+	surface := strings.TrimSpace(request.ContextSurface)
+	if surface == "" {
+		surface = "workspace"
+	}
+	if surface != "workspace" && surface != "assistant" {
+		return normalizedMessageV2{}, ErrInvalidRequest
+	}
+	excludedSourceIDs, err := normalizeExcludedSourceIDs(request.ExcludedSourceIDs, surface)
+	if err != nil {
+		return normalizedMessageV2{}, err
+	}
+	return normalizedMessageV2{
+		ContentBlocks: blocks, Projection: plainText, RequestedPolicy: policy,
+		ContextStage: stage, ContextSurface: surface, ExcludedSourceIDs: excludedSourceIDs,
+	}, nil
+}
+
+func normalizeExcludedSourceIDs(values []string, surface string) ([]string, error) {
+	if len(values) == 0 {
+		return []string{}, nil
+	}
+	if surface != "assistant" || len(values) > 32 {
+		return nil, ErrInvalidRequest
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if !validMessageResourceID(value) {
+			return nil, ErrInvalidRequest
+		}
+		if _, duplicate := seen[value]; duplicate {
+			return nil, ErrInvalidRequest
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result, nil
 }
 
 func normalizeRequestedPolicy(raw *MessageRequestedPolicy) (*MessageRequestedPolicy, error) {

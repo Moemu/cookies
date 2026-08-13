@@ -12,26 +12,94 @@ import (
 )
 
 type ConversationMemory struct {
-	ConversationID string                  `json:"conversation_id"`
-	OrganizationID contract.OrganizationID `json:"organization_id"`
-	ProjectID      contract.ProjectID      `json:"project_id"`
-	Summary        string                  `json:"summary"`
-	OpenQuestions  []string                `json:"open_questions"`
-	LastMessageID  string                  `json:"last_message_id"`
-	Version        int64                   `json:"version"`
-	UpdatedAt      time.Time               `json:"updated_at"`
+	ConversationID             string                  `json:"conversation_id"`
+	OrganizationID             contract.OrganizationID `json:"organization_id"`
+	ProjectID                  contract.ProjectID      `json:"project_id"`
+	Summary                    string                  `json:"summary"`
+	SummaryKind                string                  `json:"summary_kind"`
+	SummaryModelAlias          string                  `json:"summary_model_alias,omitempty"`
+	SummaryPromptVersion       string                  `json:"summary_prompt_version,omitempty"`
+	SummaryContentHash         contract.ContentHash    `json:"summary_content_hash"`
+	OpenQuestions              []string                `json:"open_questions"`
+	LastMessageID              string                  `json:"last_message_id"`
+	RecentWindowStartMessageID string                  `json:"recent_window_start_message_id,omitempty"`
+	ArtifactManifest           MemoryArtifactManifest  `json:"artifact_manifest"`
+	LastCompactedAt            *time.Time              `json:"last_compacted_at,omitempty"`
+	Version                    int64                   `json:"version"`
+	UpdatedAt                  time.Time               `json:"updated_at"`
+}
+
+type MemoryArtifactManifest struct {
+	BriefRef          SnapshotContextRef `json:"brief_ref"`
+	SelectedSourceIDs []string           `json:"selected_source_ids"`
 }
 
 func upsertConversationMemory(ctx context.Context, tx *sql.Tx, conversation Conversation, draft BriefDraft, questions []string, lastMessageID string, now time.Time) error {
 	summary := briefMemorySummary(draft.Document)
-	_, err := tx.ExecContext(ctx, `INSERT INTO strategy_conversation_memories
-		(conversation_id, organization_id, project_id, summary, open_questions, last_message_id, version, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+	summaryHash, err := conversationMemorySummaryHash(summary)
+	if err != nil {
+		return err
+	}
+	briefHash, err := contract.NewContentHash(struct {
+		Document    BriefDocument         `json:"document"`
+		FieldStates map[string]FieldState `json:"field_states"`
+	}{draft.Document, draft.FieldStates})
+	if err != nil {
+		return err
+	}
+	manifest := MemoryArtifactManifest{
+		BriefRef:          SnapshotContextRef{Type: "brief_draft", ID: draft.ID, Version: draft.Version, ContentHash: briefHash},
+		SelectedSourceIDs: boundedUniqueStrings(draft.Document.ReferenceIDs, 32),
+	}
+	var recentWindowStart sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM (
+		SELECT id, created_at FROM strategy_messages
+		WHERE organization_id = ? AND project_id = ? AND conversation_id = ?
+		ORDER BY created_at DESC, id DESC LIMIT 20
+	) recent ORDER BY created_at, id LIMIT 1`, conversation.OrganizationID, conversation.ProjectID, conversation.ID).Scan(&recentWindowStart); err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO strategy_conversation_memories
+		(conversation_id, organization_id, project_id, summary, summary_kind, summary_content_hash,
+		 open_questions, last_message_id, recent_window_start_message_id, artifact_manifest_json,
+		 last_compacted_at, version, updated_at)
+		VALUES (?, ?, ?, ?, 'deterministic', ?, ?, ?, ?, ?, ?, 1, ?)
 		ON DUPLICATE KEY UPDATE summary = VALUES(summary), open_questions = VALUES(open_questions),
-		last_message_id = VALUES(last_message_id), version = version + 1, updated_at = VALUES(updated_at)`,
-		conversation.ID, conversation.OrganizationID, conversation.ProjectID, summary,
-		mustJSON(questions), lastMessageID, now)
+		summary_kind = 'deterministic', summary_model_alias = NULL, summary_prompt_version = NULL,
+		summary_content_hash = VALUES(summary_content_hash), last_message_id = VALUES(last_message_id),
+		recent_window_start_message_id = VALUES(recent_window_start_message_id),
+		artifact_manifest_json = VALUES(artifact_manifest_json), last_compacted_at = VALUES(last_compacted_at),
+		version = version + 1, updated_at = VALUES(updated_at)`,
+		conversation.ID, conversation.OrganizationID, conversation.ProjectID, summary, summaryHash,
+		mustJSON(boundedUniqueStrings(questions, 16)), lastMessageID, nullableString(recentWindowStart.String),
+		mustJSON(manifest), now, now)
 	return err
+}
+
+func conversationMemorySummaryHash(summary string) (contract.ContentHash, error) {
+	return contract.NewContentHash(struct {
+		Summary string `json:"summary"`
+	}{Summary: summary})
+}
+
+func boundedUniqueStrings(values []string, limit int) []string {
+	result := make([]string, 0, min(len(values), limit))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+		if len(result) == limit {
+			break
+		}
+	}
+	return result
 }
 
 func briefMemorySummary(document BriefDocument) string {
@@ -66,20 +134,86 @@ func (s Service) GetConversationMemory(ctx context.Context, actor contract.Actor
 		return ConversationMemory{}, err
 	}
 	var value ConversationMemory
-	var questions []byte
+	var questions, artifactManifest []byte
+	var summaryModelAlias, summaryPromptVersion, recentWindowStart sql.NullString
+	var lastCompactedAt sql.NullTime
 	err = s.DB.QueryRowContext(ctx, `SELECT conversation_id, organization_id, project_id, summary,
-		open_questions, last_message_id, version, updated_at
+		summary_kind, summary_model_alias, summary_prompt_version, summary_content_hash,
+		open_questions, last_message_id, recent_window_start_message_id, artifact_manifest_json,
+		last_compacted_at, version, updated_at
 		FROM strategy_conversation_memories WHERE organization_id = ? AND project_id = ? AND conversation_id = ?`,
 		actor.OrganizationID, conversation.ProjectID, conversationID).
 		Scan(&value.ConversationID, &value.OrganizationID, &value.ProjectID, &value.Summary,
-			&questions, &value.LastMessageID, &value.Version, &value.UpdatedAt)
+			&value.SummaryKind, &summaryModelAlias, &summaryPromptVersion, &value.SummaryContentHash,
+			&questions, &value.LastMessageID, &recentWindowStart, &artifactManifest,
+			&lastCompactedAt, &value.Version, &value.UpdatedAt)
 	if err != nil {
 		return ConversationMemory{}, err
 	}
-	if json.Unmarshal(questions, &value.OpenQuestions) != nil {
+	if json.Unmarshal(questions, &value.OpenQuestions) != nil ||
+		json.Unmarshal(artifactManifest, &value.ArtifactManifest) != nil || value.SummaryContentHash.Validate() != nil {
 		return ConversationMemory{}, fmt.Errorf("stored conversation memory is invalid")
 	}
+	value.SummaryModelAlias = summaryModelAlias.String
+	value.SummaryPromptVersion = summaryPromptVersion.String
+	value.RecentWindowStartMessageID = recentWindowStart.String
+	if lastCompactedAt.Valid {
+		value.LastCompactedAt = &lastCompactedAt.Time
+	}
 	return value, nil
+}
+
+// CompactConversationMemory rebuilds memory from authoritative structured
+// artifacts and advances a bounded raw-message window. The deterministic v1
+// path deliberately cannot overwrite Brief facts with a model summary.
+func (s Service) CompactConversationMemory(ctx context.Context, actor contract.ActorContext, conversationID string) (ConversationMemory, error) {
+	if err := requireScope(actor, ScopeWrite); err != nil {
+		return ConversationMemory{}, err
+	}
+	conversation, err := s.GetConversation(ctx, actor, conversationID)
+	if err != nil {
+		return ConversationMemory{}, err
+	}
+	task, err := scanTask(s.DB.QueryRowContext(ctx, taskSelect+` WHERE organization_id = ? AND project_id = ?
+		AND conversation_id = ? ORDER BY created_at DESC LIMIT 1`, actor.OrganizationID, conversation.ProjectID, conversationID))
+	if err != nil {
+		return ConversationMemory{}, err
+	}
+	draft, err := s.GetTaskBriefDraft(ctx, actor, task.ID)
+	if err != nil {
+		return ConversationMemory{}, err
+	}
+	questions := []string{}
+	var questionsJSON []byte
+	var lastMessageID string
+	err = s.DB.QueryRowContext(ctx, `SELECT open_questions, last_message_id FROM strategy_conversation_memories
+		WHERE organization_id = ? AND project_id = ? AND conversation_id = ?`, actor.OrganizationID, conversation.ProjectID, conversationID).
+		Scan(&questionsJSON, &lastMessageID)
+	if err == nil {
+		if json.Unmarshal(questionsJSON, &questions) != nil {
+			return ConversationMemory{}, fmt.Errorf("stored conversation memory is invalid")
+		}
+	} else if err == sql.ErrNoRows {
+		err = s.DB.QueryRowContext(ctx, `SELECT id FROM strategy_messages WHERE organization_id = ? AND project_id = ?
+			AND conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`, actor.OrganizationID, conversation.ProjectID, conversationID).Scan(&lastMessageID)
+		if err != nil {
+			return ConversationMemory{}, err
+		}
+	} else {
+		return ConversationMemory{}, err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ConversationMemory{}, err
+	}
+	defer tx.Rollback()
+	if err := upsertConversationMemory(ctx, tx, conversation, draft, questions, lastMessageID, s.now()); err != nil {
+		return ConversationMemory{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ConversationMemory{}, err
+	}
+	return s.GetConversationMemory(ctx, actor, conversationID)
 }
 
 type Feedback struct {

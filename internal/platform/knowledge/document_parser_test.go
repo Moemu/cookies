@@ -1,6 +1,8 @@
 package knowledge
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +10,40 @@ import (
 	"testing"
 	"time"
 )
+
+func TestTikaMediaExtractorReturnsImagesWithPageMetadata(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		if request.Header.Get("X-Tika-PDFextractInlineImages") != "true" {
+			t.Fatalf("inline image extraction was not enabled")
+		}
+		switch request.URL.Path {
+		case "/rmeta/html":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`[{"X-TIKA:content":"<div class=\"page\">封面</div><div class=\"page\">第二页</div><div class=\"page\">第三页</div><div class=\"page\">黄金复原蜜</div>"},{"resourceName":"image7.png","Content-Type":"image/png","tika_pg:page_number":"4","width":"191","height":"513"}]`))
+		case "/unpack/all":
+			writer.Header().Set("Content-Type", "application/zip")
+			archive := zip.NewWriter(writer)
+			entry, _ := archive.Create("image7.png")
+			_, _ = entry.Write([]byte("png-content"))
+			_ = archive.Close()
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	media, err := (TikaParser{BaseURL: server.URL, HTTPClient: server.Client()}).ExtractMedia(context.Background(), DocumentParseRequest{
+		Filename: "brief.pdf", MIMEType: "application/pdf", Size: 4, Source: bytes.NewReader([]byte("%PDF")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || len(media) != 1 || media[0].Filename != "image7.png" || media[0].PageNumber != 4 || media[0].PageText != "黄金复原蜜" || media[0].Width != 191 || media[0].Height != 513 || string(media[0].Content) != "png-content" {
+		t.Fatalf("unexpected extracted media: %#v", media)
+	}
+}
 
 func TestTikaParserUsesBoundedRecursiveMetadataEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -40,6 +76,55 @@ func TestTikaParserUsesBoundedRecursiveMetadataEndpoint(t *testing.T) {
 	}
 	if parsed.Text != "第一段\n\n第二段" || parsed.ParserCode != "tika" || parsed.ParserVersion != "3.2.3.0" {
 		t.Fatalf("parsed = %#v", parsed)
+	}
+}
+
+func TestTikaParserFailsClosedForUnavailableEmptyAndOversizedResponses(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		maxBytes  int64
+		wantError string
+	}{
+		{name: "provider unavailable", status: http.StatusServiceUnavailable, body: `{"error":"unavailable"}`, maxBytes: 4096, wantError: "returned HTTP 503"},
+		{name: "empty text", status: http.StatusOK, body: `[{"X-TIKA:content":"   ","Content-Type":"application/pdf"}]`, maxBytes: 4096, wantError: "returned no valid text"},
+		{name: "oversized output", status: http.StatusOK, body: strings.Repeat("x", 65), maxBytes: 64, wantError: "exceeded the safety limit"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writer.WriteHeader(test.status)
+				_, _ = writer.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			_, err := (TikaParser{
+				BaseURL: server.URL, Timeout: time.Second, MaxOutputBytes: test.maxBytes,
+			}).Parse(context.Background(), DocumentParseRequest{
+				Filename: "brief.pdf", MIMEType: "application/pdf", Size: 4, Source: strings.NewReader("test"),
+			})
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("Parse() error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestTikaParserTimeoutDoesNotClaimTheDocumentFailedPermanently(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		select {
+		case <-request.Context().Done():
+		case <-time.After(250 * time.Millisecond):
+		}
+	}))
+	defer server.Close()
+	_, err := (TikaParser{
+		BaseURL: server.URL, Timeout: 10 * time.Millisecond, MaxOutputBytes: 4096,
+	}).Parse(context.Background(), DocumentParseRequest{
+		Filename: "brief.pdf", MIMEType: "application/pdf", Size: 4, Source: strings.NewReader("test"),
+	})
+	if err == nil || err.Error() != "Tika parsing timed out" {
+		t.Fatalf("Parse() error = %v", err)
 	}
 }
 

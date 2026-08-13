@@ -262,8 +262,8 @@ func syncEvidenceReferences(
 	mutable bool,
 ) error {
 	deleteQuery := `DELETE FROM strategy_evidence_references
-		WHERE organization_id = ? AND project_id = ? AND target_type = ? AND target_id = ?`
-	args := []any{organizationID, projectID, targetType, targetID}
+		WHERE organization_id = ? AND project_id = ? AND target_type = ? AND target_id = ? AND field_path = ?`
+	args := []any{organizationID, projectID, targetType, targetID, fieldPath}
 	if !mutable {
 		deleteQuery += ` AND target_version = ?`
 		args = append(args, targetVersion)

@@ -126,7 +126,10 @@ func (s Service) insertResearchSource(
 
 	value.StartIndex = source.StartIndex
 	value.EndIndex = source.EndIndex
-	value.SupportLevel = "model_cited"
+	value.SupportLevel = value.VerificationStatus
+	if value.SupportLevel == "" {
+		value.SupportLevel = "model_cited"
+	}
 	value.ProviderLocator = append(json.RawMessage(nil), source.ProviderLocator...)
 	if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO platform_research_citations
 		(organization_id, project_id, research_artifact_id, research_source_id,

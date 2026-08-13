@@ -415,14 +415,20 @@ function formatTime(value: string): string {
 /**
  * 登记一个素材。
  *
- * 创意模块产出的素材会自己流进来，但外部投放的（别处剪的片子、代理商给的图文）
- * 没有那条通路。少了这个入口，平台回流的广告对象就没有任何素材可以认领过去，
- * 花费只能挂在总盘上，后面的内容分析、对比、报告全都无从谈起。
+ * 创意模块产出的素材会自己流进来，但在别处做完直接投出去的（别处剪的片子、代理商
+ * 给的图文）没有那条通路。少了这个入口，平台回流的广告对象就没有任何素材可以认领
+ * 过去，花费只能挂在总盘上，后面的内容分析、对比、报告全都无从谈起。
+ *
+ * 注意跟「外部证据」区分：这里登记的是**真的投出去过**的素材，它进共享素材库、
+ * 参与归因；外部证据是竞品或参照物，只读、有到期日、永远不进素材库。
  *
  * 内容类型可以先不填：填了才知道要提哪套特征，但认不准就先留着「待识别」，
  * 比随便挑一个然后按错的特征表去提取要好。
  */
-function AssetIndexForm({ assets, projectId, busy, onCancel, onDone }: {
+// 导出给「素材 · 总览」用。登记素材是这个模块唯一一处「凭空多出一条素材」的入口，
+// 三个旧页面合并之后它不能跟着旧页面一起消失——没有它，一个新 Project 里
+// 后面每一页都是空的，而人找不到从哪儿开始。
+export function AssetIndexForm({ assets, projectId, busy, onCancel, onDone }: {
   assets: ApiInsightAsset[]
   projectId: string
   busy: boolean
@@ -438,13 +444,19 @@ function AssetIndexForm({ assets, projectId, busy, onCancel, onDone }: {
   const [working, setWorking] = useState(false)
 
   // 同一条创意的多个版本共用一个 lineage_id，列表里只需要露出每条血缘的最新一版。
+  //
+  // 整条都作废了的血缘不出现：给一条已经作废的创意再加一版没有意义，而它留在下拉里
+  // 只会让人误选，选中之后新素材就挂到了一条不该再动的血缘上。版本号仍然按全部修订
+  // 数——包括作废的——来显示，否则会写出「现在第 2 版」而后端实际给出第 4 版。
   const lineages = useMemo(() => {
     const latest = new Map<string, ApiInsightAsset>()
+    const alive = new Set<string>()
     for (const asset of assets) {
       const seen = latest.get(asset.lineage_id)
       if (!seen || asset.revision > seen.revision) latest.set(asset.lineage_id, asset)
+      if (asset.analysis_status !== 'retired') alive.add(asset.lineage_id)
     }
-    return [...latest.values()]
+    return [...latest.values()].filter(asset => alive.has(asset.lineage_id))
   }, [assets])
 
   const submit = async () => {
@@ -475,7 +487,7 @@ function AssetIndexForm({ assets, projectId, busy, onCancel, onDone }: {
 
   return <>
     <span className="section-label">登记一个素材</span>
-    <p>创意模块产出的素材会自己进来。这里登记的是外部素材——别处剪的片子、代理商给的图文，不登记就没法把平台上的广告认到它头上。</p>
+    <p>创意模块批准过的素材走「从创意导入」，一次勾完，不用在这儿一条条打。这里登记的是在别处做完直接投出去的那些——别处剪的片子、代理商给的图文，不登记就没法把平台上的广告认到它头上。（找竞品参照物请走「外部证据」，那边的东西不参与归因。）</p>
     {/* 沿用经验库修订表单的字段写法（.experience-revise）：标签在上、输入框整行。
         右边这一栏窄，标签和输入框并排会把输入框挤到只剩十几个字符宽。 */}
     <div className="experience-revise">

@@ -58,10 +58,10 @@ export function DeliveryMonitoringPage({ tourCase }: { tourCase?: string }) {
   const [simulation, setSimulation] = useState<DeliveryOutcomeSimulation>()
   const [busyId, setBusyId] = useState<string | null>(null)
   const [lastEvaluation, setLastEvaluation] = useState<DeliveryAlertEvaluation | null>(null)
-  const loadGeneration = useRef(0)
+  const loadGenerationRef = useRef(0)
 
   const load = useCallback(async () => {
-    const generation = ++loadGeneration.current
+    const loadGeneration = ++loadGenerationRef.current
     setError(null)
     setForbidden(false)
     try {
@@ -78,14 +78,14 @@ export function DeliveryMonitoringPage({ tourCase }: { tourCase?: string }) {
           if (!(reason instanceof DeliveryApiError && reason.status === 404)) throw reason
         }
       }
-      if (generation !== loadGeneration.current) return
+      if (loadGeneration !== loadGenerationRef.current) return
       setExecutionId(succeededExecution?.execution.id)
       setSimulation(latestSimulation)
       setAlerts(targetPlanId
         ? records.filter(alert => alert.planId === targetPlanId && (!latestSimulation || alert.simulationRunId === latestSimulation.run.id))
         : records)
     } catch (reason) {
-      if (generation !== loadGeneration.current) return
+      if (loadGeneration !== loadGenerationRef.current) return
       const message = reason instanceof Error ? reason.message : '无法读取监控告警。'
       setForbidden(reason instanceof DeliveryApiError && (reason.status === 403 || reason.code === 'PROJECT_ACCESS_DENIED'))
       setError(message)
@@ -93,14 +93,17 @@ export function DeliveryMonitoringPage({ tourCase }: { tourCase?: string }) {
     }
   }, [currentProject.id, targetPlanId])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    void load()
+    return () => { loadGenerationRef.current += 1 }
+  }, [load])
 
   const runSimulation = async () => {
     if (!executionId) {
       setError('当前计划还没有成功的平台操作演练；请先完成首次批准与演练。')
       return
     }
-    ++loadGeneration.current
+    loadGenerationRef.current += 1
     setBusyId('simulation')
     setError(null)
     try {
@@ -116,7 +119,7 @@ export function DeliveryMonitoringPage({ tourCase }: { tourCase?: string }) {
   }
 
   const evaluate = async () => {
-    ++loadGeneration.current
+    loadGenerationRef.current += 1
     setBusyId('evaluate')
     setError(null)
     try {
@@ -134,6 +137,7 @@ export function DeliveryMonitoringPage({ tourCase }: { tourCase?: string }) {
   }
 
   const update = async (alert: DeliveryAlert, action: 'acknowledge' | 'dismiss') => {
+    loadGenerationRef.current += 1
     setBusyId(alert.id)
     setError(null)
     try {

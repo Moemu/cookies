@@ -1,0 +1,12 @@
+{
+  "contract_version": "platform-document-vision-fallback/v1",
+  "document_id": "knowledgedoc_01",
+  "eligible": true,
+  "recommended": true,
+  "available": false,
+  "reason_code": "DOCUMENT_VISION_PROVIDER_DISABLED",
+  "model_alias": "cookies.document.vision.standard",
+  "conversion_required": false,
+  "max_pages_per_request": 24,
+  "requires_page_selection": true
+}

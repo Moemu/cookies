@@ -26,5 +26,21 @@ services:
     ports:
       - "${COOKIES_TIKA_BIND_ADDRESS:-127.0.0.1}:${COOKIES_TIKA_PORT:-9998}:9998"
 
+  gotenberg:
+    image: gotenberg/gotenberg:8.34.0
+    profiles: ["document-vision"]
+    restart: unless-stopped
+    command:
+      - gotenberg
+      - --libreoffice-deny-private-ips=true
+      - --libreoffice-deny-public-ips=true
+    ports:
+      - "${COOKIES_GOTENBERG_BIND_ADDRESS:-127.0.0.1}:${COOKIES_GOTENBERG_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
 volumes:
   mysql-data:
