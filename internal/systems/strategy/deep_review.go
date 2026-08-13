@@ -48,7 +48,7 @@ func (s Service) StartDeepReview(
 		return DeepReviewStartResult{}, false, ErrGenerationUnavailable
 	}
 	inspection, err := s.Text.InspectTextRoute(ctx, actor.OrganizationID, modelAlias)
-	if err != nil || !inspection.Ready || inspection.APIMode != provider.TextAPIResponses || !inspection.Background {
+	if err != nil || !deepReviewRouteReady(inspection) {
 		return DeepReviewStartResult{}, false, ErrGenerationUnavailable
 	}
 	requestHash, _ := contract.CanonicalJSONHash(struct {
@@ -202,7 +202,7 @@ func (s Service) StartStrategyPerspective(
 		return DeepReviewStartResult{}, false, ErrGenerationUnavailable
 	}
 	inspection, err := s.Text.InspectTextRoute(ctx, actor.OrganizationID, modelAlias)
-	if err != nil || !inspection.Ready || inspection.APIMode != provider.TextAPIResponses || !inspection.Background {
+	if err != nil || !deepReviewRouteReady(inspection) {
 		return DeepReviewStartResult{}, false, ErrGenerationUnavailable
 	}
 	requestHash, _ := contract.CanonicalJSONHash(struct {
@@ -295,6 +295,13 @@ func (s Service) StartStrategyPerspective(
 		return DeepReviewStartResult{}, false, err
 	}
 	return result, false, nil
+}
+
+func deepReviewRouteReady(inspection provider.TextRouteInspection) bool {
+	// The cookies AgentTask already runs the review asynchronously. Upstream
+	// Responses implementations may complete synchronously or expose their own
+	// background lifecycle; both transports satisfy the deep-review contract.
+	return inspection.Ready && inspection.APIMode == provider.TextAPIResponses
 }
 
 func (s Service) GetLatestStrategyPerspective(ctx context.Context, actor contract.ActorContext, strategyID string) (DeepReviewAnalysis, error) {
