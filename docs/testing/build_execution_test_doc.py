@@ -413,7 +413,7 @@ def add_cover(doc):
     add_table(
         doc,
         ["版本", "默认演示环境", "更新日期", "执行范围"],
-        [["v2.0", "http://14.103.24.58:8091", "2026-08-12", "Strategy → Brand Video / Image Text"]],
+        [["v2.0", "14.103.24.58:8091（HTTP 测试环境）", "2026-08-12", "Strategy → Brand Video / Image Text"]],
         [1200, 3420, 1500, 3240],
         header_fill=LIGHT_BLUE,
         font_size=9.5,
@@ -555,7 +555,7 @@ def add_preflight(doc):
         doc,
         ["项目", "证据"],
         [
-            ["环境", "http://14.103.24.58:8091；/healthz=ok；/readyz=ready"],
+            ["环境", "14.103.24.58:8091（HTTP 测试环境）；/healthz=ok；/readyz=ready"],
             ["身份", "org_local / user_local；owner；组织、用户、成员均 active"],
             ["Project", "project_local；active；已绑定 Local Brand；Context Version=1"],
             ["权限", "project.read/write、creative.read/write 等服务端 Scope 已授予"],
