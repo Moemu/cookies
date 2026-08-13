@@ -1,0 +1,114 @@
+{
+  "schema_version": "oceanengine-gate-one-replay-plan/v0.1",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "status": "preparation_only",
+  "remote_write_allowed": false,
+  "final_confirmation_allowed": false,
+  "automated_prepare_allowed": false,
+  "automated_submit_allowed": false,
+  "required_server_objects": [
+    "delivery_controlled_change_set",
+    "delivery_remote_write_approval",
+    "delivery_controlled_execution",
+    "computer_use_environment",
+    "computer_use_browser_profile",
+    "computer_use_site_policy"
+  ],
+  "server_resolved_authority": {
+    "request_field": "business_execution_id",
+    "client_authority_json_allowed": false,
+    "required_statuses": {
+      "controlled_change_set": "executing",
+      "controlled_execution": "pending",
+      "browser_profile": "ready"
+    }
+  },
+  "page_identity_requirements": [
+    "https_exact_host_and_path",
+    "required_query_keys",
+    "in_memory_account_match",
+    "allowlisted_platform_project_id",
+    "required_visible_page_facts",
+    "unique_semantic_locators",
+    "safe_exit_visible"
+  ],
+  "takeover_sequence": [
+    {
+      "sequence": 1,
+      "action": "observe_page",
+      "purpose": "reidentify account, page kind, project and current readonly facts"
+    },
+    {
+      "sequence": 2,
+      "action": "begin_form_fill",
+      "purpose": "record the approved unsubmitted form scope before editing"
+    },
+    {
+      "sequence": 3,
+      "action": "field_readback",
+      "purpose": "record approved expected values, actual readback and diff keys"
+    },
+    {
+      "sequence": 4,
+      "action": "discard_draft",
+      "purpose": "record the observed no-write exit from the local form"
+    },
+    {
+      "sequence": 5,
+      "action": "verify_no_write",
+      "purpose": "record readonly second-check facts proving no object or status mutation"
+    }
+  ],
+  "evidence_required_fields": [
+    "expected_version",
+    "lease_id",
+    "fencing_token",
+    "step_id",
+    "sequence",
+    "action",
+    "status",
+    "page_kind",
+    "platform_project_id",
+    "before_page_facts",
+    "after_page_facts",
+    "field_readback",
+    "diff_keys",
+    "page_reference",
+    "selector_version",
+    "action_version"
+  ],
+  "stop_conditions": [
+    "authority_or_hash_drift",
+    "approval_expired",
+    "kill_switch_active",
+    "lease_or_fencing_invalid",
+    "account_mismatch",
+    "project_not_allowlisted",
+    "page_identity_ambiguous",
+    "locator_not_unique",
+    "coordinate_fallback_required",
+    "unexpected_autosave_or_remote_draft",
+    "safe_exit_not_proven",
+    "field_readback_diff",
+    "write_boundary_required"
+  ],
+  "cleanup_sequence": [
+    "return_to_known_readonly_page",
+    "record_verify_no_write",
+    "release_fenced_lease",
+    "cancel_nonterminal_run"
+  ],
+  "forbidden_actions": [
+    "save",
+    "create",
+    "submit",
+    "enable",
+    "pause_remote_object",
+    "restart_remote_object",
+    "modify_remote_object",
+    "delete",
+    "upload",
+    "authorize"
+  ]
+}

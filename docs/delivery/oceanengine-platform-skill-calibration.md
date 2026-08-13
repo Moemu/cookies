@@ -78,6 +78,15 @@ The project-form portion passed items 1–7. The promotion-form portion and
 control-plane evidence recording remain pending, so gate one is `partial`, not
 passed, and the real Browser Driver is still uncalibrated as a complete Skill.
 
+The non-live preparation for a persisted replay is frozen in
+`oceanengine-gate-one-replay-runbook.md` and
+`fixtures/oceanengine-gate-one-replay-plan-v0.1.json`. Promotion locator
+capture uses
+`fixtures/oceanengine-promotion-live-locator-capture-v0.1-template.json`.
+That file is deliberately an empty `template_not_observed` record: it lists
+the stage B fields and selector surfaces to inspect but contains no invented
+DOM locator and is not evidence of calibration.
+
 Agent final-submit behavior must not be added to a `SKILL.md` until the complete
 project → promotion flow has been validated. Even after gate one passes, save,
 final submit, enable, and all other gate-two actions remain disabled until a

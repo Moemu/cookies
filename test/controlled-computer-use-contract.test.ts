@@ -115,6 +115,41 @@ test("live locator baseline has semantic write boundaries and no coordinate fall
   assert.equal(existsSync(join(root, "internal", "systems", "delivery", "platformskills", "SKILL.md")), false);
 });
 
+test("gate-one replay preparation is non-write and uses the exact takeover evidence sequence", () => {
+  const planPath = join(root, "docs", "delivery", "fixtures", "oceanengine-gate-one-replay-plan-v0.1.json");
+  const rawPlan = readFileSync(planPath, "utf8");
+  const plan = JSON.parse(rawPlan) as Record<string, unknown>;
+  assert.equal(plan.status, "preparation_only");
+  assert.equal(plan.remote_write_allowed, false);
+  assert.equal(plan.final_confirmation_allowed, false);
+  assert.equal(plan.automated_prepare_allowed, false);
+  assert.equal(plan.automated_submit_allowed, false);
+  assert.equal((plan.server_resolved_authority as Record<string, unknown>).client_authority_json_allowed, false);
+  assert.deepEqual(
+    (plan.takeover_sequence as Array<Record<string, unknown>>).map((step) => step.action),
+    ["observe_page", "begin_form_fill", "field_readback", "discard_draft", "verify_no_write"],
+  );
+  assert.ok((plan.stop_conditions as string[]).includes("write_boundary_required"));
+  assert.ok((plan.forbidden_actions as string[]).includes("submit"));
+  assert.doesNotMatch(rawPlan, /\b\d{16}\b/);
+});
+
+test("promotion locator capture remains an empty template rather than fabricated evidence", () => {
+  const templatePath = join(root, "docs", "delivery", "fixtures", "oceanengine-promotion-live-locator-capture-v0.1-template.json");
+  const template = readJSON(templatePath);
+  assert.equal(template.status, "template_not_observed");
+  assert.equal(template.evidence, false);
+  assert.equal(template.observed_at, null);
+  assert.equal(template.coordinate_fallback_allowed, false);
+  assert.deepEqual(template.captured_locators, []);
+  assert.deepEqual(template.dynamic_behaviors, []);
+  assert.equal((template.page_identity as Record<string, unknown>).observed, false);
+  assert.equal((template.write_boundary as Record<string, unknown>).action_allowed, false);
+  assert.equal((template.safe_exit as Record<string, unknown>).observed, false);
+  assert.ok((template.fields_to_capture as string[]).includes("promotion_name"));
+  assert.ok((template.selector_surfaces_to_capture as string[]).includes("landing_page_hybrid"));
+});
+
 test("run-time blocks cannot reuse the Phase C compile-time prohibition", () => {
   const schema = readJSON(join(contracts, "platform-computer-use-run-v1.schema.json"));
   const validate = ajv.getSchema(String(schema.$id));

@@ -1,0 +1,101 @@
+{
+  "schema_version": "oceanengine-live-locator-capture/v0.1",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "page_kind": "promotion_create",
+  "status": "template_not_observed",
+  "evidence": false,
+  "observed_at": null,
+  "platform_build": null,
+  "coordinate_fallback_allowed": false,
+  "page_identity": {
+    "https_host": "ad.oceanengine.com",
+    "pathname": null,
+    "required_query_keys": [],
+    "required_visible_facts": [
+      "account_identity",
+      "parent_project_identity",
+      "promotion_form_heading",
+      "safe_exit",
+      "final_write_boundary"
+    ],
+    "observed": false
+  },
+  "locator_acceptance": {
+    "allowed_kinds": [
+      "stable_test_attribute",
+      "role_and_accessible_name",
+      "label",
+      "placeholder",
+      "scoped_semantic_text"
+    ],
+    "forbidden_kinds": [
+      "screen_coordinate",
+      "nth_child",
+      "generated_class_only",
+      "unscoped_duplicate_text"
+    ],
+    "must_be_unique_and_visible": true,
+    "must_record_scope": true,
+    "must_record_dynamic_preconditions": true,
+    "must_record_cancel_behavior": true,
+    "must_record_adjacent_write_actions": true
+  },
+  "fields_to_capture": [
+    "delivery_identity",
+    "aigc_dynamic_creative",
+    "base_material_refs.video",
+    "base_material_refs.image",
+    "base_material_refs.image_text",
+    "copy_items",
+    "landing_page_ref",
+    "direct_link",
+    "backup_link",
+    "product_information.primary_product_name",
+    "product_information.product_image_refs",
+    "product_information.selling_points",
+    "call_to_action",
+    "native_anchor_ref",
+    "creative_component_smart_generation",
+    "promotion_settings.source_label",
+    "promotion_settings.comment_setting",
+    "promotion_settings.category_ref",
+    "promotion_settings.brand_ref",
+    "promotion_name",
+    "safe_exit",
+    "final_write_boundary"
+  ],
+  "selector_surfaces_to_capture": [
+    "authorized_identity_list",
+    "video_asset_library",
+    "image_asset_library",
+    "image_text_asset_library",
+    "copy_library",
+    "category_tree",
+    "brand_search_or_custom",
+    "native_anchor_asset_library",
+    "landing_page_hybrid"
+  ],
+  "captured_locators": [],
+  "dynamic_behaviors": [],
+  "safe_exit": {
+    "locator": null,
+    "cancel_behavior": null,
+    "returns_to_page_kind": null,
+    "no_write_proof": null,
+    "observed": false
+  },
+  "write_boundary": {
+    "locator": null,
+    "label": null,
+    "action_allowed": false,
+    "observed": false
+  },
+  "sensitive_value_policy": {
+    "account_identity": "compare_in_memory_persist_hash_only",
+    "platform_object_ids": "persist_only_allowlisted_reference",
+    "business_names": "redact",
+    "landing_urls": "persist_redacted_reference_only",
+    "screenshots": "not_persisted_by_default"
+  }
+}
