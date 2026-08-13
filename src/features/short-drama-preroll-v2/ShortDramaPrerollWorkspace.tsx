@@ -276,8 +276,9 @@ export function ShortDramaPrerollWorkspace({ onNotice, onOpenEditTask }: { onNot
           setWorkspace(restored)
           dispatch({ type: 'restore', state: restoredState })
           const restoredWorkspace = restored.video_draft.short_drama_preroll_v2
+          const hasPendingBoards = restoredWorkspace.reference_board_batch?.candidates.some(candidate => candidate.provider_job_id && ['queued', 'running'].includes(candidate.status))
           const hasPendingFrames = restoredWorkspace.first_frame_batch?.candidates.some(candidate => candidate.provider_job_id && ['queued', 'running'].includes(candidate.status))
-          if (hasPendingFrames || restoredWorkspace.active_stage === 'video_generating') {
+          if (hasPendingBoards || hasPendingFrames || restoredWorkspace.active_stage === 'video_generating') {
             void resumeWorkspaceJobs(currentProject.id, restored).then(async resumed => {
               if (cancelled) return
               const resumedState = await restoreState(currentProject.id, resumed.detail, source, session)

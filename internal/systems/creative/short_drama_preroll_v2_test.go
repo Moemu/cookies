@@ -323,6 +323,38 @@ func TestShortDramaPrerollV4BuildsReferenceBoardsAndSingleReferenceVideoInput(t 
 	}
 }
 
+func TestShortDramaReferenceBoardUsesBoundedStableRenderJobID(t *testing.T) {
+	t.Parallel()
+
+	writer := &shortDramaV2RenderedImageWriterStub{}
+	service := Service{
+		ImageBaseAssets: shortDramaV2ImageReaderStub{},
+		RenderedImages:  writer,
+	}
+	candidate := ShortDramaReferenceBoardCandidate{
+		ID: "creativetask_65fe0960bd5997fa76be08ce0a02907e_reference_board_batch_5_candidate_1",
+		Asset: &contract.ProjectAssetRef{
+			ProjectID:    "project_1",
+			AssetVersion: contract.AssetVersionRef{AssetID: "provider_board", Version: 1},
+		},
+	}
+	board := ShortDramaBoardCanvas{Width: 1024, Height: 1536}
+	first, err := service.normalizeShortDramaReferenceBoardCandidate(context.Background(), contract.ActorContext{}, "project_1", "task_1", candidate, board)
+	if err != nil {
+		t.Fatalf("normalize reference board: %v", err)
+	}
+	second, err := service.normalizeShortDramaReferenceBoardCandidate(context.Background(), contract.ActorContext{}, "project_1", "task_1", candidate, board)
+	if err != nil {
+		t.Fatalf("normalize reference board again: %v", err)
+	}
+	if len(writer.renderJobIDs) != 2 || writer.renderJobIDs[0] != writer.renderJobIDs[1] || len(writer.renderJobIDs[0]) > 96 {
+		t.Fatalf("render job ids = %#v", writer.renderJobIDs)
+	}
+	if first.ModelReferenceAsset == nil || second.ModelReferenceAsset == nil || first.ModelReferenceAsset.AssetVersion != second.ModelReferenceAsset.AssetVersion {
+		t.Fatalf("normalized assets are not idempotent: first=%#v second=%#v", first.ModelReferenceAsset, second.ModelReferenceAsset)
+	}
+}
+
 func TestShortDramaPrerollV2AnalyzesVideoAndCompilesFourGroundedDirections(t *testing.T) {
 	t.Parallel()
 
@@ -477,9 +509,10 @@ func (shortDramaV2ImageReaderStub) OpenImage(context.Context, contract.ActorCont
 	return io.NopCloser(bytes.NewReader(output.Bytes())), nil
 }
 
-type shortDramaV2RenderedImageWriterStub struct{}
+type shortDramaV2RenderedImageWriterStub struct{ renderJobIDs []string }
 
-func (shortDramaV2RenderedImageWriterStub) IngestRenderedImage(_ context.Context, _ contract.RequestContext, projectID contract.ProjectID, renderJobID string, _ io.Reader, _ int64, _, _ int, _ []contract.AssetVersionRef, _ []contract.ResourceRef) (contract.ProjectAssetRef, error) {
+func (s *shortDramaV2RenderedImageWriterStub) IngestRenderedImage(_ context.Context, _ contract.RequestContext, projectID contract.ProjectID, renderJobID string, _ io.Reader, _ int64, _, _ int, _ []contract.AssetVersionRef, _ []contract.ResourceRef) (contract.ProjectAssetRef, error) {
+	s.renderJobIDs = append(s.renderJobIDs, renderJobID)
 	return contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: contract.AssetVersionRef{AssetID: contract.AssetID("asset_" + renderJobID), Version: 1}}, nil
 }
 
@@ -537,7 +570,7 @@ func createShortDramaV2TestWorkspace(t *testing.T) (Service, string, contract.Re
 	source := contract.AssetVersionRef{AssetID: "asset_wuzetian", Version: 1}
 	service.Assets = testAssetReader{snapshot: CreativeAssetSnapshot{Ref: source, Kind: contract.AssetVideo, MIMEType: "video/mp4", Ready: true, WidthPixels: 1920, HeightPixels: 818, DurationMS: 182417, FrameRate: "30/1", VideoCodec: "h264", AudioCodec: "aac"}}
 	service.ImageBaseAssets = shortDramaV2ImageReaderStub{}
-	service.RenderedImages = shortDramaV2RenderedImageWriterStub{}
+	service.RenderedImages = &shortDramaV2RenderedImageWriterStub{}
 	service.ShortDramaV2OutputNormalizer = shortDramaV2VideoNormalizerStub{}
 	service.RenderedAssets = &testRenderedAssetWriter{ref: contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "generated_preroll_normalized", Version: 1}}}
 	rc := testRequestContext()
