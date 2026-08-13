@@ -379,9 +379,7 @@ func (r MySQLRepository) ListActiveTasksForIntake(ctx context.Context, organizat
 	if r.DB == nil {
 		return nil, fmt.Errorf("creative MySQL database is required")
 	}
-	rows, err := r.DB.QueryContext(ctx, creativeTaskSelect+`
-		WHERE organization_id = ? AND project_id = ? AND intake_id = ? AND status <> ?
-		ORDER BY created_at DESC`, organizationID, projectID, intakeID, TaskArchived)
+	rows, err := r.DB.QueryContext(ctx, creativeTasksByIntakeQuery, organizationID, projectID, intakeID, TaskArchived)
 	if err != nil {
 		return nil, err
 	}
@@ -423,7 +421,7 @@ func (r MySQLRepository) ReplaceEmptyLegacyStrategyBrandTask(
 		return CreativeTask{}, err
 	}
 	defer tx.Rollback()
-	currentTask, err := scanTask(tx.QueryRowContext(ctx, creativeTaskSelect+` WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`, legacy.Task.OrganizationID, legacy.Task.ProjectID, legacy.Task.ID))
+	currentTask, err := scanTask(tx.QueryRowContext(ctx, creativeTaskByIDForUpdateQuery, legacy.Task.OrganizationID, legacy.Task.ProjectID, legacy.Task.ID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return CreativeTask{}, ErrNotFound
 	}
@@ -444,7 +442,7 @@ func (r MySQLRepository) ReplaceEmptyLegacyStrategyBrandTask(
 		return CreativeTask{}, fmt.Errorf("decode legacy creative video draft: %w", err)
 	}
 	if task.LineageKey != "" {
-		existing, existingErr := scanTask(tx.QueryRowContext(ctx, creativeTaskSelect+` WHERE organization_id = ? AND project_id = ? AND lineage_key = ? FOR UPDATE`, task.OrganizationID, task.ProjectID, task.LineageKey))
+		existing, existingErr := scanTask(tx.QueryRowContext(ctx, creativeTaskByLineageForUpdateQuery, task.OrganizationID, task.ProjectID, task.LineageKey))
 		if existingErr == nil {
 			return existing, nil
 		}
@@ -1096,6 +1094,9 @@ const creativeIntakeSelect = `SELECT id, organization_id, project_id, principal_
 	request_payload, missing_fields, warnings, confirmed_by, idempotency_key, request_hash,
 	contract_version, COALESCE(input_identity_hash, ''), version, created_at, updated_at FROM creative_intakes`
 const creativeTaskSelect = `SELECT id, display_name, organization_id, project_id, intake_id, creative_format, channel, COALESCE(video_purpose, ''), COALESCE(performance_mode, ''), COALESCE(lineage_key, ''), status, direction_payload, version, created_at, updated_at FROM creative_tasks`
+const creativeTasksByIntakeQuery = `SELECT id, display_name, organization_id, project_id, intake_id, creative_format, channel, COALESCE(video_purpose, ''), COALESCE(performance_mode, ''), COALESCE(lineage_key, ''), status, direction_payload, version, created_at, updated_at FROM creative_tasks WHERE organization_id = ? AND project_id = ? AND intake_id = ? AND status <> ? ORDER BY created_at DESC`
+const creativeTaskByIDForUpdateQuery = `SELECT id, display_name, organization_id, project_id, intake_id, creative_format, channel, COALESCE(video_purpose, ''), COALESCE(performance_mode, ''), COALESCE(lineage_key, ''), status, direction_payload, version, created_at, updated_at FROM creative_tasks WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`
+const creativeTaskByLineageForUpdateQuery = `SELECT id, display_name, organization_id, project_id, intake_id, creative_format, channel, COALESCE(video_purpose, ''), COALESCE(performance_mode, ''), COALESCE(lineage_key, ''), status, direction_payload, version, created_at, updated_at FROM creative_tasks WHERE organization_id = ? AND project_id = ? AND lineage_key = ? FOR UPDATE`
 const creativeVersionSelect = `SELECT id, organization_id, project_id, task_id, edit_task_id, version, draft_version, status,
 	creative_format, snapshot_payload, video_snapshot_payload, content_hash, created_by, idempotency_key, request_hash, created_at, check_payload, approval_payload FROM creative_versions`
 const creativePackageSelect = `SELECT id, organization_id, project_id, creative_version_id, edit_task_id, creative_format, content_hash, snapshot_payload, video_snapshot_payload, created_by, created_at FROM creative_packages`

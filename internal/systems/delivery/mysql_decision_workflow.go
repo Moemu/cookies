@@ -27,7 +27,7 @@ func (r MySQLRepository) CreateDecision(ctx context.Context, value DeliveryDecis
 	}
 	var mysqlError *mysqlDriver.MySQLError
 	if errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
-		existing, getErr := scanDecision(r.DB.QueryRowContext(ctx, decisionSelect+` WHERE organization_id=? AND project_id=? AND canonical_hash=?`, value.OrganizationID, value.ProjectID, value.CanonicalHash))
+		existing, getErr := scanDecision(r.DB.QueryRowContext(ctx, decisionByCanonicalHashQuery, value.OrganizationID, value.ProjectID, value.CanonicalHash))
 		if getErr == nil {
 			computed, hashErr := existing.ComputeCanonicalHash()
 			if hashErr == nil && computed == value.CanonicalHash {
@@ -40,7 +40,7 @@ func (r MySQLRepository) CreateDecision(ctx context.Context, value DeliveryDecis
 }
 
 func (r MySQLRepository) ListDecisions(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, limit int) ([]DeliveryDecision, error) {
-	rows, err := r.DB.QueryContext(ctx, decisionSelect+` WHERE organization_id=? AND project_id=? ORDER BY created_at DESC,decision_id DESC LIMIT ?`, organizationID, projectID, limit)
+	rows, err := r.DB.QueryContext(ctx, decisionsByProjectQuery, organizationID, projectID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +57,7 @@ func (r MySQLRepository) ListDecisions(ctx context.Context, organizationID contr
 }
 
 func (r MySQLRepository) GetDecision(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (DeliveryDecision, error) {
-	value, err := scanDecision(r.DB.QueryRowContext(ctx, decisionSelect+` WHERE organization_id=? AND project_id=? AND decision_id=?`, organizationID, projectID, id))
+	value, err := scanDecision(r.DB.QueryRowContext(ctx, decisionByIDQuery, organizationID, projectID, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return DeliveryDecision{}, ErrNotFound
 	}
@@ -65,6 +65,9 @@ func (r MySQLRepository) GetDecision(ctx context.Context, organizationID contrac
 }
 
 const decisionSelect = `SELECT decision_json FROM delivery_decisions`
+const decisionByCanonicalHashQuery = `SELECT decision_json FROM delivery_decisions WHERE organization_id=? AND project_id=? AND canonical_hash=?`
+const decisionsByProjectQuery = `SELECT decision_json FROM delivery_decisions WHERE organization_id=? AND project_id=? ORDER BY created_at DESC,decision_id DESC LIMIT ?`
+const decisionByIDQuery = `SELECT decision_json FROM delivery_decisions WHERE organization_id=? AND project_id=? AND decision_id=?`
 
 func scanDecision(row rowScanner) (DeliveryDecision, error) {
 	var payload []byte
@@ -103,7 +106,7 @@ func (r MySQLRepository) CreateDecisionSelection(ctx context.Context, value Deci
 		if existingRequestHash != requestHash {
 			return DecisionSelection{}, false, ErrIdempotencyConflict
 		}
-		existing, getErr := scanDecisionSelection(tx.QueryRowContext(ctx, decisionSelectionSelect+` WHERE organization_id=? AND project_id=? AND idempotency_key=?`, value.OrganizationID, value.ProjectID, idempotencyKey))
+		existing, getErr := scanDecisionSelection(tx.QueryRowContext(ctx, decisionSelectionByIdempotencyKeyQuery, value.OrganizationID, value.ProjectID, idempotencyKey))
 		return existing, true, getErr
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -171,7 +174,7 @@ func (r MySQLRepository) CreateDecisionSelection(ctx context.Context, value Deci
 }
 
 func (r MySQLRepository) GetDecisionSelection(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (DecisionSelection, error) {
-	value, err := scanDecisionSelection(r.DB.QueryRowContext(ctx, decisionSelectionSelect+` WHERE organization_id=? AND project_id=? AND selection_id=?`, organizationID, projectID, id))
+	value, err := scanDecisionSelection(r.DB.QueryRowContext(ctx, decisionSelectionByIDQuery, organizationID, projectID, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return DecisionSelection{}, ErrNotFound
 	}
@@ -179,6 +182,8 @@ func (r MySQLRepository) GetDecisionSelection(ctx context.Context, organizationI
 }
 
 const decisionSelectionSelect = `SELECT selection_json FROM delivery_decision_selections`
+const decisionSelectionByIdempotencyKeyQuery = `SELECT selection_json FROM delivery_decision_selections WHERE organization_id=? AND project_id=? AND idempotency_key=?`
+const decisionSelectionByIDQuery = `SELECT selection_json FROM delivery_decision_selections WHERE organization_id=? AND project_id=? AND selection_id=?`
 
 func scanDecisionSelection(row rowScanner) (DecisionSelection, error) {
 	var payload []byte
