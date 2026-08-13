@@ -356,6 +356,31 @@ func TestAdapterGatewayTextUsesBackgroundResponsesLifecycle(t *testing.T) {
 	}
 }
 
+func TestResponsesEndpointPreservesVersionedProviderBasePath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		baseURL string
+		want    string
+	}{
+		{name: "unversioned", baseURL: "https://api.openai.com", want: "https://api.openai.com/v1/responses"},
+		{name: "v1", baseURL: "https://api.openai.com/v1", want: "https://api.openai.com/v1/responses"},
+		{name: "nested v3", baseURL: "https://ark.cn-beijing.volces.com/api/v3", want: "https://ark.cn-beijing.volces.com/api/v3/responses"},
+		{name: "trailing slash", baseURL: "https://ark.cn-beijing.volces.com/api/v3/", want: "https://ark.cn-beijing.volces.com/api/v3/responses"},
+		{name: "version-like host", baseURL: "https://v3", want: "https://v3/v1/responses"},
+		{name: "non-numeric version", baseURL: "https://gateway.example/api/v3beta", want: "https://gateway.example/api/v3beta/v1/responses"},
+		{name: "signed version", baseURL: "https://gateway.example/api/v+3", want: "https://gateway.example/api/v+3/v1/responses"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := responsesEndpoint(test.baseURL); got != test.want {
+				t.Fatalf("responsesEndpoint(%q) = %q, want %q", test.baseURL, got, test.want)
+			}
+		})
+	}
+}
+
 type textRouteStub struct {
 	snapshot ImageRouteSnapshot
 	err      error

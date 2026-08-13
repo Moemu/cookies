@@ -281,10 +281,24 @@ func responsesStatusError(status string) error {
 
 func responsesEndpoint(baseURL string) string {
 	endpoint := strings.TrimRight(baseURL, "/")
-	if strings.HasSuffix(endpoint, "/v1") {
+	parsed, err := url.Parse(endpoint)
+	if err == nil && hasVersionedAPIPath(parsed.Path) {
 		return endpoint + "/responses"
 	}
 	return endpoint + "/v1/responses"
+}
+
+func hasVersionedAPIPath(path string) bool {
+	lastSegment := path[strings.LastIndexByte(path, '/')+1:]
+	if len(lastSegment) < 2 || lastSegment[0] != 'v' {
+		return false
+	}
+	for _, digit := range lastSegment[1:] {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func appendResponseInstruction(current any, schema json.RawMessage) string {
