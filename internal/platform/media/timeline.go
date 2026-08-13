@@ -77,6 +77,13 @@ type TimelineCaption struct {
 	Emphasis []TimelineCaptionEmphasis
 }
 
+type TimelineOverlay struct {
+	StartMS int
+	EndMS   int
+	Text    string
+	Kind    string
+}
+
 type TimelineCaptionEmphasis struct {
 	StartRune int
 	EndRune   int
@@ -112,12 +119,14 @@ type TimelineRenderRequest struct {
 	Audio          []TimelineAudioClip
 	OriginalAudio  []TimelineOriginalAudioClip
 	Captions       []TimelineCaption
+	Overlays       []TimelineOverlay
 	CaptionStyles  []TimelineCaptionStyle
+	OmitAudio      bool
 }
 
 func (r TimelineRenderRequest) Validate() error {
 	if r.OrganizationID == "" || r.ProjectID == "" || r.DurationMS < 1000 || !validTimelineCanvas(r.Width, r.Height) || r.FrameRate != 30 || r.SampleRate != 48000 || len(r.Video) == 0 && len(r.Visual) == 0 {
-		return fmt.Errorf("timeline scope and Douyin output specification are required")
+		return fmt.Errorf("timeline scope and a supported output specification are required")
 	}
 	if len(r.Visual) > 0 {
 		for index, clip := range r.Visual {
@@ -162,6 +171,11 @@ func (r TimelineRenderRequest) validateAudioAndCaptions() error {
 	for index, caption := range r.Captions {
 		if caption.StartMS < 0 || caption.EndMS <= caption.StartMS || caption.EndMS > r.DurationMS || strings.TrimSpace(caption.Text) == "" || len([]rune(caption.Text)) > 80 {
 			return fmt.Errorf("caption %d is invalid", index+1)
+		}
+	}
+	for index, overlay := range r.Overlays {
+		if overlay.StartMS < 0 || overlay.EndMS <= overlay.StartMS || overlay.EndMS > r.DurationMS || strings.TrimSpace(overlay.Text) == "" || (overlay.Kind != "selling_point" && overlay.Kind != "cta") {
+			return fmt.Errorf("overlay %d is invalid", index+1)
 		}
 	}
 	styleIDs := make(map[string]struct{}, len(r.CaptionStyles))

@@ -92,22 +92,50 @@ type AINativeSpeechUnit struct {
 }
 
 type AINativeProductionPlan struct {
-	ContractVersion           string                   `json:"contract_version"`
-	Revision                  int64                    `json:"revision"`
-	Status                    string                   `json:"status"`
-	BasedOnStoryboardRevision int64                    `json:"based_on_storyboard_revision"`
-	BasedOnStoryboardHash     string                   `json:"based_on_storyboard_hash"`
-	ChannelProfileID          string                   `json:"channel_profile_id"`
-	ChannelProfileHash        string                   `json:"channel_profile_hash"`
-	TotalDurationMS           int                      `json:"total_duration_ms"`
-	AspectRatio               string                   `json:"aspect_ratio"`
-	VideoModelAlias           string                   `json:"video_model_alias"`
-	SpeechModelAlias          string                   `json:"speech_model_alias"`
-	Units                     []AINativeGenerationUnit `json:"units"`
-	SpeechUnits               []AINativeSpeechUnit     `json:"speech_units"`
-	Render                    *AINativeRenderState     `json:"render,omitempty"`
-	CreatedAt                 time.Time                `json:"created_at"`
-	UpdatedAt                 time.Time                `json:"updated_at"`
+	ContractVersion           string                       `json:"contract_version"`
+	Revision                  int64                        `json:"revision"`
+	Status                    string                       `json:"status"`
+	BasedOnStoryboardRevision int64                        `json:"based_on_storyboard_revision"`
+	BasedOnStoryboardHash     string                       `json:"based_on_storyboard_hash"`
+	ChannelProfileID          string                       `json:"channel_profile_id"`
+	ChannelProfileHash        string                       `json:"channel_profile_hash"`
+	OutputPreset              AINativeOutputPresetSnapshot `json:"output_preset,omitempty"`
+	TotalDurationMS           int                          `json:"total_duration_ms"`
+	AspectRatio               string                       `json:"aspect_ratio"`
+	VideoModelAlias           string                       `json:"video_model_alias"`
+	SpeechModelAlias          string                       `json:"speech_model_alias"`
+	Units                     []AINativeGenerationUnit     `json:"units"`
+	SpeechUnits               []AINativeSpeechUnit         `json:"speech_units"`
+	DeliveryTreatment         AINativeDeliveryTreatment    `json:"delivery_treatment,omitempty"`
+	CaptionCues               []AINativeCaptionCue         `json:"caption_cues,omitempty"`
+	SalesOverlayCues          []AINativeSalesOverlayCue    `json:"sales_overlay_cues,omitempty"`
+	AudioCues                 []AINativeAudioCue           `json:"audio_cues,omitempty"`
+	Render                    *AINativeRenderState         `json:"render,omitempty"`
+	CreatedAt                 time.Time                    `json:"created_at"`
+	UpdatedAt                 time.Time                    `json:"updated_at"`
+}
+
+type AINativeCaptionCue struct {
+	ShotID  string `json:"shot_id"`
+	StartMS int    `json:"start_ms"`
+	EndMS   int    `json:"end_ms"`
+	Text    string `json:"text"`
+	Mode    string `json:"mode"`
+}
+type AINativeSalesOverlayCue struct {
+	ShotID  string `json:"shot_id"`
+	StartMS int    `json:"start_ms"`
+	EndMS   int    `json:"end_ms"`
+	Text    string `json:"text"`
+	Kind    string `json:"kind"`
+}
+type AINativeAudioCue struct {
+	ShotID    string                    `json:"shot_id"`
+	StartMS   int                       `json:"start_ms"`
+	EndMS     int                       `json:"end_ms"`
+	Role      string                    `json:"role"`
+	Direction string                    `json:"direction"`
+	AssetRef  *contract.AssetVersionRef `json:"asset_ref,omitempty"`
 }
 
 type AINativeRenderState struct {
@@ -140,6 +168,15 @@ func CompileAINativeProductionPlan(requirement AINativeRequirementDraft, storybo
 	if storyboard.Status != AINativeStoryboardConfirmedStatus || projectID == "" || storyboard.DurationSeconds != requirement.DurationSeconds {
 		return AINativeProductionPlan{}, ErrInvalidState
 	}
+	preset := requirement.OutputPreset
+	if err := preset.Validate(); err != nil && requirement.ContractVersion == aiNativeRequirementContractV1 && requirement.Channel == "douyin" && requirement.AspectRatio == "9:16" {
+		preset = DefaultAINativeOutputPreset()
+		preset.ProfileID, preset.ProfileHash = storyboard.ChannelProfileID, storyboard.ChannelProfileHash
+	}
+	if err := preset.Validate(); err != nil || preset.Channel != requirement.Channel || preset.AspectRatio != requirement.AspectRatio ||
+		storyboard.ChannelProfileID != preset.ProfileID || storyboard.ChannelProfileHash != preset.ProfileHash {
+		return AINativeProductionPlan{}, fmt.Errorf("production inputs do not match the frozen output preset")
+	}
 	assetByID := make(map[string]AINativeStoryboardAsset, len(storyboard.Assets))
 	for _, asset := range storyboard.Assets {
 		if asset.Status != AINativeStoryboardAssetReady || asset.AssetRef == nil || asset.AssetRef.Validate() != nil {
@@ -151,10 +188,12 @@ func CompileAINativeProductionPlan(requirement AINativeRequirementDraft, storybo
 	if err != nil {
 		return AINativeProductionPlan{}, err
 	}
+	treatment := effectiveAINativeDeliveryTreatment(requirement)
 	plan := AINativeProductionPlan{ContractVersion: aiNativeProductionPlanContract, Revision: 1, Status: AINativeProductionPreparedStatus,
 		BasedOnStoryboardRevision: storyboard.Revision, BasedOnStoryboardHash: storyboardHash, ChannelProfileID: storyboard.ChannelProfileID,
-		ChannelProfileHash: storyboard.ChannelProfileHash, TotalDurationMS: requirement.DurationSeconds * 1000, AspectRatio: requirement.AspectRatio,
-		VideoModelAlias: "cookies.video.standard", SpeechModelAlias: "cookies.speech.standard", Units: []AINativeGenerationUnit{}, SpeechUnits: []AINativeSpeechUnit{}, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
+		ChannelProfileHash: storyboard.ChannelProfileHash, OutputPreset: preset, TotalDurationMS: requirement.DurationSeconds * 1000, AspectRatio: preset.AspectRatio,
+		VideoModelAlias: "cookies.video.standard", SpeechModelAlias: "cookies.speech.standard", Units: []AINativeGenerationUnit{}, SpeechUnits: []AINativeSpeechUnit{},
+		DeliveryTreatment: treatment, CaptionCues: []AINativeCaptionCue{}, SalesOverlayCues: []AINativeSalesOverlayCue{}, AudioCues: []AINativeAudioCue{}, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}
 	unitOrder := 0
 	usedNonProductReferences := map[string]struct{}{}
 	for shotIndex, shot := range storyboard.Shots {
@@ -174,7 +213,7 @@ func CompileAINativeProductionPlan(requirement AINativeRequirementDraft, storybo
 			}
 			unitOrder++
 			unit := AINativeGenerationUnit{ID: fmt.Sprintf("video-unit-%02d", unitOrder), Order: unitOrder, ShotIDs: []string{shot.ID}, StartMS: cursor, EndMS: cursor + durationMS,
-				DurationSeconds: providerDuration, Prompt: compileAINativeVideoUnitPrompt(requirement, shot, cursor-shot.StartMS, durationMS), AspectRatio: requirement.AspectRatio, Resolution: "720p",
+				DurationSeconds: providerDuration, Prompt: compileAINativeVideoUnitPrompt(requirement, shot, cursor-shot.StartMS, durationMS, preset), AspectRatio: preset.AspectRatio, Resolution: preset.Resolution,
 				ProductIdentityRequired: shot.ProductIdentityRequired, Attempts: []AINativeGenerationAttempt{}}
 			selectedReferenceID := ""
 			selectedReferencePriority := 0
@@ -232,18 +271,32 @@ func CompileAINativeProductionPlan(requirement AINativeRequirementDraft, storybo
 			plan.Units = append(plan.Units, unit)
 			cursor += durationMS
 		}
-		if strings.TrimSpace(shot.Voiceover) != "" {
+		if treatment.VoiceoverMode == AINativeVoiceoverGenerated && strings.TrimSpace(shot.Voiceover) != "" {
 			plan.SpeechUnits = append(plan.SpeechUnits, AINativeSpeechUnit{ID: fmt.Sprintf("speech-unit-%02d", len(plan.SpeechUnits)+1), Order: len(plan.SpeechUnits) + 1,
-				ShotID: shot.ID, StartMS: shot.StartMS, EndMS: shot.EndMS, Text: strings.TrimSpace(shot.Voiceover), Language: requirement.Language, VoiceAlias: "cookies.voice.douyin.default", WordTimings: []provider.SpeechWordTiming{}, Attempts: []AINativeGenerationAttempt{}})
+				ShotID: shot.ID, StartMS: shot.StartMS, EndMS: shot.EndMS, Text: strings.TrimSpace(shot.Voiceover), Language: requirement.Language, VoiceAlias: "cookies.voice." + preset.Channel + ".default", WordTimings: []provider.SpeechWordTiming{}, Attempts: []AINativeGenerationAttempt{}})
+		}
+		if treatment.CaptionMode != AINativeCaptionNone && strings.TrimSpace(shot.Subtitle) != "" {
+			plan.CaptionCues = append(plan.CaptionCues, AINativeCaptionCue{ShotID: shot.ID, StartMS: shot.StartMS, EndMS: shot.EndMS, Text: strings.TrimSpace(shot.Subtitle), Mode: treatment.CaptionMode})
+		}
+		if treatment.SalesOverlayMode != AINativeSalesOverlayNone {
+			for _, overlay := range shot.SalesOverlays {
+				plan.SalesOverlayCues = append(plan.SalesOverlayCues, AINativeSalesOverlayCue{ShotID: shot.ID, StartMS: overlay.StartMS, EndMS: overlay.EndMS, Text: strings.TrimSpace(overlay.Text), Kind: overlay.Kind})
+			}
+		}
+		if treatment.MusicSFXMode == AINativeMusicSFXAuto {
+			plan.AudioCues = append(plan.AudioCues, AINativeAudioCue{ShotID: shot.ID, StartMS: shot.StartMS, EndMS: shot.EndMS, Role: "sfx", Direction: strings.TrimSpace(shot.SoundEffect)})
+			if shotIndex == 0 {
+				plan.AudioCues = append(plan.AudioCues, AINativeAudioCue{ShotID: shot.ID, StartMS: 0, EndMS: plan.TotalDurationMS, Role: "music", Direction: strings.TrimSpace(shot.BGMDirection)})
+			}
 		}
 		_ = shotIndex
 	}
 	return plan, nil
 }
 
-func compileAINativeVideoUnitPrompt(requirement AINativeRequirementDraft, shot AINativeStoryboardShot, offsetMS, durationMS int) string {
+func compileAINativeVideoUnitPrompt(requirement AINativeRequirementDraft, shot AINativeStoryboardShot, offsetMS, durationMS int, preset AINativeOutputPresetSnapshot) string {
 	return strings.Join([]string{
-		"Create a vertical Douyin performance-ad video segment without audio or embedded text.",
+		fmt.Sprintf("Create a %s performance-ad video segment for %s without audio or embedded text.", preset.AspectRatio, preset.Label),
 		fmt.Sprintf("Product: %s. Preserve the exact product appearance from the reference image.", requirement.ProductName),
 		fmt.Sprintf("Narrative shot %s, source interval offset %dms, target material %dms.", shot.ID, offsetMS, durationMS),
 		"Visual: " + shot.VisualContent,

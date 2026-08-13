@@ -30,6 +30,12 @@ type aiNativeTextGeneratorStub struct {
 
 type aiNativeProductMediaImporterStub struct{ called bool }
 
+type aiNativeProductMediaImporterErrorStub struct{}
+
+func (aiNativeProductMediaImporterErrorStub) ImportProductMedia(context.Context, contract.ActorContext, contract.ProjectID, string, []AINativeRequirementMedia) ([]AINativeRequirementMedia, error) {
+	return nil, errors.New("image source unavailable")
+}
+
 func (s *aiNativeProductMediaImporterStub) ImportProductMedia(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, media []AINativeRequirementMedia) ([]AINativeRequirementMedia, error) {
 	s.called = true
 	result := append([]AINativeRequirementMedia{}, media...)
@@ -37,6 +43,15 @@ func (s *aiNativeProductMediaImporterStub) ImportProductMedia(_ context.Context,
 		result[index].AssetRef = &contract.AssetVersionRef{AssetID: contract.AssetID("asset_product_1"), Version: 1}
 	}
 	return result, nil
+}
+
+func containsText(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 type aiNativeOperationCancellerStub struct {
@@ -230,11 +245,165 @@ func TestAnalyzeAINativeRequirementAppliesP0Defaults(t *testing.T) {
 	if !resolver.called || workspace.WorkspaceID != "ainativeworkspace_1" || draft.Channel != "douyin" || draft.AspectRatio != "9:16" || draft.DurationSeconds != 20 || draft.Language != "zh-CN" {
 		t.Fatalf("P0 defaults were not applied: %#v", workspace)
 	}
+	if draft.ContractVersion != aiNativeRequirementContractV2 || draft.OutputPreset.ID != AINativeOutputPresetDouyinFeed9x16V1 || draft.OutputPreset.AspectRatio != "9:16" {
+		t.Fatalf("output preset defaults were not frozen: %#v", draft.OutputPreset)
+	}
+	if draft.DeliveryTreatment != DefaultAINativeDeliveryTreatment() {
+		t.Fatalf("delivery treatment defaults were not frozen: %#v", draft.DeliveryTreatment)
+	}
 	if draft.Generation.Mode != "deterministic_fallback" || len(draft.TargetAudiences) != 3 || len(draft.CoreSellingPoints) != 3 || len(draft.Media) != 1 || !importer.called || draft.Media[0].AssetRef == nil {
 		t.Fatalf("unexpected deterministic draft: %#v", draft)
 	}
 	if err := draft.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAINativeRequirementV2DraftMayBeIncompleteUntilConfirmation(t *testing.T) {
+	draft := AINativeRequirementDraft{
+		ContractVersion: aiNativeRequirementContractV2,
+		Revision:        1,
+		Status:          AINativeRequirementDraftStatus,
+		Product: AINativeProductSnapshot{
+			Source: "taobao", ProductID: "123456789", SourceURL: "https://item.taobao.com/item.htm?id=123456789",
+			Price: AINativeProductPrice{Currency: "CNY", DisplayUnconfirmed: true},
+		},
+		ProductResolution: AINativeProductResolution{
+			Status: AINativeProductResolutionManualRequired, Source: "taobao", ResourceType: AINativeProductResourceProduct,
+			ExternalID: "123456789", SourceURL: "https://item.taobao.com/item.htm?id=123456789", MissingFields: []string{"product_name", "images"},
+		},
+		OutputPreset:      DefaultAINativeOutputPreset(),
+		DeliveryTreatment: DefaultAINativeDeliveryTreatment(),
+		Channel:           "douyin", AspectRatio: "9:16", DurationSeconds: 20, Language: "zh-CN",
+		Generation: AINativeGenerationMetadata{Mode: "deterministic_fallback", ModelAlias: "fixture.deterministic", ModelVersion: "partial-v1", PromptVersion: aiNativeRequirementPromptVersion},
+	}
+
+	if err := draft.ValidateStructure(); err != nil {
+		t.Fatalf("incomplete v2 draft should be structurally valid: %v", err)
+	}
+	issues := draft.ValidateForConfirmation()
+	fields := map[string]bool{}
+	for _, issue := range issues {
+		fields[issue.Field] = true
+	}
+	for _, field := range []string{"product_name", "media", "core_selling_points", "target_audiences"} {
+		if !fields[field] {
+			t.Fatalf("confirmation issue for %s is missing: %#v", field, issues)
+		}
+	}
+}
+
+func TestAINativeDeliveryPresetRejectsContradictoryTreatment(t *testing.T) {
+	treatment := DefaultAINativeDeliveryTreatment()
+	treatment.VoiceoverMode = AINativeVoiceoverNone
+	treatment.CaptionMode = AINativeCaptionEditorial
+	if err := treatment.Validate(); err == nil {
+		t.Fatal("full_ad preset should not accept a no-voiceover treatment")
+	}
+	treatment.Preset = AINativeDeliveryPresetCustom
+	if err := treatment.Validate(); err != nil {
+		t.Fatalf("the same advanced combination should be valid as custom: %v", err)
+	}
+}
+
+func TestAINativeDeliveryPresetCatalogMapsTheThreeProductChoices(t *testing.T) {
+	cases := []struct {
+		preset, voiceover, caption, overlay, audio string
+	}{
+		{AINativeDeliveryPresetFullAd, AINativeVoiceoverGenerated, AINativeCaptionFromVoiceover, AINativeSalesOverlayKeyPoints, AINativeMusicSFXAuto},
+		{AINativeDeliveryPresetNoVoiceover, AINativeVoiceoverNone, AINativeCaptionEditorial, AINativeSalesOverlayKeyPoints, AINativeMusicSFXAuto},
+		{AINativeDeliveryPresetCleanMaterial, AINativeVoiceoverNone, AINativeCaptionNone, AINativeSalesOverlayNone, AINativeMusicSFXNone},
+	}
+	for _, tc := range cases {
+		got, err := AINativeDeliveryTreatmentForPreset(tc.preset)
+		if err != nil {
+			t.Fatalf("preset %s: %v", tc.preset, err)
+		}
+		if got.VoiceoverMode != tc.voiceover || got.CaptionMode != tc.caption || got.SalesOverlayMode != tc.overlay || got.MusicSFXMode != tc.audio {
+			t.Fatalf("preset %s = %#v", tc.preset, got)
+		}
+	}
+}
+
+func TestLegacyAINativeRequirementV1RemainsStructurallyValid(t *testing.T) {
+	draft := AINativeRequirementDraft{
+		ContractVersion: aiNativeRequirementContractV1, Revision: 1, Status: AINativeRequirementDraftStatus,
+		Product: testAINativeProduct(), ProductName: testAINativeProduct().Name, ProductDescription: "legacy description",
+		TargetAudiences:   []AINativeEditableText{{ID: "audience_1", Text: "通勤人群"}},
+		Media:             []AINativeRequirementMedia{{ID: "media_1", URL: testAINativeProduct().Images[0].URL, Role: "main", Source: "douyin_mall", AssetRef: &contract.AssetVersionRef{AssetID: "asset_1", Version: 1}}},
+		CoreSellingPoints: []AINativeEditableText{{ID: "selling_point_1", Text: "便携随行"}},
+		Channel:           "douyin", AspectRatio: "9:16", DurationSeconds: 20, Language: "zh-CN",
+		Generation: AINativeGenerationMetadata{Mode: "deterministic_fallback", ModelAlias: "fixture.deterministic", ModelVersion: "legacy-v1", PromptVersion: aiNativeRequirementPromptVersion},
+	}
+
+	if err := draft.ValidateStructure(); err != nil {
+		t.Fatalf("legacy v1 requirement should remain readable: %v", err)
+	}
+}
+
+func TestUpdatingLegacyAINativeRequirementWritesV2Defaults(t *testing.T) {
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
+	product := testAINativeProduct()
+	assetRef := &contract.AssetVersionRef{AssetID: "asset_product_1", Version: 1}
+	draft := AINativeRequirementDraft{
+		ContractVersion: aiNativeRequirementContractV1, Revision: 1, Status: AINativeRequirementDraftStatus,
+		Product: product, ProductName: product.Name, ProductDescription: "legacy description",
+		TargetAudiences:   []AINativeEditableText{{ID: "audience_1", Text: "通勤人群"}},
+		Media:             []AINativeRequirementMedia{{ID: "media_1", URL: product.Images[0].URL, Role: "main", Source: product.Source, AssetRef: assetRef}},
+		CoreSellingPoints: []AINativeEditableText{{ID: "selling_point_1", Text: "便携随行"}},
+		Channel:           "douyin", AspectRatio: "9:16", DurationSeconds: 20, Language: "zh-CN",
+		Generation: AINativeGenerationMetadata{Mode: "deterministic_fallback", ModelAlias: "fixture.deterministic", ModelVersion: "legacy-v1", PromptVersion: aiNativeRequirementPromptVersion},
+	}
+	repository := &memoryAINativeRequirementRepository{workspace: AINativeRequirementWorkspace{
+		WorkspaceID: "workspace_1", CreativeIntakeID: "intake_1", CreativeTaskID: "task_1", OrganizationID: "org_1", ProjectID: "project_1",
+		Status: AINativeRequirementDraftStatus, CurrentStage: AINativeStageRequirement, WorkspaceVersion: 1, CurrentRevision: 1,
+		Requirement: draft, CreatedBy: "user_1", CreatedAt: now, UpdatedAt: now,
+	}, revisions: map[int64]AINativeRequirementDraft{1: draft}, statuses: map[int64]string{1: AINativeRequirementDraftStatus}}
+	service := Service{Projects: testProjects{}, AINativeRequirements: repository, Now: func() time.Time { return now.Add(time.Minute) }}
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeWrite}}
+
+	updated, err := service.UpdateAINativeRequirement(context.Background(), actor, "project_1", "workspace_1", UpdateAINativeRequirementRequest{
+		ExpectedRevision: 1, ProductName: draft.ProductName, ProductDescription: draft.ProductDescription,
+		TargetAudiences: draft.TargetAudiences, Media: draft.Media, CoreSellingPoints: draft.CoreSellingPoints,
+		AspectRatio: "9:16", DurationSeconds: 20, Language: "zh-CN",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Requirement.ContractVersion != aiNativeRequirementContractV2 || updated.Requirement.OutputPreset.ID != AINativeOutputPresetDouyinFeed9x16V1 {
+		t.Fatalf("legacy update was not upgraded to v2: %#v", updated.Requirement)
+	}
+	if updated.Requirement.DeliveryTreatment != DefaultAINativeDeliveryTreatment() || updated.Requirement.ProductResolution.Source != product.Source {
+		t.Fatalf("v2 defaults were not populated during upgrade: %#v", updated.Requirement)
+	}
+}
+
+func TestUpdatingRequirementRejectsUploadedAssetOutsideProjectImageAuthority(t *testing.T) {
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
+	product := testAINativeProduct()
+	draft := AINativeRequirementDraft{
+		ContractVersion: aiNativeRequirementContractV2, Revision: 1, Status: AINativeRequirementDraftStatus,
+		Product: product, ProductResolution: AINativeProductResolution{Status: AINativeProductResolutionManualRequired, Source: product.Source, ResourceType: AINativeProductResourceProduct, ExternalID: product.ProductID, SourceURL: product.SourceURL, MissingFields: []string{"images"}},
+		ProductName: product.Name, ProductDescription: product.Name,
+		TargetAudiences: []AINativeEditableText{{ID: "audience_1", Text: "通勤人群"}}, CoreSellingPoints: []AINativeEditableText{{ID: "selling_point_1", Text: "便携随行"}},
+		Channel: "douyin", AspectRatio: "9:16", DurationSeconds: 20, Language: "zh-CN", OutputPreset: DefaultAINativeOutputPreset(), DeliveryTreatment: DefaultAINativeDeliveryTreatment(),
+		Generation: AINativeGenerationMetadata{Mode: "deterministic_fallback", ModelAlias: "fixture.deterministic", ModelVersion: "partial-v1", PromptVersion: aiNativeRequirementPromptVersion},
+	}
+	repository := &memoryAINativeRequirementRepository{workspace: AINativeRequirementWorkspace{
+		WorkspaceID: "workspace_1", OrganizationID: "org_1", ProjectID: "project_1", Status: AINativeRequirementDraftStatus, CurrentStage: AINativeStageRequirement,
+		WorkspaceVersion: 1, CurrentRevision: 1, Requirement: draft, CreatedBy: "user_1", CreatedAt: now, UpdatedAt: now,
+	}, revisions: map[int64]AINativeRequirementDraft{1: draft}, statuses: map[int64]string{1: AINativeRequirementDraftStatus}}
+	service := Service{Projects: testProjects{}, AINativeRequirements: repository, Assets: testAssetReader{snapshots: map[contract.AssetID]CreativeAssetSnapshot{}}}
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeWrite}}
+
+	_, err := service.UpdateAINativeRequirement(context.Background(), actor, "project_1", "workspace_1", UpdateAINativeRequirementRequest{
+		ExpectedRevision: 1, ProductName: product.Name, ProductDescription: product.Name,
+		TargetAudiences: draft.TargetAudiences, CoreSellingPoints: draft.CoreSellingPoints,
+		Media:       []AINativeRequirementMedia{{ID: "media_upload", URL: "https://assets.cookies.local/asset_missing/1", Role: "main", Source: "user_upload", AssetRef: &contract.AssetVersionRef{AssetID: "asset_missing", Version: 1}}},
+		AspectRatio: "9:16", DurationSeconds: 20, Language: "zh-CN",
+	})
+	if !errors.Is(err, ErrInvalidAINativeRequirement) {
+		t.Fatalf("unreadable uploaded asset must be rejected, got %v", err)
 	}
 }
 
@@ -252,13 +421,102 @@ func TestResolveAINativeProductPreviewDoesNotCreateWorkspace(t *testing.T) {
 	}
 }
 
-func TestAnalyzeAINativeRequirementRejectsDisabledChannelBeforeResolve(t *testing.T) {
+func TestResolveAINativeProductPreviewAcceptsManualRequiredProduct(t *testing.T) {
+	product := AINativeProductSnapshot{
+		Source: "taobao", ProductID: "123456789", Name: "", SourceURL: "https://item.taobao.com/item.htm?id=123456789",
+		ResolutionStatus: AINativeProductResolutionManualRequired, ResourceType: AINativeProductResourceProduct,
+		MissingFields: []string{"product_name", "images", "core_selling_points"},
+		Price:         AINativeProductPrice{Currency: "CNY", DisplayUnconfirmed: true},
+	}
+	service := Service{Projects: testProjects{}, AINativeProducts: &aiNativeProductResolverStub{product: product}}
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeRead}}
+
+	preview, err := service.ResolveAINativeProductPreview(context.Background(), actor, "project_1", ResolveAINativeProductPreviewRequest{ProductLink: product.SourceURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Status != AINativeProductResolutionManualRequired || preview.Source != "taobao" || preview.ProductID != "123456789" || len(preview.MissingFields) != 3 {
+		t.Fatalf("unexpected partial preview: %#v", preview)
+	}
+}
+
+func TestAnalyzeAINativeRequirementKeepsDraftWhenAutomaticImageImportFails(t *testing.T) {
+	product := testAINativeProduct()
+	product.ResolutionStatus = AINativeProductResolutionPartial
+	product.ResourceType = AINativeProductResourceProduct
+	product.MissingFields = []string{"description", "core_selling_points"}
+	repository := &memoryAINativeRequirementRepository{}
+	service := Service{
+		Projects: testProjects{}, AINativeProducts: &aiNativeProductResolverStub{product: product},
+		AINativeRequirementPlanner: DeterministicAINativeRequirementPlanner{}, AINativeRequirements: repository,
+		AINativeProductMediaImporter: aiNativeProductMediaImporterErrorStub{},
+		NewID:                        func(prefix string) (string, error) { return prefix + "_1", nil },
+	}
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeWrite}}
+
+	workspace, err := service.AnalyzeAINativeRequirement(context.Background(), actor, "project_1", AnalyzeAINativeRequirementRequest{ProductLink: product.SourceURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.Requirement.ProductResolution.Status != AINativeProductResolutionManualRequired || len(workspace.Requirement.Media) != 0 || !containsText(workspace.Requirement.ProductResolution.MissingFields, "images") {
+		t.Fatalf("failed image import should become manual upload state: %#v", workspace.Requirement)
+	}
+}
+
+func TestAnalyzeAINativeRequirementPersistsIncompleteCommerceDraft(t *testing.T) {
+	product := AINativeProductSnapshot{
+		Source: "taobao", ProductID: "123456789", SourceURL: "https://item.taobao.com/item.htm?id=123456789",
+		ResolutionStatus: AINativeProductResolutionManualRequired, ResourceType: AINativeProductResourceProduct,
+		MissingFields: []string{"product_name", "images", "description", "core_selling_points"},
+		Price:         AINativeProductPrice{Currency: "CNY", DisplayUnconfirmed: true},
+	}
+	service := Service{
+		Projects: testProjects{}, AINativeProducts: &aiNativeProductResolverStub{product: product},
+		AINativeRequirementPlanner: DeterministicAINativeRequirementPlanner{}, AINativeRequirements: &memoryAINativeRequirementRepository{},
+		NewID: func(prefix string) (string, error) { return prefix + "_1", nil },
+	}
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeWrite}}
+
+	workspace, err := service.AnalyzeAINativeRequirement(context.Background(), actor, "project_1", AnalyzeAINativeRequirementRequest{ProductLink: product.SourceURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := workspace.Requirement.ProductResolution.MissingFields
+	if workspace.Requirement.ProductResolution.Status != AINativeProductResolutionManualRequired || len(missing) != 4 {
+		t.Fatalf("incomplete link must remain an editable, de-duplicated draft: %#v", workspace.Requirement.ProductResolution)
+	}
+	if issues := workspace.Requirement.ValidateForConfirmation(); len(issues) != 4 {
+		t.Fatalf("confirmation must report all user-fillable blockers, got %#v", issues)
+	}
+}
+
+func TestAnalyzeAINativeRequirementRejectsChannelThatConflictsWithPresetBeforeResolve(t *testing.T) {
 	resolver := &aiNativeProductResolverStub{product: testAINativeProduct()}
 	service := Service{Projects: testProjects{}, AINativeProducts: resolver, AINativeRequirementPlanner: DeterministicAINativeRequirementPlanner{}, AINativeRequirements: &memoryAINativeRequirementRepository{}}
 	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeWrite}}
 	_, err := service.AnalyzeAINativeRequirement(context.Background(), actor, "project_1", AnalyzeAINativeRequirementRequest{ProductLink: "https://v.douyin.com/example/", Channel: "kuaishou"})
 	if err == nil || resolver.called {
-		t.Fatalf("disabled channel should fail before product resolution, err=%v called=%v", err, resolver.called)
+		t.Fatalf("conflicting channel and default preset should fail before product resolution, err=%v called=%v", err, resolver.called)
+	}
+}
+
+func TestAnalyzeAINativeRequirementAcceptsSupportedCreationSurface(t *testing.T) {
+	resolver := &aiNativeProductResolverStub{product: testAINativeProduct()}
+	service := Service{
+		Projects: testProjects{}, AINativeProducts: resolver,
+		AINativeRequirementPlanner: DeterministicAINativeRequirementPlanner{}, AINativeRequirements: &memoryAINativeRequirementRepository{},
+		NewID: func(prefix string) (string, error) { return prefix + "_surface", nil },
+	}
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeWrite}}
+
+	workspace, err := service.AnalyzeAINativeRequirement(context.Background(), actor, "project_1", AnalyzeAINativeRequirementRequest{
+		ProductLink: testAINativeProduct().SourceURL, OutputPresetID: "kuaishou_feed_9x16_v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolver.called || workspace.Requirement.Channel != "kuaishou" || workspace.Requirement.AspectRatio != "9:16" || workspace.Requirement.OutputPreset.ID != "kuaishou_feed_9x16_v1" {
+		t.Fatalf("supported creation surface was not frozen into the requirement: called=%v requirement=%#v", resolver.called, workspace.Requirement)
 	}
 }
 
@@ -313,6 +571,37 @@ func TestAINativeRequirementRevisionAndConfirmationStateMachine(t *testing.T) {
 	}
 }
 
+func TestConfirmAINativeRequirementRejectsIncompleteDraftBeforeRepositoryMutation(t *testing.T) {
+	now := time.Date(2026, 8, 13, 9, 0, 0, 0, time.UTC)
+	draft := AINativeRequirementDraft{
+		ContractVersion: aiNativeRequirementContractV2, Revision: 1, Status: AINativeRequirementDraftStatus,
+		Product:           AINativeProductSnapshot{Source: "taobao", ProductID: "123", SourceURL: "https://item.taobao.com/item.htm?id=123", Price: AINativeProductPrice{Currency: "CNY", DisplayUnconfirmed: true}},
+		ProductResolution: AINativeProductResolution{Status: AINativeProductResolutionManualRequired, Source: "taobao", ResourceType: AINativeProductResourceProduct, ExternalID: "123", SourceURL: "https://item.taobao.com/item.htm?id=123"},
+		OutputPreset:      DefaultAINativeOutputPreset(), DeliveryTreatment: DefaultAINativeDeliveryTreatment(),
+		Channel: "douyin", AspectRatio: "9:16", DurationSeconds: 20, Language: "zh-CN",
+		Generation: AINativeGenerationMetadata{Mode: "deterministic_fallback", ModelAlias: "fixture.deterministic", ModelVersion: "partial-v1", PromptVersion: aiNativeRequirementPromptVersion},
+	}
+	repository := &memoryAINativeRequirementRepository{workspace: AINativeRequirementWorkspace{
+		WorkspaceID: "workspace_1", CreativeIntakeID: "intake_1", CreativeTaskID: "task_1", OrganizationID: "org_1", ProjectID: "project_1",
+		Status: AINativeRequirementDraftStatus, CurrentStage: AINativeStageRequirement, WorkspaceVersion: 1, CurrentRevision: 1,
+		Requirement: draft, CreatedBy: "user_1", CreatedAt: now, UpdatedAt: now,
+	}}
+	service := Service{Projects: testProjects{}, AINativeRequirements: repository, Now: func() time.Time { return now }}
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeWrite}}
+
+	_, err := service.ConfirmAINativeRequirement(context.Background(), actor, "project_1", "workspace_1", ConfirmAINativeRequirementRequest{ExpectedRevision: 1})
+	if !errors.Is(err, ErrInvalidAINativeRequirement) {
+		t.Fatalf("incomplete requirement should fail confirmation, got %v", err)
+	}
+	var confirmationErr AINativeRequirementConfirmationError
+	if !errors.As(err, &confirmationErr) || len(confirmationErr.Issues) != 4 {
+		t.Fatalf("confirmation error should expose four field issues, got %#v", err)
+	}
+	if repository.workspace.Status != AINativeRequirementDraftStatus || repository.workspace.ConfirmedRevision != nil {
+		t.Fatalf("repository was mutated despite failed confirmation: %#v", repository.workspace)
+	}
+}
+
 func TestAINativeWorkspaceCreatesAggregateIdentityAndReopensConfirmedRequirement(t *testing.T) {
 	repository := &memoryAINativeRequirementRepository{}
 	canceller := &aiNativeOperationCancellerStub{}
@@ -320,9 +609,9 @@ func TestAINativeWorkspaceCreatesAggregateIdentityAndReopensConfirmedRequirement
 	service := Service{
 		Projects: testProjects{}, AINativeProducts: &aiNativeProductResolverStub{product: testAINativeProduct()},
 		AINativeRequirementPlanner: DeterministicAINativeRequirementPlanner{}, AINativeRequirements: repository,
-		AINativeOperationCanceller: canceller,
-		NewID:                      func(string) (string, error) { value := ids[0]; ids = ids[1:]; return value, nil },
-		Now:                        func() time.Time { return time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC) },
+		AINativeProductMediaImporter: &aiNativeProductMediaImporterStub{}, AINativeOperationCanceller: canceller,
+		NewID: func(string) (string, error) { value := ids[0]; ids = ids[1:]; return value, nil },
+		Now:   func() time.Time { return time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC) },
 	}
 	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{ScopeRead, ScopeWrite}}
 	created, err := service.AnalyzeAINativeRequirement(context.Background(), actor, "project_1", AnalyzeAINativeRequirementRequest{ProductLink: "https://v.douyin.com/example/"})

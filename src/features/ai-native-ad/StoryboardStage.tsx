@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Image, LoaderCircle, Maximize2, RefreshCw, X } from 'lucide-react'
 import { getAssetPreview } from './api'
 import { StageEmpty, StageLoading } from './ScriptStage'
-import type { AINativeStageStatus, StoryboardAsset, StoryboardDraft } from './types'
+import type { AINativeDeliveryTreatment, AINativeStageStatus, StoryboardAsset, StoryboardDraft } from './types'
 
 const assetGroupLabels: Record<StoryboardAsset['role'], string> = {
   person_identity: '人物图片',
@@ -28,9 +28,10 @@ type StoryboardStageProps = {
   suggestedFeedback?: string
   onRegenerateAsset: (assetId: string, feedback: string) => void
   onReplaceSourceAsset: (assetId: string) => void
+  deliveryTreatment?: AINativeDeliveryTreatment
 }
 
-export function StoryboardStage({ projectId, status, storyboard, canGenerate, error, onChange, onSave, onConfirm, onEdit, onRetry, focusAssetId = '', suggestedFeedback = '', onRegenerateAsset, onReplaceSourceAsset }: StoryboardStageProps) {
+export function StoryboardStage({ projectId, status, storyboard, canGenerate, error, onChange, onSave, onConfirm, onEdit, onRetry, focusAssetId = '', suggestedFeedback = '', onRegenerateAsset, onReplaceSourceAsset, deliveryTreatment }: StoryboardStageProps) {
   const locked = status === 'confirmed'
   const editable = status === 'draft'
   const [previews, setPreviews] = useState<Record<string, string>>({})
@@ -125,10 +126,11 @@ export function StoryboardStage({ projectId, status, storyboard, canGenerate, er
       <label>景别<textarea disabled={!editable} value={shot.shot_size} onChange={event => updateShot(index, { shot_size: event.target.value })}/></label>
       <label>运镜<textarea disabled={!editable} value={shot.camera_movement} onChange={event => updateShot(index, { camera_movement: event.target.value })}/></label>
       <label className="wide">参考图片<input disabled={!editable} value={shot.reference_asset_ids.join('、')} onChange={event => updateShot(index, { reference_asset_ids: event.target.value.split('、').map(value => value.trim()).filter(Boolean) })}/></label>
-      <label>旁白<textarea disabled={!editable} value={shot.voiceover} onChange={event => updateShot(index, { voiceover: event.target.value })}/></label>
-      <label>字幕<textarea disabled={!editable} value={shot.subtitle} onChange={event => updateShot(index, { subtitle: event.target.value })}/></label>
-      <label>音效<textarea disabled={!editable} value={shot.sound_effect} onChange={event => updateShot(index, { sound_effect: event.target.value })}/></label>
-      <label>BGM<textarea disabled={!editable} value={shot.bgm_direction} onChange={event => updateShot(index, { bgm_direction: event.target.value })}/></label>
+      <label>旁白<textarea disabled={!editable || deliveryTreatment?.voiceover_mode === 'none'} value={shot.voiceover} placeholder={deliveryTreatment?.voiceover_mode === 'none' ? '本次交付不生成旁白' : ''} onChange={event => updateShot(index, { voiceover: event.target.value })}/></label>
+      <label>字幕<textarea disabled={!editable || deliveryTreatment?.caption_mode === 'none'} value={shot.subtitle} placeholder={deliveryTreatment?.caption_mode === 'none' ? '本次交付不烧录字幕' : ''} onChange={event => updateShot(index, { subtitle: event.target.value })}/></label>
+      <label className="wide">卖点叠字<textarea disabled={!editable || deliveryTreatment?.sales_overlay_mode === 'none'} value={(shot.sales_overlays ?? []).map(item => item.text).join('、')} placeholder={deliveryTreatment?.sales_overlay_mode === 'none' ? '本次交付不烧录卖点文字' : '卖点短句，用顿号分隔'} onChange={event => { const values = event.target.value.split('、').map(value => value.trim()).filter(Boolean); updateShot(index, { sales_overlays: values.map((text, overlayIndex) => { const start = shot.start_ms + Math.min(overlayIndex * 800, Math.max(0, shot.duration_ms - 800)); return { text, start_ms: start, end_ms: Math.min(shot.end_ms, start + Math.min(2200, shot.duration_ms)), kind: shot.id === storyboard.shots.at(-1)?.id ? 'cta' : 'selling_point' } }) }) }}/></label>
+      <label>音效<textarea disabled={!editable || deliveryTreatment?.music_sfx_mode === 'none'} value={shot.sound_effect} placeholder={deliveryTreatment?.music_sfx_mode === 'none' ? '本次交付不使用音效' : ''} onChange={event => updateShot(index, { sound_effect: event.target.value })}/></label>
+      <label>BGM<textarea disabled={!editable || deliveryTreatment?.music_sfx_mode === 'none'} value={shot.bgm_direction} placeholder={deliveryTreatment?.music_sfx_mode === 'none' ? '本次交付不使用 BGM' : ''} onChange={event => updateShot(index, { bgm_direction: event.target.value })}/></label>
       <label className="wide">转场<textarea disabled={!editable} value={shot.transition} onChange={event => updateShot(index, { transition: event.target.value })}/></label>
     </div></article>)}</div>
     <footer className="ai-native-actions">{locked ? <span className="confirmed-note">故事板已确认并冻结</span> : status === 'failed' ? <button className="primary-button" disabled={!canGenerate} onClick={onRetry}><RefreshCw size={14}/>仅重试失败素材</button> : status === 'generating' ? <span className="confirmed-note">素材生成中，完成后可编辑分镜</span> : <><button className="secondary-button" onClick={onSave}>保存故事板</button><button className="primary-button" onClick={onConfirm}>确认并一键成片</button></>}</footer>

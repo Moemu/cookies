@@ -121,3 +121,78 @@ func TestAINativeStoryboardMySQLReopenMovesProductionBackToEditableStoryboard(t 
 		t.Fatalf("reopened workspace retained stale downstream errors: %#v", reopened)
 	}
 }
+
+func TestAINativeStoryboardMySQLCompletionAdvancesPastInvalidatedHistory(t *testing.T) {
+	dsn := os.Getenv("COOKIES_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("COOKIES_TEST_MYSQL_DSN is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.PingContext(ctx); err != nil {
+		t.Fatalf("ping MySQL: %v", err)
+	}
+
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
+	organizationID := contract.OrganizationID("org_ai_finalize_" + suffix)
+	projectID := contract.ProjectID("project_ai_finalize_" + suffix)
+	userID := "user_ai_finalize_" + suffix
+	workspaceID := "workspace_ai_finalize_" + suffix
+	actor := contract.ActorContext{OrganizationID: organizationID, Principal: contract.Principal{Kind: contract.PrincipalUser, ID: userID}, Scopes: []contract.Scope{"project.read", "project.write", ScopeRead, ScopeWrite}}
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), "DELETE FROM creative_ai_native_storyboard_revisions WHERE organization_id=?", organizationID)
+		_, _ = db.ExecContext(context.Background(), "DELETE FROM creative_ai_native_script_revisions WHERE organization_id=?", organizationID)
+		_, _ = db.ExecContext(context.Background(), "DELETE FROM creative_ai_native_requirement_revisions WHERE organization_id=?", organizationID)
+		_, _ = db.ExecContext(context.Background(), "DELETE FROM creative_ai_native_requirement_workspaces WHERE organization_id=?", organizationID)
+		cleanupImageTextIntegration(t, db, organizationID, userID)
+	})
+	if err := (identity.MySQLStore{DB: db}).EnsureLocalActor(ctx, actor); err != nil {
+		t.Fatalf("seed actor: %v", err)
+	}
+	if err := (project.MySQLStore{DB: db}).EnsureLocalProject(ctx, actor, projectID); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+
+	requirement := validAINativeWorkspaceRequirement()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	repository := MySQLRepository{DB: db}
+	workspace := AINativeRequirementWorkspace{WorkspaceID: workspaceID, DisplayName: "finalize history test", CreativeIntakeID: "intake_" + suffix, CreativeTaskID: "task_" + suffix,
+		OrganizationID: organizationID, ProjectID: projectID, Status: AINativeRequirementDraftStatus, CurrentStage: AINativeStageRequirement,
+		WorkspaceVersion: 1, CurrentRevision: 1, Requirement: requirement, CreatedBy: userID, CreatedAt: now, UpdatedAt: now}
+	if _, err := repository.CreateAINativeRequirementWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	storyboard := validAINativeStoryboard()
+	payload, _ := json.Marshal(storyboard)
+	metadata, _ := json.Marshal(storyboard.Generation)
+	const hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if _, err := db.ExecContext(ctx, `INSERT INTO creative_ai_native_storyboard_revisions
+		(organization_id, project_id, workspace_id, revision, status, content_payload, content_hash, based_on_requirement_revision,
+		 based_on_requirement_hash, based_on_script_revision, based_on_script_hash, channel_profile_id, channel_profile_hash,
+		 generation_metadata, created_by, superseded_at, created_at)
+		VALUES (?, ?, ?, 1, 'superseded', ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+		organizationID, projectID, workspaceID, payload, hash, storyboard.BasedOnRequirementHash, storyboard.BasedOnScriptHash,
+		storyboard.ChannelProfileID, storyboard.ChannelProfileHash, metadata, userID, now, now); err != nil {
+		t.Fatal(err)
+	}
+	operation := AINativeStoryboardOperation{ID: "operation_" + suffix, Version: 1, WorkspaceID: workspaceID}
+	if _, err := db.ExecContext(ctx, `UPDATE creative_ai_native_requirement_workspaces SET storyboard_status='generating', storyboard_plan_payload=?,
+		active_operation_id=?, active_operation_version=1, current_storyboard_revision=NULL WHERE organization_id=? AND project_id=? AND workspace_id=?`,
+		payload, operation.ID, organizationID, projectID, workspaceID); err != nil {
+		t.Fatal(err)
+	}
+
+	completed, err := repository.CompleteAINativeStoryboardGeneration(ctx, organizationID, projectID, workspaceID, operation, storyboard, userID, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("complete after invalidated history: %v", err)
+	}
+	if completed.StoryboardStatus != AINativeStoryboardDraftStatus || completed.CurrentStoryboardRevision == nil || *completed.CurrentStoryboardRevision != 2 || completed.ActiveOperationID != "" {
+		t.Fatalf("completion did not advance past historical revision: %#v", completed)
+	}
+}

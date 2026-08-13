@@ -1,10 +1,16 @@
-import type { AdScriptDraft, AINativeAdWorkspaceSummary, AINativeProductPreview, AINativeReopenImpact, AINativeRequirement, AINativeRequirementWorkspace, AINativeStageId, StoryboardDraft, VoiceoverFitSuggestion } from './types'
+import type { AdScriptDraft, AINativeAdWorkspaceSummary, AINativeOutputPreset, AINativeProductPreview, AINativeReopenImpact, AINativeRequirement, AINativeRequirementWorkspace, AINativeStageId, StoryboardDraft, VoiceoverFitSuggestion } from './types'
+import { ProjectAssetUploadError, uploadProjectAssetFile } from '../../data/projectAssetUpload'
 
 const viteEnv = (import.meta as unknown as { env?: { VITE_API_BASE_URL?: string } }).env
 const backendOrigin = viteEnv?.VITE_API_BASE_URL ?? ''
 
 export class AINativeApiError extends Error {
-  constructor(message: string, readonly status: number, readonly code = '') {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code = '',
+    readonly details: Array<{ field: string; reason: string }> = [],
+  ) {
     super(message)
     this.name = 'AINativeApiError'
   }
@@ -29,16 +35,16 @@ async function request<T>(path: string, method = 'GET', body?: unknown, timeoutM
     if (timeout !== undefined) clearTimeout(timeout)
   }
   const responseText = await response.text()
-  let payload: T | { error?: { message?: string; code?: string; request_id?: string } }
+  let payload: T | { error?: { message?: string; code?: string; request_id?: string; details?: Array<{ field: string; reason: string }> } }
   try {
-    payload = responseText ? JSON.parse(responseText) as T | { error?: { message?: string; code?: string; request_id?: string } } : {}
+    payload = responseText ? JSON.parse(responseText) as T | { error?: { message?: string; code?: string; request_id?: string; details?: Array<{ field: string; reason: string }> } } : {}
   } catch {
     throw new AINativeApiError(`AI 效果广告接口返回了无法解析的响应（HTTP ${response.status}）`, response.status)
   }
   if (!response.ok) {
-    const error = payload as { error?: { message?: string; code?: string; request_id?: string } }
+    const error = payload as { error?: { message?: string; code?: string; request_id?: string; details?: Array<{ field: string; reason: string }> } }
     const requestId = error.error?.request_id ? `（request_id: ${error.error.request_id}）` : ''
-    throw new AINativeApiError(`${error.error?.message ?? `AI 效果广告接口请求失败（HTTP ${response.status}）`}${requestId}`, response.status, error.error?.code)
+    throw new AINativeApiError(`${error.error?.message ?? `AI 效果广告接口请求失败（HTTP ${response.status}）`}${requestId}`, response.status, error.error?.code, error.error?.details ?? [])
   }
   return payload as T
 }
@@ -47,14 +53,30 @@ export function analyzeRequirement(projectId: string, productLink: string, suppl
   return request<AINativeRequirementWorkspace>(
     `/projects/${encodeURIComponent(projectId)}/ai-native-ads/requirements:analyze`,
     'POST',
-    {
-      product_link: productLink,
-      supplemental_requirement: supplementalRequirement,
-      channel: 'douyin',
-      aspect_ratio: '9:16',
-      duration_seconds: 20,
-      language: 'zh-CN',
+    buildAnalyzeRequirementRequest(productLink, supplementalRequirement),
+  )
+}
+
+export function buildAnalyzeRequirementRequest(productLink: string, supplementalRequirement: string) {
+  return {
+    product_link: productLink,
+    supplemental_requirement: supplementalRequirement,
+    duration_seconds: 20,
+    language: 'zh-CN',
+    output_preset_id: 'douyin_feed_9x16_v1',
+    delivery_treatment: {
+      preset: 'full_ad',
+      voiceover_mode: 'generated',
+      caption_mode: 'from_voiceover',
+      sales_overlay_mode: 'key_points',
+      music_sfx_mode: 'auto',
     },
+  }
+}
+
+export function listOutputPresets(projectId: string) {
+  return request<AINativeOutputPreset[]>(
+    `/projects/${encodeURIComponent(projectId)}/ai-native-ads/output-presets`,
   )
 }
 
@@ -110,9 +132,10 @@ export function updateRequirement(projectId: string, workspaceId: string, requir
       media: requirement.media,
       core_selling_points: requirement.core_selling_points,
       supplemental_requirement: requirement.supplemental_requirement,
-      aspect_ratio: requirement.aspect_ratio,
       duration_seconds: requirement.duration_seconds,
       language: requirement.language,
+      ...(requirement.output_preset ? { output_preset_id: requirement.output_preset.id } : {}),
+      ...(requirement.delivery_treatment ? { delivery_treatment: requirement.delivery_treatment } : {}),
     },
   )
 }
@@ -242,4 +265,19 @@ export async function getAssetPreview(projectId: string, ref: { asset_id: string
   if (!response.ok) throw new AINativeApiError('项目素材预览读取失败。', response.status)
   const value = await response.json() as { url: string }
   return value.url.startsWith('/') ? `${backendOrigin}${value.url}` : value.url
+}
+
+export async function uploadRequirementProductImage(projectId: string, file: File) {
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    throw new AINativeApiError('仅支持 JPG、PNG 或 WebP 商品图片。', 400, 'PRODUCT_IMAGE_TYPE_UNSUPPORTED')
+  }
+  if (file.size <= 0 || file.size > 20 * 1024 * 1024) {
+    throw new AINativeApiError('商品图片大小必须在 20MB 以内。', 400, 'PRODUCT_IMAGE_SIZE_INVALID')
+  }
+  try {
+    return await uploadProjectAssetFile(backendOrigin, projectId, file, 'ai-native-product')
+  } catch (cause) {
+    if (cause instanceof ProjectAssetUploadError) throw new AINativeApiError(cause.message, cause.status)
+    throw cause
+  }
 }

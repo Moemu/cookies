@@ -14,10 +14,45 @@ servers:
 security:
   - cookiesAuth: []
 paths:
+  /api/creative/v1/projects/{project_id}/ai-native-ads/output-presets:
+    get:
+      operationId: listAINativeAdOutputPresets
+      summary: List only output presets whose channel profile and provider route are verified.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      responses:
+        '200':
+          description: Available immutable placement and aspect-ratio presets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/AINativeOutputPreset'}
+  /api/creative/v1/projects/{project_id}/ai-native-ads/products:resolve:
+    post:
+      operationId: resolveAINativeAdProductPreview
+      summary: Recognize a Douyin, Taobao, Tmall, Xiaohongshu, or 1688 product link without requiring complete product details.
+      parameters: [{$ref: '#/components/parameters/ProjectID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [product_link]
+              properties:
+                product_link: {type: string, minLength: 1, maxLength: 65536}
+      responses:
+        '200':
+          description: Platform and external identity were recognized; missing product facts are explicit.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AINativeProductPreview'}
+        '422': {description: The input is incomplete, unsupported, or does not contain a product/content identity.}
   /api/creative/v1/projects/{project_id}/ai-native-ads/requirements:analyze:
     post:
       operationId: analyzeAINativeAdRequirement
-      summary: Resolve a Douyin Mall product link and produce one editable AI-native-ad requirement draft.
+      summary: Resolve a supported commerce link and produce one editable AI-native-ad requirement draft.
       parameters: [{$ref: '#/components/parameters/ProjectID'}]
       requestBody:
         required: true
@@ -28,12 +63,12 @@ paths:
               additionalProperties: false
               required: [product_link, supplemental_requirement]
               properties:
-                product_link: {type: string, minLength: 1, maxLength: 16384}
+                product_link: {type: string, minLength: 1, maxLength: 65536}
                 supplemental_requirement: {type: string, maxLength: 2000}
-                channel: {type: string, enum: [douyin], default: douyin}
-                aspect_ratio: {type: string, enum: ['9:16'], default: '9:16'}
                 duration_seconds: {type: integer, minimum: 15, maximum: 30, default: 20}
                 language: {type: string, enum: [zh-CN], default: zh-CN}
+                output_preset_id: {type: string, enum: [douyin_feed_9x16_v1], default: douyin_feed_9x16_v1}
+                delivery_treatment: {$ref: '#/components/schemas/AINativeDeliveryTreatment'}
       responses:
         '200':
           description: Editable requirement-analysis draft; price and incomplete product facts remain explicitly unconfirmed.
@@ -82,7 +117,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [expected_revision, product_name, product_description, target_audiences, media, core_selling_points, supplemental_requirement, aspect_ratio, duration_seconds, language]
+              required: [expected_revision, product_name, product_description, target_audiences, media, core_selling_points, supplemental_requirement, output_preset_id, duration_seconds, language]
               properties:
                 expected_revision: {type: integer, minimum: 1}
                 product_name: {type: string, minLength: 1}
@@ -91,9 +126,10 @@ paths:
                 media: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/AINativeRequirementMedia'}}
                 core_selling_points: {type: array, minItems: 1, maxItems: 20, items: {$ref: '#/components/schemas/AINativeEditableText'}}
                 supplemental_requirement: {type: string, maxLength: 2000}
-                aspect_ratio: {const: '9:16'}
                 duration_seconds: {type: integer, minimum: 15, maximum: 30}
                 language: {const: zh-CN}
+                output_preset_id: {type: string, enum: [douyin_feed_9x16_v1]}
+                delivery_treatment: {$ref: '#/components/schemas/AINativeDeliveryTreatment'}
       responses:
         '200':
           description: Workspace pointing to the newly appended revision.
@@ -124,6 +160,8 @@ paths:
           content:
             application/json:
               schema: {$ref: '../contracts/creative-ai-native-requirement-workspace-v1.schema.json'}
+        '400':
+          description: Required product name, product image, selling point, or target audience is missing; the error details identify each incomplete field.
         '409': {$ref: '#/components/responses/Conflict'}
   /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}/reopen-impact:
     get:
@@ -1677,6 +1715,18 @@ components:
       in: query
       schema: {type: integer, minimum: 1, maximum: 100, default: 50}
   schemas:
+    AINativeProductPreview:
+      type: object
+      additionalProperties: false
+      required: [product_id, product_name, source, source_url, status, resource_type, missing_fields]
+      properties:
+        product_id: {type: string, minLength: 1}
+        product_name: {type: string}
+        source: {enum: [douyin_mall, taobao, tmall, xiaohongshu, '1688']}
+        source_url: {type: string, format: uri}
+        status: {enum: [recognized, partial, manual_required]}
+        resource_type: {enum: [product, note]}
+        missing_fields: {type: array, uniqueItems: true, items: {type: string, minLength: 1}}
     ProductionRunPage:
       $ref: '../contracts/creative-production-center-v1.schema.json#/$defs/ProductionRunPage'
     ProductionRunDetail:
@@ -1777,6 +1827,51 @@ components:
           properties:
             asset_id: {type: string, minLength: 1}
             version: {type: integer, minimum: 1}
+    AINativeOutputPreset:
+      type: object
+      additionalProperties: false
+      required: [id, label, channel, placement, aspect_ratio, width, height, resolution, profile_id, profile_version, profile_hash, safe_zone, status]
+      properties:
+        id: {type: string, minLength: 1}
+        label: {type: string, minLength: 1}
+        channel: {type: string, minLength: 1}
+        placement: {type: string, minLength: 1}
+        aspect_ratio: {type: string, minLength: 1}
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+        resolution: {type: string, minLength: 1}
+        profile_id: {type: string, minLength: 1}
+        profile_version: {type: string, minLength: 1}
+        profile_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        safe_zone:
+          type: object
+          additionalProperties: false
+          required: [top, right, bottom, left]
+          properties:
+            top: {type: integer, minimum: 0}
+            right: {type: integer, minimum: 0}
+            bottom: {type: integer, minimum: 0}
+            left: {type: integer, minimum: 0}
+        status: {const: available}
+    AINativeDeliveryTreatment:
+      type: object
+      additionalProperties: false
+      required: [preset, voiceover_mode, caption_mode, sales_overlay_mode, music_sfx_mode]
+      properties:
+        preset: {enum: [full_ad, no_voiceover, clean_material, custom]}
+        voiceover_mode: {enum: [generated, none]}
+        caption_mode: {enum: [from_voiceover, editorial, none]}
+        sales_overlay_mode: {enum: [key_points, minimal, none]}
+        music_sfx_mode: {enum: [auto, none]}
+      allOf:
+        - if: {properties: {caption_mode: {const: from_voiceover}}, required: [caption_mode]}
+          then: {properties: {voiceover_mode: {const: generated}}}
+        - if: {properties: {preset: {const: full_ad}}, required: [preset]}
+          then: {properties: {voiceover_mode: {const: generated}, caption_mode: {const: from_voiceover}, sales_overlay_mode: {const: key_points}, music_sfx_mode: {const: auto}}}
+        - if: {properties: {preset: {const: no_voiceover}}, required: [preset]}
+          then: {properties: {voiceover_mode: {const: none}, caption_mode: {const: editorial}, sales_overlay_mode: {const: key_points}, music_sfx_mode: {const: auto}}}
+        - if: {properties: {preset: {const: clean_material}}, required: [preset]}
+          then: {properties: {voiceover_mode: {const: none}, caption_mode: {const: none}, sales_overlay_mode: {const: none}, music_sfx_mode: {const: none}}}
     CreativeIntakeCreateV4:
       $ref: '../contracts/creative-intake-create-v4.schema.json'
     CreativeIntakeV4:

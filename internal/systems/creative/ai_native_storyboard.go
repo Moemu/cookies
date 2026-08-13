@@ -51,21 +51,29 @@ type AINativeStoryboardAsset struct {
 }
 
 type AINativeStoryboardShot struct {
-	ID                      string   `json:"id"`
-	StartMS                 int      `json:"start_ms"`
-	EndMS                   int      `json:"end_ms"`
-	DurationMS              int      `json:"duration_ms"`
-	VisualContent           string   `json:"visual_content"`
-	SubjectsProductsActions string   `json:"subjects_products_actions"`
-	ShotSize                string   `json:"shot_size"`
-	CameraMovement          string   `json:"camera_movement"`
-	ReferenceAssetIDs       []string `json:"reference_asset_ids"`
-	Voiceover               string   `json:"voiceover"`
-	Subtitle                string   `json:"subtitle"`
-	SoundEffect             string   `json:"sound_effect"`
-	BGMDirection            string   `json:"bgm_direction"`
-	Transition              string   `json:"transition"`
-	ProductIdentityRequired bool     `json:"product_identity_required"`
+	ID                      string                 `json:"id"`
+	StartMS                 int                    `json:"start_ms"`
+	EndMS                   int                    `json:"end_ms"`
+	DurationMS              int                    `json:"duration_ms"`
+	VisualContent           string                 `json:"visual_content"`
+	SubjectsProductsActions string                 `json:"subjects_products_actions"`
+	ShotSize                string                 `json:"shot_size"`
+	CameraMovement          string                 `json:"camera_movement"`
+	ReferenceAssetIDs       []string               `json:"reference_asset_ids"`
+	Voiceover               string                 `json:"voiceover"`
+	Subtitle                string                 `json:"subtitle"`
+	SalesOverlays           []AINativeSalesOverlay `json:"sales_overlays"`
+	SoundEffect             string                 `json:"sound_effect"`
+	BGMDirection            string                 `json:"bgm_direction"`
+	Transition              string                 `json:"transition"`
+	ProductIdentityRequired bool                   `json:"product_identity_required"`
+}
+
+type AINativeSalesOverlay struct {
+	Text    string `json:"text"`
+	StartMS int    `json:"start_ms"`
+	EndMS   int    `json:"end_ms"`
+	Kind    string `json:"kind"`
 }
 
 type AINativeStoryboardGenerationMetadata struct {
@@ -125,7 +133,7 @@ func (s AINativeStoryboardRevision) ValidatePlanAgainst(requirement AINativeRequ
 		s.DurationSeconds != requirement.DurationSeconds || s.BasedOnRequirementRevision != requirement.Revision ||
 		s.BasedOnScriptRevision != script.Revision || len(s.BasedOnRequirementHash) != 64 || len(s.BasedOnScriptHash) != 64 ||
 		strings.TrimSpace(s.ChannelProfileID) == "" || len(s.ChannelProfileHash) != 64 ||
-		s.Generation.PromptVersion != aiNativeStoryboardPromptVersion || s.Generation.ProfileHash != s.ChannelProfileHash ||
+		strings.TrimSpace(s.Generation.PromptVersion) == "" || s.Generation.ProfileHash != s.ChannelProfileHash ||
 		strings.TrimSpace(s.Generation.ModelAlias) == "" || strings.TrimSpace(s.Generation.ModelVersion) == "" || len(s.Assets) == 0 || len(s.Shots) == 0 {
 		return fmt.Errorf("AI native storyboard is invalid")
 	}
@@ -147,13 +155,13 @@ func (s AINativeStoryboardRevision) ValidatePlanAgainst(requirement AINativeRequ
 	if !roles[AINativeStoryboardAssetRoleProductIdentity] || !roles[AINativeStoryboardAssetRolePersonIdentity] || !roles[AINativeStoryboardAssetRoleSceneReference] {
 		return fmt.Errorf("AI native storyboard must include product, person and scene reference assets")
 	}
+	treatment := effectiveAINativeDeliveryTreatment(requirement)
 	lastEnd := 0
 	for index, shot := range s.Shots {
 		if strings.TrimSpace(shot.ID) == "" || shot.StartMS != lastEnd || shot.EndMS <= shot.StartMS || shot.DurationMS != shot.EndMS-shot.StartMS ||
 			strings.TrimSpace(shot.VisualContent) == "" || strings.TrimSpace(shot.SubjectsProductsActions) == "" ||
 			strings.TrimSpace(shot.ShotSize) == "" || strings.TrimSpace(shot.CameraMovement) == "" ||
-			strings.TrimSpace(shot.Voiceover) == "" || strings.TrimSpace(shot.Subtitle) == "" ||
-			strings.TrimSpace(shot.SoundEffect) == "" || strings.TrimSpace(shot.BGMDirection) == "" || strings.TrimSpace(shot.Transition) == "" {
+			!validAINativeStoryboardDeliveryFields(shot, treatment) || strings.TrimSpace(shot.Transition) == "" {
 			return fmt.Errorf("AI native storyboard shot %d is incomplete or timeline is not contiguous", index)
 		}
 		hasProductIdentity := false
@@ -175,6 +183,27 @@ func (s AINativeStoryboardRevision) ValidatePlanAgainst(requirement AINativeRequ
 		return fmt.Errorf("AI native storyboard timeline must close at target duration")
 	}
 	return nil
+}
+
+func validAINativeStoryboardDeliveryFields(shot AINativeStoryboardShot, treatment AINativeDeliveryTreatment) bool {
+	if treatment.VoiceoverMode == AINativeVoiceoverGenerated && strings.TrimSpace(shot.Voiceover) == "" || treatment.VoiceoverMode == AINativeVoiceoverNone && strings.TrimSpace(shot.Voiceover) != "" {
+		return false
+	}
+	if treatment.CaptionMode != AINativeCaptionNone && strings.TrimSpace(shot.Subtitle) == "" || treatment.CaptionMode == AINativeCaptionNone && strings.TrimSpace(shot.Subtitle) != "" {
+		return false
+	}
+	if treatment.MusicSFXMode == AINativeMusicSFXAuto && (strings.TrimSpace(shot.SoundEffect) == "" || strings.TrimSpace(shot.BGMDirection) == "") || treatment.MusicSFXMode == AINativeMusicSFXNone && (strings.TrimSpace(shot.SoundEffect) != "" || strings.TrimSpace(shot.BGMDirection) != "") {
+		return false
+	}
+	if treatment.SalesOverlayMode == AINativeSalesOverlayNone && len(shot.SalesOverlays) > 0 {
+		return false
+	}
+	for _, overlay := range shot.SalesOverlays {
+		if strings.TrimSpace(overlay.Text) == "" || overlay.StartMS < shot.StartMS || overlay.EndMS <= overlay.StartMS || overlay.EndMS > shot.EndMS || (overlay.Kind != "selling_point" && overlay.Kind != "cta") {
+			return false
+		}
+	}
+	return true
 }
 
 func (s AINativeStoryboardRevision) ValidateReadyAgainst(requirement AINativeRequirementDraft, script AINativeScriptRevision) error {

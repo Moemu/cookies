@@ -147,10 +147,14 @@ func main() {
 		Projects: projectService, Assets: creativeAssetReader{uploads: uploadService}, AssetUses: assets.AssetUsePolicy{Rights: assetRepository},
 		AudioAssets:        creativeAudioAssetWriter{uploads: uploadService},
 		CommerceWorkspaces: creativeRepository, BrandBriefs: creativeRepository, Directions: creativeRepository,
-		AINativeProducts:             creativeProductResolver{resolver: productsource.NewDouyinResolver()},
-		AINativeRequirements:         creativeRepository,
-		AINativeScripts:              creativeRepository,
-		AINativeScriptProfiles:       creative.NewChannelCreativeProfileRegistry(),
+		AINativeProducts:       creativeProductResolver{resolver: productsource.NewResolver()},
+		AINativeRequirements:   creativeRepository,
+		AINativeScripts:        creativeRepository,
+		AINativeScriptProfiles: creative.NewChannelCreativeProfileRegistry(),
+		AINativeOutputPresets: func() *creative.OutputPresetRegistry {
+			value := creative.NewOutputPresetRegistry(creative.NewChannelCreativeProfileRegistry())
+			return &value
+		}(),
 		AINativeProductMediaImporter: creativeProductMediaImporter{uploads: uploadService},
 	}
 	productionRetryAdapters := []creative.ProductionRetryAdapter{
@@ -246,7 +250,7 @@ func main() {
 				Text:       &provider.Service{TextAdapter: textAdapter},
 				ModelAlias: cfg.Creative.GamePrerollPlannerModelAlias,
 			},
-			Fallback: creative.DeterministicGamePrerollPlanner{},
+			Fallback: creative.GenericGamePrerollPlanner{},
 			OnPrimaryFailure: func(err error) {
 				log.Printf("Creative game-preroll model planning fell back to deterministic planning: %v", err)
 			},
@@ -256,7 +260,7 @@ func main() {
 			cfg.Creative.GamePrerollPlannerModelAlias,
 		)
 	} else {
-		creativeService.GamePrerollPlanner = creative.DeterministicGamePrerollPlanner{}
+		creativeService.GamePrerollPlanner = creative.GenericGamePrerollPlanner{}
 	}
 	if cfg.Creative.BrandFilmModelPlannerEnabled {
 		textAdapter, textAdapterErr := buildTextAdapter(cfg, db)
@@ -315,6 +319,11 @@ func main() {
 			log.Fatalf("configure commerce preroll V2 analyzer: %v", commerceAnalyzerErr)
 		}
 		creativeService.CommercePrerollV2Analyzer = commerceAnalyzer
+		gameAnalyzer, gameAnalyzerErr := creativeprovider.NewGamePrerollV2Analyzer(analysisConfig)
+		if gameAnalyzerErr != nil {
+			log.Fatalf("configure game preroll V2 analyzer: %v", gameAnalyzerErr)
+		}
+		creativeService.GamePrerollV2Analyzer = gameAnalyzer
 		log.Printf("Creative viral analysis configured: model_alias=%s prompt_version=%s asr=%s", "cookies.text.standard", "viral.analyze.v1", cfg.Provider.VolcengineASR.ResourceID)
 	}
 	runtimeStore := jobruntime.MySQLStore{DB: db}
@@ -1068,7 +1077,7 @@ func (a miyunMediaEvidenceAdapter) ReadLatestMiyunMediaEvidence(ctx context.Cont
 
 type creativeAssetReader struct{ uploads *assets.UploadService }
 
-type creativeProductResolver struct{ resolver productsource.DouyinResolver }
+type creativeProductResolver struct{ resolver productsource.Resolver }
 
 func (r creativeProductResolver) Resolve(ctx context.Context, input string) (creative.AINativeProductSnapshot, error) {
 	value, err := r.resolver.Resolve(ctx, input)
@@ -1094,7 +1103,8 @@ func (r creativeProductResolver) Resolve(ctx context.Context, input string) (cre
 			MinRaw: value.Price.MinRaw, MaxRaw: value.Price.MaxRaw, Currency: value.Price.Currency,
 			DisplayUnconfirmed: value.Price.DisplayUnconfirmed,
 		},
-		Sales: value.Sales, SourceURL: value.SourceURL,
+		Sales: value.Sales, SourceURL: value.SourceURL, ResolutionStatus: value.ResolutionStatus,
+		ResourceType: value.ResourceType, MissingFields: append([]string{}, value.MissingFields...),
 	}, nil
 }
 

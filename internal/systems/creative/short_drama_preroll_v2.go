@@ -119,16 +119,70 @@ type ShortDramaV2DirectionBatch struct {
 }
 
 type ShortDramaV2PromptDraft struct {
-	Revision           int64  `json:"revision"`
-	DirectionID        string `json:"direction_id"`
-	DurationSeconds    int    `json:"duration_seconds"`
-	ImagePrompt        string `json:"image_prompt"`
-	VideoDescription   string `json:"video_description"`
-	VideoPrompt        string `json:"video_prompt"`
-	BaseVideoPrompt    string `json:"base_video_prompt,omitempty"`
-	SelectedVariantKey string `json:"selected_variant_key,omitempty"`
-	CompilerVersion    string `json:"compiler_version"`
-	ContentHash        string `json:"content_hash"`
+	Revision           int64                         `json:"revision"`
+	DirectionID        string                        `json:"direction_id"`
+	DurationSeconds    int                           `json:"duration_seconds"`
+	ImagePrompt        string                        `json:"image_prompt"`
+	VideoDescription   string                        `json:"video_description"`
+	VideoPrompt        string                        `json:"video_prompt"`
+	BaseVideoPrompt    string                        `json:"base_video_prompt,omitempty"`
+	SelectedVariantKey string                        `json:"selected_variant_key,omitempty"`
+	CompilerVersion    string                        `json:"compiler_version"`
+	ContentHash        string                        `json:"content_hash"`
+	VibeIntent         *ShortDramaVibeIntent         `json:"vibe_intent,omitempty"`
+	ReferenceBoardPlan *ShortDramaReferenceBoardPlan `json:"reference_board_plan,omitempty"`
+}
+
+type ShortDramaVibeIntent struct {
+	Version         string   `json:"version"`
+	VisualAnchor    string   `json:"visual_anchor"`
+	BehaviorState   string   `json:"behavior_state"`
+	LocalTone       string   `json:"local_tone"`
+	Theme           string   `json:"theme"`
+	HardConstraints []string `json:"hard_constraints"`
+	EvidenceIDs     []string `json:"evidence_ids"`
+}
+
+type ShortDramaReferencePanelPlan struct {
+	Slot        string   `json:"slot"`
+	Role        string   `json:"role"`
+	Description string   `json:"description"`
+	EvidenceIDs []string `json:"evidence_ids"`
+}
+
+type ShortDramaReferenceBoardPlan struct {
+	Version       string                         `json:"version"`
+	Layout        string                         `json:"layout"`
+	VibeIntent    ShortDramaVibeIntent           `json:"vibe_intent"`
+	Panels        []ShortDramaReferencePanelPlan `json:"panels"`
+	GlobalStyle   string                         `json:"global_style"`
+	NegativeRules []string                       `json:"negative_rules"`
+	ContentHash   string                         `json:"content_hash,omitempty"`
+}
+
+type ShortDramaReferenceBoardCandidate struct {
+	ID                  string                       `json:"id"`
+	VariantIndex        int                          `json:"variant_index"`
+	PrimaryTestVariable string                       `json:"primary_test_variable"`
+	Plan                ShortDramaReferenceBoardPlan `json:"plan"`
+	ProviderJobID       string                       `json:"provider_job_id,omitempty"`
+	Status              ShortDramaV2ResourceStatus   `json:"status"`
+	Asset               *contract.ProjectAssetRef    `json:"asset,omitempty"`
+	ModelReferenceAsset *contract.ProjectAssetRef    `json:"model_reference_asset,omitempty"`
+	PromptHash          string                       `json:"prompt_hash"`
+	ErrorCode           string                       `json:"error_code,omitempty"`
+	ErrorMessage        string                       `json:"error_message,omitempty"`
+}
+
+type ShortDramaReferenceBoardBatch struct {
+	ShortDramaV2AsyncResource
+	ID                  string                              `json:"id,omitempty"`
+	Revision            int64                               `json:"revision"`
+	PromptRevision      int64                               `json:"prompt_revision"`
+	AnalysisRevision    int64                               `json:"analysis_revision"`
+	Candidates          []ShortDramaReferenceBoardCandidate `json:"candidates"`
+	SelectedCandidateID string                              `json:"selected_candidate_id,omitempty"`
+	SelectedAsset       *contract.ProjectAssetRef           `json:"selected_asset,omitempty"`
 }
 
 type ShortDramaV2FirstFrameCandidate struct {
@@ -175,23 +229,31 @@ type ShortDramaV2TrustedMaterialBinding struct {
 }
 
 type ShortDramaV2GenerationSpec struct {
-	ContractVersion  string                              `json:"contract_version"`
-	DraftRevision    int64                               `json:"draft_revision"`
-	PromptRevision   int64                               `json:"prompt_revision"`
-	DurationSeconds  int                                 `json:"duration_seconds"`
-	AspectRatio      string                              `json:"aspect_ratio"`
-	Resolution       string                              `json:"resolution"`
-	AudioPolicy      string                              `json:"audio_policy"`
-	InputMode        string                              `json:"input_mode"`
-	FirstFrameAsset  contract.ProjectAssetRef            `json:"first_frame_asset"`
-	LastFrameAsset   *contract.ProjectAssetRef           `json:"last_frame_asset,omitempty"`
-	TrustedMaterials *ShortDramaV2TrustedMaterialBinding `json:"trusted_materials,omitempty"`
-	SourceCanvas     *ShortDramaSourceCanvas             `json:"source_canvas,omitempty"`
-	ModelCanvas      *ShortDramaModelCanvas              `json:"model_canvas,omitempty"`
-	OutputCanvas     *ShortDramaOutputCanvas             `json:"output_canvas,omitempty"`
-	CompiledPrompt   string                              `json:"compiled_prompt,omitempty"`
-	PromptHash       string                              `json:"prompt_hash"`
-	SpecHash         string                              `json:"spec_hash"`
+	ContractVersion     string                              `json:"contract_version"`
+	DraftRevision       int64                               `json:"draft_revision"`
+	PromptRevision      int64                               `json:"prompt_revision"`
+	DurationSeconds     int                                 `json:"duration_seconds"`
+	AspectRatio         string                              `json:"aspect_ratio"`
+	Resolution          string                              `json:"resolution"`
+	AudioPolicy         string                              `json:"audio_policy"`
+	InputMode           string                              `json:"input_mode"`
+	FirstFrameAsset     contract.ProjectAssetRef            `json:"first_frame_asset"`
+	ReferenceBoardAsset *contract.ProjectAssetRef           `json:"reference_board_asset,omitempty"`
+	LastFrameAsset      *contract.ProjectAssetRef           `json:"last_frame_asset,omitempty"`
+	TrustedMaterials    *ShortDramaV2TrustedMaterialBinding `json:"trusted_materials,omitempty"`
+	SourceCanvas        *ShortDramaSourceCanvas             `json:"source_canvas,omitempty"`
+	ModelCanvas         *ShortDramaModelCanvas              `json:"model_canvas,omitempty"`
+	OutputCanvas        *ShortDramaOutputCanvas             `json:"output_canvas,omitempty"`
+	BoardCanvas         *ShortDramaBoardCanvas              `json:"board_canvas,omitempty"`
+	AnalysisRevision    int64                               `json:"analysis_revision,omitempty"`
+	DirectionBatchID    string                              `json:"direction_batch_id,omitempty"`
+	DirectionID         string                              `json:"direction_id,omitempty"`
+	BoardBatchID        string                              `json:"board_batch_id,omitempty"`
+	BoardCandidateID    string                              `json:"board_candidate_id,omitempty"`
+	CompilerVersion     string                              `json:"compiler_version,omitempty"`
+	CompiledPrompt      string                              `json:"compiled_prompt,omitempty"`
+	PromptHash          string                              `json:"prompt_hash"`
+	SpecHash            string                              `json:"spec_hash"`
 }
 
 type ShortDramaPrerollV2Workspace struct {
@@ -208,6 +270,8 @@ type ShortDramaPrerollV2Workspace struct {
 	DirectionBatch       *ShortDramaV2DirectionBatch         `json:"direction_batch,omitempty"`
 	PromptDraft          *ShortDramaV2PromptDraft            `json:"prompt_draft,omitempty"`
 	FirstFrameBatch      *ShortDramaV2FirstFrameBatch        `json:"first_frame_batch,omitempty"`
+	ReferenceBoardBatch  *ShortDramaReferenceBoardBatch      `json:"reference_board_batch,omitempty"`
+	BoardCanvas          *ShortDramaBoardCanvas              `json:"board_canvas,omitempty"`
 	SourceOpeningFrame   *ShortDramaV2SourceOpeningFrame     `json:"source_opening_frame,omitempty"`
 	TrustedMaterials     *ShortDramaV2TrustedMaterialBinding `json:"trusted_materials,omitempty"`
 	GenerationSpec       *ShortDramaV2GenerationSpec         `json:"generation_spec,omitempty"`
@@ -221,7 +285,7 @@ type ShortDramaPrerollV2Workspace struct {
 }
 
 func (w ShortDramaPrerollV2Workspace) Validate() error {
-	if (w.ContractVersion != ShortDramaPrerollV2ContractVersion && w.ContractVersion != ShortDramaPrerollV3ContractVersion) || strings.TrimSpace(w.TaskID) == "" ||
+	if (w.ContractVersion != ShortDramaPrerollV2ContractVersion && w.ContractVersion != ShortDramaPrerollV3ContractVersion && w.ContractVersion != ShortDramaPrerollV4ContractVersion) || strings.TrimSpace(w.TaskID) == "" ||
 		w.Revision < 1 || w.ActiveStage == "" || w.SourceVideo.Validate() != nil ||
 		w.CreatedAt.IsZero() || w.UpdatedAt.IsZero() {
 		return fmt.Errorf("creative short drama preroll V2 workspace is incomplete")

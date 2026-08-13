@@ -92,6 +92,8 @@ func (s Service) AnalyzeShortDramaV2Source(
 	workspace.DirectionBatch = nil
 	workspace.PromptDraft = nil
 	workspace.FirstFrameBatch = nil
+	workspace.ReferenceBoardBatch = nil
+	workspace.BoardCanvas = nil
 	workspace.TrustedMaterials = nil
 	workspace.GenerationSpec = nil
 	workspace.LatestVideoAttemptID, workspace.VideoError = "", nil
@@ -154,6 +156,8 @@ func (s Service) GenerateShortDramaV2Directions(
 	}
 	updated.PromptDraft = nil
 	updated.FirstFrameBatch = nil
+	updated.ReferenceBoardBatch = nil
+	updated.BoardCanvas = nil
 	updated.TrustedMaterials = nil
 	updated.GenerationSpec = nil
 	updated.LatestVideoAttemptID, updated.VideoError = "", nil
@@ -216,6 +220,12 @@ func (s Service) SelectShortDramaV2Direction(
 	prompt.DurationSeconds = request.DurationSeconds
 	prompt.Revision = 1
 	prompt.BaseVideoPrompt = prompt.VideoPrompt
+	plan, err := compileShortDramaReferenceBoardPlan(workspace.Analysis, *selected, request.DurationSeconds)
+	if err != nil {
+		return TaskDetail{}, err
+	}
+	prompt.VibeIntent = &plan.VibeIntent
+	prompt.ReferenceBoardPlan = &plan
 	if err := validateShortDramaV2PromptDraft(prompt); err != nil {
 		return TaskDetail{}, err
 	}
@@ -229,6 +239,7 @@ func (s Service) SelectShortDramaV2Direction(
 	next.Revision++
 	next.CreatedAt = now
 	updated := *workspace
+	updated.ContractVersion = ShortDramaPrerollV4ContractVersion
 	updated.Revision = next.Revision
 	updated.ActiveStage = ShortDramaV2StagePromptsReady
 	batchCopy := *batch
@@ -236,6 +247,8 @@ func (s Service) SelectShortDramaV2Direction(
 	updated.DirectionBatch = &batchCopy
 	updated.PromptDraft = &prompt
 	updated.FirstFrameBatch = nil
+	updated.ReferenceBoardBatch = nil
+	updated.BoardCanvas = nil
 	updated.TrustedMaterials = nil
 	updated.GenerationSpec = nil
 	updated.LatestVideoAttemptID, updated.VideoError = "", nil
@@ -286,6 +299,8 @@ func (s Service) UpdateShortDramaV2Analysis(
 	updated.DirectionBatch = nil
 	updated.PromptDraft = nil
 	updated.FirstFrameBatch = nil
+	updated.ReferenceBoardBatch = nil
+	updated.BoardCanvas = nil
 	updated.TrustedMaterials = nil
 	updated.GenerationSpec = nil
 	updated.LatestVideoAttemptID, updated.VideoError = "", nil
@@ -346,7 +361,19 @@ func (s Service) UpdateShortDramaV2Prompts(
 	updated.ActiveStage = ShortDramaV2StagePromptsReady
 	if imagePromptChanged {
 		updated.FirstFrameBatch = nil
+		updated.ReferenceBoardBatch = nil
+		updated.BoardCanvas = nil
 		updated.TrustedMaterials = nil
+		updated.GenerationSpec = nil
+	} else if updated.ReferenceBoardBatch != nil && updated.ReferenceBoardBatch.SelectedAsset != nil {
+		updated.ActiveStage = ShortDramaV2StageFrameSelected
+		spec, compileErr := compileShortDramaV2GenerationSpec(updated, projectID, next.Revision)
+		if compileErr != nil {
+			return TaskDetail{}, compileErr
+		}
+		updated.GenerationSpec = spec
+	} else if updated.ReferenceBoardBatch != nil && (updated.ReferenceBoardBatch.Status == ShortDramaV2ResourceReady || updated.ReferenceBoardBatch.Status == ShortDramaV2ResourcePartial) {
+		updated.ActiveStage = ShortDramaV2StageFramesReady
 		updated.GenerationSpec = nil
 	} else if updated.FirstFrameBatch != nil && updated.FirstFrameBatch.SelectedAsset != nil {
 		updated.ActiveStage = ShortDramaV2StageFrameSelected
@@ -376,15 +403,17 @@ func (s Service) UpdateShortDramaV2Prompts(
 
 func shortDramaV2PromptHash(prompt ShortDramaV2PromptDraft) (string, error) {
 	hash, err := contract.CanonicalJSONHash(struct {
-		DirectionID        string `json:"direction_id"`
-		DurationSeconds    int    `json:"duration_seconds"`
-		ImagePrompt        string `json:"image_prompt"`
-		VideoDescription   string `json:"video_description"`
-		VideoPrompt        string `json:"video_prompt"`
-		BaseVideoPrompt    string `json:"base_video_prompt,omitempty"`
-		SelectedVariantKey string `json:"selected_variant_key,omitempty"`
-		CompilerVersion    string `json:"compiler_version"`
-	}{prompt.DirectionID, prompt.DurationSeconds, prompt.ImagePrompt, prompt.VideoDescription, prompt.VideoPrompt, prompt.BaseVideoPrompt, prompt.SelectedVariantKey, prompt.CompilerVersion})
+		DirectionID        string                        `json:"direction_id"`
+		DurationSeconds    int                           `json:"duration_seconds"`
+		ImagePrompt        string                        `json:"image_prompt"`
+		VideoDescription   string                        `json:"video_description"`
+		VideoPrompt        string                        `json:"video_prompt"`
+		BaseVideoPrompt    string                        `json:"base_video_prompt,omitempty"`
+		SelectedVariantKey string                        `json:"selected_variant_key,omitempty"`
+		CompilerVersion    string                        `json:"compiler_version"`
+		VibeIntent         *ShortDramaVibeIntent         `json:"vibe_intent,omitempty"`
+		ReferenceBoardPlan *ShortDramaReferenceBoardPlan `json:"reference_board_plan,omitempty"`
+	}{prompt.DirectionID, prompt.DurationSeconds, prompt.ImagePrompt, prompt.VideoDescription, prompt.VideoPrompt, prompt.BaseVideoPrompt, prompt.SelectedVariantKey, prompt.CompilerVersion, prompt.VibeIntent, prompt.ReferenceBoardPlan})
 	if err != nil {
 		return "", err
 	}
@@ -472,10 +501,10 @@ func validateShortDramaV2Directions(analysis ShortDramaV2Analysis, directions []
 
 func validateShortDramaV2Duration(duration int) error {
 	switch duration {
-	case 5, 6, 10, 12, 15:
+	case 10, 12, 15:
 		return nil
 	default:
-		return fmt.Errorf("short drama V2 duration must be one of 5, 6, 10, 12, or 15 seconds")
+		return fmt.Errorf("short drama preroll duration must be one of 10, 12, or 15 seconds")
 	}
 }
 
@@ -487,6 +516,11 @@ func validateShortDramaV2PromptDraft(prompt ShortDramaV2PromptDraft) error {
 		strings.TrimSpace(prompt.VideoDescription) == "" || strings.TrimSpace(prompt.VideoPrompt) == "" ||
 		strings.TrimSpace(prompt.CompilerVersion) == "" || len(prompt.ImagePrompt) > 8000 || len(prompt.VideoPrompt) > 12000 {
 		return fmt.Errorf("short drama V2 prompt draft is incomplete")
+	}
+	if prompt.ReferenceBoardPlan != nil {
+		if prompt.VibeIntent == nil || prompt.ReferenceBoardPlan.ContentHash == "" {
+			return fmt.Errorf("short drama V4 reference board prompt draft is incomplete")
+		}
 	}
 	return nil
 }

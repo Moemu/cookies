@@ -78,9 +78,9 @@ func (DeterministicShortDramaV2Planner) CompilePrompts(_ context.Context, _ cont
 		keywords = "与原短剧一致的人物、时代和场景"
 	}
 	return ShortDramaV2PromptDraft{
-		ImagePrompt:      fmt.Sprintf("竖屏 9:16 短剧前贴首帧，%s。画面主题：%s。视觉元素：%s。保持真实人物比例、电影感光影、明确主体、无品牌标识、无额外文字。", analysis.Content.Tone, direction.VisualIntent, keywords),
+		ImagePrompt:      fmt.Sprintf("短剧前贴视觉设定，%s。画面主题：%s。视觉元素：%s。保持原创人物比例、电影感光影、明确主体、无品牌标识、无额外文字。", analysis.Content.Tone, direction.VisualIntent, keywords),
 		VideoDescription: fmt.Sprintf("%d 秒独立短剧前贴。%s 结尾字幕：点击观看正片。", duration, direction.HookCopy),
-		VideoPrompt:      fmt.Sprintf("生成 %d 秒、9:16、720p 的独立短剧前贴视频。0-2 秒：%s；中段：%s；最后 1 秒保留悬念并尝试生成简短字幕“点击观看正片”。人物、时代、场景与首帧保持连续，不虚构输入剧情之外的事实。", duration, direction.VisualIntent, direction.HookCopy),
+		VideoPrompt:      fmt.Sprintf("生成 %d 秒的独立短剧前贴视频。开场立即建立视觉锚点：%s；中段围绕%s推进；最后 1 秒保留悬念并尝试生成简短字幕“点击观看正片”。人物、时代、场景保持连续，不虚构输入剧情之外的事实。", duration, direction.VisualIntent, direction.HookCopy),
 		CompilerVersion:  "deterministic/short-drama-v2-prompt-v1",
 	}, nil
 }
@@ -174,7 +174,7 @@ func (p ModelShortDramaV2Planner) CompilePrompts(ctx context.Context, actor cont
 		Actor: actor, Project: project, ModelAlias: p.ModelAlias,
 		InvocationKey: contract.IdempotencyKey(fmt.Sprintf("short-drama-v2-prompts-%s-%d", direction.ID, duration)),
 		Messages: []provider.TextMessage{
-			{Role: provider.TextRoleSystem, Content: "你是短剧前贴生成提示词编译器。输出首帧图片提示词、业务可读视频描述、可执行视频提示词。视频为独立竖屏前贴，最后自然趋近输入短剧开场；不要声称已经拼接。字幕由视频模型尝试生成，文字短而少。不得虚构输入事实。只返回JSON。"},
+			{Role: provider.TextRoleSystem, Content: "你是短剧前贴生成提示词编译器。输出视觉参考图片提示词、业务可读视频描述、可执行视频提示词。保留用户创作意图，强化故事、情绪、氛围和视觉锚点，弱化机械分镜语言。视频为独立前贴，不要声称已经拼接。字幕由视频模型尝试生成，文字短而少。不得虚构输入事实。只返回JSON。"},
 			{Role: provider.TextRoleUser, Content: string(input)},
 		},
 		OutputJSONSchema: shortDramaV2PromptSchema,

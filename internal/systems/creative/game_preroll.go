@@ -10,9 +10,100 @@ import (
 )
 
 const (
-	PerformanceModeGamePreroll = "game_preroll"
-	ManualGamePrerollRouteID   = "route_manual_game_preroll_v1"
+	PerformanceModeGamePreroll   = "game_preroll"
+	ManualGamePrerollRouteID     = "route_manual_game_preroll_v1"
+	ManualGamePrerollV2RouteID   = "route_manual_game_preroll_v2"
+	GamePrerollV2ContractVersion = "creative-game-preroll-workspace/v2"
 )
+
+type GamePrerollStage string
+
+const (
+	GamePrerollStageSourceReady       GamePrerollStage = "source_ready"
+	GamePrerollStageAnalysisReady     GamePrerollStage = "analysis_ready"
+	GamePrerollStageBriefConfirmed    GamePrerollStage = "brief_confirmed"
+	GamePrerollStageCandidatesReady   GamePrerollStage = "candidates_ready"
+	GamePrerollStageCandidateSelected GamePrerollStage = "candidate_selected"
+	GamePrerollStageVideoGenerating   GamePrerollStage = "video_generating"
+	GamePrerollStageVideoReady        GamePrerollStage = "video_ready"
+)
+
+type GamePrerollResourceStatus string
+
+const (
+	GamePrerollResourceIdle    GamePrerollResourceStatus = "idle"
+	GamePrerollResourceRunning GamePrerollResourceStatus = "running"
+	GamePrerollResourceReady   GamePrerollResourceStatus = "ready"
+	GamePrerollResourceFailed  GamePrerollResourceStatus = "failed"
+)
+
+type ManualGamePrerollV2Input struct {
+	SourceVideo       contract.AssetVersionRef `json:"source_video"`
+	SourceVideoRights RightsStatus             `json:"source_video_rights"`
+}
+
+func (i ManualGamePrerollV2Input) Validate() error {
+	if err := i.SourceVideo.Validate(); err != nil {
+		return fmt.Errorf("source_video: %w", err)
+	}
+	if i.SourceVideoRights != RightsConfirmed {
+		return fmt.Errorf("source_video_rights must be confirmed")
+	}
+	return nil
+}
+
+type GamePrerollAnalysis struct {
+	Status          GamePrerollResourceStatus `json:"status"`
+	Revision        int64                     `json:"revision,omitempty"`
+	InputHash       string                    `json:"input_hash,omitempty"`
+	PromptVersion   string                    `json:"prompt_version,omitempty"`
+	ErrorCode       string                    `json:"error_code,omitempty"`
+	ErrorMessage    string                    `json:"error_message,omitempty"`
+	GameName        string                    `json:"game_name,omitempty"`
+	GameplaySummary string                    `json:"gameplay_summary,omitempty"`
+	Facts           []GameAnalysisFact        `json:"facts,omitempty"`
+	Evidence        []GameEvidenceMoment      `json:"evidence,omitempty"`
+	Unknowns        []string                  `json:"unknowns,omitempty"`
+	SuggestedBrief  []GameBriefField          `json:"suggested_brief,omitempty"`
+}
+
+type GameFactProvenance string
+
+const (
+	GameProvenanceVideo  GameFactProvenance = "video_evidence"
+	GameProvenanceAI     GameFactProvenance = "ai_inference"
+	GameProvenanceManual GameFactProvenance = "manual"
+)
+
+type GameAnalysisFact struct {
+	ID           string             `json:"id"`
+	Label        string             `json:"label"`
+	Value        string             `json:"value"`
+	Provenance   GameFactProvenance `json:"provenance"`
+	EvidenceRefs []string           `json:"evidence_refs"`
+}
+type GameBriefField struct {
+	ID           string             `json:"id"`
+	Key          string             `json:"key"`
+	Label        string             `json:"label"`
+	Value        string             `json:"value"`
+	Provenance   GameFactProvenance `json:"provenance"`
+	EvidenceRefs []string           `json:"evidence_refs"`
+	Required     bool               `json:"required"`
+}
+type GameBriefVersion struct {
+	ID               string           `json:"id"`
+	Version          int64            `json:"version"`
+	AnalysisRevision int64            `json:"analysis_revision"`
+	Fields           []GameBriefField `json:"fields"`
+	ConfirmedBy      string           `json:"confirmed_by"`
+	ConfirmedAt      time.Time        `json:"confirmed_at"`
+	ContentHash      string           `json:"content_hash"`
+}
+
+func (d GamePrerollDraft) AnalysisSuggestedBrief() []GameBriefField {
+	return append([]GameBriefField{}, d.Analysis.SuggestedBrief...)
+}
 
 type GameEvidenceKind string
 
@@ -20,6 +111,11 @@ const (
 	GameEvidenceSkillChoice  GameEvidenceKind = "skill_choice"
 	GameEvidenceWaveProgress GameEvidenceKind = "wave_progress"
 	GameEvidenceBattle       GameEvidenceKind = "battle"
+	GameEvidenceGameplay     GameEvidenceKind = "gameplay"
+	GameEvidenceOperation    GameEvidenceKind = "operation"
+	GameEvidenceResult       GameEvidenceKind = "result"
+	GameEvidenceReward       GameEvidenceKind = "reward"
+	GameEvidenceUI           GameEvidenceKind = "ui"
 )
 
 type GameHookMechanism string
@@ -48,7 +144,7 @@ func (m GameEvidenceMoment) Validate() error {
 		return fmt.Errorf("game evidence moment is incomplete")
 	}
 	switch m.Kind {
-	case GameEvidenceSkillChoice, GameEvidenceWaveProgress, GameEvidenceBattle:
+	case GameEvidenceSkillChoice, GameEvidenceWaveProgress, GameEvidenceBattle, GameEvidenceGameplay, GameEvidenceOperation, GameEvidenceResult, GameEvidenceReward, GameEvidenceUI:
 	default:
 		return fmt.Errorf("unsupported game evidence kind %q", m.Kind)
 	}
@@ -118,9 +214,15 @@ type GamePrerollInputSnapshot struct {
 }
 
 type GamePrerollGenerationConfig struct {
-	SubtitleStyle string `json:"subtitle_style"`
-	HookStrength  int    `json:"hook_strength"`
-	PaceProfile   string `json:"pace_profile"`
+	SubtitleStyle   string `json:"subtitle_style"`
+	HookStrength    int    `json:"hook_strength"`
+	PaceProfile     string `json:"pace_profile"`
+	DurationSeconds int    `json:"duration_seconds,omitempty"`
+	Channel         string `json:"channel,omitempty"`
+	AspectRatio     string `json:"aspect_ratio,omitempty"`
+	Resolution      string `json:"resolution,omitempty"`
+	AudioPolicy     string `json:"audio_policy,omitempty"`
+	CallToAction    string `json:"call_to_action,omitempty"`
 }
 
 func (c GamePrerollGenerationConfig) Validate() error {
@@ -129,6 +231,15 @@ func (c GamePrerollGenerationConfig) Validate() error {
 	}
 	if c.HookStrength < 1 || c.HookStrength > 5 {
 		return fmt.Errorf("hook_strength must be between 1 and 5")
+	}
+	if c.DurationSeconds != 0 && (c.DurationSeconds < 6 || c.DurationSeconds > 10) {
+		return fmt.Errorf("duration_seconds must be between 6 and 10")
+	}
+	if c.Channel != "" && c.Channel != string(ChannelDouyin) {
+		return fmt.Errorf("unsupported game preroll channel")
+	}
+	if c.AspectRatio != "" && c.AspectRatio != "9:16" {
+		return fmt.Errorf("unsupported game preroll aspect_ratio")
 	}
 	switch c.PaceProfile {
 	case "punchy", "balanced":
@@ -224,23 +335,44 @@ type GamePrerollGenerationSpec struct {
 }
 
 type GamePrerollDraft struct {
-	ContractVersion      string                     `json:"contract_version"`
-	TaskID               string                     `json:"task_id"`
-	Revision             int64                      `json:"revision"`
-	SelectedRouteID      string                     `json:"selected_route_id"`
-	InputSnapshot        GamePrerollInputSnapshot   `json:"input_snapshot"`
-	InputHash            string                     `json:"input_hash"`
-	Readiness            CreativeReadiness          `json:"readiness"`
-	ActiveCandidateBatch *GameCandidateBatch        `json:"active_candidate_batch,omitempty"`
-	Candidates           []GamePrerollCandidate     `json:"candidates"`
-	SelectedCandidateID  string                     `json:"selected_candidate_id,omitempty"`
-	EvidenceAssets       *GameEvidenceAssetSet      `json:"evidence_assets,omitempty"`
-	GenerationSpec       *GamePrerollGenerationSpec `json:"generation_spec,omitempty"`
-	CreatedAt            time.Time                  `json:"created_at"`
-	UpdatedAt            time.Time                  `json:"updated_at"`
+	ContractVersion      string                      `json:"contract_version"`
+	TaskID               string                      `json:"task_id"`
+	Revision             int64                       `json:"revision"`
+	SelectedRouteID      string                      `json:"selected_route_id"`
+	InputSnapshot        GamePrerollInputSnapshot    `json:"input_snapshot"`
+	InputHash            string                      `json:"input_hash"`
+	Readiness            CreativeReadiness           `json:"readiness"`
+	ActiveCandidateBatch *GameCandidateBatch         `json:"active_candidate_batch,omitempty"`
+	Candidates           []GamePrerollCandidate      `json:"candidates"`
+	SelectedCandidateID  string                      `json:"selected_candidate_id,omitempty"`
+	EvidenceAssets       *GameEvidenceAssetSet       `json:"evidence_assets,omitempty"`
+	GenerationSpec       *GamePrerollGenerationSpec  `json:"generation_spec,omitempty"`
+	CreatedAt            time.Time                   `json:"created_at"`
+	UpdatedAt            time.Time                   `json:"updated_at"`
+	Stage                GamePrerollStage            `json:"stage,omitempty"`
+	SourceMetadata       CreativeAssetSnapshot       `json:"source_metadata,omitempty"`
+	SourceVideoRights    RightsConfirmation          `json:"source_video_rights,omitempty"`
+	Analysis             GamePrerollAnalysis         `json:"analysis,omitempty"`
+	GenerationConfig     GamePrerollGenerationConfig `json:"generation_config,omitempty"`
+	OutputAsset          *contract.ProjectAssetRef   `json:"output_asset,omitempty"`
+	ConfirmedBrief       *GameBriefVersion           `json:"confirmed_brief,omitempty"`
+	LatestVideoAttemptID string                      `json:"latest_video_attempt_id,omitempty"`
+	VideoError           *contract.JobError          `json:"video_error,omitempty"`
 }
 
 func (d GamePrerollDraft) Validate() error {
+	if d.ContractVersion == GamePrerollV2ContractVersion && d.Stage == GamePrerollStageSourceReady {
+		if strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 || d.SelectedRouteID != ManualGamePrerollV2RouteID || d.InputSnapshot.SourceVideo.Validate() != nil || d.SourceVideoRights.Validate() != nil || d.Analysis.Status != GamePrerollResourceIdle || d.GenerationConfig.Validate() != nil || d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
+			return fmt.Errorf("game preroll V2 source workspace is incomplete")
+		}
+		return nil
+	}
+	if d.ContractVersion == GamePrerollV2ContractVersion {
+		if strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 || d.SelectedRouteID != ManualGamePrerollV2RouteID || d.SourceVideoRights.Validate() != nil || d.GenerationConfig.Validate() != nil || d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
+			return fmt.Errorf("game preroll V2 workspace is incomplete")
+		}
+		return nil
+	}
 	if (d.ContractVersion != "creative-game-preroll-draft/v1" && d.ContractVersion != "creative-game-preroll-draft/v2") || strings.TrimSpace(d.TaskID) == "" ||
 		d.Revision < 1 || d.SelectedRouteID != ManualGamePrerollRouteID || strings.TrimSpace(d.InputHash) == "" ||
 		!d.Readiness.PlanningReady || len(d.Candidates) != 3 || d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
@@ -272,13 +404,17 @@ func planGamePrerollCandidateBatch(
 	config GamePrerollGenerationConfig,
 	now time.Time,
 ) (GameCandidateBatch, error) {
+	outlines := defaultGameCandidateOutlines(snapshot)
+	if !gameEvidenceIDsExist(snapshot.EvidenceMoments, []string{"skill_choice_1", "skill_choice_2", "wave_2"}) {
+		outlines = genericGameCandidateOutlines(snapshot, config.DurationSeconds)
+	}
 	return compileGamePrerollCandidateBatch(
 		snapshot,
 		inputHash,
 		batchID,
 		revision,
 		config,
-		defaultGameCandidateOutlines(snapshot),
+		outlines,
 		"game-preroll-deterministic-fallback/v1",
 		now,
 	)
@@ -330,16 +466,15 @@ func compileGamePrerollCandidateBatch(
 			CandidateID:           candidateID,
 			GenerationConfig:      config,
 			DirectorSpec: map[string]string{
-				"truth_source":   "仅使用已核验的《保卫向日葵》实录玩法与界面信息",
-				"composition":    "保持原始竖屏玩法主体完整；9:20 素材适配 9:16 时不得裁掉顶部资源、技能文字、波次与底部操作区",
-				"continuity":     "选择界面、战斗画面与第 2/10 波按真实时间关系连续衔接",
+				"truth_source":   "仅使用当前上传视频中有证据支持的真实玩法、界面、数值和结果",
+				"composition":    "输出 9:16 竖屏；玩法主体、关键操作、结果反馈和核心 UI 保持可读",
+				"continuity":     "三个 Beat 按当前证据时间关系连续表达，不虚构中间事件",
 				"cta":            snapshot.CallToAction,
 				"hook_mechanism": string(outline.Mechanism),
 			},
 			NegativeConstraints: []string{
-				"不得生成素材中没有出现的失败、复活、合成、升级或奖励结果",
+				"不得生成当前素材中没有出现的失败、复活、合成、升级或奖励结果",
 				"不得改写游戏名称、技能名称、数值、波次和核心 UI",
-				"不得展示广告刷新植物弹窗",
 				"不得伪造试玩操作或宣称选择产生了素材未证明的结果",
 			},
 			CompiledPrompt: compiledPrompt,
@@ -372,6 +507,9 @@ func compileGamePrerollCandidateBatch(
 }
 
 func defaultGameCandidateOutlines(snapshot GamePrerollInputSnapshot) []gameCandidateOutline {
+	if !gameEvidenceIDsExist(snapshot.EvidenceMoments, []string{"skill_choice_1", "skill_choice_2", "wave_2"}) {
+		return genericGameCandidateOutlines(snapshot, 6)
+	}
 	cta := snapshot.CallToAction
 	return []gameCandidateOutline{
 		{
@@ -410,10 +548,45 @@ func defaultGameCandidateOutlines(snapshot GamePrerollInputSnapshot) []gameCandi
 	}
 }
 
+func planGenericGameCandidateBatch(snapshot GamePrerollInputSnapshot, inputHash, batchID string, revision int64, config GamePrerollGenerationConfig, now time.Time) (GameCandidateBatch, error) {
+	if len(snapshot.EvidenceMoments) < 3 {
+		return GameCandidateBatch{}, fmt.Errorf("three evidence moments are required for game candidate planning")
+	}
+	duration := config.DurationSeconds
+	if duration == 0 {
+		duration = 8
+	}
+	return compileGamePrerollCandidateBatch(snapshot, inputHash, batchID, revision, config, genericGameCandidateOutlines(snapshot, duration), "game-preroll-evidence-fallback/v2", now)
+}
+
+func genericGameCandidateOutlines(snapshot GamePrerollInputSnapshot, duration int) []gameCandidateOutline {
+	e := snapshot.EvidenceMoments
+	if len(e) < 3 {
+		return nil
+	}
+	if duration < 1 {
+		duration = 6
+	}
+	hookEnd := duration * 1000 / 4
+	if hookEnd < 1000 {
+		hookEnd = 1000
+	}
+	changeEnd := duration*1000 - 2000
+	return []gameCandidateOutline{
+		{Mechanism: GameHookChoiceChallenge, ExecutionAngle: "suspense_question", PrimaryTestVariable: "question", VariantHypothesis: "真实操作问题建立参与感。", HookLine: "这一步你会怎么选？", EvidenceMomentIDs: []string{e[0].ID, e[1].ID, e[2].ID}, Beats: []GameStoryboardBeat{{0, hookEnd, "展示真实操作入口", "你会怎么选？", e[0].ID}, {hookEnd, changeEnd, "展示操作后的真实反馈", "结果马上出现", e[1].ID}, {changeEnd, duration * 1000, "用真实结果和 CTA 收束", snapshot.CallToAction, e[2].ID}}},
+		{Mechanism: GameHookTacticalTradeoff, ExecutionAngle: "operation_feedback", PrimaryTestVariable: "key_operation", VariantHypothesis: "真实操作与反馈的因果邻接建立信息缺口。", HookLine: "关键就在这一步，你看懂了吗？", EvidenceMomentIDs: []string{e[0].ID, e[1].ID, e[2].ID}, Beats: []GameStoryboardBeat{{0, hookEnd, "先展示真实反馈片段", "关键在哪一步？", e[1].ID}, {hookEnd, changeEnd, "回到真实操作过程", "注意这次操作", e[0].ID}, {changeEnd, duration * 1000, "展示后续真实反馈并收束", snapshot.CallToAction, e[2].ID}}},
+		{Mechanism: GameHookWaveEscalation, ExecutionAngle: "visual_impact", PrimaryTestVariable: "impact", VariantHypothesis: "强反馈画面能在静音环境建立注意力。", HookLine: "这一操作，画面立刻变了！", EvidenceMomentIDs: []string{e[0].ID, e[1].ID, e[2].ID}, Beats: []GameStoryboardBeat{{0, hookEnd, "用最强真实反馈开场", "画面立刻变了", e[1].ID}, {hookEnd, changeEnd, "展示触发反馈的真实操作", "就是这一步", e[0].ID}, {changeEnd, duration * 1000, "保留真实 UI 并展示 CTA", snapshot.CallToAction, e[2].ID}}},
+	}
+}
+
 func compileGamePrerollPrompt(snapshot GamePrerollInputSnapshot, outline gameCandidateOutline, config GamePrerollGenerationConfig) string {
+	duration := config.DurationSeconds
+	if duration == 0 {
+		duration = 6
+	}
 	parts := []string{
 		"效果广告游戏前贴，游戏：《" + snapshot.GameName + "》。",
-		"目标：制作独立 6 秒、9:16、720p 的真实玩法前贴。",
+		fmt.Sprintf("目标：制作独立 %d 秒、9:16、720p 的真实玩法前贴。", duration),
 		"玩法事实：" + snapshot.GameplaySummary,
 		"钩子：" + outline.HookLine,
 		"执行：必须以授权实录为视觉事实源，保持游戏 UI、技能名、数值和波次可读；只允许剪辑、节奏、字幕、音效和 CTA 包装。",
@@ -431,7 +604,7 @@ func compileGamePrerollPrompt(snapshot GamePrerollInputSnapshot, outline gameCan
 	}
 	parts = append(parts,
 		"结尾 CTA："+snapshot.CallToAction+"。",
-		"严禁虚构失败反转、合成升级、奖励、胜利或选择结果；严禁出现“观看广告，免费刷新植物”弹窗。",
+		"严禁虚构当前视频没有证据支持的失败反转、合成升级、奖励、胜利或选择结果。",
 	)
 	return strings.Join(parts, "\n")
 }

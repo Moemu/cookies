@@ -1358,6 +1358,19 @@ func (r *memoryRepository) CreateGamePrerollGenerationAttempt(_ context.Context,
 	r.tasks[attempt.TaskID] = value
 	return attempt, nil
 }
+
+func (r *memoryRepository) CompleteGamePrerollGenerationAttempt(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, providerJobID string, output contract.AssetVersionRef) error {
+	for key, value := range r.tasks {
+		for index := range value.GamePrerollGenerationAttempts {
+			if value.GamePrerollGenerationAttempts[index].ProviderJobID == providerJobID {
+				value.GamePrerollGenerationAttempts[index].OutputAssetVersion = &output
+				r.tasks[key] = value
+				return nil
+			}
+		}
+	}
+	return ErrNotFound
+}
 func (r *memoryRepository) ArchiveTask(_ context.Context, _ contract.OrganizationID, _ contract.ProjectID, taskID string, now time.Time) error {
 	value, ok := r.tasks[taskID]
 	if !ok {

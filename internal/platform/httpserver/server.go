@@ -476,6 +476,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-workspaces/brand-film:ensure-fixture", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.ensureBrandFilmFixtureWorkspace))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/ai-native-ads/requirements:analyze", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.analyzeAINativeRequirement))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/ai-native-ads/products:resolve", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.resolveAINativeProductPreview))))
+	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/ai-native-ads/output-presets", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listAINativeOutputPresets))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/ai-native-ads", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listAINativeAdWorkspaces))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/ai-native-ads:latest", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getLatestAINativeRequirementWorkspace))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/ai-native-ads/{workspace_id}", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getAINativeRequirementWorkspace))))
@@ -505,6 +506,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/production-runs/{production_source}/{production_run_id}", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getProductionRun))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/production-runs/{production_source}/{production_run_action}", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.retryProductionRun))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/production-assets", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listProductionAssets))))
+	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/edit-tasks", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.listEditTasks))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/edit-tasks", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.createEditTask))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/edit-tasks/{edit_task_id}", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getEditTask))))
 	server.mux.Handle("PATCH /api/creative/v1/projects/{project_id}/edit-tasks/{edit_task_id}/timeline", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.saveEditTimeline))))
@@ -520,6 +522,8 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-workspaces/commerce-preroll", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getLatestCommercePrerollWorkspace))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-workspaces/short-drama-preroll", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getLatestShortDramaPrerollWorkspace))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-workspaces/game-preroll", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getLatestGamePrerollWorkspace))))
+	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/game-preroll-workspaces", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.gamePrerollV2))))
+	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/game-preroll-workspaces/{task_id}", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.gamePrerollV2))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-workspaces/brand-film", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getLatestBrandFilmWorkspace))))
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getBrandFilmWorkspace))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/brand-film:initialize-from-strategy", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.initializeStrategyBrandFilmWorkspace))))
@@ -555,6 +559,20 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.getCommercePrerollWorkspace))))
 	server.mux.Handle("PATCH /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll-draft", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.updateCommercePrerollDraft))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll:confirm-generation", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.confirmCommerceGeneration))))
+	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/commerce-preroll-v2:latest", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.commercePrerollV2))))
+	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/commerce-preroll-v2", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.commercePrerollV2))))
+	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll-v2", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.commercePrerollV2))))
+	server.mux.Handle("GET /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll-v2/versions", server.requireProject(server.requireScope(creative.ScopeRead, http.HandlerFunc(server.commercePrerollV2))))
+	for _, action := range []string{
+		"analyze-source", "confirm-understanding", "generate-hooks", "select-hook",
+		"prepare-references", "bind-product-reference", "select-product-reference",
+		"update-storyboard", "update-prompt", "save-version", "restore-version",
+		"bind-custom-first-frame", "generate-first-frames", "reconcile-first-frame",
+		"select-first-frame", "generate-video", "reconcile-video", "adopt-output",
+	} {
+		pattern := "POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/commerce-preroll-v2:" + action
+		server.mux.Handle(pattern, server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.commercePrerollV2))))
+	}
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll:select-candidate", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.selectShortDramaCandidate))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll:regenerate-candidates", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.regenerateShortDramaCandidates))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll-v2:analyze-source", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.shortDramaV2Command))))
@@ -563,6 +581,9 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll-v2:select-direction", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.shortDramaV2Command))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll-v2:update-prompts", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.shortDramaV2Command))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll-v2:prepare-opening-frame", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.shortDramaV2Command))))
+	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll-v2:generate-reference-boards", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.shortDramaV2Command))))
+	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll-v2:reconcile-reference-board", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.shortDramaV2Command))))
+	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll-v2:select-reference-board", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.shortDramaV2Command))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll-v2:generate-first-frames", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.shortDramaV2Command))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll-v2:reconcile-first-frame", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.shortDramaV2Command))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/short-drama-preroll-v2:select-first-frame", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.shortDramaV2Command))))
@@ -574,6 +595,9 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/game-preroll:select-candidate", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.selectGamePrerollCandidate))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/game-preroll:prepare-evidence", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.prepareGamePrerollEvidence))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/game-preroll:regenerate-candidates", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.regenerateGamePrerollCandidates))))
+	for _, action := range []string{"analyze-source", "confirm-brief", "plan-candidates", "update-generation-config", "select-candidate", "prepare-evidence", "generate-video", "reconcile-video"} {
+		server.mux.Handle("POST /api/creative/v1/projects/{project_id}/game-preroll-workspaces/{task_id}/actions/"+action, server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.gamePrerollV2))))
+	}
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/viral-remake:analyze-reference", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.analyzeViralRemake))))
 	server.mux.Handle("PATCH /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/viral-remake/prompt-draft", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.updateViralPrompt))))
 	server.mux.Handle("POST /api/creative/v1/projects/{project_id}/creative-tasks/{task_id}/viral-remake:confirm-generation", server.requireProject(server.requireScope(creative.ScopeWrite, http.HandlerFunc(server.confirmViralGeneration))))

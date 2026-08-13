@@ -19,6 +19,28 @@ func (squareTimelineProbe) Probe(context.Context, []byte) (assets.VideoMetadata,
 	return assets.VideoMetadata{DurationMS: 3000, WidthPixels: 1080, HeightPixels: 1080, FrameRate: "30/1", VideoCodec: "h264", AudioCodec: "aac"}, nil
 }
 
+type silentTimelineProbe struct{ duration int64 }
+
+func (p silentTimelineProbe) Probe(context.Context, []byte) (assets.VideoMetadata, error) {
+	return assets.VideoMetadata{DurationMS: p.duration, WidthPixels: 720, HeightPixels: 1280, FrameRate: "30/1", VideoCodec: "h264"}, nil
+}
+
+func TestFFmpegTimelineRendererOmitsTheAudioStreamForCleanMaterial(t *testing.T) {
+	runner := &timelineProgressRunnerStub{}
+	request := TimelineRenderRequest{OrganizationID: "org_1", ProjectID: "project_1", DurationMS: 3000, Width: 720, Height: 1280, FrameRate: 30, SampleRate: 48000, OmitAudio: true,
+		Video: []TimelineVideoClip{{ID: "v1", Asset: contract.AssetVersionRef{AssetID: "video", Version: 1}, EndMS: 3000}}}
+	renderer := FFmpegTimelineRenderer{FFmpegPath: "ffmpeg", WorkRoot: t.TempDir(), Videos: audioMixTestSource{}, Audio: audioMixTestSource{}, Probe: silentTimelineProbe{duration: 3000}, Runner: runner}
+	output, err := renderer.Render(context.Background(), request, func(TimelineProgress) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer output.Content.Close()
+	joined := strings.Join(runner.args, " ")
+	if !strings.Contains(joined, "-an") || strings.Contains(joined, "-c:a") || strings.Contains(joined, "[audioout]") {
+		t.Fatalf("clean material FFmpeg args still contain audio output: %s", joined)
+	}
+}
+
 func TestFFmpegTimelineRendererDeterministicModePinsCPUAndThreads(t *testing.T) {
 	runner := &timelineProgressRunnerStub{}
 	request := TimelineRenderRequest{OrganizationID: "org_1", ProjectID: "project_1", DurationMS: 3000, Width: 720, Height: 1280, FrameRate: 30, SampleRate: 48000,
