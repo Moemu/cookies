@@ -245,6 +245,25 @@ test("promotion live locators use stable semantics and retain the write boundary
   assert.deepEqual(locators.reference_gaps, []);
 });
 
+test("gate-two preflight is frozen without granting or mounting final submit", () => {
+  const schemaPath = join(root, "docs", "delivery", "schemas", "oceanengine-gate-two-preflight-v0.1.json");
+  const fixturePath = join(root, "docs", "delivery", "fixtures", "oceanengine-gate-two-preflight-v0.1.json");
+  const rawFixture = readFileSync(fixturePath, "utf8");
+  const schema = readJSON(schemaPath);
+  const fixture = JSON.parse(rawFixture) as Record<string, unknown>;
+  const validate = ajv.compile(schema);
+  assert.equal(validate(fixture), true, ajv.errorsText(validate.errors));
+  assert.equal(fixture.execution_authorized, false);
+  assert.equal(fixture.final_confirmation_issued, false);
+  assert.equal(fixture.production_submit_port_mounted, false);
+  assert.equal(fixture.skill_submit_allowed, false);
+  assert.equal(fixture.maximum_final_clicks, 1);
+  assert.equal(fixture.result_unknown_policy, "query_or_takeover_never_resubmit");
+  assert.equal(fixture.mapping_confirmation_policy, "result_page_and_list_page_ids_and_statuses_must_match");
+  assert.ok((fixture.implementation_gaps as string[]).includes("takeover_remote_write_authorization_port"));
+  assert.doesNotMatch(rawFixture, /\b\d{16}\b/);
+});
+
 test("run-time blocks cannot reuse the Phase C compile-time prohibition", () => {
   const schema = readJSON(join(contracts, "platform-computer-use-run-v1.schema.json"));
   const validate = ajv.getSchema(String(schema.$id));

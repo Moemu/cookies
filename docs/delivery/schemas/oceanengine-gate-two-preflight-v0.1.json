@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/docs/delivery/schemas/oceanengine-gate-two-preflight-v0.1.json",
+  "title": "OceanEngine gate-two preflight v0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "skill_id", "skill_version", "status", "execution_authorized", "final_confirmation_issued", "production_submit_port_mounted", "skill_submit_allowed", "maximum_final_clicks", "execution_scope", "required_runtime_checks", "allowed_result_states", "result_unknown_policy", "mapping_confirmation_policy", "implementation_gaps"],
+  "properties": {
+    "schema_version": { "const": "oceanengine-gate-two-preflight/v0.1" },
+    "skill_id": { "const": "oceanengine-ecommerce-manual" },
+    "skill_version": { "const": "v0.1-calibration" },
+    "status": { "const": "contract_frozen_authorization_required" },
+    "execution_authorized": { "const": false },
+    "final_confirmation_issued": { "const": false },
+    "production_submit_port_mounted": { "const": false },
+    "skill_submit_allowed": { "const": false },
+    "maximum_final_clicks": { "const": 1 },
+    "execution_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account_reference", "platform_project_id", "action", "budget_limit", "responsible_user_presence"],
+      "properties": {
+        "account_reference": { "const": "required_at_execution_time" },
+        "platform_project_id": { "const": "required_at_execution_time" },
+        "action": { "const": "single_final_submit" },
+        "budget_limit": { "const": "bind_fresh_approval" },
+        "responsible_user_presence": { "const": "required" }
+      }
+    },
+    "required_runtime_checks": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 12,
+      "items": { "enum": ["fresh_controlled_authority", "explicit_user_authorization_in_execution_turn", "responsible_user_online", "account_project_action_budget_exact_match", "current_page_values_match_approval", "unexpired_single_use_confirmation", "valid_fenced_lease", "kill_switch_inactive", "single_click_budget", "post_write_result_and_list_readback", "result_unknown_no_resubmit", "confirmed_mapping_requires_two_matching_readbacks"] }
+    },
+    "allowed_result_states": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 4,
+      "items": { "enum": ["succeeded", "pending_review", "rejected_or_error", "result_unknown"] }
+    },
+    "result_unknown_policy": { "const": "query_or_takeover_never_resubmit" },
+    "mapping_confirmation_policy": { "const": "result_page_and_list_page_ids_and_statuses_must_match" },
+    "implementation_gaps": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 4,
+      "items": { "enum": ["takeover_remote_write_authorization_port", "post_write_result_evidence_port", "delivery_mapping_http_api", "skill_final_submit_instructions_after_validation"] }
+    }
+  }
+}

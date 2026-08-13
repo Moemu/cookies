@@ -133,3 +133,11 @@ Agent final-submit behavior must not be added to a `SKILL.md` until the complete
 project → promotion flow has been validated. Even after gate one passes, save,
 final submit, enable, and all other gate-two actions remain disabled until a
 separate explicit gate-two authorization and implementation review.
+
+The non-write gate-two preparation baseline is frozen in
+`oceanengine-gate-two-preparation.md` and
+`fixtures/oceanengine-gate-two-preflight-v0.1.json`. It records the reusable
+authority and recovery primitives, the fresh objects required at execution
+time, the one-click limit, double-readback Mapping rule, and the remaining
+production-port gaps. Its status is `contract_frozen_authorization_required`;
+it does not issue a confirmation or enable submit.

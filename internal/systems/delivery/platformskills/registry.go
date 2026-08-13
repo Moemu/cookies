@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"slices"
 )
 
 const (
@@ -12,6 +13,9 @@ const (
 )
 
 var ErrInvalidDefinition = errors.New("invalid delivery Platform Skill definition")
+
+var gateTwoRequiredRuntimeChecks = []string{"fresh_controlled_authority", "explicit_user_authorization_in_execution_turn", "responsible_user_online", "account_project_action_budget_exact_match", "current_page_values_match_approval", "unexpired_single_use_confirmation", "valid_fenced_lease", "kill_switch_inactive", "single_click_budget", "post_write_result_and_list_readback", "result_unknown_no_resubmit", "confirmed_mapping_requires_two_matching_readbacks"}
+var gateTwoImplementationGaps = []string{"takeover_remote_write_authorization_port", "post_write_result_evidence_port", "delivery_mapping_http_api", "skill_final_submit_instructions_after_validation"}
 
 //go:embed definitions/*.json
 var definitions embed.FS
@@ -74,6 +78,17 @@ type Definition struct {
 		Scope                      []string `json:"required_scope"`
 		Checklist                  []string `json:"acceptance_checklist"`
 	} `json:"gate_one"`
+	GateTwoPreparation struct {
+		Status                      string   `json:"status"`
+		ExecutionAuthorized         bool     `json:"execution_authorized"`
+		FinalConfirmationIssued     bool     `json:"final_confirmation_issued"`
+		ProductionSubmitPortMounted bool     `json:"production_submit_port_mounted"`
+		SkillSubmitAllowed          bool     `json:"skill_submit_allowed"`
+		MaximumFinalClicks          int      `json:"maximum_final_clicks"`
+		PreflightRef                string   `json:"preflight_ref"`
+		RequiredRuntimeChecks       []string `json:"required_runtime_checks"`
+		ImplementationGaps          []string `json:"implementation_gaps"`
+	} `json:"gate_two_preparation"`
 }
 
 func Get(id, version string) (Definition, error) {
@@ -119,6 +134,15 @@ func (d Definition) Validate() error {
 		d.GateOne.PromotionFormStatus != "passed" ||
 		d.GateOne.ControlPlaneEvidenceStatus != "passed" ||
 		d.GateOne.LiveEvidenceRef == "" ||
+		d.GateTwoPreparation.Status != "contract_frozen_authorization_required" ||
+		d.GateTwoPreparation.ExecutionAuthorized ||
+		d.GateTwoPreparation.FinalConfirmationIssued ||
+		d.GateTwoPreparation.ProductionSubmitPortMounted ||
+		d.GateTwoPreparation.SkillSubmitAllowed ||
+		d.GateTwoPreparation.MaximumFinalClicks != 1 ||
+		d.GateTwoPreparation.PreflightRef != "docs/delivery/fixtures/oceanengine-gate-two-preflight-v0.1.json" ||
+		!slices.Equal(d.GateTwoPreparation.RequiredRuntimeChecks, gateTwoRequiredRuntimeChecks) ||
+		!slices.Equal(d.GateTwoPreparation.ImplementationGaps, gateTwoImplementationGaps) ||
 		len(d.EvidenceRefs) < 11 ||
 		len(d.PageTypes) < 9 ||
 		len(d.Capabilities.Allowed) == 0 ||

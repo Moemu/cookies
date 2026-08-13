@@ -151,7 +151,7 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 		t.Fatalf("attached execution=%#v err=%v", execution, err)
 	}
 	mapping, err := service.CreatePendingPlatformEntityMapping(context.Background(), actor, PlatformEntityMapping{ID: "mapping_1", ProjectID: "project_a", AccountReferenceID: change.Binding.AccountReferenceID, PlanID: change.Binding.PlanID, ConfigurationID: change.Binding.ConfigurationID, BusinessExecutionID: execution.ID, ComputerUseRunID: execution.ComputerUseRunID, InternalObjectKind: "project", InternalObjectID: change.Binding.ObjectFingerprint, PlatformObjectKind: "project"})
-	if err != nil || mapping.Status != PlatformEntityMappingPending {
+	if err != nil || mapping.Status != PlatformEntityMappingPending || mapping.PlatformObjectID != "" || mapping.PlatformStatus != "" || mapping.ResultEvidenceID != "" || mapping.ListEvidenceID != "" {
 		t.Fatalf("pending mapping=%#v err=%v", mapping, err)
 	}
 	_, err = service.ConfirmPlatformEntityMapping(context.Background(), actor, "project_a", mapping.ID, mapping.Version, MappingReadback{PlatformObjectID: "platform_1", PlatformStatus: "pending_review", EvidenceID: "evidence_result"}, MappingReadback{PlatformObjectID: "platform_2", PlatformStatus: "pending_review", EvidenceID: "evidence_list"})

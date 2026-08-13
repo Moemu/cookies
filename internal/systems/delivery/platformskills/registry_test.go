@@ -25,4 +25,7 @@ func TestOceanEngineEcommerceManualFreezesStageBBaselineWithoutClaimingDriverRea
 	if definition.RuntimePolicy.AgentFinalSubmitDocumentation != "deferred_until_end_to_end_flow_validated" {
 		t.Fatalf("agent final-submit documentation was enabled before the flow was validated: %#v", definition)
 	}
+	if definition.GateTwoPreparation.Status != "contract_frozen_authorization_required" || definition.GateTwoPreparation.ExecutionAuthorized || definition.GateTwoPreparation.FinalConfirmationIssued || definition.GateTwoPreparation.ProductionSubmitPortMounted || definition.GateTwoPreparation.SkillSubmitAllowed || definition.GateTwoPreparation.MaximumFinalClicks != 1 {
+		t.Fatalf("gate-two preparation accidentally enabled execution: %#v", definition)
+	}
 }

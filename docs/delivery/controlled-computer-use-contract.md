@@ -76,6 +76,7 @@ handlers re-authorize organization, Project and scope, then delegate to the
 authority service; they do not rebuild lease, confirmation, Kill Switch or
 transition policy. The production host mounts only the persisted takeover
 control plane and returns not-found for fake-worker `prepare` and `submit`
-commands. The remaining promotion-form and persisted live-evidence work must
-complete before a real adapter can be considered calibrated; final submit
-remains outside the current implementation and release gate.
+commands. Gate one has completed the promotion-form and persisted live-evidence
+calibration. Gate-two preflight is frozen in
+`oceanengine-gate-two-preparation.md`, but final submit remains outside the
+current production mount and requires separate execution-turn authorization.

@@ -103,9 +103,11 @@ func TestTakeoverOnlyServerRegistersScopedResourcesWithoutMountingFakeWorker(t *
 	}
 	run := validHTTPRun(time.Now().UTC())
 	_, _, _ = repo.CreateRun(context.Background(), run)
-	prepare := call(http.MethodPost, "/api/platform/v1/computer-use/projects/project_1/runs/run_1:prepare", `{}`, "delivery.execute")
-	if prepare.Code != http.StatusNotFound {
-		t.Fatalf("fake worker unexpectedly mounted: status=%d body=%s", prepare.Code, prepare.Body.String())
+	for _, action := range []string{"prepare", "submit"} {
+		response := call(http.MethodPost, "/api/platform/v1/computer-use/projects/project_1/runs/run_1:"+action, `{}`, "delivery.execute")
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("fake worker %s unexpectedly mounted: status=%d body=%s", action, response.Code, response.Body.String())
+		}
 	}
 }
 
