@@ -18,16 +18,46 @@ export type RequirementMedia = {
 export type AINativeProductPreview = {
   product_id: string
   product_name: string
-  source: 'douyin_mall'
+  source: 'douyin_mall' | 'taobao' | 'tmall' | 'xiaohongshu' | '1688'
   source_url: string
+  status: 'recognized' | 'partial' | 'manual_required'
+  resource_type: 'product' | 'note'
+  missing_fields: string[]
+}
+
+export type AINativeOutputPresetSnapshot = {
+  id: string
+  label: string
+  channel: 'douyin' | 'kuaishou' | 'wechat_channels' | 'xiaohongshu'
+  placement: string
+  aspect_ratio: string
+  width: number
+  height: number
+  resolution: '480p' | '720p' | '1080p'
+  profile_id: string
+  profile_version: string
+  profile_hash: string
+  safe_zone: { top: number; right: number; bottom: number; left: number }
+}
+
+export type AINativeOutputPreset = AINativeOutputPresetSnapshot & {
+  status: 'available'
+}
+
+export type AINativeDeliveryTreatment = {
+  preset: 'full_ad' | 'no_voiceover' | 'clean_material' | 'custom'
+  voiceover_mode: 'generated' | 'none'
+  caption_mode: 'from_voiceover' | 'editorial' | 'none'
+  sales_overlay_mode: 'key_points' | 'minimal' | 'none'
+  music_sfx_mode: 'auto' | 'none'
 }
 
 export type AINativeRequirement = {
-  contract_version: 'creative.ai-native.requirement/v1'
+  contract_version: 'creative.ai-native.requirement/v1' | 'creative.ai-native.requirement/v2'
   revision: number
   status: 'draft'
   product: {
-    source: 'douyin_mall'
+    source: 'douyin_mall' | 'taobao' | 'tmall' | 'xiaohongshu' | '1688'
     product_id: string
     name: string
     description: string
@@ -40,6 +70,17 @@ export type AINativeRequirement = {
     }
     sales: number
     source_url: string
+    resolution_status?: 'recognized' | 'partial' | 'manual_required'
+    resource_type?: 'product' | 'note'
+    missing_fields?: string[]
+  }
+  product_resolution?: {
+    status: 'recognized' | 'partial' | 'manual_required'
+    source: 'douyin_mall' | 'taobao' | 'tmall' | 'xiaohongshu' | '1688'
+    resource_type: 'product' | 'note'
+    external_id?: string
+    source_url: string
+    missing_fields: string[]
   }
   product_name: string
   product_description: string
@@ -47,17 +88,19 @@ export type AINativeRequirement = {
   media: RequirementMedia[]
   core_selling_points: EditableTextItem[]
   supplemental_requirement: string
-  channel: 'douyin'
-  aspect_ratio: '9:16'
+  channel: AINativeOutputPresetSnapshot['channel']
+  aspect_ratio: string
   duration_seconds: number
   language: 'zh-CN'
+  output_preset?: AINativeOutputPresetSnapshot
+  delivery_treatment?: AINativeDeliveryTreatment
   needs_confirmation: string[]
   generation: {
     mode: 'model' | 'deterministic_fallback'
     model_alias: string
     model_version: string
     route_revision_id?: string
-    prompt_version: 'ai-native-requirement/douyin-v1'
+    prompt_version: string
   }
 }
 
@@ -157,7 +200,7 @@ export type AdScriptDraft = {
     model_alias: string
     model_version: string
     route_revision_id?: string
-    prompt_version: 'ai-ad-script/douyin/v1'
+    prompt_version: string
     profile_hash: string
     input_tokens?: number
     output_tokens?: number
@@ -192,6 +235,7 @@ export type StoryboardShot = {
   reference_asset_ids: string[]
   voiceover: string
   subtitle: string
+  sales_overlays?: Array<{ text: string; start_ms: number; end_ms: number; kind: 'selling_point' | 'cta' }>
   sound_effect: string
   bgm_direction: string
   transition: string
@@ -215,7 +259,7 @@ export type StoryboardDraft = {
     model_alias: string
     model_version: string
     route_revision_id?: string
-    prompt_version: 'ai-ad-storyboard/douyin/v1'
+    prompt_version: string
     profile_hash: string
   }
 }
@@ -292,12 +336,16 @@ export type ProductionPlan = {
   aspect_ratio: '9:16'
   units: ProductionVideoUnit[]
   speech_units: Array<{ id: string; shot_id: string; start_ms?: number; end_ms?: number; text?: string; speaking_rate?: number; attempts: GenerationAttempt[]; selected_attempt_id?: string }>
+  delivery_treatment?: AINativeDeliveryTreatment
+  caption_cues?: Array<{ shot_id: string; start_ms: number; end_ms: number; text: string; mode: string }>
+  sales_overlay_cues?: Array<{ shot_id: string; start_ms: number; end_ms: number; text: string; kind: string }>
+  audio_cues?: Array<{ shot_id: string; start_ms: number; end_ms: number; role: 'music' | 'sfx'; direction: string; asset_ref?: { asset_id: string; version: number } }>
   render?: {
     id: string
     status: 'rendering' | 'completed' | 'render_failed'
     progress_percent: number
     eta_seconds: number
-    renderer_version: 'ffmpeg-ai-ad-timeline/v1'
+    renderer_version: 'ffmpeg-ai-ad-timeline/v2'
     output_asset_ref?: { asset_id: string; version: number }
     error_code?: string
     error_message?: string

@@ -94,7 +94,7 @@ func (s Service) GenerateAINativeScript(ctx context.Context, actor contract.Acto
 	if workspace.WorkspaceVersion != request.ExpectedWorkspaceVersion {
 		return AINativeRequirementWorkspace{}, ErrVersionConflict
 	}
-	if _, err := s.AINativeScriptProfiles.Resolve(workspace.Requirement.Channel, "performance", "v1"); err != nil {
+	if _, err := s.resolveFrozenChannelProfile(workspace.Requirement); err != nil {
 		return AINativeRequirementWorkspace{}, err
 	}
 	requirementHash, err := contract.CanonicalJSONHash(workspace.Requirement)
@@ -210,7 +210,7 @@ func (s Service) HandleAINativeScriptJob(ctx context.Context, claim jobruntime.C
 	if err != nil {
 		return s.failAINativeScriptJob(ctx, claim, operation, "AI_NATIVE_SCRIPT_PROJECT_UNAVAILABLE", err)
 	}
-	profile, err := s.AINativeScriptProfiles.Resolve(workspace.Requirement.Channel, "performance", "v1")
+	profile, err := s.resolveFrozenChannelProfile(workspace.Requirement)
 	if err != nil {
 		return s.failAINativeScriptJob(ctx, claim, operation, "AI_NATIVE_SCRIPT_PROFILE_UNAVAILABLE", err)
 	}
@@ -218,7 +218,7 @@ func (s Service) HandleAINativeScriptJob(ctx context.Context, claim jobruntime.C
 	if err != nil {
 		return s.failAINativeScriptJob(ctx, claim, operation, "AI_NATIVE_SCRIPT_GENERATION_FAILED", err)
 	}
-	if script.ChannelProfileID != profile.ID || script.ChannelProfileHash != profile.ContentHash || script.Generation.ProfileHash != profile.ContentHash {
+	if script.ChannelProfileID != profile.ID || script.ChannelProfileHash != profile.ContentHash || script.Generation.ProfileHash != profile.ContentHash || script.Generation.PromptVersion != profile.PromptVersion {
 		return s.failAINativeScriptJob(ctx, claim, operation, "AI_NATIVE_SCRIPT_PROFILE_MISMATCH", fmt.Errorf("script output does not match the selected channel profile"))
 	}
 	script.BasedOnRequirementRevision = operation.RequirementRevision

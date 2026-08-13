@@ -11,7 +11,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/provider"
 )
 
-const aiNativeScriptPromptVersion = "ai-ad-script/douyin/v1"
+const aiNativeScriptPromptVersion = "ai-ad-script/douyin/v1" // legacy fixture compatibility
 
 type AINativeScriptTextGenerator interface {
 	GenerateText(context.Context, provider.TextGenerateRequest) (provider.SynchronousResponse, error)
@@ -92,7 +92,7 @@ func (p ModelAINativeScriptPlanner) Plan(ctx context.Context, actor contract.Act
 }
 
 func (p ModelAINativeScriptPlanner) generate(ctx context.Context, actor contract.ActorContext, project contract.ProjectContext, input string, repair bool) (provider.SynchronousResponse, error) {
-	system := "你是抖音效果广告脚本策划。仅基于已确认商品事实和卖点 ID，一次只输出一份完整脚本。时间线必须从0开始、连续无空洞，并严格结束于目标时长。必须包含 hook、proof 和带 conversion_action 的 cta。不得编造材质、性能、价格、优惠、销量、认证、医疗功效或保证爆款。只输出符合 JSON Schema 的 JSON。"
+	system := "你是效果广告脚本策划。严格遵循 requirement.delivery_treatment：旁白和字幕是独立字段，关闭旁白时 voiceover 必须为空，关闭字幕时 subtitle 必须为空，无旁白编辑型字幕仍需完整表达叙事。仅基于已确认商品事实和卖点 ID，一次只输出一份完整脚本。时间线必须连续并严格结束于目标时长，包含 hook、proof 和 cta。不得编造事实。只输出符合 JSON Schema 的 JSON。"
 	if repair {
 		system = "你是结构修复器。只修复给定脚本的 JSON 结构、时间线闭合和卖点 ID 引用，不增加新商品事实。只输出符合 JSON Schema 的 JSON。"
 	}
@@ -113,10 +113,12 @@ func decodeModelAINativeScript(response provider.SynchronousResponse, requiremen
 	}
 	segments := make([]AINativeScriptSegment, 0, len(output.Segments))
 	for _, segment := range output.Segments {
-		segments = append(segments, AINativeScriptSegment(segment))
+		value := AINativeScriptSegment(segment)
+		applyAINativeScriptDeliveryTreatment(&value, requirement.DeliveryTreatment)
+		segments = append(segments, value)
 	}
 	generation := AINativeScriptGenerationMetadata{ModelAlias: response.ModelAlias, ModelVersion: response.ModelVersion,
-		RouteRevisionID: response.RouteRevisionID, PromptVersion: aiNativeScriptPromptVersion, ProfileHash: profile.ContentHash, LatencyMS: latency.Milliseconds()}
+		RouteRevisionID: response.RouteRevisionID, PromptVersion: profile.PromptVersion, ProfileHash: profile.ContentHash, LatencyMS: latency.Milliseconds()}
 	if response.Usage != nil {
 		generation.InputTokens, generation.OutputTokens, generation.TotalTokens = response.Usage.InputTokens, response.Usage.OutputTokens, response.Usage.TotalTokens
 	}
@@ -133,6 +135,17 @@ func decodeModelAINativeScript(response provider.SynchronousResponse, requiremen
 		return AINativeScriptRevision{}, err
 	}
 	return value, nil
+}
+
+func applyAINativeScriptDeliveryTreatment(segment *AINativeScriptSegment, treatment AINativeDeliveryTreatment) {
+	if treatment.VoiceoverMode == AINativeVoiceoverNone {
+		segment.Voiceover = ""
+	}
+	if treatment.CaptionMode == AINativeCaptionNone {
+		segment.Subtitle = ""
+	} else if treatment.CaptionMode == AINativeCaptionEditorial && strings.TrimSpace(segment.Subtitle) == "" {
+		segment.Subtitle = strings.TrimSpace(segment.Voiceover)
+	}
 }
 
 func rawTextResponse(response provider.SynchronousResponse) string {

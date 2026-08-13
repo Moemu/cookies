@@ -276,7 +276,7 @@ func (s Service) HandleAINativeStoryboardJob(ctx context.Context, claim jobrunti
 	}
 	plan := workspace.StoryboardPlan
 	if plan == nil {
-		profile, resolveErr := s.AINativeScriptProfiles.Resolve(workspace.Requirement.Channel, "performance", "v1")
+		profile, resolveErr := s.resolveFrozenChannelProfile(workspace.Requirement)
 		if resolveErr != nil {
 			return s.failAINativeStoryboardJob(ctx, claim, op, "AI_NATIVE_STORYBOARD_PROFILE_UNAVAILABLE", resolveErr)
 		}
@@ -289,9 +289,12 @@ func (s Service) HandleAINativeStoryboardJob(ctx context.Context, claim jobrunti
 		if generated.ValidatePlanAgainst(workspace.Requirement, *workspace.Script) != nil {
 			return s.failAINativeStoryboardJob(ctx, claim, op, "AI_NATIVE_STORYBOARD_VALIDATION_FAILED", generated.ValidatePlanAgainst(workspace.Requirement, *workspace.Script))
 		}
+		if generated.Generation.PromptVersion != profile.StoryboardPromptVersion() || generated.Generation.ProfileHash != profile.ContentHash {
+			return s.failAINativeStoryboardJob(ctx, claim, op, "AI_NATIVE_STORYBOARD_PROFILE_MISMATCH", fmt.Errorf("storyboard output does not match the frozen channel profile"))
+		}
 		persisted, saveErr := s.AINativeStoryboards.SaveAINativeStoryboardPlan(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, op.WorkspaceID, op, generated, s.now())
 		if saveErr != nil {
-			return jobruntime.Result{}, saveErr
+			return s.failAINativeStoryboardJob(ctx, claim, op, "AI_NATIVE_STORYBOARD_PERSISTENCE_FAILED", saveErr)
 		}
 		plan = persisted.StoryboardPlan
 	}
@@ -314,7 +317,7 @@ func (s Service) HandleAINativeStoryboardJob(ctx context.Context, claim jobrunti
 			ready.Assets[index].ErrorCode = ""
 			ready.Assets[index].ErrorMessage = ""
 			if _, saveErr := s.AINativeStoryboards.SaveAINativeStoryboardPlan(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, op.WorkspaceID, op, ready, s.now()); saveErr != nil {
-				return jobruntime.Result{}, saveErr
+				return s.failAINativeStoryboardJob(ctx, claim, op, "AI_NATIVE_STORYBOARD_PERSISTENCE_FAILED", saveErr)
 			}
 		}
 		asset = ready.Assets[index]
@@ -324,7 +327,7 @@ func (s Service) HandleAINativeStoryboardJob(ctx context.Context, claim jobrunti
 			ready.Assets[index].ErrorCode = "AI_NATIVE_STORYBOARD_ASSET_FAILED"
 			ready.Assets[index].ErrorMessage = boundedError(prepareErr)
 			if _, saveErr := s.AINativeStoryboards.SaveAINativeStoryboardPlan(context.WithoutCancel(ctx), claim.Job.OrganizationID, claim.Job.ProjectID, op.WorkspaceID, op, ready, s.now()); saveErr != nil {
-				return jobruntime.Result{}, saveErr
+				return s.failAINativeStoryboardJob(ctx, claim, op, "AI_NATIVE_STORYBOARD_PERSISTENCE_FAILED", saveErr)
 			}
 			if assetFailure == nil {
 				assetFailure = prepareErr
@@ -342,7 +345,7 @@ func (s Service) HandleAINativeStoryboardJob(ctx context.Context, claim jobrunti
 		ready.Assets[index].ErrorCode = ""
 		ready.Assets[index].ErrorMessage = ""
 		if _, saveErr := s.AINativeStoryboards.SaveAINativeStoryboardPlan(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, op.WorkspaceID, op, ready, s.now()); saveErr != nil {
-			return jobruntime.Result{}, saveErr
+			return s.failAINativeStoryboardJob(ctx, claim, op, "AI_NATIVE_STORYBOARD_PERSISTENCE_FAILED", saveErr)
 		}
 	}
 	if assetFailure != nil {
@@ -356,7 +359,7 @@ func (s Service) HandleAINativeStoryboardJob(ctx context.Context, claim jobrunti
 	}
 	completed, err := s.AINativeStoryboards.CompleteAINativeStoryboardGeneration(ctx, claim.Job.OrganizationID, claim.Job.ProjectID, op.WorkspaceID, op, ready, op.ActorID, s.now())
 	if err != nil {
-		return jobruntime.Result{}, err
+		return s.failAINativeStoryboardJob(ctx, claim, op, "AI_NATIVE_STORYBOARD_PERSISTENCE_FAILED", err)
 	}
 	ref := contract.ResourceRef{Type: "creative_ai_native_storyboard", ID: completed.WorkspaceID, Version: completed.CurrentStoryboardRevision}
 	return jobruntime.Result{Ref: &ref}, nil

@@ -2,16 +2,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { RequirementMediaGallery } from '../src/features/ai-native-ad/RequirementStage'
+import { RequirementMediaGallery, RequirementStage } from '../src/features/ai-native-ad/RequirementStage'
 import { StoryboardStage } from '../src/features/ai-native-ad/StoryboardStage'
 import { VideoStage } from '../src/features/ai-native-ad/VideoStage'
 import { aiNativeReducer, initialAINativeState } from '../src/features/ai-native-ad/reducer'
-import type { AdScriptDraft, AINativeRequirement, AINativeRequirementWorkspace, StoryboardDraft } from '../src/features/ai-native-ad/types'
+import type { AdScriptDraft, AINativeOutputPreset, AINativeRequirement, AINativeRequirementWorkspace, StoryboardDraft } from '../src/features/ai-native-ad/types'
 import { aiNativeWorkspaceLocation, readAINativeWorkspaceLocation } from '../src/features/ai-native-ad/navigation'
 import { readAINativeStageDraft, readAINativeWorkspacePointer, rememberAINativeStageDraft, rememberAINativeWorkspace } from '../src/features/ai-native-ad/storage'
 import { createSerialAutosave } from '../src/features/ai-native-ad/autosave'
 import { autosaveRevisionFor, syncAutosaveRevisionCursor } from '../src/features/ai-native-ad/workspaceAutosaveRevision'
 import { referenceRepairSuggestion } from '../src/features/ai-native-ad/referenceRepair'
+import { buildAnalyzeRequirementRequest } from '../src/features/ai-native-ad/api'
 
 const requirement: AINativeRequirement = {
   contract_version: 'creative.ai-native.requirement/v1',
@@ -40,6 +41,98 @@ const requirement: AINativeRequirement = {
   needs_confirmation: [],
   generation: { mode: 'model', model_alias: 'cookies.text.standard', model_version: 'test', prompt_version: 'ai-native-requirement/douyin-v1' },
 }
+
+const outputPreset: AINativeOutputPreset = {
+  id: 'douyin_feed_9x16_v1',
+  label: '抖音信息流 · 9:16',
+  channel: 'douyin',
+  placement: 'feed',
+  aspect_ratio: '9:16',
+  width: 720,
+  height: 1280,
+  resolution: '720p',
+  profile_id: 'douyin.performance.v1',
+  profile_version: 'v1',
+  profile_hash: 'a'.repeat(64),
+  safe_zone: { top: 96, right: 48, bottom: 240, left: 48 },
+  status: 'available',
+}
+
+test('新建需求请求同时携带固定投放预设和完整广告轨道契约', () => {
+  assert.deepEqual(
+    buildAnalyzeRequirementRequest(
+      '1.58 NwF:/ 【抖音商城】https://v.douyin.com/xcYJuBqvxDM/',
+      '参考店铺链接生成爆款抖音保温杯广告视频',
+    ),
+    {
+      product_link: '1.58 NwF:/ 【抖音商城】https://v.douyin.com/xcYJuBqvxDM/',
+      supplemental_requirement: '参考店铺链接生成爆款抖音保温杯广告视频',
+      duration_seconds: 20,
+      language: 'zh-CN',
+      output_preset_id: 'douyin_feed_9x16_v1',
+      delivery_treatment: {
+        preset: 'full_ad',
+        voiceover_mode: 'generated',
+        caption_mode: 'from_voiceover',
+        sales_overlay_mode: 'key_points',
+        music_sfx_mode: 'auto',
+      },
+    },
+  )
+})
+
+test('需求分析把视频使用场景与比例作为一个后端预设下拉框', () => {
+  const creationSurfaces: AINativeOutputPreset[] = [
+    outputPreset,
+    { ...outputPreset, id: 'kuaishou_feed_9x16_v1', label: '快手信息流 · 9:16', channel: 'kuaishou', profile_id: 'kuaishou.performance.v1' },
+    { ...outputPreset, id: 'wechat_channels_feed_9x16_v1', label: '视频号信息流 · 9:16', channel: 'wechat_channels', profile_id: 'wechat_channels.performance.v1' },
+    { ...outputPreset, id: 'xiaohongshu_feed_9x16_v1', label: '小红书视频信息流 · 9:16', channel: 'xiaohongshu', profile_id: 'xiaohongshu.performance.v1' },
+  ]
+  const markup = renderToStaticMarkup(React.createElement(RequirementStage, {
+    projectId: 'project-1',
+    status: 'draft',
+    productLink: requirement.product.source_url,
+    supplementalRequirement: requirement.supplemental_requirement,
+    requirement: { ...requirement, contract_version: 'creative.ai-native.requirement/v2', output_preset: outputPreset },
+    outputPresets: creationSurfaces,
+    error: '',
+    onProductLinkChange: () => undefined,
+    onSupplementalRequirementChange: () => undefined,
+    onAnalyze: () => undefined,
+    onReanalyze: () => undefined,
+    onChange: () => undefined,
+    onSave: () => undefined,
+    onConfirm: () => undefined,
+    onEdit: () => undefined,
+  }))
+
+  assert.match(markup, /视频使用场景与比例/)
+  assert.match(markup, /抖音信息流 · 9:16/)
+  assert.match(markup, /快手信息流 · 9:16/)
+  assert.match(markup, /视频号信息流 · 9:16/)
+  assert.match(markup, /小红书视频信息流 · 9:16/)
+  assert.match(markup, /不会自动投放或连接广告账户/)
+  assert.doesNotMatch(markup, />视频比例</)
+})
+
+test('需求分析提供三种交付方式和可独立调整的高级轨道设置', () => {
+  const markup = renderToStaticMarkup(React.createElement(RequirementStage, {
+    projectId: 'project-1', status: 'draft', productLink: requirement.product.source_url,
+    supplementalRequirement: requirement.supplemental_requirement,
+    requirement: { ...requirement, contract_version: 'creative.ai-native.requirement/v2', output_preset: outputPreset,
+      delivery_treatment: { preset: 'full_ad', voiceover_mode: 'generated', caption_mode: 'from_voiceover', sales_overlay_mode: 'key_points', music_sfx_mode: 'auto' } },
+    outputPresets: [outputPreset], error: '', onProductLinkChange: () => undefined,
+    onSupplementalRequirementChange: () => undefined, onAnalyze: () => undefined, onReanalyze: () => undefined,
+    onChange: () => undefined, onSave: () => undefined, onConfirm: () => undefined, onEdit: () => undefined,
+  }))
+
+  assert.match(markup, /完整广告/)
+  assert.match(markup, /无旁白成片/)
+  assert.match(markup, /纯净视频素材/)
+  assert.match(markup, /高级设置/)
+  assert.match(markup, /卖点叠字/)
+  assert.match(markup, /BGM\/音效/)
+})
 
 test('AI native ad remembers the latest workspace pointer per project', () => {
   const values = new Map<string, string>()
@@ -240,6 +333,20 @@ test('项目素材预览失败时显示可理解的占位状态而不是破图',
 
   assert.match(markup, /素材预览暂不可用/)
   assert.doesNotMatch(markup, /<img/)
+})
+
+test('商品链接无权提取图片时提供项目素材上传兜底', () => {
+  const markup = renderToStaticMarkup(React.createElement(RequirementMediaGallery, {
+    media: [],
+    previews: {},
+    status: 'draft',
+    onReanalyze: () => undefined,
+    onUpload: () => undefined,
+  }))
+
+  assert.match(markup, /上传商品主图/)
+  assert.match(markup, /链接没有权限提取，需要用户手动上传/)
+  assert.match(markup, /image\/jpeg,image\/png,image\/webp/)
 })
 
 test('AI 原生广告工作区地址可恢复 workspace 与阶段且保留项目查询参数', () => {

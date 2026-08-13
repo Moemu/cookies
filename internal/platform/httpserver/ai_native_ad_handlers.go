@@ -38,6 +38,25 @@ type aiNativeProductPreviewManager interface {
 	ResolveAINativeProductPreview(context.Context, contract.ActorContext, contract.ProjectID, creative.ResolveAINativeProductPreviewRequest) (creative.AINativeProductPreview, error)
 }
 
+type aiNativeOutputPresetManager interface {
+	ListAINativeOutputPresets(context.Context, contract.ActorContext, contract.ProjectID) ([]creative.AINativeOutputPreset, error)
+}
+
+func (s *Server) listAINativeOutputPresets(w http.ResponseWriter, r *http.Request) {
+	manager, ok := s.creative.(aiNativeOutputPresetManager)
+	if !ok || manager == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := manager.ListAINativeOutputPresets(r.Context(), rc.Actor, contract.ProjectID(r.PathValue("project_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
 type aiNativeWorkspaceCatalogManager interface {
 	ListAINativeAdWorkspaces(context.Context, contract.ActorContext, contract.ProjectID) ([]creative.AINativeAdWorkspaceSummary, error)
 	RenameAINativeAdWorkspace(context.Context, contract.ActorContext, contract.ProjectID, string, creative.RenameAINativeAdWorkspaceRequest) (creative.AINativeRequirementWorkspace, error)

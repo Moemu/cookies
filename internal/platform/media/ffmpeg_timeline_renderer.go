@@ -183,6 +183,9 @@ func (r FFmpegTimelineRenderer) Render(ctx context.Context, request TimelineRend
 	}
 	args = append(args, "-f", "lavfi", "-t", seconds(request.DurationMS), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000")
 	var subtitles []byte
+	for _, overlay := range request.Overlays {
+		request.Captions = append(request.Captions, TimelineCaption{StartMS: overlay.StartMS, EndMS: overlay.EndMS, Text: overlay.Text})
+	}
 	if len(request.CaptionStyles) > 0 {
 		subtitles, _, err = BuildASSSubtitlesWithStyles(request.Captions, request.Width, request.Height, request.CaptionStyles)
 	} else {
@@ -197,11 +200,21 @@ func (r FFmpegTimelineRenderer) Render(ctx context.Context, request TimelineRend
 	}
 	graph, videoLabel, audioLabel := BuildTimelineFilter(request, subtitlePath)
 	outputPath := filepath.Join(dir, "final.mp4")
-	args = append(args, "-filter_complex", graph, "-map", videoLabel, "-map", audioLabel, "-c:v", "libx264", "-preset", "medium", "-crf", "20")
+	args = append(args, "-filter_complex", graph, "-map", videoLabel)
+	if audioLabel != "" {
+		args = append(args, "-map", audioLabel)
+	}
+	args = append(args, "-c:v", "libx264", "-preset", "medium", "-crf", "20")
 	if r.Deterministic {
 		args = append(args, "-threads", "1", "-x264-params", "asm=0")
 	}
-	args = append(args, "-pix_fmt", "yuv420p", "-r", strconv.Itoa(request.FrameRate), "-c:a", "aac", "-b:a", "192k", "-ar", strconv.Itoa(request.SampleRate), "-ac", "2", "-t", seconds(request.DurationMS), "-movflags", "+faststart", outputPath)
+	args = append(args, "-pix_fmt", "yuv420p", "-r", strconv.Itoa(request.FrameRate))
+	if request.OmitAudio {
+		args = append(args, "-an")
+	} else {
+		args = append(args, "-c:a", "aac", "-b:a", "192k", "-ar", strconv.Itoa(request.SampleRate), "-ac", "2")
+	}
+	args = append(args, "-t", seconds(request.DurationMS), "-movflags", "+faststart", outputPath)
 	runner := r.Runner
 	if runner == nil {
 		runner = ExecProgressCommandRunner{}
@@ -217,7 +230,7 @@ func (r FFmpegTimelineRenderer) Render(ctx context.Context, request TimelineRend
 	if err != nil {
 		return fail(fmt.Errorf("validate timeline output: %w", err))
 	}
-	if math.Abs(float64(metadata.DurationMS-int64(request.DurationMS))) > 250 || metadata.WidthPixels != request.Width || metadata.HeightPixels != request.Height || strings.TrimSpace(metadata.AudioCodec) == "" || strings.TrimSpace(metadata.VideoCodec) == "" {
+	if math.Abs(float64(metadata.DurationMS-int64(request.DurationMS))) > 250 || metadata.WidthPixels != request.Width || metadata.HeightPixels != request.Height || !request.OmitAudio && strings.TrimSpace(metadata.AudioCodec) == "" || request.OmitAudio && strings.TrimSpace(metadata.AudioCodec) != "" || strings.TrimSpace(metadata.VideoCodec) == "" {
 		return fail(fmt.Errorf("timeline output metadata does not match the frozen output profile"))
 	}
 	file, err := os.Open(outputPath)

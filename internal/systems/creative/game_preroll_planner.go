@@ -134,11 +134,11 @@ func (p ModelGamePrerollPlanner) Plan(
 				Content: "你是效果广告游戏前贴规划器。只输出 3 个彼此不同的结构化候选，不生成最终视频 Prompt。" +
 					"只能使用 allowed_mechanisms 和 evidence_moments；不得推断素材未证明的胜负、奖励、升级、合成或数值结果。" +
 					"hook_line 必须简短、可静音理解，并且不得改写游戏 UI 文案。" +
-					"三个候选的顺序固定为：选择挑战、战术取舍、波次压力；机制与证据由服务端绑定，你只规划表达角度、测试变量、假设和钩子文案。",
+					"机制与证据由服务端绑定，你只规划表达角度、测试变量、假设和钩子文案。",
 			},
 			{
 				Role: provider.TextRoleUser,
-				Content: "请为以下不可变事实快照规划 3 个完整 6 秒候选，并严格保持既定顺序。" +
+				Content: fmt.Sprintf("请为以下不可变事实快照规划 3 个完整 %d 秒候选。", config.DurationSeconds) +
 					"\nINPUT_SNAPSHOT=" + string(snapshotJSON),
 			},
 		},
@@ -155,7 +155,7 @@ func (p ModelGamePrerollPlanner) Plan(
 	if err := json.Unmarshal(raw, &planned); err != nil {
 		return GameCandidateBatch{}, fmt.Errorf("decode game planner output: %w", err)
 	}
-	outlines, err := modelGameOutlines(snapshot, planned)
+	outlines, err := modelGameOutlines(snapshot, planned, config.DurationSeconds)
 	if err != nil {
 		return GameCandidateBatch{}, err
 	}
@@ -171,11 +171,14 @@ func (p ModelGamePrerollPlanner) Plan(
 	)
 }
 
-func modelGameOutlines(snapshot GamePrerollInputSnapshot, planned modelGamePlan) ([]gameCandidateOutline, error) {
+func modelGameOutlines(snapshot GamePrerollInputSnapshot, planned modelGamePlan, durationSeconds int) ([]gameCandidateOutline, error) {
 	if len(planned.Candidates) != 3 {
 		return nil, fmt.Errorf("game model planner must return exactly three candidates")
 	}
 	templates := defaultGameCandidateOutlines(snapshot)
+	if !gameEvidenceIDsExist(snapshot.EvidenceMoments, []string{"skill_choice_1", "skill_choice_2", "wave_2"}) {
+		templates = genericGameCandidateOutlines(snapshot, durationSeconds)
+	}
 	seenHookLines := make(map[string]struct{}, 3)
 	outlines := make([]gameCandidateOutline, 0, 3)
 	for index, candidate := range planned.Candidates {

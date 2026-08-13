@@ -72,9 +72,10 @@ func (s AINativeScriptRevision) ValidateAgainst(requirement AINativeRequirementD
 		s.DurationSeconds != requirement.DurationSeconds || len(s.Segments) < 3 ||
 		s.BasedOnRequirementRevision != requirement.Revision || len(s.BasedOnRequirementHash) != 64 ||
 		strings.TrimSpace(s.Generation.ModelAlias) == "" || strings.TrimSpace(s.Generation.ModelVersion) == "" ||
-		s.Generation.PromptVersion != aiNativeScriptPromptVersion || s.Generation.ProfileHash != s.ChannelProfileHash {
+		strings.TrimSpace(s.Generation.PromptVersion) == "" || s.Generation.ProfileHash != s.ChannelProfileHash {
 		return fmt.Errorf("AI native script is invalid")
 	}
+	treatment := effectiveAINativeDeliveryTreatment(requirement)
 	knownPoints := make(map[string]struct{}, len(requirement.CoreSellingPoints))
 	for _, point := range requirement.CoreSellingPoints {
 		knownPoints[point.ID] = struct{}{}
@@ -83,7 +84,7 @@ func (s AINativeScriptRevision) ValidateAgainst(requirement AINativeRequirementD
 	hasHook, hasProof, hasCTA := false, false, false
 	for index, segment := range s.Segments {
 		if strings.TrimSpace(segment.ID) == "" || segment.StartMS != lastEnd || segment.EndMS <= segment.StartMS ||
-			strings.TrimSpace(segment.VisualIntent) == "" || strings.TrimSpace(segment.Voiceover) == "" || strings.TrimSpace(segment.Subtitle) == "" {
+			strings.TrimSpace(segment.VisualIntent) == "" || !validAINativeScriptDeliveryFields(segment, treatment) {
 			return fmt.Errorf("AI native script segment %d is invalid or timeline is not contiguous", index)
 		}
 		switch segment.Purpose {
@@ -108,4 +109,17 @@ func (s AINativeScriptRevision) ValidateAgainst(requirement AINativeRequirementD
 		return fmt.Errorf("AI native script must close at target duration and include hook, proof and CTA")
 	}
 	return nil
+}
+
+func validAINativeScriptDeliveryFields(segment AINativeScriptSegment, treatment AINativeDeliveryTreatment) bool {
+	if treatment.VoiceoverMode == AINativeVoiceoverGenerated && strings.TrimSpace(segment.Voiceover) == "" {
+		return false
+	}
+	if treatment.VoiceoverMode == AINativeVoiceoverNone && strings.TrimSpace(segment.Voiceover) != "" {
+		return false
+	}
+	if treatment.CaptionMode != AINativeCaptionNone && strings.TrimSpace(segment.Subtitle) == "" {
+		return false
+	}
+	return treatment.CaptionMode != AINativeCaptionNone || strings.TrimSpace(segment.Subtitle) == ""
 }

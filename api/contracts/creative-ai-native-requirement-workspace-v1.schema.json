@@ -32,7 +32,7 @@
 	"active_operation_version": {"type": "integer", "minimum": 1},
     "current_revision": {"type": "integer", "minimum": 1},
     "confirmed_revision": {"type": "integer", "minimum": 1},
-    "requirement": {"$ref": "./creative-ai-native-requirement-v1.schema.json"},
+    "requirement": {"oneOf": [{"$ref": "./creative-ai-native-requirement-v1.schema.json"}, {"$ref": "./creative-ai-native-requirement-v2.schema.json"}]},
     "script_status": {"enum": ["generating", "draft", "confirmed", "failed"]},
     "current_script_revision": {"type": "integer", "minimum": 1},
     "confirmed_script_revision": {"type": "integer", "minimum": 1},

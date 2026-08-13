@@ -3,7 +3,7 @@ import type { ApiProjectMediaAsset } from '../../data/api'
 export type ShortDramaStep = 'understanding' | 'direction' | 'first-frame' | 'video'
 export type AsyncStatus = 'idle' | 'loading' | 'ready' | 'error'
 export type HookCategory = 'curiosity' | 'summary'
-export type PrerollDuration = 5 | 6 | 10 | 12 | 15
+export type PrerollDuration = 10 | 12 | 15
 
 export type StoryAnalysis = {
   title: string
@@ -32,6 +32,8 @@ export type FirstFrameCandidate = {
   variantKey?: string
   visualMechanism?: string
   styleProfile?: string
+  primaryTestVariable?: string
+  panels?: Array<{ slot: string; role: string; description: string }>
 }
 
 export type GeneratedPreroll = {

@@ -100,6 +100,7 @@ type CreateIntakeRequest struct {
 	ManualShortDramaPreroll   *ManualShortDramaPrerollInput   `json:"manual_short_drama_preroll,omitempty"`
 	ManualShortDramaPrerollV2 *ManualShortDramaPrerollV2Input `json:"manual_short_drama_preroll_v2,omitempty"`
 	ManualGamePreroll         *ManualGamePrerollInput         `json:"manual_game_preroll,omitempty"`
+	ManualGamePrerollV2       *ManualGamePrerollV2Input       `json:"manual_game_preroll_v2,omitempty"`
 	ManualCommercePreroll     *ManualCommercePrerollInput     `json:"manual_commerce_preroll,omitempty"`
 	ManualCommercePrerollV2   *ManualCommercePrerollV2Input   `json:"manual_commerce_preroll_v2,omitempty"`
 	ManualBrandFilm           *ManualBrandFilmInput           `json:"manual_brand_film,omitempty"`
@@ -172,7 +173,7 @@ func (r CreativeRouteSnapshot) Validate() error {
 		r.RouteID != ManualShortDramaPrerollRouteID && r.RouteID != ManualShortDramaPrerollV2RouteID {
 		return fmt.Errorf("short drama preroll route_id is unsupported")
 	}
-	if r.RouteType == PerformanceModeGamePreroll && r.RouteID != ManualGamePrerollRouteID {
+	if r.RouteType == PerformanceModeGamePreroll && r.RouteID != ManualGamePrerollRouteID && r.RouteID != ManualGamePrerollV2RouteID {
 		return fmt.Errorf("game preroll route_id must be %q", ManualGamePrerollRouteID)
 	}
 	if r.RouteType == PerformanceModeCommercePreroll && r.RouteID != ManualCommercePrerollRouteID && r.RouteID != ManualCommercePrerollV2RouteID {
@@ -184,11 +185,18 @@ func (r CreativeRouteSnapshot) Validate() error {
 	if r.RouteType == "pre_roll" && r.TargetDurationSeconds != 5 {
 		return fmt.Errorf("creative pre-roll route duration must be 5 seconds")
 	}
-	if r.RouteType == PerformanceModeShortDramaPreroll && r.TargetDurationSeconds != 6 {
-		return fmt.Errorf("short drama preroll route duration must be 6 seconds")
+	if r.RouteType == PerformanceModeShortDramaPreroll && r.RouteID == ManualShortDramaPrerollRouteID && r.TargetDurationSeconds != 6 {
+		return fmt.Errorf("legacy short drama preroll route duration must be 6 seconds")
 	}
-	if r.RouteType == PerformanceModeGamePreroll && r.TargetDurationSeconds != 6 {
-		return fmt.Errorf("game preroll route duration must be 6 seconds")
+	if r.RouteType == PerformanceModeShortDramaPreroll && r.RouteID == ManualShortDramaPrerollV2RouteID &&
+		(r.TargetDurationSeconds != 10 && r.TargetDurationSeconds != 12 && r.TargetDurationSeconds != 15) {
+		return fmt.Errorf("short drama preroll V2 route duration must be 10, 12, or 15 seconds")
+	}
+	if r.RouteType == PerformanceModeGamePreroll && r.RouteID == ManualGamePrerollRouteID && r.TargetDurationSeconds != 6 {
+		return fmt.Errorf("legacy game preroll route duration must be 6 seconds")
+	}
+	if r.RouteType == PerformanceModeGamePreroll && r.RouteID == ManualGamePrerollV2RouteID && (r.TargetDurationSeconds < 6 || r.TargetDurationSeconds > 10) {
+		return fmt.Errorf("game preroll V2 route duration must be between 6 and 10 seconds")
 	}
 	if r.RouteType == PerformanceModeCommercePreroll && r.RouteID == ManualCommercePrerollRouteID && r.TargetDurationSeconds != 6 {
 		return fmt.Errorf("legacy commerce preroll route duration must be 6 seconds")
@@ -269,6 +277,9 @@ func (r CreateIntakeRequest) Validate() error {
 		}
 		if r.ManualGamePreroll != nil {
 			return r.validateManualGamePreroll()
+		}
+		if r.ManualGamePrerollV2 != nil {
+			return r.validateManualGamePrerollV2()
 		}
 		if r.ManualCommercePreroll != nil {
 			return r.validateManualCommercePreroll()
@@ -394,6 +405,25 @@ func (r CreateIntakeRequest) validateManualGamePreroll() error {
 	if len(r.CreativeRoutes[0].SourceAssetRefs) != 1 ||
 		r.CreativeRoutes[0].SourceAssetRefs[0] != r.ManualGamePreroll.SourceVideo {
 		return fmt.Errorf("game preroll route must freeze the licensed source video")
+	}
+	return r.validateVideoContent()
+}
+
+func (r CreateIntakeRequest) validateManualGamePrerollV2() error {
+	if r.Format != FormatVideo || r.PerformanceMode != PerformanceModeGamePreroll || r.Channel != ChannelDouyin {
+		return fmt.Errorf("manual game preroll V2 requires video and channel=douyin")
+	}
+	if len(r.CreativeRoutes) != 1 || r.CreativeRoutes[0].RouteID != ManualGamePrerollV2RouteID {
+		return fmt.Errorf("manual game preroll V2 requires exactly one stable route")
+	}
+	if err := r.CreativeRoutes[0].Validate(); err != nil {
+		return err
+	}
+	if err := r.ManualGamePrerollV2.Validate(); err != nil {
+		return err
+	}
+	if len(r.CreativeRoutes[0].SourceAssetRefs) != 1 || r.CreativeRoutes[0].SourceAssetRefs[0] != r.ManualGamePrerollV2.SourceVideo {
+		return fmt.Errorf("game preroll V2 route must freeze the licensed source video")
 	}
 	return r.validateVideoContent()
 }

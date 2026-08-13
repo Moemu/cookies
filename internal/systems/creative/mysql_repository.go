@@ -878,6 +878,33 @@ func (r MySQLRepository) CreateGamePrerollGenerationAttempt(
 	return r.gamePrerollGenerationAttemptByProviderJob(ctx, organizationID, projectID, attempt.ProviderJobID)
 }
 
+func (r MySQLRepository) CompleteGamePrerollGenerationAttempt(
+	ctx context.Context,
+	organizationID contract.OrganizationID,
+	projectID contract.ProjectID,
+	providerJobID string,
+	output contract.AssetVersionRef,
+) error {
+	if r.DB == nil {
+		return fmt.Errorf("creative MySQL database is required")
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE creative_game_preroll_generation_attempts
+		SET output_asset_id = ?, output_asset_version = ?
+		WHERE organization_id = ? AND project_id = ? AND provider_job_id = ?`,
+		output.AssetID, output.Version, organizationID, projectID, providerJobID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r MySQLRepository) CreateVersion(ctx context.Context, value CreativeVersion) (CreativeVersion, bool, error) {
 	if r.DB == nil {
 		return CreativeVersion{}, false, fmt.Errorf("creative MySQL database is required")

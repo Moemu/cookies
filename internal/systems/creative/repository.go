@@ -77,6 +77,12 @@ type ViralRemakeRepository interface {
 	ReviseVideoDraft(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, VideoDraft, TaskStatus) (VideoDraft, error)
 }
 
+// GamePrerollAttemptRepository closes the durable lineage from a submitted
+// provider job to the Project Asset created when that job succeeds.
+type GamePrerollAttemptRepository interface {
+	CompleteGamePrerollGenerationAttempt(context.Context, contract.OrganizationID, contract.ProjectID, string, contract.AssetVersionRef) error
+}
+
 type StrategyBrandTaskRepository interface {
 	ListActiveTasksForIntake(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]CreativeTask, error)
 	ReplaceEmptyLegacyStrategyBrandTask(context.Context, TaskDetail, CreativeTask, VideoDraft, time.Time) (CreativeTask, error)
