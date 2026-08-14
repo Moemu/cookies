@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/delivery-controlled-change-set-v1.schema.json",
+  "title": "Delivery Controlled ChangeSet v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "organization_id", "project_id", "binding", "action", "budget_limit_minor", "currency", "status", "canonical_hash", "version", "created_by", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": { "const": "delivery-controlled-change-set/v1" },
+    "id": { "type": "string", "minLength": 1 },
+    "organization_id": { "type": "string", "minLength": 1 },
+    "project_id": { "type": "string", "minLength": 1 },
+    "binding": { "$ref": "#/$defs/binding" },
+    "action": { "enum": ["create_project_and_promotions", "create_promotions_in_existing_project"] },
+    "budget_limit_minor": { "type": "integer", "minimum": 0 },
+    "currency": { "const": "CNY" },
+    "status": { "enum": ["ready_for_approval", "approved", "rejected", "executing", "executed", "invalidated"] },
+    "canonical_hash": { "$ref": "#/$defs/hash" },
+    "version": { "type": "integer", "minimum": 1 },
+    "created_by": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selection_id", "observatory_run_id", "observatory_run_canonical_hash", "operator_feedback_id", "operator_feedback_canonical_hash", "operator_feedback_disposition", "plan_id", "plan_version", "plan_canonical_hash", "intent_id", "intent_version", "intent_canonical_hash", "decision_id", "decision_canonical_hash", "configuration_id", "configuration_version", "configuration_canonical_hash", "workflow_id", "workflow_canonical_hash", "account_reference_id", "object_fingerprint"],
+      "dependentRequired": {
+        "skill_id": ["skill_version"],
+        "skill_version": ["skill_id"]
+      },
+      "properties": {
+        "selection_id": { "type": "string", "minLength": 1 },
+        "observatory_run_id": { "type": "string", "minLength": 1 },
+        "observatory_run_canonical_hash": { "$ref": "#/$defs/hash" },
+        "operator_feedback_id": { "type": "string", "minLength": 1 },
+        "operator_feedback_canonical_hash": { "$ref": "#/$defs/hash" },
+        "operator_feedback_disposition": { "enum": ["accepted", "modified"] },
+        "plan_id": { "type": "string", "minLength": 1 },
+        "plan_version": { "type": "integer", "minimum": 1 },
+        "plan_canonical_hash": { "$ref": "#/$defs/hash" },
+        "intent_id": { "type": "string", "minLength": 1 },
+        "intent_version": { "type": "integer", "minimum": 1 },
+        "intent_canonical_hash": { "$ref": "#/$defs/hash" },
+        "decision_id": { "type": "string", "minLength": 1 },
+        "decision_canonical_hash": { "$ref": "#/$defs/hash" },
+        "configuration_id": { "type": "string", "minLength": 1 },
+        "configuration_version": { "type": "integer", "minimum": 1 },
+        "configuration_canonical_hash": { "$ref": "#/$defs/hash" },
+        "workflow_id": { "type": "string", "minLength": 1 },
+        "workflow_canonical_hash": { "$ref": "#/$defs/hash" },
+        "account_reference_id": { "type": "string", "minLength": 1 },
+        "parent_platform_project_id": { "type": "string", "minLength": 1 },
+        "project_budget_mode": { "enum": ["daily", "unlimited"] },
+        "project_budget_limit_minor": { "type": "integer", "minimum": 0 },
+        "promotion_budget_limit_minor": { "type": "integer", "minimum": 0 },
+        "object_fingerprint": { "type": "string", "minLength": 1 },
+        "skill_id": { "type": "string", "minLength": 1 },
+        "skill_version": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

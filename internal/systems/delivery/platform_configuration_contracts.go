@@ -445,6 +445,7 @@ type OceanEngineSchedule struct {
 }
 
 type OceanEngineBudgetAndBidding struct {
+	BudgetMode       string   `json:"budget_mode,omitempty"`
 	Currency         string   `json:"currency"`
 	DailyBudgetMinor int64    `json:"daily_budget_minor"`
 	BiddingStrategy  string   `json:"bidding_strategy"`
@@ -452,6 +453,11 @@ type OceanEngineBudgetAndBidding struct {
 	BidMinor         *int64   `json:"bid_minor,omitempty"`
 	ROICoefficient   *float64 `json:"roi_coefficient,omitempty"`
 }
+
+const (
+	OceanEngineBudgetModeDaily     = "daily"
+	OceanEngineBudgetModeUnlimited = "unlimited"
+)
 
 type OceanEngineProjectDraft struct {
 	DraftSchemaVersion          string                      `json:"draft_schema_version"`
@@ -482,11 +488,14 @@ type OceanEngineCopyItem struct {
 }
 
 type OceanEnginePromotionSettings struct {
-	CallToAction      string           `json:"call_to_action,omitempty"`
-	SourceLabel       string           `json:"source_label,omitempty"`
-	CommentsEnabled   *bool            `json:"comments_enabled,omitempty"`
-	CategoryReference *StableReference `json:"category_reference,omitempty"`
-	BrandReference    *StableReference `json:"brand_reference,omitempty"`
+	CallToAction           string           `json:"call_to_action,omitempty"`
+	SourceLabel            string           `json:"source_label,omitempty"`
+	CommentsEnabled        *bool            `json:"comments_enabled,omitempty"`
+	SmartGenerationEnabled *bool            `json:"smart_generation_enabled,omitempty"`
+	ClientDownloadEnabled  *bool            `json:"client_download_enabled,omitempty"`
+	DirectLinkMode         string           `json:"direct_link_mode,omitempty"`
+	CategoryReference      *StableReference `json:"category_reference,omitempty"`
+	BrandReference         *StableReference `json:"brand_reference,omitempty"`
 }
 
 type OceanEnginePromotionDraft struct {
@@ -501,6 +510,7 @@ type OceanEnginePromotionDraft struct {
 	ProductReference            *StableReference             `json:"product_reference,omitempty"`
 	CreativeComponentReferences []StableReference            `json:"creative_component_references,omitempty"`
 	Settings                    OceanEnginePromotionSettings `json:"settings"`
+	BudgetAndBidding            *OceanEngineBudgetAndBidding `json:"budget_and_bidding,omitempty"`
 	PromotionName               string                       `json:"promotion_name"`
 }
 
@@ -784,17 +794,8 @@ func validateOceanEngineConfiguration(configuration OceanEngineConfiguration) er
 	if project.Schedule.StartAt.IsZero() || !project.Schedule.EndAt.After(project.Schedule.StartAt) || strings.TrimSpace(project.Schedule.Timezone) == "" {
 		return contractFailure(ContractErrorProjectRequired, "payload.ocean_engine.project.schedule", "schedule requires timezone and end_at after start_at")
 	}
-	if strings.TrimSpace(project.BudgetAndBidding.Currency) == "" || project.BudgetAndBidding.DailyBudgetMinor < 0 || strings.TrimSpace(project.BudgetAndBidding.BiddingStrategy) == "" || strings.TrimSpace(project.BudgetAndBidding.ChargingMode) == "" {
-		return contractFailure(ContractErrorProjectRequired, "payload.ocean_engine.project.budget_and_bidding", "currency, non-negative budget, bidding strategy, and charging mode are required")
-	}
-	if (project.BudgetAndBidding.BidMinor == nil) == (project.BudgetAndBidding.ROICoefficient == nil) {
-		return contractFailure(ContractErrorProjectRequired, "payload.ocean_engine.project.budget_and_bidding", "exactly one of bid_minor or roi_coefficient is required")
-	}
-	if project.BudgetAndBidding.BidMinor != nil && *project.BudgetAndBidding.BidMinor < 0 {
-		return contractFailure(ContractErrorProjectRequired, "payload.ocean_engine.project.budget_and_bidding.bid_minor", "bid must not be negative")
-	}
-	if project.BudgetAndBidding.ROICoefficient != nil && (*project.BudgetAndBidding.ROICoefficient < 0 || math.IsInf(*project.BudgetAndBidding.ROICoefficient, 0) || math.IsNaN(*project.BudgetAndBidding.ROICoefficient)) {
-		return contractFailure(ContractErrorProjectRequired, "payload.ocean_engine.project.budget_and_bidding.roi_coefficient", "ROI coefficient must be finite and non-negative")
+	if err := validateOceanEngineBudgetAndBidding(project.BudgetAndBidding, "payload.ocean_engine.project.budget_and_bidding", false); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	for index := range configuration.Promotions {
@@ -804,6 +805,9 @@ func validateOceanEngineConfiguration(configuration OceanEngineConfiguration) er
 			return contractFailure(ContractErrorInvalidPromotion, field, "promotion profile version, unique id, and name are required")
 		}
 		seen[promotion.PromotionDraftID] = true
+		if promotion.Settings.DirectLinkMode != "" && promotion.Settings.DirectLinkMode != "automatic" && promotion.Settings.DirectLinkMode != "manual" {
+			return contractFailure(ContractErrorInvalidPromotion, field+".settings.direct_link_mode", "direct link mode must be automatic or manual")
+		}
 		if promotion.DeliveryIdentity.Mode != "account_info" && promotion.DeliveryIdentity.Mode != "douyin_account" {
 			return contractFailure(ContractErrorInvalidPromotion, field+".delivery_identity.mode", "identity must be account_info or douyin_account")
 		}
@@ -820,6 +824,11 @@ func validateOceanEngineConfiguration(configuration OceanEngineConfiguration) er
 		}
 		if err := validateReferenceSlices(promotion.BaseMaterialReferences, field+".base_material_references"); err != nil {
 			return err
+		}
+		if promotion.BudgetAndBidding != nil {
+			if err := validateOceanEngineBudgetAndBidding(*promotion.BudgetAndBidding, field+".budget_and_bidding", true); err != nil {
+				return err
+			}
 		}
 		optionalPromotionReferences := []struct {
 			field     string
@@ -842,6 +851,40 @@ func validateOceanEngineConfiguration(configuration OceanEngineConfiguration) er
 		if err := validateReferenceSlices(promotion.CreativeComponentReferences, field+".creative_component_references"); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func effectiveOceanEngineBudgetMode(value OceanEngineBudgetAndBidding) string {
+	if value.BudgetMode == "" {
+		return OceanEngineBudgetModeDaily
+	}
+	return value.BudgetMode
+}
+
+func validateOceanEngineBudgetAndBidding(value OceanEngineBudgetAndBidding, field string, requireBidding bool) error {
+	mode := effectiveOceanEngineBudgetMode(value)
+	if (mode != OceanEngineBudgetModeDaily && mode != OceanEngineBudgetModeUnlimited) || strings.TrimSpace(value.Currency) == "" || value.DailyBudgetMinor < 0 {
+		return contractFailure(ContractErrorProjectRequired, field, "budget mode, currency, and non-negative budget are required")
+	}
+	if mode == OceanEngineBudgetModeDaily && value.DailyBudgetMinor == 0 {
+		return contractFailure(ContractErrorProjectRequired, field+".daily_budget_minor", "daily budget must be positive")
+	}
+	if mode == OceanEngineBudgetModeUnlimited && value.DailyBudgetMinor != 0 {
+		return contractFailure(ContractErrorProjectRequired, field+".daily_budget_minor", "unlimited budget must use zero daily budget")
+	}
+	hasBidding := strings.TrimSpace(value.BiddingStrategy) != "" || strings.TrimSpace(value.ChargingMode) != "" || value.BidMinor != nil || value.ROICoefficient != nil
+	if !requireBidding && !hasBidding {
+		return nil
+	}
+	if strings.TrimSpace(value.BiddingStrategy) == "" || strings.TrimSpace(value.ChargingMode) == "" || (value.BidMinor == nil) == (value.ROICoefficient == nil) {
+		return contractFailure(ContractErrorProjectRequired, field, "exactly one of bid_minor or roi_coefficient is required")
+	}
+	if value.BidMinor != nil && *value.BidMinor < 0 {
+		return contractFailure(ContractErrorProjectRequired, field+".bid_minor", "bid must not be negative")
+	}
+	if value.ROICoefficient != nil && (*value.ROICoefficient < 0 || math.IsInf(*value.ROICoefficient, 0) || math.IsNaN(*value.ROICoefficient)) {
+		return contractFailure(ContractErrorProjectRequired, field+".roi_coefficient", "ROI coefficient must be finite and non-negative")
 	}
 	return nil
 }

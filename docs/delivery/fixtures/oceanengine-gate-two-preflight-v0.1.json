@@ -1,0 +1,36 @@
+{
+  "schema_version": "oceanengine-gate-two-preflight/v0.1",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "status": "gate_two_validated_authorization_required_per_execution",
+  "execution_authorized": false,
+  "final_confirmation_issued": false,
+  "production_submit_port_mounted": true,
+  "skill_submit_allowed": true,
+  "maximum_final_clicks": 1,
+  "execution_scope": {
+    "account_reference": "required_at_execution_time",
+    "platform_project_id": "required_at_execution_time",
+    "action": "single_final_submit",
+    "budget_limit": "bind_fresh_approval",
+    "responsible_user_presence": "required"
+  },
+  "required_runtime_checks": [
+    "fresh_controlled_authority",
+    "explicit_user_authorization_in_execution_turn",
+    "responsible_user_online",
+    "account_project_action_budget_exact_match",
+    "current_page_values_match_approval",
+    "unexpired_single_use_confirmation",
+    "valid_fenced_lease",
+    "kill_switch_inactive",
+    "single_click_budget",
+    "post_write_result_and_list_readback",
+    "result_unknown_no_resubmit",
+    "confirmed_mapping_requires_two_matching_readbacks"
+  ],
+  "allowed_result_states": ["succeeded", "pending_review", "rejected_or_error", "result_unknown"],
+  "result_unknown_policy": "query_or_takeover_never_resubmit",
+  "mapping_confirmation_policy": "result_page_and_list_page_ids_and_statuses_must_match",
+  "implementation_gaps": []
+}

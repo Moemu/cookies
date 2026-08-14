@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/delivery-platform-skill-definition-v1.schema.json",
+  "title": "Delivery Platform Skill Definition v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "version", "display_name", "platform", "capability", "status", "owner", "executable", "real_browser_driver", "submit_allowed", "evidence_observed_at", "last_reviewed_at", "ui_baseline", "schema_ref", "evidence_refs", "page_types", "capabilities", "dynamic_condition_keys", "safety_exit", "write_validation_pending", "runtime_policy", "rollback", "gate_one", "gate_two_preparation", "gate_two_validation"],
+  "properties": {
+    "schema_version": { "const": "delivery-platform-skill-definition/v1" },
+    "id": { "const": "oceanengine-ecommerce-manual" },
+    "version": { "const": "v0.1-calibration" },
+    "display_name": { "const": "巨量引擎·电商手动投放" },
+    "platform": { "const": "ocean_engine" },
+    "capability": { "const": "ecommerce_manual_delivery" },
+    "status": { "const": "gate_two_passed_takeover_submit_calibration" },
+    "owner": { "const": "delivery" },
+    "executable": { "const": false },
+    "real_browser_driver": { "const": false },
+    "submit_allowed": { "const": true },
+    "evidence_observed_at": { "const": "2026-08-06" },
+    "last_reviewed_at": { "type": "string", "format": "date" },
+    "ui_baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_at", "revalidated_at", "platform_build", "locator_contract", "drift_check"],
+      "properties": {
+        "observed_at": { "const": "2026-08-06" },
+        "revalidated_at": { "const": "2026-08-14" },
+        "platform_build": { "const": "unknown" },
+        "locator_contract": { "const": "project_and_promotion_forms_live_dom" },
+        "drift_check": { "const": "promotion_submit_and_independent_list_readback_revalidated" }
+      }
+    },
+    "schema_ref": { "const": "docs/delivery/schemas/oceanengine-bidding-schema-v0.1.json" },
+    "evidence_refs": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 11, "uniqueItems": true },
+    "page_types": {
+      "type": "array",
+      "minItems": 9,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "evidence_state"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "evidence_state": { "enum": ["observed", "operator_reviewed", "sample_only", "platform_pending"] }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "forbidden"],
+      "properties": {
+        "allowed": { "type": "array", "items": { "enum": ["navigate", "identify_page", "identify_account", "identify_project", "fill_unsubmitted_form", "readback_field", "discard_local_draft", "verify_no_write", "controlled_final_submit_once", "record_post_write_result", "confirm_platform_mapping"] }, "minItems": 1, "uniqueItems": true },
+        "forbidden": { "type": "array", "items": { "enum": ["unattended_submit", "submit_without_current_turn_authorization", "resubmit_after_click", "enable", "pause_remote_object", "modify_remote_object", "delete", "upload"] }, "minItems": 1, "uniqueItems": true }
+      }
+    },
+    "dynamic_condition_keys": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 6, "uniqueItems": true },
+    "safety_exit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "required_proof"],
+      "properties": {
+        "method": { "const": "discard_unsubmitted_local_form" },
+        "required_proof": { "const": "return_to_known_readonly_page_and_confirm_no_platform_object_or_status_change" }
+      }
+    },
+    "write_validation_pending": { "type": "array", "items": { "enum": ["unattended_browser_driver", "enable_delivery", "remote_object_modification", "delete", "write_compensation", "additional_submit_without_new_authority"] }, "minItems": 6, "uniqueItems": true },
+    "runtime_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_form_live_calibrated", "promotion_form_live_calibrated", "control_plane_evidence_recorded", "agent_final_submit_documentation"],
+      "properties": {
+        "project_form_live_calibrated": { "const": true },
+        "promotion_form_live_calibrated": { "const": true },
+        "control_plane_evidence_recorded": { "const": true },
+        "agent_final_submit_documentation": { "const": "available_in_skill_md_with_per_execution_authorization" }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "trigger"],
+      "properties": {
+        "method": { "const": "disable_skill_version_and_fall_back_to_human_takeover" },
+        "trigger": { "const": "page_drift_account_mismatch_locator_ambiguity_or_unexpected_write_boundary" }
+      }
+    },
+    "gate_one": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["purpose", "ready", "result", "project_form_status", "promotion_form_status", "control_plane_evidence_status", "live_evidence_ref", "required_scope", "acceptance_checklist"],
+      "properties": {
+        "purpose": { "const": "revalidate_stage_b_evidence_and_calibrate_realtime_dom_locators" },
+        "ready": { "const": true },
+        "result": { "const": "passed" },
+        "project_form_status": { "const": "passed" },
+        "promotion_form_status": { "const": "passed" },
+        "control_plane_evidence_status": { "const": "passed" },
+        "live_evidence_ref": { "const": "docs/delivery/evidence/oceanengine-gate-one-promotion-form-2026-08-13.json" },
+        "required_scope": { "type": "array", "items": { "enum": ["test_account_reference", "allowed_platform_project_ids", "action_fill_unsubmitted_form", "budget_ceiling_cny"] }, "minItems": 4, "uniqueItems": true },
+        "acceptance_checklist": { "type": "array", "items": { "enum": ["reidentify_current_page_and_account", "confirm_ui_has_not_drifted", "establish_stable_dom_locators", "fill_only_unsubmitted_fields", "read_back_every_field", "discard_draft", "confirm_no_platform_write"] }, "minItems": 7, "uniqueItems": true }
+      }
+    },
+    "gate_two_preparation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "execution_authorized", "final_confirmation_issued", "production_submit_port_mounted", "skill_submit_allowed", "maximum_final_clicks", "preflight_ref", "required_runtime_checks", "implementation_gaps"],
+      "properties": {
+        "status": { "const": "gate_two_validated_authorization_required_per_execution" },
+        "execution_authorized": { "const": false },
+        "final_confirmation_issued": { "const": false },
+        "production_submit_port_mounted": { "const": true },
+        "skill_submit_allowed": { "const": true },
+        "maximum_final_clicks": { "const": 1 },
+        "preflight_ref": { "const": "docs/delivery/fixtures/oceanengine-gate-two-preflight-v0.1.json" },
+        "required_runtime_checks": { "type": "array", "items": { "enum": ["fresh_controlled_authority", "explicit_user_authorization_in_execution_turn", "responsible_user_online", "account_project_action_budget_exact_match", "current_page_values_match_approval", "unexpired_single_use_confirmation", "valid_fenced_lease", "kill_switch_inactive", "single_click_budget", "post_write_result_and_list_readback", "result_unknown_no_resubmit", "confirmed_mapping_requires_two_matching_readbacks"] }, "minItems": 12, "maxItems": 12, "uniqueItems": true },
+        "implementation_gaps": { "type": "array", "maxItems": 0 }
+      }
+    },
+    "gate_two_validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_at", "account_reference_sha256", "parent_platform_project_reference_sha256", "promotion_reference_sha256", "maximum_final_clicks_observed", "run_status", "mapping_status", "delivery_enabled", "evidence_ref"],
+      "properties": {
+        "observed_at": { "const": "2026-08-14" },
+        "account_reference_sha256": { "const": "a8c499f7e22dc70d392d8de9b7bd093a4e7371cb17ba3e53c4bf8e0eea15667c" },
+        "parent_platform_project_reference_sha256": { "const": "07f55315c832782799372a190c3a7c263717634543e81d253919cfa180317f89" },
+        "promotion_reference_sha256": { "const": "199672dd7e6d506b8ef3da3b3011c2b192ba5339d743a0c57f6fc3a5f444aab2" },
+        "maximum_final_clicks_observed": { "const": 1 },
+        "run_status": { "const": "succeeded" },
+        "mapping_status": { "const": "confirmed" },
+        "delivery_enabled": { "const": false },
+        "evidence_ref": { "const": "docs/delivery/evidence/oceanengine-gate-two-promotion-submit-2026-08-14.json" }
+      }
+    }
+  }
+}

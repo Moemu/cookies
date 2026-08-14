@@ -57,6 +57,10 @@ const ProductionCenterPage = lazy(() => import('../features/production-center/Pr
   default: module.ProductionCenterPage,
 })))
 
+const ControlledExecutionWorkspace = lazy(() => import('../features/delivery-controlled-execution/ControlledExecutionWorkspace').then(module => ({
+  default: module.ControlledExecutionWorkspace,
+})))
+
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string, tourRunId?: string, tourCase?: string) => void
 type OpenStrategyWorkspace = (projectId: string, workspaceId: string, location: StrategyWorkspaceLocation, replace?: boolean) => void
 
@@ -1617,6 +1621,9 @@ export function ModulePage({
     : system.key === 'delivery' && item.id === 'plans' ? <DeliveryPlanPage state={dataState}/>
     : system.key === 'delivery' && item.id === 'configuration' ? <DeliveryConfigurationPage state={dataState} activeView={activeView} tourRunId={tourRunId} tourCase={tourCase}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState} tourCase={tourCase} tourRunId={tourRunId} selectedChangeSetId={objectId}/>
+    : system.key === 'delivery' && item.id === 'execution' ? <Suspense fallback={<div className="page-notice" role="status">正在加载受控执行中心…</div>}>
+      <ControlledExecutionWorkspace projectId={currentProject.id} runId={objectId}/>
+    </Suspense>
     : system.key === 'delivery' && item.id === 'monitoring' ? <DeliveryMonitoringPage tourCase={tourCase}/>
     : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryOptimizationPage state={dataState} activeView={activeView} tourRunId={tourRunId} tourCase={tourCase}/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>

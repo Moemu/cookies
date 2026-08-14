@@ -165,6 +165,22 @@ func TestMySQLPlatformRuntimeRoundTripAndLegacyUpgradeCompatibility(t *testing.T
 	if updated, err := BackfillPlanCanonicalHashes(ctx, db); err != nil || updated != 0 {
 		t.Fatalf("second standard backfill updated=%d err=%v", updated, err)
 	}
+	if verified, err := VerifyPlanCanonicalHashes(ctx, db); err != nil || verified < 2 {
+		t.Fatalf("explicit canonical hash verification verified=%d err=%v", verified, err)
+	}
+	const mismatchedHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if _, err := db.ExecContext(ctx, `UPDATE delivery_plan_versions SET canonical_hash=? WHERE organization_id=? AND project_id=? AND plan_id=? AND version_number=1`, mismatchedHash, organizationID, projectID, legacyPlanID); err != nil {
+		t.Fatalf("write explicit verification fixture: %v", err)
+	}
+	if updated, err := BackfillPlanCanonicalHashes(ctx, db); err != nil || updated != 0 {
+		t.Fatalf("routine backfill must ignore already populated hashes: updated=%d err=%v", updated, err)
+	}
+	if _, err := VerifyPlanCanonicalHashes(ctx, db); err == nil {
+		t.Fatal("explicit canonical hash verification must reject a populated mismatch")
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE delivery_plan_versions SET canonical_hash=? WHERE organization_id=? AND project_id=? AND plan_id=? AND version_number=1`, legacyHashBefore, organizationID, projectID, legacyPlanID); err != nil {
+		t.Fatalf("restore canonical hash verification fixture: %v", err)
+	}
 	var legacyBytesAfter []byte
 	var legacyHashAfter string
 	if err = db.QueryRowContext(ctx, `SELECT config_json,canonical_hash FROM delivery_plan_versions WHERE organization_id=? AND project_id=? AND plan_id=? AND version_number=1`, organizationID, projectID, legacyPlanID).Scan(&legacyBytesAfter, &legacyHashAfter); err != nil {

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ocean Engine Ecommerce Manual"
+  short_description: "Controlled Ocean Engine ecommerce promotion workflow"
+  default_prompt: "Use $oceanengine-ecommerce-manual to prepare or execute one explicitly authorized Ocean Engine ecommerce manual promotion."

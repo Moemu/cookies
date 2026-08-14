@@ -3,6 +3,10 @@ name: cookies-test
 services:
   mysql:
     image: mysql:8.0
+    mem_limit: ${COOKIES_MYSQL_MEMORY_LIMIT:-640m}
+    command:
+      - --innodb-buffer-pool-size=${COOKIES_MYSQL_INNODB_BUFFER_POOL_SIZE:-192M}
+      - --max-connections=${COOKIES_MYSQL_MAX_SERVER_CONNECTIONS:-40}
     environment:
       MYSQL_DATABASE: cookies
       MYSQL_USER: cookies

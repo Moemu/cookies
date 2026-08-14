@@ -30,6 +30,8 @@ import (
 	"github.com/shikanon/cookies/internal/integrations/strategycreative"
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/assets"
+	"github.com/shikanon/cookies/internal/platform/computeruse"
+	computerusehttp "github.com/shikanon/cookies/internal/platform/computeruse/httpapi"
 	"github.com/shikanon/cookies/internal/platform/config"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/database"
@@ -465,6 +467,16 @@ func main() {
 	}
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 		httpserver.DomainMount{Pattern: "/api/delivery/v1/", Handler: deliveryhttp.New(deliveryService)})
+	computerUseRepository := computeruse.MySQLRepository{DB: db}
+	computerUseService := computeruse.Service{
+		Repository: computerUseRepository,
+		AuthorityProvider: delivery.ComputerUseAuthorityProvider{
+			Repository: delivery.MySQLRepository{DB: db},
+		},
+		NewID: func(prefix string) (string, error) { return ids.New(prefix) },
+	}
+	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
+		httpserver.DomainMount{Pattern: "/api/platform/v1/computer-use/", Handler: computerusehttp.NewTakeoverOnly(computerUseService, projectStore)})
 	// 文本模型出口。Strategy 和 Insights 共用同一个网关适配器和同一个能力别名——
 	// 它们要的是同一件事：调一次文本模型。**目前也共用同一个开关**
 	// （COOKIES_STRATEGY_REAL_PROVIDER_ENABLED），这是个遗留：

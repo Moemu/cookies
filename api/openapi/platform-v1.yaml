@@ -13,6 +13,422 @@ servers:
 security:
 - cookiesAuth: []
 paths:
+  /platform/v1/computer-use/kill-switches/{scope}:
+    parameters:
+    - name: scope
+      in: path
+      required: true
+      schema: {type: string, enum: [global, platform, organization]}
+    put:
+      operationId: setComputerUseKillSwitch
+      summary: Set a global, platform, or organization write prohibition.
+      description: Requires a service principal with platform.computer-use.admin. Read-only evidence and takeover remain available.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SetComputerUseKillSwitchRequest'}
+      responses:
+        '200': {description: Authoritative Kill Switch., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseKillSwitch'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/environments:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    post:
+      operationId: registerComputerUseEnvironment
+      summary: Idempotently register one project/account-scoped visible local browser environment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RegisterComputerUseEnvironmentRequest'}
+      responses:
+        '201': {description: Registered environment., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseEnvironment'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/environments/{environment_id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseEnvironmentID'
+    get:
+      operationId: getComputerUseEnvironment
+      summary: Read one project-scoped environment.
+      responses:
+        '200': {description: Environment., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseEnvironment'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/computer-use/projects/{project_id}/browser-profiles:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    post:
+      operationId: registerComputerUseBrowserProfile
+      summary: Idempotently register a browser profile bound to an existing environment and exact account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RegisterComputerUseBrowserProfileRequest'}
+      responses:
+        '201': {description: Registered profile., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseBrowserProfile'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/browser-profiles/{profile_id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseProfileID'
+    get:
+      operationId: getComputerUseBrowserProfile
+      summary: Read one project-scoped browser profile.
+      responses:
+        '200': {description: Browser profile., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseBrowserProfile'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/computer-use/projects/{project_id}/site-policies:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    post:
+      operationId: registerComputerUseSitePolicy
+      summary: Idempotently register an exact HTTPS host, page-kind and platform-project allowlist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RegisterComputerUseSitePolicyRequest'}
+      responses:
+        '201': {description: Registered site policy., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseSitePolicy'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/site-policies/{policy_id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUsePolicyID'
+    get:
+      operationId: getComputerUseSitePolicy
+      summary: Read one project-scoped site policy.
+      responses:
+        '200': {description: Site policy., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseSitePolicy'}}}}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/computer-use/projects/{project_id}/kill-switches/active:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - name: platform
+      in: query
+      required: true
+      schema: {type: string, const: ocean_engine}
+    get:
+      operationId: getActiveComputerUseKillSwitch
+      summary: Resolve the winning global, platform, or organization Kill Switch without blocking evidence reads.
+      responses:
+        '200':
+          description: Active status and the winning switch when present.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [active, kill_switch]
+                properties:
+                  active: {type: boolean}
+                  kill_switch:
+                    anyOf:
+                    - {$ref: '#/components/schemas/ComputerUseKillSwitch'}
+                    - {type: 'null'}
+  /platform/v1/computer-use/projects/{project_id}/runs:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    post:
+      operationId: createComputerUseRun
+      summary: Create or idempotently replay a controlled UI-session run.
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema: {type: string, minLength: 1, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateComputerUseRunRequest'}
+      responses:
+        '201':
+          description: Created controlled run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ComputerUseRun'}
+        '200':
+          description: Idempotent replay of the same request.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ComputerUseRun'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    get:
+      operationId: getComputerUseRun
+      summary: Read a controlled run from its authoritative server state.
+      responses:
+        '200':
+          description: Controlled run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ComputerUseRun'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/events:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    get:
+      operationId: listComputerUseRunEvents
+      summary: Read append-only run events; Kill Switches never block this query.
+      responses:
+        '200':
+          description: Ordered run events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ComputerUseEvent'}}
+                additionalProperties: false
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/evidence:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    get:
+      operationId: listComputerUseRunEvidence
+      summary: Read redacted structured page evidence.
+      responses:
+        '200':
+          description: Ordered redacted evidence.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ComputerUseEvidence'}}
+                additionalProperties: false
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-evidence:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: recordComputerUseTakeoverEvidence
+      summary: Record one fenced non-write browser observation or form-readback step during an active takeover.
+      description: Only observe_page, begin_form_fill, field_readback, discard_draft, and verify_no_write are accepted. The run must be paused in awaiting_takeover with a valid lease and exact site-policy match. This endpoint cannot authorize or perform save, create, submit, enable, or any other remote write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RecordComputerUseTakeoverEvidenceRequest'}
+      responses:
+        '200':
+          description: Atomically recorded Run version, Step, Event and redacted Evidence.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecordedComputerUseTakeoverEvidence'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-action-attempts:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: authorizeComputerUseTakeoverAction
+      summary: Atomically authorize exactly one operator-controlled final click without performing it.
+      description: Requires an active fenced takeover, an exact site-policy match, zero readback diffs, an unexpired immutable authority binding, an inactive Kill Switch, and a fresh one-time final confirmation. The confirmation, authorized attempt, pre-click evidence, running step, and transition to submitting are committed atomically. No Browser Driver is invoked.
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema: {type: string, minLength: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AuthorizeComputerUseTakeoverActionRequest'}
+      responses:
+        '200':
+          description: Single-use authorization and redacted pre-click evidence. The caller remains responsible for the manual browser click.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthorizedComputerUseTakeoverAction'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-action-attempts/{attempt_id}:outcome:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    - name: attempt_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+    post:
+      operationId: recordComputerUseTakeoverActionOutcome
+      summary: Record fenced result-page or list-page evidence for the one authorized click.
+      description: result_observed advances to verifying; list_confirmed advances to succeeded; result_unknown is terminal and requires reconciliation, never resubmission. Delivery confirms the platform mapping only after distinct result and list evidence agree on object ID and status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RecordComputerUseTakeoverOutcomeRequest'}
+      responses:
+        '200':
+          description: Atomically recorded outcome evidence, step, event, and Run transition.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RecordedComputerUseTakeoverEvidence'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: acquireComputerUseRunLease
+      summary: Atomically acquire the one exclusive visible-browser lease and attach it to the run.
+      requestBody: {$ref: '#/components/requestBodies/ComputerUseExpectedVersion'}
+      responses:
+        '200':
+          description: Fenced lease and incremented authoritative Run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AcquiredComputerUseRunLease'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases/{lease_id}:heartbeat:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/ComputerUseLeaseID'
+    post:
+      operationId: heartbeatComputerUseRunLease
+      summary: Renew the fenced exclusive lease attached to this run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HeartbeatComputerUseRunLeaseRequest'}
+      responses:
+        '200':
+          description: Renewed lease.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ComputerUseSessionLease'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases/{lease_id}:release:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/ComputerUseLeaseID'
+    post:
+      operationId: releaseComputerUseRunLease
+      summary: Atomically release the fenced lease and detach it from the run for safe recovery.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReleaseComputerUseRunLeaseRequest'}
+      responses:
+        '200':
+          description: Released lease and incremented authoritative Run.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AcquiredComputerUseRunLease'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:pause:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: pauseComputerUseRun
+      summary: Pause automated actions without blocking evidence reads or takeover.
+      requestBody: {$ref: '#/components/requestBodies/ComputerUseExpectedVersion'}
+      responses:
+        '200': {description: Paused run., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:resume:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: resumeComputerUseRun
+      summary: Resume through environment, page and account re-identification.
+      requestBody: {$ref: '#/components/requestBodies/ComputerUseExpectedVersion'}
+      responses:
+        '200': {description: Run returned to environment_check., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:cancel:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: cancelComputerUseRun
+      summary: Cancel a run only when no unknown remote result exists.
+      requestBody: {$ref: '#/components/requestBodies/ComputerUseExpectedVersion'}
+      responses:
+        '200': {description: Cancelled run., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:takeover:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: takeoverComputerUseRun
+      summary: Pause automation and hand the visible session to the user.
+      requestBody: {$ref: '#/components/requestBodies/ComputerUseExpectedVersion'}
+      responses:
+        '200': {description: Run awaiting or under takeover., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/confirmations:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: issueComputerUseFinalConfirmation
+      summary: Issue a short-lived one-time confirmation for the exact frozen run binding.
+      description: The bearer secret is returned once and only its SHA-256 digest is persisted. Issuing a confirmation does not submit an external form.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IssueComputerUseConfirmationRequest'}
+      responses:
+        '201':
+          description: One-time confirmation secret and audit view.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IssuedComputerUseConfirmation'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:prepare:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: prepareComputerUseRun
+      summary: Advance environment checks and deterministic/manual page preparation to the final-confirmation boundary.
+      responses:
+        '200': {description: Prepared run., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:submit:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/ComputerUseRunID'
+    post:
+      operationId: submitComputerUseControlledAction
+      summary: Atomically consume one final confirmation and authorize one fenced action attempt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [step_id, confirmation_id, token, lease_id, fencing_token, idempotency_key]
+              properties:
+                step_id: {type: string}
+                confirmation_id: {type: string}
+                token: {type: string, writeOnly: true}
+                lease_id: {type: string}
+                fencing_token: {type: integer, minimum: 1}
+                idempotency_key: {type: string}
+      responses:
+        '200': {description: Authoritative terminal or recovery run state., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
   /platform/v1/provider/capabilities:
     get:
       operationId: listProviderCapabilities
@@ -2737,6 +3153,31 @@ paths:
           $ref: '#/components/responses/Conflict'
 components:
   parameters:
+    ComputerUseEnvironmentID:
+      name: environment_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 96}
+    ComputerUseProfileID:
+      name: profile_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 96}
+    ComputerUsePolicyID:
+      name: policy_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 96}
+    ComputerUseLeaseID:
+      name: lease_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 96}
+    ComputerUseRunID:
+      name: run_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 96}
     ProjectID:
       name: project_id
       in: path
@@ -2862,7 +3303,399 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Problem'
+  requestBodies:
+    ComputerUseExpectedVersion:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [expected_version]
+            properties:
+              expected_version: {type: integer, minimum: 1}
   schemas:
+    SetComputerUseKillSwitchRequest:
+      type: object
+      additionalProperties: false
+      required: [active, reason, expected_version]
+      properties:
+        platform: {type: string, const: ocean_engine}
+        active: {type: boolean}
+        reason: {type: string, minLength: 1, maxLength: 1000}
+        expected_version: {type: integer, minimum: 0}
+    ComputerUseKillSwitch:
+      type: object
+      additionalProperties: false
+      required: [id, scope, active, reason, version, updated_by, updated_at]
+      properties:
+        id: {type: string}
+        scope: {type: string, enum: [global, platform, organization]}
+        organization_id: {type: string}
+        platform: {type: string, const: ocean_engine}
+        active: {type: boolean}
+        reason: {type: string}
+        version: {type: integer, minimum: 1}
+        updated_by: {type: string}
+        updated_at: {type: string, format: date-time}
+    RegisterComputerUseEnvironmentRequest:
+      type: object
+      additionalProperties: false
+      required: [id, platform, account_id, mode, browser_version, region, healthy]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 96}
+        platform: {type: string, const: ocean_engine}
+        account_id: {type: string, minLength: 1, maxLength: 160}
+        mode: {type: string, const: local_visible}
+        browser_version: {type: string, minLength: 1, maxLength: 64}
+        region: {type: string, minLength: 1, maxLength: 64}
+        healthy: {type: boolean}
+    ComputerUseEnvironment:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, platform, account_id, mode, browser_version, region, healthy, version]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        platform: {type: string, const: ocean_engine}
+        account_id: {type: string}
+        mode: {type: string, const: local_visible}
+        browser_version: {type: string}
+        region: {type: string}
+        healthy: {type: boolean}
+        version: {type: integer, const: 1}
+    RegisterComputerUseBrowserProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [id, environment_id, platform, account_id, state]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 96}
+        environment_id: {type: string, minLength: 1, maxLength: 96}
+        platform: {type: string, const: ocean_engine}
+        account_id: {type: string, minLength: 1, maxLength: 160}
+        state: {type: string, enum: [ready, takeover_required, disabled]}
+    ComputerUseBrowserProfile:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, environment_id, platform, account_id, state, version]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        environment_id: {type: string}
+        platform: {type: string, const: ocean_engine}
+        account_id: {type: string}
+        state: {type: string, enum: [ready, takeover_required, disabled]}
+        version: {type: integer, const: 1}
+    RegisterComputerUseSitePolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [id, platform, account_id, allowed_protocols, allowed_hosts, allowed_page_kinds, allowed_platform_project_ids]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 96}
+        platform: {type: string, const: ocean_engine}
+        account_id: {type: string, minLength: 1, maxLength: 160}
+        allowed_protocols: {type: array, minItems: 1, uniqueItems: true, items: {type: string, const: https}}
+        allowed_hosts: {type: array, minItems: 1, uniqueItems: true, items: {type: string, pattern: '^[a-z0-9.-]+$'}}
+        allowed_page_kinds: {type: array, minItems: 1, uniqueItems: true, items: {type: string, minLength: 1}}
+        allowed_platform_project_ids: {type: array, minItems: 1, uniqueItems: true, items: {type: string, minLength: 1}}
+    ComputerUseSitePolicy:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, platform, account_id, allowed_protocols, allowed_hosts, allowed_page_kinds, allowed_platform_project_ids, version]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        platform: {type: string, const: ocean_engine}
+        account_id: {type: string}
+        allowed_protocols: {type: array, items: {type: string, const: https}}
+        allowed_hosts: {type: array, items: {type: string}}
+        allowed_page_kinds: {type: array, items: {type: string}}
+        allowed_platform_project_ids: {type: array, items: {type: string}}
+        version: {type: integer, const: 1}
+    HeartbeatComputerUseRunLeaseRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, fencing_token]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        fencing_token: {type: integer, minimum: 1}
+    ReleaseComputerUseRunLeaseRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_run_version, expected_lease_version, fencing_token]
+      properties:
+        expected_run_version: {type: integer, minimum: 1}
+        expected_lease_version: {type: integer, minimum: 1}
+        fencing_token: {type: integer, minimum: 1}
+    ComputerUseBlockingReason:
+      type: string
+      enum: [FINAL_CONFIRMATION_REQUIRED, FINAL_CONFIRMATION_INVALID, APPROVAL_INVALID, LEASE_INVALID, KILL_SWITCH_ACTIVE, ACCOUNT_MISMATCH, PROJECT_NOT_ALLOWED, SITE_NOT_ALLOWED, PAGE_DRIFT, WORKFLOW_DRIFT, SKILL_DRIFT, RESULT_RECONCILIATION_REQUIRED]
+    ComputerUseRunState:
+      type: string
+      enum: [queued, environment_check, awaiting_takeover, preparing, awaiting_confirmation, submitting, verifying, succeeded, failed, partial, result_unknown, cancelled]
+    ComputerUseAuthorityBinding:
+      type: object
+      additionalProperties: false
+      required: [schema_version, organization_id, project_id, business_execution_id, change_set_id, approval_id, approval_action_hash, account_reference_id, object_fingerprint, action, budget_limit_minor, currency, plan_canonical_hash, intent_canonical_hash, feedback_canonical_hash, decision_canonical_hash, configuration_canonical_hash, workflow_id, workflow_canonical_hash, workflow_step_id]
+      properties:
+        schema_version: {type: string, const: computer-use-authority/v1}
+        organization_id: {type: string}
+        project_id: {type: string}
+        business_execution_id: {type: string}
+        change_set_id: {type: string}
+        approval_id: {type: string}
+        approval_action_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        account_reference_id: {type: string}
+        object_fingerprint: {type: string}
+        action: {type: string}
+        budget_limit_minor: {type: integer, minimum: 0}
+        currency: {type: string, const: CNY}
+        plan_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        intent_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        feedback_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        decision_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        configuration_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        workflow_id: {type: string}
+        workflow_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        workflow_step_id: {type: string}
+        skill_id: {type: string}
+        skill_version: {type: string}
+    ComputerUseRun:
+      type: object
+      additionalProperties: false
+      required: [schema_version, id, organization_id, project_id, platform, account_id, authority, environment_id, profile_id, lease_id, policy_id, state, paused, takeover_active, version, idempotency_key, request_hash, created_by, created_at, updated_at]
+      properties:
+        schema_version: {type: string, const: computer-use-run/v1}
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        platform: {type: string, const: ocean_engine}
+        account_id: {type: string}
+        authority: {$ref: '#/components/schemas/ComputerUseAuthorityBinding'}
+        environment_id: {type: string}
+        profile_id: {type: string}
+        lease_id: {type: string}
+        policy_id: {type: string}
+        state: {$ref: '#/components/schemas/ComputerUseRunState'}
+        blocking_reason: {$ref: '#/components/schemas/ComputerUseBlockingReason'}
+        paused: {type: boolean}
+        takeover_active: {type: boolean}
+        version: {type: integer, minimum: 1}
+        idempotency_key: {type: string}
+        request_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateComputerUseRunRequest:
+      type: object
+      additionalProperties: false
+      required: [project_id, platform, account_id, business_execution_id, environment_id, profile_id, policy_id]
+      properties:
+        project_id: {type: string, minLength: 1}
+        platform: {type: string, const: ocean_engine}
+        account_id: {type: string, minLength: 1}
+        business_execution_id:
+          type: string
+          minLength: 1
+          description: Server-resolved Delivery controlled execution; clients cannot supply an authority binding.
+        environment_id: {type: string, minLength: 1}
+        profile_id: {type: string, minLength: 1}
+        policy_id: {type: string, minLength: 1}
+    ComputerUseEvent:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, run_id, sequence, kind, summary, actor, created_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        run_id: {type: string}
+        sequence: {type: integer, minimum: 1}
+        kind: {type: string}
+        summary: {type: string}
+        actor: {type: string}
+        created_at: {type: string, format: date-time}
+    ComputerUseEvidence:
+      type: object
+      additionalProperties: false
+      required: [schema_version, id, organization_id, project_id, run_id, step_id, before_page_facts, after_page_facts, field_readback, diff_keys, page_reference, object_fingerprint, selector_version, action_version, redaction_version, created_at]
+      properties:
+        schema_version: {type: string, const: computer-use-evidence/v1}
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        run_id: {type: string}
+        step_id: {type: string}
+        before_page_facts: {type: object, additionalProperties: {type: string}}
+        after_page_facts: {type: object, additionalProperties: {type: string}}
+        field_readback: {type: object, additionalProperties: {type: string}}
+        diff_keys: {type: array, items: {type: string}}
+        page_reference: {type: string}
+        screenshot_reference: {type: string}
+        object_fingerprint: {type: string}
+        skill_version: {type: string}
+        selector_version: {type: string}
+        action_version: {type: string}
+        redaction_version: {type: string}
+        created_at: {type: string, format: date-time}
+    ComputerUseStep:
+      type: object
+      additionalProperties: false
+      required: [id, run_id, sequence, workflow_step_id, action, status, attempt, version]
+      properties:
+        id: {type: string, minLength: 1}
+        run_id: {type: string, minLength: 1}
+        sequence: {type: integer, minimum: 1}
+        workflow_step_id: {type: string, minLength: 1}
+        action: {type: string, enum: [observe_page, begin_form_fill, field_readback, discard_draft, verify_no_write, submit_platform_configuration, result_observed, list_confirmed, rejected_or_error, result_unknown]}
+        status: {type: string, enum: [running, succeeded, failed, result_unknown]}
+        blocking_reason: {$ref: '#/components/schemas/ComputerUseBlockingReason'}
+        attempt: {type: integer, minimum: 1}
+        version: {type: integer, minimum: 1}
+    ComputerUseSessionLease:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, run_id, environment_id, profile_id, platform, account_id, holder, fencing_token, version, expires_at, heartbeat_deadline]
+      properties:
+        id: {type: string, minLength: 1}
+        organization_id: {type: string, minLength: 1}
+        project_id: {type: string, minLength: 1}
+        run_id: {type: string, minLength: 1}
+        environment_id: {type: string, minLength: 1}
+        profile_id: {type: string, minLength: 1}
+        platform: {type: string, const: ocean_engine}
+        account_id: {type: string, minLength: 1}
+        holder: {type: string, minLength: 1}
+        fencing_token: {type: integer, minimum: 1}
+        version: {type: integer, minimum: 1}
+        expires_at: {type: string, format: date-time}
+        heartbeat_deadline: {type: string, format: date-time}
+        released_at: {type: string, format: date-time}
+    AcquiredComputerUseRunLease:
+      type: object
+      additionalProperties: false
+      required: [run, lease]
+      properties:
+        run: {$ref: '#/components/schemas/ComputerUseRun'}
+        lease: {$ref: '#/components/schemas/ComputerUseSessionLease'}
+    RecordComputerUseTakeoverEvidenceRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, lease_id, fencing_token, step_id, sequence, action, status, page_kind, platform_project_id, before_page_facts, after_page_facts, field_readback, diff_keys, page_reference, selector_version, action_version]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        lease_id: {type: string, minLength: 1}
+        fencing_token: {type: integer, minimum: 1}
+        step_id: {type: string, minLength: 1}
+        sequence: {type: integer, minimum: 1}
+        action: {type: string, enum: [observe_page, begin_form_fill, field_readback, discard_draft, verify_no_write]}
+        status: {type: string, enum: [running, succeeded, failed]}
+        page_kind: {type: string, minLength: 1}
+        platform_project_id: {type: string, minLength: 1}
+        before_page_facts: {type: object, additionalProperties: {type: string}}
+        after_page_facts: {type: object, additionalProperties: {type: string}}
+        field_readback: {type: object, additionalProperties: {type: string}}
+        diff_keys: {type: array, items: {type: string}}
+        page_reference: {type: string, format: uri}
+        selector_version: {type: string, minLength: 1}
+        action_version: {type: string, minLength: 1}
+    RecordedComputerUseTakeoverEvidence:
+      type: object
+      additionalProperties: false
+      required: [run, step, evidence]
+      properties:
+        run: {$ref: '#/components/schemas/ComputerUseRun'}
+        step: {$ref: '#/components/schemas/ComputerUseStep'}
+        evidence: {$ref: '#/components/schemas/ComputerUseEvidence'}
+    AuthorizeComputerUseTakeoverActionRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, step_id, sequence, confirmation_id, confirmation_token, lease_id, fencing_token, page_kind, platform_project_id, before_page_facts, field_readback, diff_keys, page_reference, selector_version, action_version]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        step_id: {type: string, minLength: 1}
+        sequence: {type: integer, minimum: 1}
+        confirmation_id: {type: string, minLength: 1}
+        confirmation_token: {type: string, minLength: 32, writeOnly: true}
+        lease_id: {type: string, minLength: 1}
+        fencing_token: {type: integer, minimum: 1}
+        page_kind: {type: string, minLength: 1}
+        platform_project_id: {type: string, minLength: 1}
+        before_page_facts: {type: object, additionalProperties: {type: string}}
+        field_readback: {type: object, minProperties: 1, additionalProperties: {type: string}}
+        diff_keys: {type: array, maxItems: 0, items: {type: string}}
+        page_reference: {type: string, format: uri}
+        selector_version: {type: string, minLength: 1}
+        action_version: {type: string, minLength: 1}
+    ComputerUseControlledActionAttempt:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, run_id, step_id, confirmation_id, approval_id, lease_id, fencing_token, action_hash, idempotency_key, status, created_at]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        project_id: {type: string}
+        run_id: {type: string}
+        step_id: {type: string}
+        confirmation_id: {type: string}
+        approval_id: {type: string}
+        lease_id: {type: string}
+        fencing_token: {type: integer, minimum: 1}
+        action_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        idempotency_key: {type: string}
+        status: {type: string, const: authorized}
+        created_at: {type: string, format: date-time}
+    AuthorizedComputerUseTakeoverAction:
+      type: object
+      additionalProperties: false
+      required: [run, attempt, step, evidence]
+      properties:
+        run: {$ref: '#/components/schemas/ComputerUseRun'}
+        attempt: {$ref: '#/components/schemas/ComputerUseControlledActionAttempt'}
+        step: {$ref: '#/components/schemas/ComputerUseStep'}
+        evidence: {$ref: '#/components/schemas/ComputerUseEvidence'}
+    RecordComputerUseTakeoverOutcomeRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, lease_id, fencing_token, step_id, sequence, outcome, page_kind, platform_project_id, before_page_facts, after_page_facts, field_readback, page_reference, selector_version, action_version]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        lease_id: {type: string, minLength: 1}
+        fencing_token: {type: integer, minimum: 1}
+        step_id: {type: string, minLength: 1}
+        sequence: {type: integer, minimum: 1}
+        outcome: {type: string, enum: [result_observed, list_confirmed, rejected_or_error, result_unknown]}
+        page_kind: {type: string, minLength: 1}
+        platform_project_id: {type: string, minLength: 1}
+        before_page_facts: {type: object, additionalProperties: {type: string}}
+        after_page_facts: {type: object, additionalProperties: {type: string}}
+        field_readback: {type: object, additionalProperties: {type: string}}
+        page_reference: {type: string, format: uri}
+        selector_version: {type: string, minLength: 1}
+        action_version: {type: string, minLength: 1}
+    IssueComputerUseConfirmationRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, binding_hash]
+      properties:
+        expected_version: {type: integer, minimum: 1}
+        binding_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+    IssuedComputerUseConfirmation:
+      type: object
+      additionalProperties: false
+      required: [confirmation_id, bearer_secret, binding_hash, issued_at, expires_at]
+      properties:
+        confirmation_id: {type: string}
+        bearer_secret: {type: string, minLength: 32, writeOnly: true}
+        binding_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        issued_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+    ComputerUseHash:
+      type: string
+      pattern: '^[0-9a-f]{64}$'
     SHA256:
       type: string
       pattern: '^sha256:[0-9a-f]{64}$'

@@ -1,0 +1,34 @@
+{
+  "schema_version": "oceanengine-gate-one-promotion-observation/v0.1",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "observed_at": "2026-08-13",
+  "status": "conservative_stop_reclassified_as_configuration_branch",
+  "gate_one_result": "partial",
+  "real_browser_driver_calibrated": false,
+  "submit_allowed": false,
+  "account_ref": "redacted_in_memory_match",
+  "parent_project_ref": "allowlisted_existing_test_project_redacted",
+  "original_stop_reason": "PAGE_DRIFT",
+  "reclassification": {
+    "landing_page_label": "parent_project_delivery_carrier_branch",
+    "material_capacity": "conditional_platform_limit_not_frozen_constant",
+    "promotion_budget_and_bid": "promotion_field_ownership_observed_on_current_manual_branch",
+    "operator_explanation_received": true
+  },
+  "actions": {
+    "form_fill_started": false,
+    "field_values_changed": false,
+    "selector_opened": false,
+    "write_boundaries_clicked": [],
+    "remote_side_effect_detected": false
+  },
+  "superseded_by": "docs/delivery/evidence/oceanengine-gate-one-promotion-form-2026-08-13.json",
+  "privacy": {
+    "raw_account_id_persisted": false,
+    "raw_project_id_persisted": false,
+    "raw_product_id_persisted": false,
+    "business_names_persisted": false,
+    "screenshots_persisted": false
+  }
+}

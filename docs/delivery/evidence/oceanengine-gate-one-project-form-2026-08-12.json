@@ -1,0 +1,51 @@
+{
+  "schema_version": "oceanengine-gate-one-evidence/v0.1",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "observed_at": "2026-08-12",
+  "browser_surface": "user_visible_external_browser_takeover",
+  "operator_present": true,
+  "account_reference_sha256": "a8c499f7e22dc70d392d8de9b7bd093a4e7371cb17ba3e53c4bf8e0eea15667c",
+  "account_scope_match": true,
+  "allowed_project_scope": "all_existing_projects_in_confirmed_test_account",
+  "authorized_action": "fill_unsubmitted_form",
+  "budget_ceiling_source": "current_page_validation",
+  "remote_write_authorized": false,
+  "screenshots_persisted": false,
+  "sensitive_names_persisted": false,
+  "project_form": {
+    "status": "passed",
+    "starting_project_count": 163,
+    "page_identity": "project_create",
+    "fields": [
+      { "field": "marketing_purpose", "expected": "ecommerce", "readback": "ecommerce", "matched": true },
+      { "field": "marketing_scenario", "expected": "short_video_and_image_text", "readback": "short_video_and_image_text", "matched": true },
+      { "field": "marketing_product", "expected": "selected_test_product", "readback": "selected_test_product", "matched": true, "identifier_persisted": false },
+      { "field": "optimization_target", "expected": "app_order", "readback": "app_order", "matched": true },
+      { "field": "deep_optimization_mode", "expected": "disabled", "readback": "disabled", "matched": true },
+      { "field": "delivery_mode", "expected": "manual", "readback": "manual", "matched": true },
+      { "field": "daily_budget_cny", "expected": "300", "readback": "300", "matched": true },
+      { "field": "project_name", "expected": "GATE1-READBACK-20260812", "readback": "GATE1-READBACK-20260812", "matched": true }
+    ],
+    "write_boundaries_observed": ["save_and_new_promotion", "save_and_close"],
+    "write_boundaries_clicked": [],
+    "safe_exit": "cancel",
+    "ending_project_count": 163,
+    "draft_name_present_after_exit": false,
+    "remote_side_effect_detected": false
+  },
+  "promotion_form": {
+    "status": "pending",
+    "reason": "new_manual_project_requires_save_and_new_promotion_to_cross_the_project_write_boundary",
+    "existing_project_observation": "sampled_visible_and_oldest_projects_were_automatic_delivery",
+    "write_boundary_crossed": false
+  },
+  "control_plane_recording": {
+    "status": "pending",
+    "reason": "live_calibration_was_not_bound_to_a_persisted_ComputerUseRun_and_step_evidence_chain"
+  },
+  "gate_one_result": "partial",
+  "real_browser_driver_calibrated": false,
+  "submit_allowed": false,
+  "gate_two_status": "disabled"
+}
