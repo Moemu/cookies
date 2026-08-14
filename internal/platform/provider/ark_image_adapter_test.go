@@ -53,6 +53,26 @@ func TestArkImageAdapterCachesOpaqueBase64Output(t *testing.T) {
 	}
 }
 
+func TestArkImageAdapterClassifiesPolicyErrorBody(t *testing.T) {
+	t.Parallel()
+	adapter, err := NewArkImageAdapter(ArkImageConfig{APIKey: "test-key", Model: "seedream-test"}, &memoryOutputHandles{})
+	if err != nil {
+		t.Fatalf("NewArkImageAdapter() error = %v", err)
+	}
+	adapter.client = &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusBadRequest, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString(`{"error":{"code":"OutputImageSensitiveContentDetected","message":"raw provider detail"}}`))}, nil
+	})}
+	_, err = adapter.Submit(context.Background(), ImageGenerationRequest{
+		OrganizationID: "org_1", ProjectID: "project_1", ProviderJobID: "provider_job_policy",
+		ModelAlias: "cookies.image.standard", IdempotencyKey: "ark-policy-error",
+		Input: ImageGenerationInput{Prompt: "fictional scene", Width: 1024, Height: 1024},
+	})
+	executionError, ok := err.(ExecutionError)
+	if !ok || executionError.JobError.Code != "MODEL_OUTPUT_POLICY_REJECTED" || executionError.JobError.Retryable {
+		t.Fatalf("Submit() error = %#v", err)
+	}
+}
+
 func TestArkImageAdapterSendsSourceImageForEdit(t *testing.T) {
 	t.Parallel()
 	handles := &memoryOutputHandles{}

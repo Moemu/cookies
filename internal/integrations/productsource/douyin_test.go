@@ -63,6 +63,38 @@ func TestDouyinResolverResolvesShareMessage(t *testing.T) {
 	}
 }
 
+func TestDouyinResolverResolvesDoubleEncodedGoodsDetail(t *testing.T) {
+	detail, err := json.Marshal(map[string]any{
+		"title": "秋田满满 圈圈鲜虾条10g儿童营养零食饼干米饼磨牙非油炸SP",
+		"sales": 24464,
+		"img": map[string]any{"url_list": []string{
+			"https://p26-item.ecombdimg.com/img/shrimp-snack.png",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedTwice := url.QueryEscape(url.QueryEscape(string(detail)))
+	finalURL, err := url.Parse("https://haohuo.jinritemai.com/ecommerce/trade/detail/index.html?id=3780276306042814935&goods_detail=" + encodedTwice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := DouyinResolver{Client: doerFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Request: &http.Request{URL: finalURL}}, nil
+	})}
+
+	snapshot, err := resolver.Resolve(context.Background(), "复制 https://v.douyin.com/zlyjQCLefFM/ 打开抖音")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ProductID != "3780276306042814935" || snapshot.Name != "秋田满满 圈圈鲜虾条10g儿童营养零食饼干米饼磨牙非油炸SP" {
+		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+	if len(snapshot.Images) != 1 || !strings.Contains(snapshot.Images[0].URL, "shrimp-snack") {
+		t.Fatalf("double-encoded product image was not preserved: %#v", snapshot.Images)
+	}
+}
+
 func TestDouyinResolverRejectsUnsupportedHostBeforeRequest(t *testing.T) {
 	called := false
 	resolver := DouyinResolver{Client: doerFunc(func(request *http.Request) (*http.Response, error) {

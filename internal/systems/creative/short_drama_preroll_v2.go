@@ -161,28 +161,54 @@ type ShortDramaReferenceBoardPlan struct {
 }
 
 type ShortDramaReferenceBoardCandidate struct {
-	ID                  string                       `json:"id"`
-	VariantIndex        int                          `json:"variant_index"`
-	PrimaryTestVariable string                       `json:"primary_test_variable"`
-	Plan                ShortDramaReferenceBoardPlan `json:"plan"`
-	ProviderJobID       string                       `json:"provider_job_id,omitempty"`
-	Status              ShortDramaV2ResourceStatus   `json:"status"`
-	Asset               *contract.ProjectAssetRef    `json:"asset,omitempty"`
-	ModelReferenceAsset *contract.ProjectAssetRef    `json:"model_reference_asset,omitempty"`
-	PromptHash          string                       `json:"prompt_hash"`
-	ErrorCode           string                       `json:"error_code,omitempty"`
-	ErrorMessage        string                       `json:"error_message,omitempty"`
+	ID                  string                            `json:"id"`
+	VariantIndex        int                               `json:"variant_index"`
+	PrimaryTestVariable string                            `json:"primary_test_variable"`
+	Plan                ShortDramaReferenceBoardPlan      `json:"plan"`
+	ProviderJobID       string                            `json:"provider_job_id,omitempty"`
+	Status              ShortDramaV2ResourceStatus        `json:"status"`
+	Asset               *contract.ProjectAssetRef         `json:"asset,omitempty"`
+	ModelReferenceAsset *contract.ProjectAssetRef         `json:"model_reference_asset,omitempty"`
+	PromptHash          string                            `json:"prompt_hash"`
+	ErrorCode           string                            `json:"error_code,omitempty"`
+	ErrorMessage        string                            `json:"error_message,omitempty"`
+	Attempts            []ShortDramaReferenceBoardAttempt `json:"attempts,omitempty"`
+	CurrentAttemptID    string                            `json:"current_attempt_id,omitempty"`
+	RecoveryState       string                            `json:"recovery_state,omitempty"`
+	FailureClass        string                            `json:"failure_class,omitempty"`
+	Recoverable         bool                              `json:"recoverable,omitempty"`
+}
+
+type ShortDramaReferenceBoardAttempt struct {
+	ID                   string                     `json:"id"`
+	Ordinal              int                        `json:"ordinal"`
+	Mode                 string                     `json:"mode"`
+	RewritePolicyVersion string                     `json:"rewrite_policy_version,omitempty"`
+	SourcePromptHash     string                     `json:"source_prompt_hash,omitempty"`
+	PromptHash           string                     `json:"prompt_hash"`
+	ProviderJobID        string                     `json:"provider_job_id,omitempty"`
+	Status               ShortDramaV2ResourceStatus `json:"status"`
+	ProviderErrorCode    string                     `json:"provider_error_code,omitempty"`
+	FailureClass         string                     `json:"failure_class,omitempty"`
+	Retryable            bool                       `json:"retryable,omitempty"`
+	CreatedAt            time.Time                  `json:"created_at"`
+	CompletedAt          *time.Time                 `json:"completed_at,omitempty"`
 }
 
 type ShortDramaReferenceBoardBatch struct {
 	ShortDramaV2AsyncResource
-	ID                  string                              `json:"id,omitempty"`
-	Revision            int64                               `json:"revision"`
-	PromptRevision      int64                               `json:"prompt_revision"`
-	AnalysisRevision    int64                               `json:"analysis_revision"`
-	Candidates          []ShortDramaReferenceBoardCandidate `json:"candidates"`
-	SelectedCandidateID string                              `json:"selected_candidate_id,omitempty"`
-	SelectedAsset       *contract.ProjectAssetRef           `json:"selected_asset,omitempty"`
+	ID                     string                              `json:"id,omitempty"`
+	Revision               int64                               `json:"revision"`
+	PromptRevision         int64                               `json:"prompt_revision"`
+	AnalysisRevision       int64                               `json:"analysis_revision"`
+	Candidates             []ShortDramaReferenceBoardCandidate `json:"candidates"`
+	SelectedCandidateID    string                              `json:"selected_candidate_id,omitempty"`
+	SelectedAsset          *contract.ProjectAssetRef           `json:"selected_asset,omitempty"`
+	DesiredCount           int                                 `json:"desired_count,omitempty"`
+	ReadyCount             int                                 `json:"ready_count,omitempty"`
+	RunningCount           int                                 `json:"running_count,omitempty"`
+	FailedCount            int                                 `json:"failed_count,omitempty"`
+	RecoverableFailedCount int                                 `json:"recoverable_failed_count,omitempty"`
 }
 
 type ShortDramaV2FirstFrameCandidate struct {
@@ -251,6 +277,8 @@ type ShortDramaV2GenerationSpec struct {
 	BoardBatchID        string                              `json:"board_batch_id,omitempty"`
 	BoardCandidateID    string                              `json:"board_candidate_id,omitempty"`
 	CompilerVersion     string                              `json:"compiler_version,omitempty"`
+	FallbackMode        string                              `json:"fallback_mode,omitempty"`
+	FallbackReason      string                              `json:"fallback_reason,omitempty"`
 	CompiledPrompt      string                              `json:"compiled_prompt,omitempty"`
 	PromptHash          string                              `json:"prompt_hash"`
 	SpecHash            string                              `json:"spec_hash"`

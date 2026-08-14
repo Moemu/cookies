@@ -81,6 +81,16 @@ func (a *ArkImageAdapter) Submit(ctx context.Context, request ImageGenerationReq
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+		if readErr != nil {
+			responseBody = nil
+		}
+		switch strings.ToLower(gatewayImageErrorCode(responseBody)) {
+		case "inputtextsensitivecontentdetected", "sensitivecontentdetected", "sensitivecontentdetected.violence", "sensitivecontentdetected.severeviolation":
+			return ImageSubmission{}, ExecutionError{JobError: contract.JobError{Code: "MODEL_INPUT_POLICY_REJECTED", Message: fmt.Sprintf("%s image input was rejected by the provider safety policy", a.providerName), Retryable: false}}
+		case "outputimagesensitivecontentdetected":
+			return ImageSubmission{}, ExecutionError{JobError: contract.JobError{Code: "MODEL_OUTPUT_POLICY_REJECTED", Message: fmt.Sprintf("%s generated image was rejected by the provider safety policy", a.providerName), Retryable: false}}
+		}
 		problem := contract.JobError{Code: "MODEL_REQUEST_REJECTED", Message: fmt.Sprintf("%s image request returned HTTP %d", a.providerName, response.StatusCode), Retryable: false}
 		// A rate-limit response is a confirmed non-acceptance. Other 5xx
 		// responses may have reached the model after the gateway accepted the

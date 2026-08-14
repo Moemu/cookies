@@ -339,23 +339,13 @@ func TestArkImageAdapterIsExplicitAndLocalOnly(t *testing.T) {
 	}
 }
 
-func TestArkVideoAdapterIsExplicitAndLocalOnly(t *testing.T) {
+func TestVideoGenerationRejectsDirectArkAdapter(t *testing.T) {
 	t.Parallel()
-	if _, err := FromLookup(mapLookup(map[string]string{"COOKIES_PROVIDER_VIDEO_ADAPTER": "ark_video"})); err == nil {
-		t.Fatal("expected Ark video configuration without credentials to be rejected")
-	}
-	config, err := FromLookup(mapLookup(map[string]string{
+	if _, err := FromLookup(mapLookup(map[string]string{
 		"COOKIES_ENV": "local", "COOKIES_PROVIDER_VIDEO_ADAPTER": "ark_video",
 		"COOKIES_PROVIDER_MASTER_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32)),
-	}))
-	if err != nil || config.Provider.VideoAdapter != "ark_video" {
-		t.Fatalf("valid local Ark video configuration rejected: config=%#v err=%v", config.Provider, err)
-	}
-	if _, err := FromLookup(mapLookup(map[string]string{
-		"COOKIES_ENV": "staging", "COOKIES_BLOB_PROVIDER": "memory", "COOKIES_PROVIDER_VIDEO_ADAPTER": "ark_video",
-		"COOKIES_PROVIDER_MASTER_KEY": base64.StdEncoding.EncodeToString(make([]byte, 32)),
 	})); err == nil {
-		t.Fatal("expected Ark video adapter outside local to be rejected")
+		t.Fatal("direct Ark video must be rejected even in local development")
 	}
 }
 

@@ -121,7 +121,7 @@ func (a *AdapterGatewayImageAdapter) Submit(ctx context.Context, request ImageGe
 		return ImageSubmission{}, gatewayExecutionError("MODEL_RESPONSE_INVALID", "Adapter gateway response exceeded the configured safety limit")
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return ImageSubmission{}, mapGatewayImageHTTPError(response.StatusCode)
+		return ImageSubmission{}, mapGatewayImageHTTPError(response.StatusCode, responseBody)
 	}
 	var decoded struct {
 		Model string `json:"model"`
@@ -184,7 +184,14 @@ func (a *AdapterGatewayImageAdapter) Open(ctx context.Context, project contract.
 
 func (*AdapterGatewayImageAdapter) ProviderCode() string { return adapterGatewayProviderCode }
 
-func mapGatewayImageHTTPError(status int) error {
+func mapGatewayImageHTTPError(status int, responseBody []byte) error {
+	providerCode := gatewayImageErrorCode(responseBody)
+	switch strings.ToLower(providerCode) {
+	case "inputtextsensitivecontentdetected", "sensitivecontentdetected", "sensitivecontentdetected.violence", "sensitivecontentdetected.severeviolation":
+		return gatewayExecutionError("MODEL_INPUT_POLICY_REJECTED", "Image generation input was rejected by the provider safety policy")
+	case "outputimagesensitivecontentdetected":
+		return gatewayExecutionError("MODEL_OUTPUT_POLICY_REJECTED", "Generated image was rejected by the provider safety policy")
+	}
 	switch status {
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return gatewayExecutionError("MODEL_AUTH_REJECTED", "Adapter gateway rejected its service credential")
@@ -193,15 +200,35 @@ func mapGatewayImageHTTPError(status int) error {
 	case http.StatusUnprocessableEntity:
 		return gatewayExecutionError("MODEL_INPUT_UNSUPPORTED", "Adapter gateway could not process the image request")
 	case http.StatusTooManyRequests:
-		// Unless the adapter explicitly proves non-acceptance, retrying a
-		// synchronous generation can duplicate cost.
-		return gatewayExecutionError("MODEL_RATE_LIMITED", "Adapter gateway rate limited the image request")
+		return ExecutionError{JobError: contract.JobError{
+			Code: "MODEL_RATE_LIMITED", Message: "Adapter gateway rate limited the image request", Retryable: true,
+		}}
 	default:
 		if status >= 500 {
 			return gatewayExecutionError("MODEL_SUBMISSION_UNKNOWN", "Adapter gateway submission outcome is unknown and will not be retried automatically")
 		}
 		return gatewayExecutionError("MODEL_REQUEST_REJECTED", fmt.Sprintf("Adapter gateway returned HTTP %d", status))
 	}
+}
+
+func gatewayImageErrorCode(responseBody []byte) string {
+	var payload struct {
+		Code  string `json:"code"`
+		Error struct {
+			Code         string `json:"code"`
+			ProviderCode string `json:"provider_code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		return ""
+	}
+	if code := strings.TrimSpace(payload.Error.Code); code != "" {
+		return code
+	}
+	if code := strings.TrimSpace(payload.Error.ProviderCode); code != "" {
+		return code
+	}
+	return strings.TrimSpace(payload.Code)
 }
 
 func mapGatewayTextHTTPError(status int, responseBody []byte) error {

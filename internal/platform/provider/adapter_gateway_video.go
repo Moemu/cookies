@@ -92,30 +92,42 @@ func (a *AdapterGatewayVideoAdapter) Submit(ctx context.Context, request VideoGe
 }
 
 func adapterGatewayVideoPayload(request VideoGenerationRequest, model string) ([]byte, error) {
+	inputMode := request.Input.InputMode
+	if inputMode == "" {
+		inputMode = VideoInputTextOnly
+	}
 	body := map[string]any{
 		"model": model, "prompt": request.Input.Prompt,
 		"duration": request.Input.DurationSeconds, "ratio": request.Input.AspectRatio,
-		"resolution": request.Input.Resolution,
+		"resolution": request.Input.Resolution, "input_mode": inputMode,
 	}
 	if request.Input.AudioPolicy != "" {
 		body["generate_audio"] = request.Input.AudioPolicy == VideoAudioGenerated
 	}
+	content := make([]map[string]any, 0, len(request.Sources))
 	for index, source := range request.Sources {
-		contents, err := io.ReadAll(io.LimitReader(source.Content, arkVideoMaxImageBytes+1))
-		if err != nil || len(contents) == 0 || int64(len(contents)) > arkVideoMaxImageBytes {
-			return nil, gatewayExecutionError("MODEL_INPUT_UNSUPPORTED", fmt.Sprintf("video conditioning image %d could not be read safely", index+1))
+		mediaURL := ""
+		if source.AuthorizedAsset != nil {
+			mediaURL = "asset://" + source.AuthorizedAsset.AssetID
+		} else {
+			contents, err := io.ReadAll(io.LimitReader(source.Content, arkVideoMaxImageBytes+1))
+			if err != nil || len(contents) == 0 || int64(len(contents)) > arkVideoMaxImageBytes {
+				return nil, gatewayExecutionError("MODEL_INPUT_UNSUPPORTED", fmt.Sprintf("video conditioning image %d could not be read safely", index+1))
+			}
+			mediaURL = "data:" + source.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(contents)
 		}
-		dataURL := "data:" + source.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(contents)
 		switch source.Role {
-		case VideoConditioningReferenceImage:
-			body["image_url"] = dataURL
-		case VideoConditioningFirstFrame:
-			body["first_frame_url"] = dataURL
-		case VideoConditioningLastFrame:
-			body["last_frame_url"] = dataURL
+		case VideoConditioningReferenceImage, VideoConditioningFirstFrame, VideoConditioningLastFrame:
+			content = append(content, map[string]any{
+				"type": "image_url", "role": string(source.Role),
+				"image_url": map[string]any{"url": mediaURL},
+			})
 		default:
 			return nil, gatewayExecutionError("MODEL_INPUT_UNSUPPORTED", "video conditioning role is unsupported by Adapter")
 		}
+	}
+	if len(content) > 0 {
+		body["content"] = content
 	}
 	return json.Marshal(body)
 }
@@ -194,7 +206,8 @@ func (a *AdapterGatewayVideoAdapter) Poll(ctx context.Context, reference VideoTa
 	case "failed", "cancelled", "canceled", "expired":
 		message := firstNonEmpty(decoded.Error.Message, decoded.FailedReason, "Adapter video generation failed")
 		code := firstNonEmpty(decoded.Error.Code, "MODEL_GENERATION_FAILED")
-		return VideoTaskResult{Status: VideoTaskFailed, Error: &contract.JobError{Code: code, Message: message, Retryable: false}}, nil
+		jobError := classifyAdapterGatewayVideoJobError(code, message, code == "rate_limited" || code == "timeout" || code == "provider_error")
+		return VideoTaskResult{Status: VideoTaskFailed, Error: &jobError}, nil
 	default:
 		return VideoTaskResult{}, gatewayExecutionError("MODEL_RESPONSE_INVALID", "Adapter video task status is invalid")
 	}
@@ -341,5 +354,29 @@ func mapAdapterGatewayVideoHTTPError(status int, body []byte) error {
 	if status == http.StatusTooManyRequests || status >= 500 {
 		retryable = true
 	}
-	return ExecutionError{JobError: contract.JobError{Code: code, Message: message, Retryable: retryable}}
+	return ExecutionError{JobError: classifyAdapterGatewayVideoJobError(code, message, retryable)}
+}
+
+func classifyAdapterGatewayVideoJobError(code, message string, retryable bool) contract.JobError {
+	normalizedCode := strings.ToLower(strings.TrimSpace(code))
+	normalizedMessage := strings.ToLower(message)
+	if (normalizedCode == "content_rejected" || strings.Contains(normalizedCode, "inputimagesensitivecontentdetected")) &&
+		strings.Contains(normalizedMessage, "input image") &&
+		(strings.Contains(normalizedMessage, "real person") || strings.Contains(normalizedMessage, "portrait")) {
+		return contract.JobError{
+			Code:      "REFERENCE_ASSET_CONTENT_REJECTED",
+			Message:   "所选视觉参考包含清晰写实人物，视频模型拒绝将其作为输入；请更换原创虚构角色参考，或改用不传参考图的文字生成方式。",
+			Retryable: false,
+		}
+	}
+	if normalizedCode == "content_rejected" {
+		return contract.JobError{Code: "VIDEO_CONTENT_REJECTED", Message: message, Retryable: false}
+	}
+	if normalizedCode == "rate_limited" || normalizedCode == "timeout" || normalizedCode == "provider_error" {
+		return contract.JobError{Code: "ADAPTER_UPSTREAM_RETRYABLE", Message: message, Retryable: true}
+	}
+	if normalizedCode == "auth_failed" {
+		return contract.JobError{Code: "ADAPTER_ROUTE_UNAVAILABLE", Message: message, Retryable: false}
+	}
+	return contract.JobError{Code: code, Message: message, Retryable: retryable}
 }

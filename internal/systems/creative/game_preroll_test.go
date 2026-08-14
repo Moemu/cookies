@@ -216,6 +216,17 @@ func TestGamePrerollV2AnalysisFailureIsRetryableWithoutLosingSource(t *testing.T
 	}
 }
 
+func TestGamePrerollV2SourceWorkspaceAcceptsAsyncAnalysisStates(t *testing.T) {
+	_, _, detail := testGamePrerollV2Service(t)
+	workspace := *detail.VideoDraft.GamePreroll
+	for _, status := range []GamePrerollResourceStatus{GamePrerollResourceRunning, GamePrerollResourceFailed} {
+		workspace.Analysis.Status = status
+		if err := workspace.Validate(); err != nil {
+			t.Fatalf("source workspace must persist %s analysis state: %v", status, err)
+		}
+	}
+}
+
 func TestGamePrerollV2ModelFailureFallsBackToGenericEvidenceCandidates(t *testing.T) {
 	t.Parallel()
 	service, rc, detail := testGamePrerollV2Service(t)

@@ -11,18 +11,17 @@ func TestOutputPresetRegistryExposesAllSupportedCreationSurfaces(t *testing.T) {
 	registry := NewOutputPresetRegistry(NewChannelCreativeProfileRegistry())
 
 	all := registry.List()
-	if len(all) != 4 {
-		t.Fatalf("registered presets = %d, want 4: %#v", len(all), all)
+	if len(all) != 3 {
+		t.Fatalf("registered presets = %d, want 3: %#v", len(all), all)
 	}
 	available := registry.ListAvailable()
-	if len(available) != 4 {
-		t.Fatalf("available creation presets = %#v, want all 4 supported surfaces", available)
+	if len(available) != 3 {
+		t.Fatalf("available creation presets = %#v, want all 3 supported surfaces", available)
 	}
 	for _, id := range []string{
 		AINativeOutputPresetDouyinFeed9x16V1,
 		"kuaishou_feed_9x16_v1",
 		"wechat_channels_feed_9x16_v1",
-		"xiaohongshu_feed_9x16_v1",
 	} {
 		preset, err := registry.Resolve(id)
 		if err != nil {
@@ -47,7 +46,7 @@ func TestListAINativeOutputPresetsIsProjectScopedAndReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 4 || items[0].Label != "抖音信息流 · 9:16" || items[0].Width != 720 || items[0].Height != 1280 {
+	if len(items) != 3 || items[0].Label != "抖音信息流 · 9:16" || items[0].Width != 720 || items[0].Height != 1280 {
 		t.Fatalf("output presets = %#v", items)
 	}
 }

@@ -19,7 +19,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	snapshot, err := productsource.NewDouyinResolver().Resolve(ctx, strings.Join(os.Args[1:], " "))
+	snapshot, err := productsource.NewResolver().Resolve(ctx, strings.Join(os.Args[1:], " "))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
