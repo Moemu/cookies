@@ -78,17 +78,22 @@ func TestExistingProjectControlledActionRequiresBoundParentAndPromotionBudget(t 
 	}
 }
 
-func TestFinitePromotionMutationContractsBindScheduleAndAuthorizedMaterials(t *testing.T) {
-	start := time.Date(2026, 8, 15, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
-	schedule, err := (CompileMappedControlledChangeSetRequest{
-		Action:                  ControlledActionUpdatePromotionSchedule,
+func TestFinitePromotionMutationContractsBindBudgetAndAuthorizedMaterials(t *testing.T) {
+	budget, err := (CompileMappedControlledChangeSetRequest{
+		Action:                  ControlledActionUpdatePromotionBudget,
+		CurrentDailyBudgetMinor: 30000,
+		TargetDailyBudgetMinor:  36000,
+	}).mutation()
+	if err != nil || budget.CurrentStateHash == budget.TargetStateHash {
+		t.Fatalf("budget mutation=%#v err=%v", budget, err)
+	}
+
+	if _, err := (CompileMappedControlledChangeSetRequest{
+		Action:                  ControlledAction("update_promotion_schedule"),
 		CurrentDailyBudgetMinor: 30000,
 		TargetDailyBudgetMinor:  30000,
-		CurrentSchedule:         &ControlledScheduleWindow{StartAt: start, EndAt: start.Add(24 * time.Hour), Timezone: "Asia/Shanghai"},
-		TargetSchedule:          &ControlledScheduleWindow{StartAt: start, EndAt: start.Add(48 * time.Hour), Timezone: "Asia/Shanghai"},
-	}).mutation()
-	if err != nil || schedule.CurrentStateHash == schedule.TargetStateHash {
-		t.Fatalf("schedule mutation=%#v err=%v", schedule, err)
+	}).mutation(); err != ErrInvalidRequest {
+		t.Fatalf("project-owned schedule was accepted as a promotion mutation: %v", err)
 	}
 
 	materials, err := (CompileMappedControlledChangeSetRequest{

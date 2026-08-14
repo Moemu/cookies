@@ -133,12 +133,6 @@ func toComputerUsePromotionRestart(value ControlledPromotionRestart) *computerus
 
 func toComputerUsePromotionMutation(value ControlledPromotionMutation) *computeruse.PromotionMutationBinding {
 	converted := &computeruse.PromotionMutationBinding{CurrentDailyBudgetMinor: value.CurrentDailyBudgetMinor, TargetDailyBudgetMinor: value.TargetDailyBudgetMinor, CurrentStateHash: value.CurrentStateHash, TargetStateHash: value.TargetStateHash}
-	if value.CurrentSchedule != nil {
-		converted.CurrentSchedule = &computeruse.PromotionScheduleWindow{StartAt: value.CurrentSchedule.StartAt, EndAt: value.CurrentSchedule.EndAt, Timezone: value.CurrentSchedule.Timezone}
-	}
-	if value.TargetSchedule != nil {
-		converted.TargetSchedule = &computeruse.PromotionScheduleWindow{StartAt: value.TargetSchedule.StartAt, EndAt: value.TargetSchedule.EndAt, Timezone: value.TargetSchedule.Timezone}
-	}
 	for _, reference := range value.CurrentMaterials {
 		converted.CurrentMaterials = append(converted.CurrentMaterials, computeruse.PromotionMaterialReference{ReferenceID: reference.ReferenceID, AuthorizationEvidenceID: reference.AuthorizationEvidenceID})
 	}

@@ -330,10 +330,8 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	if err != nil || updatedMapping.Version != mapping.Version+1 || updatedMapping.BusinessExecutionID != mutationExecution.ID || updatedMapping.ComputerUseRunID != mutationExecution.ComputerUseRunID || updatedMapping.CurrentStateAction != ControlledActionUpdatePromotionBudget || updatedMapping.CurrentStateHash != mutation.TargetStateHash || revision.PreviousStateHash != "" || revision.CurrentStateAction != ControlledActionUpdatePromotionBudget || revision.CurrentStateHash != mutation.TargetStateHash || revision.Action != ControlledActionUpdatePromotionBudget {
 		t.Fatalf("updated mapping=%#v revision=%#v err=%v", updatedMapping, revision, err)
 	}
-	scheduleStart := now.Add(24 * time.Hour)
-	scheduleChange, _, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", updatedMapping.ID, CompileMappedControlledChangeSetRequest{ExpectedMappingVersion: updatedMapping.Version, Action: ControlledActionUpdatePromotionSchedule, CurrentDailyBudgetMinor: 36000, TargetDailyBudgetMinor: 36000, CurrentSchedule: &ControlledScheduleWindow{StartAt: scheduleStart, EndAt: scheduleStart.Add(24 * time.Hour), Timezone: "Asia/Shanghai"}, TargetSchedule: &ControlledScheduleWindow{StartAt: scheduleStart, EndAt: scheduleStart.Add(48 * time.Hour), Timezone: "Asia/Shanghai"}})
-	if err != nil || scheduleChange.Binding.PromotionMutation == nil {
-		t.Fatalf("schedule change=%#v err=%v", scheduleChange, err)
+	if _, _, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", updatedMapping.ID, CompileMappedControlledChangeSetRequest{ExpectedMappingVersion: updatedMapping.Version, Action: ControlledAction("update_promotion_schedule"), CurrentDailyBudgetMinor: 36000, TargetDailyBudgetMinor: 36000}); err != ErrInvalidRequest {
+		t.Fatalf("project-owned schedule was accepted through a promotion mapping: %v", err)
 	}
 	for _, material := range []struct{ reference, evidence string }{{"asset_a", "material_evidence_a"}, {"asset_b", "material_evidence_b"}} {
 		repo.evidence[material.evidence] = platformMappingEvidence{Evidence: computeruse.Evidence{ID: material.evidence, OrganizationID: actor.OrganizationID, ProjectID: "project_a", FieldReadback: map[string]string{"authorized_material_reference_id": material.reference, "material_available": "true"}}}

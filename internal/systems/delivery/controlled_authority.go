@@ -32,7 +32,6 @@ const (
 	ControlledActionCreateProjectAndPromotions        ControlledAction = "create_project_and_promotions"
 	ControlledActionCreatePromotionsInExistingProject ControlledAction = "create_promotions_in_existing_project"
 	ControlledActionUpdatePromotionBudget             ControlledAction = "update_promotion_budget"
-	ControlledActionUpdatePromotionSchedule           ControlledAction = "update_promotion_schedule"
 	ControlledActionUpdatePromotionMaterials          ControlledAction = "update_promotion_materials"
 	ControlledActionPausePromotion                    ControlledAction = "pause_promotion"
 	ControlledActionResumePromotion                   ControlledAction = "resume_promotion"
@@ -43,7 +42,6 @@ func (a ControlledAction) Valid() bool {
 		ControlledActionCreateProjectAndPromotions,
 		ControlledActionCreatePromotionsInExistingProject,
 		ControlledActionUpdatePromotionBudget,
-		ControlledActionUpdatePromotionSchedule,
 		ControlledActionUpdatePromotionMaterials,
 		ControlledActionPausePromotion,
 		ControlledActionResumePromotion,
@@ -53,7 +51,6 @@ func (a ControlledAction) Valid() bool {
 func (a ControlledAction) ModifiesExistingPromotion() bool {
 	return slices.Contains([]ControlledAction{
 		ControlledActionUpdatePromotionBudget,
-		ControlledActionUpdatePromotionSchedule,
 		ControlledActionUpdatePromotionMaterials,
 	}, a)
 }
@@ -88,8 +85,6 @@ type ControlledLandingPageReference struct {
 type ControlledPromotionMutation struct {
 	CurrentDailyBudgetMinor int64                         `json:"current_daily_budget_minor,omitempty"`
 	TargetDailyBudgetMinor  int64                         `json:"target_daily_budget_minor,omitempty"`
-	CurrentSchedule         *ControlledScheduleWindow     `json:"current_schedule,omitempty"`
-	TargetSchedule          *ControlledScheduleWindow     `json:"target_schedule,omitempty"`
 	CurrentMaterials        []ControlledMaterialReference `json:"current_materials,omitempty"`
 	TargetMaterials         []ControlledMaterialReference `json:"target_materials,omitempty"`
 	CurrentStateHash        string                        `json:"current_state_hash"`
@@ -106,29 +101,14 @@ func (m ControlledPromotionMutation) statePayload(action ControlledAction, targe
 	}
 	switch action {
 	case ControlledActionUpdatePromotionBudget:
-		if m.CurrentSchedule != nil || m.TargetSchedule != nil || len(m.CurrentMaterials) != 0 || len(m.TargetMaterials) != 0 || m.CurrentDailyBudgetMinor == m.TargetDailyBudgetMinor {
+		if len(m.CurrentMaterials) != 0 || len(m.TargetMaterials) != 0 || m.CurrentDailyBudgetMinor == m.TargetDailyBudgetMinor {
 			return nil, ErrInvalidRequest
 		}
 		return struct {
 			DailyBudgetMinor int64 `json:"daily_budget_minor"`
 		}{dailyBudgetMinor}, nil
-	case ControlledActionUpdatePromotionSchedule:
-		if m.CurrentDailyBudgetMinor != m.TargetDailyBudgetMinor || len(m.CurrentMaterials) != 0 || len(m.TargetMaterials) != 0 {
-			return nil, ErrApprovalContentMismatch
-		}
-		value := m.CurrentSchedule
-		if target {
-			value = m.TargetSchedule
-		}
-		if value == nil || value.Validate() != nil {
-			return nil, ErrInvalidRequest
-		}
-		return struct {
-			DailyBudgetMinor int64                    `json:"daily_budget_minor"`
-			Schedule         ControlledScheduleWindow `json:"schedule"`
-		}{dailyBudgetMinor, *value}, nil
 	case ControlledActionUpdatePromotionMaterials:
-		if m.CurrentDailyBudgetMinor != m.TargetDailyBudgetMinor || m.CurrentSchedule != nil || m.TargetSchedule != nil {
+		if m.CurrentDailyBudgetMinor != m.TargetDailyBudgetMinor {
 			return nil, ErrApprovalContentMismatch
 		}
 		value := m.CurrentMaterials
@@ -507,7 +487,7 @@ func validateControlledActionBinding(action ControlledAction, binding Controlled
 		if strings.TrimSpace(binding.ParentPlatformProjectID) == "" || binding.OperatorPrincipalID != "" || hasMutationTargetFields(binding) || binding.PromotionMutation != nil || binding.PromotionControl != nil || binding.PromotionRestart != nil || binding.PromotionBudgetLimitMinor < 1 || budgetLimitMinor != binding.PromotionBudgetLimitMinor {
 			return ErrApprovalContentMismatch
 		}
-	case ControlledActionUpdatePromotionBudget, ControlledActionUpdatePromotionSchedule, ControlledActionUpdatePromotionMaterials:
+	case ControlledActionUpdatePromotionBudget, ControlledActionUpdatePromotionMaterials:
 		if strings.TrimSpace(binding.ParentPlatformProjectID) == "" || strings.TrimSpace(binding.OperatorPrincipalID) == "" || !binding.HasMutationTarget() || binding.PromotionMutation == nil || binding.PromotionControl != nil || binding.PromotionRestart != nil {
 			return ErrApprovalContentMismatch
 		}

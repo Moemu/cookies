@@ -45,16 +45,26 @@ If the submission result is unclear, record `result_unknown`; permit only query,
 
 ## Calibrate finite modifications separately
 
-The shared control plane can now freeze and simulate exact promotion budget,
-schedule and authorized-material modifications. That implementation does not
-expand this Skill's live write capability: `modify_remote_object` remains
-forbidden until the specific edit path is calibrated in a visible browser.
+The shared control plane can now freeze and simulate exact promotion budget and
+authorized-material modifications. The 2026-08-14 read-only edit inventory
+confirmed that schedule is owned by the parent project and is inherited as a
+read-only summary on the promotion form. Reject `update_promotion_schedule` for
+a promotion Mapping. A future project-schedule action requires its own confirmed
+project Mapping and project-mutation authority contract. This implementation
+does not expand the Skill's live write capability: `modify_remote_object`
+remains forbidden until the specific edit path is calibrated in a visible
+browser.
 
 For a no-write calibration, require a confirmed promotion Mapping and a new
 ChangeSet/Approval. Reidentify the exact parent project and promotion, read the
 current field values, prepare only the approved target values, read every
 changed field back, and exit without saving. Record `PAGE_DRIFT` or the
 platform's own edit restriction instead of selecting a different object.
+
+Use the existing-object locator baseline for read-only calibration. In
+particular, the former brand selector now matches both the visible field and a
+hidden search input; locate the visible field by the exact placeholder
+`选择或手动输入品牌`. Treat any loss of uniqueness as `PAGE_DRIFT` and stop.
 
 If the user separately authorizes the first real modification in that same
 execution turn, limit it to one budget change on the dedicated test promotion.

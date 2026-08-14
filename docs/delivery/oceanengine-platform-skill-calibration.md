@@ -156,3 +156,29 @@ fresh control-plane objects, zero-diff readback, one short-lived confirmation an
 single click. `submit_allowed=true` expresses only this controlled takeover path;
 `executable=false` and `real_browser_driver=false` remain unchanged, and enable,
 unattended submit, resubmit, remote modification, delete and upload remain forbidden.
+
+## Existing-object edit inventory
+
+After gate two, a separate 2026-08-14 visible-browser walkthrough inspected the
+edit surfaces for the exact hashed parent project and promotion without changing
+any field. The project edit surface owns targeting, schedule/dayparting, project
+budget mode, search settings, tracking links and project name. The promotion edit
+surface exposes materials, copy, landing/direct-link data, product additions,
+creative settings, category/brand, daily budget, bid and promotion name. Its
+schedule is inherited and read-only.
+
+This field ownership corrects the control-plane boundary: a confirmed promotion
+Mapping may support only `update_promotion_budget` and
+`update_promotion_materials`. `update_promotion_schedule` is invalid because it
+would write a parent-project field with promotion authority. Project schedule
+changes remain capability-pending until a confirmed project Mapping and separate
+project-mutation contract exist.
+
+The walkthrough also found locator drift on the promotion brand field. The old
+container selector now matches two inputs; the exact visible placeholder
+`选择或手动输入品牌` is the unique replacement. The inspected promotion remained
+`pending_review`, so no pause or restart control was available for calibration.
+No field was filled and no save, pause or restart control was clicked. The
+redacted evidence and locator baseline are respectively
+`evidence/oceanengine-existing-object-edit-readonly-2026-08-14.json` and
+`fixtures/oceanengine-existing-object-live-locators-v0.1.json`.

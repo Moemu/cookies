@@ -62,13 +62,22 @@ func TestFinalConfirmationCannotBeReplayedOrUsedAfterExpiry(t *testing.T) {
 	}
 }
 
+func TestAuthorityRejectsUnknownPromotionMutationAction(t *testing.T) {
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	authority := validRun(now).Authority
+	authority.Action = "update_promotion_schedule"
+	if err := authority.Validate(); err != ErrInvalidContract {
+		t.Fatalf("project-owned schedule action passed the promotion authority contract: %v", err)
+	}
+}
+
 func TestPlatformOpenAPIExposesControlledRunWithoutCompileTimeBlockReason(t *testing.T) {
 	contents, err := os.ReadFile("../../../api/openapi/platform-v1.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(contents)
-	for _, fragment := range []string{"createComputerUseRun", "issueComputerUseFinalConfirmation", "ComputerUseAuthorityBinding:", "FINAL_CONFIRMATION_REQUIRED", "RESULT_RECONCILIATION_REQUIRED"} {
+	for _, fragment := range []string{"createComputerUseRun", "issueComputerUseFinalConfirmation", "ComputerUseAuthorityBinding:", "ComputerUsePromotionControl:", "ComputerUsePromotionRestart:", "FINAL_CONFIRMATION_REQUIRED", "RESULT_RECONCILIATION_REQUIRED"} {
 		if !strings.Contains(text, fragment) {
 			t.Fatalf("platform OpenAPI missing %q", fragment)
 		}
@@ -83,6 +92,9 @@ func TestPlatformOpenAPIExposesControlledRunWithoutCompileTimeBlockReason(t *tes
 	}
 	if strings.Contains(text[start:start+end], "PHASE_C_REMOTE_WRITE_PROHIBITED") {
 		t.Fatal("run-time blocking reasons reused the Phase C compile-time prohibition")
+	}
+	if strings.Contains(text, "update_promotion_schedule") {
+		t.Fatal("platform OpenAPI assigns the parent-project schedule to a promotion authority")
 	}
 }
 

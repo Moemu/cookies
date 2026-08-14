@@ -80,8 +80,6 @@ type PromotionLandingPageReference struct {
 type PromotionMutationBinding struct {
 	CurrentDailyBudgetMinor int64                        `json:"current_daily_budget_minor"`
 	TargetDailyBudgetMinor  int64                        `json:"target_daily_budget_minor"`
-	CurrentSchedule         *PromotionScheduleWindow     `json:"current_schedule,omitempty"`
-	TargetSchedule          *PromotionScheduleWindow     `json:"target_schedule,omitempty"`
 	CurrentMaterials        []PromotionMaterialReference `json:"current_materials,omitempty"`
 	TargetMaterials         []PromotionMaterialReference `json:"target_materials,omitempty"`
 	CurrentStateHash        string                       `json:"current_state_hash"`
@@ -182,7 +180,7 @@ func (m PromotionMutationBinding) Validate(action string) error {
 	var current, target any
 	switch action {
 	case "update_promotion_budget":
-		if m.CurrentDailyBudgetMinor == m.TargetDailyBudgetMinor || m.CurrentSchedule != nil || m.TargetSchedule != nil || len(m.CurrentMaterials) != 0 || len(m.TargetMaterials) != 0 {
+		if m.CurrentDailyBudgetMinor == m.TargetDailyBudgetMinor || len(m.CurrentMaterials) != 0 || len(m.TargetMaterials) != 0 {
 			return ErrInvalidContract
 		}
 		current = struct {
@@ -191,20 +189,8 @@ func (m PromotionMutationBinding) Validate(action string) error {
 		target = struct {
 			DailyBudgetMinor int64 `json:"daily_budget_minor"`
 		}{m.TargetDailyBudgetMinor}
-	case "update_promotion_schedule":
-		if m.CurrentDailyBudgetMinor != m.TargetDailyBudgetMinor || m.CurrentSchedule == nil || m.TargetSchedule == nil || !validPromotionSchedule(*m.CurrentSchedule) || !validPromotionSchedule(*m.TargetSchedule) || len(m.CurrentMaterials) != 0 || len(m.TargetMaterials) != 0 {
-			return ErrInvalidContract
-		}
-		current = struct {
-			DailyBudgetMinor int64                   `json:"daily_budget_minor"`
-			Schedule         PromotionScheduleWindow `json:"schedule"`
-		}{m.CurrentDailyBudgetMinor, *m.CurrentSchedule}
-		target = struct {
-			DailyBudgetMinor int64                   `json:"daily_budget_minor"`
-			Schedule         PromotionScheduleWindow `json:"schedule"`
-		}{m.TargetDailyBudgetMinor, *m.TargetSchedule}
 	case "update_promotion_materials":
-		if m.CurrentDailyBudgetMinor != m.TargetDailyBudgetMinor || m.CurrentSchedule != nil || m.TargetSchedule != nil || len(m.TargetMaterials) == 0 || !validPromotionMaterials(m.CurrentMaterials) || !validPromotionMaterials(m.TargetMaterials) {
+		if m.CurrentDailyBudgetMinor != m.TargetDailyBudgetMinor || len(m.TargetMaterials) == 0 || !validPromotionMaterials(m.CurrentMaterials) || !validPromotionMaterials(m.TargetMaterials) {
 			return ErrInvalidContract
 		}
 		current = struct {
@@ -279,7 +265,7 @@ type AuthorityBinding struct {
 func (b AuthorityBinding) Validate() error {
 	if b.SchemaVersion != AuthoritySchemaV1 || b.OrganizationID == "" || b.ProjectID == "" ||
 		b.BusinessExecutionID == "" || b.ChangeSetID == "" || b.ApprovalID == "" || b.AccountReferenceID == "" ||
-		b.ObjectFingerprint == "" || b.Action == "" || b.ProjectBudgetLimitMinor < 0 || b.PromotionBudgetLimitMinor < 0 || b.BudgetLimitMinor < 0 || b.Currency != "CNY" ||
+		b.ObjectFingerprint == "" || !validAuthorityAction(b.Action) || b.ProjectBudgetLimitMinor < 0 || b.PromotionBudgetLimitMinor < 0 || b.BudgetLimitMinor < 0 || b.Currency != "CNY" ||
 		b.WorkflowID == "" || b.WorkflowStepID == "" || (b.SkillID == "") != (b.SkillVersion == "") {
 		return ErrInvalidContract
 	}
@@ -309,8 +295,19 @@ func (b AuthorityBinding) Validate() error {
 	return nil
 }
 
+func validAuthorityAction(action string) bool {
+	return slices.Contains([]string{
+		"create_project_and_promotions",
+		"create_promotions_in_existing_project",
+		"update_promotion_budget",
+		"update_promotion_materials",
+		"pause_promotion",
+		"resume_promotion",
+	}, action)
+}
+
 func modifiesExistingPromotionAction(action string) bool {
-	return slices.Contains([]string{"update_promotion_budget", "update_promotion_schedule", "update_promotion_materials"}, action)
+	return slices.Contains([]string{"update_promotion_budget", "update_promotion_materials"}, action)
 }
 
 func changesExistingPromotionAction(action string) bool {

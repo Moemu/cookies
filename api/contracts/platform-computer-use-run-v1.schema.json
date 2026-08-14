@@ -60,7 +60,7 @@
         "promotion_control": { "$ref": "#/$defs/promotionControl" },
         "promotion_restart": { "$ref": "#/$defs/promotionRestart" },
         "object_fingerprint": { "type": "string", "minLength": 1 },
-        "action": { "type": "string", "minLength": 1 },
+        "action": { "enum": ["create_project_and_promotions", "create_promotions_in_existing_project", "update_promotion_budget", "update_promotion_materials", "pause_promotion", "resume_promotion"] },
         "project_budget_mode": { "enum": ["daily", "unlimited"] },
         "project_budget_limit_minor": { "type": "integer", "minimum": 0 },
         "promotion_budget_limit_minor": { "type": "integer", "minimum": 0 },
@@ -113,8 +113,6 @@
       "properties": {
         "current_daily_budget_minor": { "type": "integer", "minimum": 30000 },
         "target_daily_budget_minor": { "type": "integer", "minimum": 30000 },
-        "current_schedule": { "$ref": "#/$defs/scheduleWindow" },
-        "target_schedule": { "$ref": "#/$defs/scheduleWindow" },
         "current_materials": { "type": "array", "items": { "$ref": "#/$defs/materialReference" } },
         "target_materials": { "type": "array", "items": { "$ref": "#/$defs/materialReference" } },
         "current_state_hash": { "$ref": "#/$defs/hash" },

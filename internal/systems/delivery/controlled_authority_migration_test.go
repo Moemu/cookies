@@ -49,7 +49,7 @@ func TestControlledPromotionMutationMigrationVersionsMappingsAndKeepsMockAuthori
 		t.Fatal(err)
 	}
 	sql := strings.ToLower(string(payload))
-	for _, required := range []string{"update_promotion_budget", "update_promotion_schedule", "update_promotion_materials", "current_state_action", "current_state_hash", "updated_at", "delivery_platform_entity_mapping_revisions", "previous_state_action", "previous_state_hash", "mapping_version", "business_execution_id", "result_evidence_id", "list_evidence_id"} {
+	for _, required := range []string{"update_promotion_budget", "update_promotion_materials", "current_state_action", "current_state_hash", "updated_at", "delivery_platform_entity_mapping_revisions", "previous_state_action", "previous_state_hash", "mapping_version", "business_execution_id", "result_evidence_id", "list_evidence_id"} {
 		if !strings.Contains(sql, required) {
 			t.Errorf("promotion mutation migration omitted %q", required)
 		}
@@ -58,6 +58,9 @@ func TestControlledPromotionMutationMigrationVersionsMappingsAndKeepsMockAuthori
 		if strings.Contains(sql, forbidden) {
 			t.Errorf("promotion mutation migration widens historical authority with %q", forbidden)
 		}
+	}
+	if strings.Contains(sql, "update_promotion_schedule") {
+		t.Fatal("promotion mutation migration assigns the parent-project schedule to a promotion mapping")
 	}
 }
 

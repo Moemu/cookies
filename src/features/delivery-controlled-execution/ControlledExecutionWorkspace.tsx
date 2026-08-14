@@ -167,7 +167,6 @@ function PromotionChangeDiff({ run }: { run: ComputerUseRun }) {
   const controlledRestart = run.authority.action === 'resume_promotion' && Boolean(restart)
   const actionLabel = ({
     update_promotion_budget: '修改推广单元日预算',
-    update_promotion_schedule: '修改推广单元排期',
     update_promotion_materials: '更换或增减授权素材',
     pause_promotion: '紧急暂停推广单元',
     resume_promotion: '受控重启推广单元',
@@ -200,9 +199,6 @@ function statusLabel(status: string) {
 }
 
 function mutationRows(action: string, mutation: NonNullable<ComputerUseRun['authority']['promotion_mutation']>) {
-  if (action === 'update_promotion_schedule') {
-    return [{ label: '投放排期', current: formatSchedule(mutation.current_schedule), target: formatSchedule(mutation.target_schedule) }]
-  }
   if (action === 'update_promotion_materials') {
     return [{ label: '已授权素材', current: `${mutation.current_materials?.length ?? 0} 个`, target: `${mutation.target_materials?.length ?? 0} 个` }]
   }

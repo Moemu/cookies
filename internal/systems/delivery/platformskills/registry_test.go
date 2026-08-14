@@ -10,7 +10,7 @@ func TestOceanEngineEcommerceManualAllowsOnlyControlledSubmitWithoutClaimingDriv
 	if definition.Executable || definition.RealBrowserDriver || !definition.SubmitAllowed {
 		t.Fatalf("controlled submit or driver boundary is wrong: %#v", definition)
 	}
-	if definition.EvidenceObserved != "2026-08-06" || definition.UIBaseline.RevalidatedAt != "2026-08-14" || definition.UIBaseline.DriftCheck != "promotion_submit_and_independent_list_readback_revalidated" {
+	if definition.EvidenceObserved != "2026-08-06" || definition.UIBaseline.RevalidatedAt != "2026-08-14" || definition.UIBaseline.DriftCheck != "existing_object_edit_surfaces_revalidated_with_brand_locator_drift" {
 		t.Fatalf("stage B provenance was not preserved: %#v", definition)
 	}
 	if len(definition.PageTypes) < 9 || len(definition.Capabilities.Allowed) == 0 || len(definition.Capabilities.Forbidden) == 0 || len(definition.DynamicConditionKeys) < 6 {
@@ -19,8 +19,11 @@ func TestOceanEngineEcommerceManualAllowsOnlyControlledSubmitWithoutClaimingDriv
 	if definition.SafetyExit.Method != "discard_unsubmitted_local_form" || len(definition.WriteValidationPending) < 6 {
 		t.Fatalf("stage B safe exit or pending write boundary was not preserved: %#v", definition)
 	}
-	if !definition.RuntimePolicy.ProjectFormLiveCalibrated || !definition.RuntimePolicy.PromotionFormLiveCalibrated || !definition.RuntimePolicy.ControlPlaneEvidenceRecorded || !definition.GateOne.Ready || definition.GateOne.Result != "passed" {
+	if !definition.RuntimePolicy.ProjectFormLiveCalibrated || !definition.RuntimePolicy.PromotionFormLiveCalibrated || !definition.RuntimePolicy.ExistingProjectEditSurfaceLiveObserved || !definition.RuntimePolicy.ExistingPromotionEditSurfaceObserved || definition.RuntimePolicy.RemoteModificationLiveCalibrated || !definition.RuntimePolicy.ControlPlaneEvidenceRecorded || !definition.GateOne.Ready || definition.GateOne.Result != "passed" {
 		t.Fatalf("passed takeover calibration status was overstated or lost: %#v", definition)
+	}
+	if !definition.ExistingObjectEditCalibration.ParentProjectOwnsSchedule || !definition.ExistingObjectEditCalibration.ProjectMappingRequiredForSchedule || !definition.ExistingObjectEditCalibration.PromotionScheduleActionForbidden || definition.ExistingObjectEditCalibration.PromotionBrandLocatorDrift != "PAGE_DRIFT" || definition.ExistingObjectEditCalibration.LiveRemoteModificationAllowed {
+		t.Fatalf("existing-object edit ownership or no-write boundary was lost: %#v", definition)
 	}
 	if definition.RuntimePolicy.AgentFinalSubmitDocumentation != "available_in_skill_md_with_per_execution_authorization" {
 		t.Fatalf("agent final-submit documentation is not bound to per-execution authorization: %#v", definition)

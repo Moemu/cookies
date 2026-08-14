@@ -58,10 +58,13 @@ type Definition struct {
 		DriftCheck      string `json:"drift_check"`
 	} `json:"ui_baseline"`
 	RuntimePolicy struct {
-		ProjectFormLiveCalibrated     bool   `json:"project_form_live_calibrated"`
-		PromotionFormLiveCalibrated   bool   `json:"promotion_form_live_calibrated"`
-		ControlPlaneEvidenceRecorded  bool   `json:"control_plane_evidence_recorded"`
-		AgentFinalSubmitDocumentation string `json:"agent_final_submit_documentation"`
+		ProjectFormLiveCalibrated              bool   `json:"project_form_live_calibrated"`
+		PromotionFormLiveCalibrated            bool   `json:"promotion_form_live_calibrated"`
+		ExistingProjectEditSurfaceLiveObserved bool   `json:"existing_project_edit_surface_live_observed"`
+		ExistingPromotionEditSurfaceObserved   bool   `json:"existing_promotion_edit_surface_live_observed"`
+		RemoteModificationLiveCalibrated       bool   `json:"remote_modification_live_calibrated"`
+		ControlPlaneEvidenceRecorded           bool   `json:"control_plane_evidence_recorded"`
+		AgentFinalSubmitDocumentation          string `json:"agent_final_submit_documentation"`
 	} `json:"runtime_policy"`
 	Rollback struct {
 		Method  string `json:"method"`
@@ -100,6 +103,17 @@ type Definition struct {
 		DeliveryEnabled                      bool   `json:"delivery_enabled"`
 		EvidenceRef                          string `json:"evidence_ref"`
 	} `json:"gate_two_validation"`
+	ExistingObjectEditCalibration struct {
+		ObservedAt                        string `json:"observed_at"`
+		EvidenceRef                       string `json:"evidence_ref"`
+		LocatorRef                        string `json:"locator_ref"`
+		ObservedPromotionStatus           string `json:"observed_promotion_status"`
+		ParentProjectOwnsSchedule         bool   `json:"parent_project_owns_schedule"`
+		ProjectMappingRequiredForSchedule bool   `json:"project_mapping_required_for_schedule"`
+		PromotionScheduleActionForbidden  bool   `json:"promotion_schedule_action_forbidden"`
+		PromotionBrandLocatorDrift        string `json:"promotion_brand_locator_drift"`
+		LiveRemoteModificationAllowed     bool   `json:"live_remote_modification_allowed"`
+	} `json:"existing_object_edit_calibration"`
 }
 
 func Get(id, version string) (Definition, error) {
@@ -133,9 +147,12 @@ func (d Definition) Validate() error {
 		d.EvidenceObserved != "2026-08-06" ||
 		d.UIBaseline.RevalidatedAt != "2026-08-14" ||
 		d.UIBaseline.LocatorContract != "project_and_promotion_forms_live_dom" ||
-		d.UIBaseline.DriftCheck != "promotion_submit_and_independent_list_readback_revalidated" ||
+		d.UIBaseline.DriftCheck != "existing_object_edit_surfaces_revalidated_with_brand_locator_drift" ||
 		!d.RuntimePolicy.ProjectFormLiveCalibrated ||
 		!d.RuntimePolicy.PromotionFormLiveCalibrated ||
+		!d.RuntimePolicy.ExistingProjectEditSurfaceLiveObserved ||
+		!d.RuntimePolicy.ExistingPromotionEditSurfaceObserved ||
+		d.RuntimePolicy.RemoteModificationLiveCalibrated ||
 		!d.RuntimePolicy.ControlPlaneEvidenceRecorded ||
 		d.RuntimePolicy.AgentFinalSubmitDocumentation != "available_in_skill_md_with_per_execution_authorization" ||
 		d.Rollback.Method != "disable_skill_version_and_fall_back_to_human_takeover" ||
@@ -163,6 +180,15 @@ func (d Definition) Validate() error {
 		d.GateTwoValidation.MappingStatus != "confirmed" ||
 		d.GateTwoValidation.DeliveryEnabled ||
 		d.GateTwoValidation.EvidenceRef != "docs/delivery/evidence/oceanengine-gate-two-promotion-submit-2026-08-14.json" ||
+		d.ExistingObjectEditCalibration.ObservedAt != "2026-08-14" ||
+		d.ExistingObjectEditCalibration.EvidenceRef != "docs/delivery/evidence/oceanengine-existing-object-edit-readonly-2026-08-14.json" ||
+		d.ExistingObjectEditCalibration.LocatorRef != "docs/delivery/fixtures/oceanengine-existing-object-live-locators-v0.1.json" ||
+		d.ExistingObjectEditCalibration.ObservedPromotionStatus != "pending_review" ||
+		!d.ExistingObjectEditCalibration.ParentProjectOwnsSchedule ||
+		!d.ExistingObjectEditCalibration.ProjectMappingRequiredForSchedule ||
+		!d.ExistingObjectEditCalibration.PromotionScheduleActionForbidden ||
+		d.ExistingObjectEditCalibration.PromotionBrandLocatorDrift != "PAGE_DRIFT" ||
+		d.ExistingObjectEditCalibration.LiveRemoteModificationAllowed ||
 		len(d.EvidenceRefs) < 11 ||
 		len(d.PageTypes) < 9 ||
 		len(d.Capabilities.Allowed) == 0 ||

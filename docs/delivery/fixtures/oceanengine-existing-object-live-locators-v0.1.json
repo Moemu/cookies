@@ -1,0 +1,101 @@
+{
+  "schema_version": "oceanengine-existing-object-live-locators/v0.1",
+  "observed_at": "2026-08-14",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "status": "readonly_edit_surfaces_observed",
+  "coordinate_fallback_allowed": false,
+  "project_edit": {
+    "page_identity": {
+      "https_host": "ad.oceanengine.com",
+      "pathname": "/superior/create-project",
+      "required_query_keys": ["aadvid", "cascade_id", "is_update", "project_id", "uuid"]
+    },
+    "locked_locators": [
+      { "field": "marketing_purpose", "selector": "[data-e2e='createproject_landingtype']", "disabled_state": "descendant_class_contains_disabled" },
+      { "field": "marketing_scenario", "selector": "[data-e2e='createproject_cdpmarketinggoal']", "disabled_state": "class_contains_ovui-radio-group--disabled" },
+      { "field": "marketing_product_kind", "selector": "[data-e2e='createproject_deliveryproduct']", "disabled_state": "class_contains_ovui-radio-group--disabled" },
+      { "field": "marketing_product_ref", "selector": "[data-e2e='createproject_productselect'] button", "disabled_state": "native_disabled" },
+      { "field": "delivery_carrier", "selector": "[data-e2e='createproject_assetType']", "disabled_state": "class_contains_ovui-radio-group--disabled" },
+      { "field": "deep_optimization", "selector": "[data-e2e='createproject_deepbidtype']", "disabled_state": "class_contains_ovui-radio-group--disabled" },
+      { "field": "delivery_mode", "selector": "[data-e2e='createproject_deliverymode']", "disabled_state": "class_contains_ovui-radio-group--disabled" },
+      { "field": "placement", "selector": "[data-e2e='createproject_selectPlacement']", "disabled_state": "class_contains_ovui-radio-group--disabled" },
+      { "field": "billing_method", "selector": "[data-e2e='createproject_pricetype']", "disabled_state": "class_contains_ovui-radio-group--disabled" }
+    ],
+    "editable_locators": [
+      { "field": "targeting.region", "selector": "[data-e2e='createproject_district']", "unique_visible": true },
+      { "field": "targeting.gender", "selector": "[data-e2e='createproject_genderorientation']", "unique_visible": true },
+      { "field": "targeting.age", "selector": "[data-e2e='createproject_audienceAge']", "unique_visible": true },
+      { "field": "schedule.type", "selector": "[data-e2e='createproject_scheduletypeselect']", "unique_visible": true },
+      { "field": "schedule.end", "selector": "[data-e2e='createproject_rangePicker_end'] input", "unique_visible": true },
+      { "field": "schedule.dayparting", "selector": "[data-e2e='createproject_weekscheduletypeselect']", "unique_visible": true },
+      { "field": "bid_strategy", "selector": "[data-e2e='createproject_flowcontrolmode']", "unique_visible": true },
+      { "field": "budget.mode", "selector": "[data-e2e='createproject_budgettypeselect']", "unique_visible": true },
+      { "field": "search.bid_coefficient", "selector": "[data-e2e='createproject_bidcoefficient_input_component'] input", "unique_visible": true },
+      { "field": "tracking.display", "selector": "[data-e2e='createproject_displaytrackurl'] input", "unique_visible": true },
+      { "field": "tracking.action", "selector": "[data-e2e='createproject_actiontrackurl'] input", "unique_visible": true },
+      { "field": "project_name", "selector": "[data-e2e='createproject_projectname'] textarea", "unique_visible": true }
+    ],
+    "conditional_locators": [
+      { "field": "schedule.start", "selector": "[data-e2e='createproject_rangePicker_start'] input", "observed_state": "native_disabled" },
+      { "field": "budget.amount", "selector": null, "observed_state": "not_rendered_for_unlimited_budget" }
+    ],
+    "write_boundaries": [
+      { "field": "save_and_create_promotion", "selector": "[data-e2e='createproject_submitmodule_confirmandcreate'] button", "action_allowed": false },
+      { "field": "save_and_close", "selector": "[data-e2e='createproject_submitmodule_confirm'] button", "action_allowed": false }
+    ],
+    "safe_exit": { "method": "close_unmodified_edit_tab", "action_allowed": true }
+  },
+  "promotion_edit": {
+    "page_identity": {
+      "https_host": "ad.oceanengine.com",
+      "pathname": "/superior/ads",
+      "required_query_keys": ["aadvid", "cascade_id", "is_update", "project_id", "promotion_id", "temp_id", "uuid"]
+    },
+    "locked_locators": [
+      { "field": "delivery_identity", "selector": "[data-e2e='createad_nativetype']", "disabled_state": "class_contains_ovui-radio-group--disabled" },
+      { "field": "product.primary_name", "selector": "[data-e2e='createad_productName_input_component'] input[disabled]", "disabled_state": "native_disabled" },
+      { "field": "budget.type", "selector": "[data-e2e='createad_budgetTypeSelect']", "disabled_state": "class_contains_ovui-radio-group--disabled" },
+      { "field": "client_video_download", "selector": "[data-e2e='createad_adDownloadStatus']", "disabled_state": "class_contains_ovui-radio-group--disabled" }
+    ],
+    "editable_locators": [
+      { "field": "materials.video", "kind": "role_and_accessible_name", "role": "button", "name": "添加视频", "exact": true, "unique_visible": true },
+      { "field": "copy_items[0]", "selector": "[data-e2e='createad_creativeTitles__creativeTitleGroup_title_input_component'] input", "unique_visible": true },
+      { "field": "landing_page", "selector": "[data-e2e='createad_thirdPageUrl__createExternalUrl_input_component'] input", "unique_visible": true },
+      { "field": "direct_link", "selector": "[data-e2e='createad_openUrl_input_input_component'] input", "unique_visible": true },
+      { "field": "backup_link", "selector": "[data-e2e='createad_uLinkUrl_input_component'] input", "unique_visible": true },
+      { "field": "product.additional_name", "selector": "[data-e2e='createad_productName_input_component'] input:not([disabled])", "unique_visible": true },
+      { "field": "product.selling_points", "selector": "[data-e2e='createad_productSelling__createRecommendTag__ocTagInput'] input", "unique_visible": true },
+      { "field": "settings.source", "selector": "[data-e2e='createad_source'] input", "unique_visible": true },
+      { "field": "settings.comment", "selector": "[data-e2e='createad_comment_0']", "unique_visible": true },
+      { "field": "settings.category", "selector": "[data-e2e='createad_yuntuCategory__ocCascader'] input", "unique_visible": true },
+      { "field": "settings.brand", "kind": "placeholder", "name": "选择或手动输入品牌", "exact": true, "unique_visible": true },
+      { "field": "budget.amount", "selector": "[data-e2e='createad_adBudget_input_component'] input", "unique_visible": true },
+      { "field": "bid.amount", "selector": "[data-e2e='createad_adBid'] input", "unique_visible": true },
+      { "field": "promotion_name", "selector": "[data-e2e='createad_adName'] textarea", "unique_visible": true }
+    ],
+    "inherited_readonly_summary": ["bid_strategy", "optimization_target", "deep_optimization", "billing_method", "schedule"],
+    "safe_exit": { "selector": "[data-e2e='createad_save_cancel']", "action_allowed": true, "observed": true },
+    "write_boundary": { "kind": "role_and_accessible_name", "role": "button", "name": "保存并关闭", "exact": true, "unique_visible": true, "action_allowed": false }
+  },
+  "drift": [
+    {
+      "field": "promotion.settings.brand",
+      "old_selector": "[data-e2e='createad_cdpBrand'] input",
+      "old_selector_total_matches": 2,
+      "old_selector_visible_matches": 1,
+      "replacement_kind": "placeholder",
+      "replacement_name": "选择或手动输入品牌",
+      "replacement_unique_visible": true,
+      "classification": "PAGE_DRIFT"
+    }
+  ],
+  "calibration_limits": {
+    "observed_promotion_status": "pending_review",
+    "fields_filled": 0,
+    "write_boundary_clicks": 0,
+    "pause_control_observed": false,
+    "restart_control_observed": false,
+    "live_remote_modification_allowed": false
+  }
+}

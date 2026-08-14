@@ -37,6 +37,22 @@ test("controlled Computer Use fixtures satisfy the frozen contracts", () => {
   }
 });
 
+test("promotion mutation contracts reject project-owned schedule changes", () => {
+  const deliverySchema = readJSON(join(contracts, "delivery-controlled-change-set-v1.schema.json"));
+  const validateDelivery = ajv.getSchema(String(deliverySchema.$id));
+  assert.ok(validateDelivery);
+  const deliveryFixture = readJSON(join(fixtures, "delivery-controlled-change-set-v1-budget-mutation.json"));
+  deliveryFixture.action = "update_promotion_schedule";
+  assert.equal(validateDelivery(deliveryFixture), false);
+
+  const runSchema = readJSON(join(contracts, "platform-computer-use-run-v1.schema.json"));
+  const validateRun = ajv.getSchema(String(runSchema.$id));
+  assert.ok(validateRun);
+  const runFixture = readJSON(join(fixtures, "platform-computer-use-run-v1-budget-mutation.json"));
+  (runFixture.authority as Record<string, unknown>).action = "update_promotion_schedule";
+  assert.equal(validateRun(runFixture), false);
+});
+
 test("emergency pause fixtures bind one operator and a delivering-to-paused state transition", () => {
   for (const fixtureName of [
     "delivery-controlled-change-set-v1-emergency-pause.json",
@@ -114,11 +130,49 @@ test("OceanEngine SkillDefinition records controlled gate-two submit without cla
   assert.equal((definition.ui_baseline as Record<string, unknown>).revalidated_at, "2026-08-14");
   assert.equal(
     (definition.ui_baseline as Record<string, unknown>).drift_check,
-    "promotion_submit_and_independent_list_readback_revalidated",
+    "existing_object_edit_surfaces_revalidated_with_brand_locator_drift",
   );
+  const runtimePolicy = definition.runtime_policy as Record<string, unknown>;
+  assert.equal(runtimePolicy.existing_project_edit_surface_live_observed, true);
+  assert.equal(runtimePolicy.existing_promotion_edit_surface_live_observed, true);
+  assert.equal(runtimePolicy.remote_modification_live_calibrated, false);
+  const editCalibration = definition.existing_object_edit_calibration as Record<string, unknown>;
+  assert.equal(editCalibration.parent_project_owns_schedule, true);
+  assert.equal(editCalibration.promotion_schedule_action_forbidden, true);
+  assert.equal(editCalibration.live_remote_modification_allowed, false);
   for (const reference of [definition.schema_ref, ...(definition.evidence_refs as string[])]) {
     assert.equal(existsSync(join(root, String(reference))), true, `missing stage B evidence ${reference}`);
   }
+});
+
+test("existing-object inventory records field ownership, locator drift and zero writes without raw IDs", () => {
+  const evidencePath = join(root, "docs", "delivery", "evidence", "oceanengine-existing-object-edit-readonly-2026-08-14.json");
+  const rawEvidence = readFileSync(evidencePath, "utf8");
+  const evidence = JSON.parse(rawEvidence) as Record<string, unknown>;
+  assert.doesNotMatch(rawEvidence, /\b\d{15,20}\b/);
+
+  const boundary = evidence.implementation_boundary as Record<string, unknown>;
+  assert.deepEqual(boundary.promotion_mapping_actions_supported_by_observed_field_ownership, [
+    "update_promotion_budget",
+    "update_promotion_materials",
+  ]);
+  assert.equal(boundary.invalid_promotion_mapping_action, "update_promotion_schedule");
+  assert.equal(boundary.project_mapping_required_for_schedule, true);
+  assert.equal(boundary.live_remote_modification_allowed, false);
+
+  const noWrite = evidence.no_write_verification as Record<string, unknown>;
+  assert.equal(noWrite.fields_filled, 0);
+  assert.equal(noWrite.write_boundary_clicks, 0);
+  assert.equal(noWrite.status_control_clicks, 0);
+  assert.equal(noWrite.remote_side_effect_detected, false);
+
+  const locatorPath = join(root, "docs", "delivery", "fixtures", "oceanengine-existing-object-live-locators-v0.1.json");
+  const locators = readJSON(locatorPath);
+  assert.equal(locators.coordinate_fallback_allowed, false);
+  const drift = (locators.drift as Array<Record<string, unknown>>)[0];
+  assert.equal(drift.old_selector_total_matches, 2);
+  assert.equal(drift.replacement_unique_visible, true);
+  assert.equal(drift.classification, "PAGE_DRIFT");
 });
 
 test("PR 50 preserves takeover calibration and per-execution submit instructions without claiming an automated Browser Driver", () => {

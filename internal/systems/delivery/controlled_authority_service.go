@@ -153,8 +153,6 @@ type CompileMappedControlledChangeSetRequest struct {
 	Action                  ControlledAction              `json:"action"`
 	CurrentDailyBudgetMinor int64                         `json:"current_daily_budget_minor"`
 	TargetDailyBudgetMinor  int64                         `json:"target_daily_budget_minor"`
-	CurrentSchedule         *ControlledScheduleWindow     `json:"current_schedule,omitempty"`
-	TargetSchedule          *ControlledScheduleWindow     `json:"target_schedule,omitempty"`
 	CurrentMaterials        []ControlledMaterialReference `json:"current_materials,omitempty"`
 	TargetMaterials         []ControlledMaterialReference `json:"target_materials,omitempty"`
 }
@@ -179,8 +177,6 @@ func (r CompileMappedControlledChangeSetRequest) mutation() (ControlledPromotion
 	mutation := ControlledPromotionMutation{
 		CurrentDailyBudgetMinor: r.CurrentDailyBudgetMinor,
 		TargetDailyBudgetMinor:  r.TargetDailyBudgetMinor,
-		CurrentSchedule:         r.CurrentSchedule,
-		TargetSchedule:          r.TargetSchedule,
 		CurrentMaterials:        r.CurrentMaterials,
 		TargetMaterials:         r.TargetMaterials,
 	}

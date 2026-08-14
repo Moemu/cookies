@@ -1528,8 +1528,6 @@ components:
       properties:
         current_daily_budget_minor: { type: integer, minimum: 30000 }
         target_daily_budget_minor: { type: integer, minimum: 30000 }
-        current_schedule: { $ref: '#/components/schemas/ControlledScheduleWindow' }
-        target_schedule: { $ref: '#/components/schemas/ControlledScheduleWindow' }
         current_materials:
           type: array
           items: { $ref: '#/components/schemas/ControlledMaterialReference' }
@@ -1579,11 +1577,9 @@ components:
       required: [expected_mapping_version, action, current_daily_budget_minor, target_daily_budget_minor]
       properties:
         expected_mapping_version: { type: integer, minimum: 2 }
-        action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        action: { type: string, enum: [update_promotion_budget, update_promotion_materials] }
         current_daily_budget_minor: { type: integer, minimum: 30000 }
         target_daily_budget_minor: { type: integer, minimum: 30000 }
-        current_schedule: { $ref: '#/components/schemas/ControlledScheduleWindow' }
-        target_schedule: { $ref: '#/components/schemas/ControlledScheduleWindow' }
         current_materials:
           type: array
           items: { $ref: '#/components/schemas/ControlledMaterialReference' }
@@ -1623,7 +1619,7 @@ components:
         organization_id: { type: string }
         project_id: { type: string }
         binding: { $ref: '#/components/schemas/ControlledAuthorityBinding' }
-        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion, resume_promotion] }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_materials, pause_promotion, resume_promotion] }
         budget_limit_minor: { type: integer, minimum: 0 }
         currency: { type: string, const: CNY }
         status: { type: string, enum: [ready_for_approval, approved, rejected, executing, executed, invalidated] }
@@ -1645,7 +1641,7 @@ components:
         controlled_change_set_id: { type: string }
         controlled_change_set_hash: { $ref: '#/components/schemas/CanonicalHash' }
         binding: { $ref: '#/components/schemas/ControlledAuthorityBinding' }
-        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion, resume_promotion] }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_materials, pause_promotion, resume_promotion] }
         scope: { type: string, const: controlled_remote_write }
         budget_limit_minor: { type: integer, minimum: 0 }
         currency: { type: string, const: CNY }
@@ -1702,7 +1698,7 @@ components:
         platform_object_kind: { type: string }
         platform_object_id: { type: string }
         platform_status: { type: string }
-        current_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion, resume_promotion] }
+        current_state_action: { type: string, enum: [update_promotion_budget, update_promotion_materials, pause_promotion, resume_promotion] }
         current_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
         result_evidence_id: { type: string }
         list_evidence_id: { type: string }
@@ -1719,14 +1715,14 @@ components:
         organization_id: { type: string }
         project_id: { type: string }
         version: { type: integer, minimum: 1 }
-        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion, resume_promotion] }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_materials, pause_promotion, resume_promotion] }
         business_execution_id: { type: string }
         computer_use_run_id: { type: string }
         platform_object_id: { type: string }
         platform_status: { type: string }
-        previous_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion, resume_promotion] }
+        previous_state_action: { type: string, enum: [update_promotion_budget, update_promotion_materials, pause_promotion, resume_promotion] }
         previous_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
-        current_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion, resume_promotion] }
+        current_state_action: { type: string, enum: [update_promotion_budget, update_promotion_materials, pause_promotion, resume_promotion] }
         current_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
         result_evidence_id: { type: string }
         list_evidence_id: { type: string }

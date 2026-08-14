@@ -42,8 +42,6 @@ export type ComputerUseAuthorityBinding = {
   promotion_mutation?: {
     current_daily_budget_minor: number
     target_daily_budget_minor: number
-    current_schedule?: { start_at: string; end_at: string; timezone: string }
-    target_schedule?: { start_at: string; end_at: string; timezone: string }
     current_materials?: Array<{ reference_id: string; authorization_evidence_id: string }>
     target_materials?: Array<{ reference_id: string; authorization_evidence_id: string }>
     current_state_hash: string

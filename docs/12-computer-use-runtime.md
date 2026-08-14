@@ -53,7 +53,7 @@ Control Plane 不理解抖音/快手业务字段；平台页面流程由 Deliver
 7. 结果未知进入人工/对账，不自动重复点击。
 8. 结束后释放租约，保存脱敏证据和结构化审计。
 
-既有推广单元的有限修改不得复用创建时的审批。预算、排期或授权素材每次变化都必须从已确认的 `PlatformEntityMapping` 读取精确对象，创建新的 ChangeSet、Approval、Execution 和 ComputerUseRun；提交前同时核对对象 ID、当前状态哈希和目标状态哈希。写后结果页与列表页均匹配后，Mapping 才递增版本并追加不可变修订记录。
+既有推广单元的有限修改不得复用创建时的审批。预算或授权素材每次变化都必须从已确认的推广单元 `PlatformEntityMapping` 读取精确对象，创建新的 ChangeSet、Approval、Execution 和 ComputerUseRun；提交前同时核对对象 ID、当前状态哈希和目标状态哈希。写后结果页与列表页均匹配后，Mapping 才递增版本并追加不可变修订记录。真实页面校准已确认排期属于父项目而不是推广单元；项目排期必须使用独立的项目 Mapping 和项目变更契约，不能借用推广单元 Mapping。
 
 ## 6. 风险和动作策略
 
@@ -96,7 +96,7 @@ Control Plane 不理解抖音/快手业务字段；平台页面流程由 Deliver
 - `POST /platform/v1/computer-use/runs/{id}:pause|resume|cancel|takeover`。
 - `POST /platform/v1/computer-use/runs/{id}/confirmations`。
 - `/platform/v1/computer-use/environments/*`、`devices/*`、`profiles/*`。
-- `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-change-sets`：从已确认 Mapping 创建一次预算、排期或授权素材变更。
+- `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-change-sets`：从已确认推广单元 Mapping 创建一次预算或授权素材变更。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}:confirm-mutation`：以同一 Run 的结果页和列表页证据递增 Mapping 版本。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/emergency-pause-change-sets`：只对状态为 `delivering` 的已确认推广单元创建独立紧急暂停 ChangeSet；目标状态由服务端固定为 `paused`。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-restart-change-sets`：只允许从本系统确认的紧急暂停修订创建全新重启 ChangeSet；预算、有效排期、授权素材和授权落地页必须重新核对。
@@ -133,6 +133,6 @@ Switch 激活都会阻断。当前 Skill 尚未校准真实重启控制，仍只
 | 版本 | 日期 | 说明 |
 | --- | --- | --- |
 | v0.1 | 2026-07-20 | 确定受控远程设备模式，定义会话隔离、接管、证据、恢复和发布门禁 |
-| v0.2 | 2026-08-14 | 增加指定推广单元的预算、排期、授权素材有限变更和 Mapping 修订链；真实最终点击仍需执行当轮单独授权 |
+| v0.2 | 2026-08-14 | 增加指定推广单元的预算、授权素材有限变更和 Mapping 修订链；真实页面确认排期属于父项目，项目排期需独立 Mapping 与变更契约；真实最终点击仍需执行当轮单独授权 |
 | v0.3 | 2026-08-14 | 增加操作人绑定的独立紧急暂停权威链与 fake/no-write 路径；真实暂停仍需单独页面校准和当轮授权 |
 | v0.4 | 2026-08-14 | 增加从受控暂停出发、严格重检预算/排期/素材/落地页/身份/Kill Switch 的独立重启权威链；不作为自动补偿 |
