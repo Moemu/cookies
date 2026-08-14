@@ -1428,6 +1428,9 @@ type shortDramaV2CreativeCommands interface {
 	SelectShortDramaV2Direction(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectShortDramaV2DirectionRequest) (creative.TaskDetail, error)
 	UpdateShortDramaV2Prompts(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateShortDramaV2PromptsRequest) (creative.TaskDetail, error)
 	PrepareShortDramaV2OpeningFrame(context.Context, contract.RequestContext, contract.ProjectID, string, creative.PrepareShortDramaV2OpeningFrameRequest) (creative.TaskDetail, error)
+	GenerateShortDramaReferenceBoards(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateShortDramaReferenceBoardsRequest) (creative.TaskDetail, error)
+	ReconcileShortDramaReferenceBoard(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReconcileShortDramaReferenceBoardRequest) (creative.TaskDetail, error)
+	SelectShortDramaReferenceBoard(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectShortDramaReferenceBoardRequest) (creative.TaskDetail, error)
 	GenerateShortDramaV2FirstFrames(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateShortDramaV2FirstFramesRequest) (creative.TaskDetail, error)
 	ReconcileShortDramaV2FirstFrame(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReconcileShortDramaV2FirstFrameRequest) (creative.TaskDetail, error)
 	SelectShortDramaV2FirstFrame(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectShortDramaV2FirstFrameRequest) (creative.TaskDetail, error)
@@ -1494,6 +1497,40 @@ func (s *Server) shortDramaV2Command(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		value, err = manager.PrepareShortDramaV2OpeningFrame(r.Context(), rc, projectID, taskID, body)
+	case strings.HasSuffix(path, ":generate-reference-boards"):
+		var body creative.GenerateShortDramaReferenceBoardsRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.GenerateShortDramaReferenceBoards(r.Context(), rc.Actor, projectID, taskID, body)
+	case strings.HasSuffix(path, ":reconcile-reference-board"):
+		if s.providerJobs == nil {
+			s.notImplemented(w, r)
+			return
+		}
+		var body struct {
+			ExpectedRevision int64  `json:"expected_revision"`
+			CandidateID      string `json:"candidate_id"`
+			ProviderJobID    string `json:"provider_job_id"`
+		}
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		job, getErr := s.providerJobs.GetJob(r.Context(), rc.Actor.OrganizationID, projectID, body.ProviderJobID)
+		if getErr != nil {
+			s.writeServiceError(w, r, getErr)
+			return
+		}
+		value, err = manager.ReconcileShortDramaReferenceBoard(r.Context(), rc.Actor, projectID, taskID, creative.ReconcileShortDramaReferenceBoardRequest{ExpectedRevision: body.ExpectedRevision, CandidateID: body.CandidateID, Job: job})
+	case strings.HasSuffix(path, ":select-reference-board"):
+		var body creative.SelectShortDramaReferenceBoardRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.SelectShortDramaReferenceBoard(r.Context(), rc.Actor, projectID, taskID, body)
 	case strings.HasSuffix(path, ":generate-first-frames"):
 		var body creative.GenerateShortDramaV2FirstFramesRequest
 		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {

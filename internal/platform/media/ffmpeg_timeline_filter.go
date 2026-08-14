@@ -58,6 +58,9 @@ func BuildTimelineFilter(request TimelineRenderRequest, subtitlePath string) (st
 	escapedSubtitle := strings.ReplaceAll(filepath.ToSlash(subtitlePath), ":", `\:`)
 	escapedSubtitle = strings.ReplaceAll(escapedSubtitle, "'", `\'`)
 	parts = append(parts, fmt.Sprintf("[visual]subtitles='%s'[videoout]", escapedSubtitle))
+	if request.OmitAudio {
+		return strings.Join(parts, ";"), "[videoout]", ""
+	}
 
 	groups := map[TimelineAudioRole][]string{}
 	originalInputs := []string{}

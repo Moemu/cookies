@@ -118,6 +118,8 @@ type Service struct {
 	ShortDramaPrerollPlanner            ShortDramaPrerollPlanner
 	ShortDramaV2Analyzer                ShortDramaV2Analyzer
 	CommercePrerollV2Analyzer           CommercePrerollV2Analyzer
+	GamePrerollV2Analyzer               GamePrerollV2Analyzer
+	GamePrerollV2AnalysisLauncher       GamePrerollV2AnalysisLauncher
 	CommercePrerollV2Images             CommercePrerollV2ImageJobCreator
 	ShortDramaV2Planner                 ShortDramaV2Planner
 	ShortDramaV2Images                  ShortDramaV2ImageJobCreator
@@ -137,6 +139,7 @@ type Service struct {
 	AINativeProducts                    AINativeProductResolver
 	AINativeRequirementPlanner          AINativeRequirementPlanner
 	AINativeRequirements                AINativeRequirementRepository
+	AINativeOutputPresets               *OutputPresetRegistry
 	AINativeProductMediaImporter        AINativeProductMediaImporter
 	AINativeOperationCanceller          AINativeOperationCanceller
 	AINativeScripts                     AINativeScriptRepository
@@ -271,6 +274,7 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 	hasSourceVideo := strings.TrimSpace(string(request.SourceVideo.AssetID)) != "" || request.SourceVideo.Version != 0
 	isShortDramaV2 := intake.Source == IntakeSourceManual && route.RouteID == ManualShortDramaPrerollV2RouteID
 	isCommerceV2 := intake.Source == IntakeSourceManual && route.RouteID == ManualCommercePrerollV2RouteID
+	isGameV2 := intake.Source == IntakeSourceManual && route.RouteID == ManualGamePrerollV2RouteID
 	needsSourceVideo := (route.RouteType != PerformanceModeShortDramaPreroll || isShortDramaV2) &&
 		!isManualBrandFilm &&
 		(route.RouteType != CreativeRouteBrandVideo || hasSourceVideo)
@@ -309,8 +313,11 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		}
 	}
 	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeGamePreroll {
-		if intake.Request.ManualGamePreroll == nil ||
-			intake.Request.ManualGamePreroll.SourceVideo != request.SourceVideo {
+		if isGameV2 && (intake.Request.ManualGamePrerollV2 == nil || intake.Request.ManualGamePrerollV2.SourceVideo != request.SourceVideo) {
+			return CreativeTask{}, fmt.Errorf("source_video must match the immutable game preroll V2 intake snapshot")
+		}
+		if !isGameV2 && (intake.Request.ManualGamePreroll == nil ||
+			intake.Request.ManualGamePreroll.SourceVideo != request.SourceVideo) {
 			return CreativeTask{}, fmt.Errorf("source_video must match the immutable game preroll intake snapshot")
 		}
 	}
@@ -553,7 +560,21 @@ func (s Service) CreateVideoTask(ctx context.Context, actor contract.ActorContex
 		}
 		draft.Prompt = "等待原视频理解"
 	}
-	if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeGamePreroll {
+	if isGameV2 {
+		now := s.now()
+		source, readErr := s.Assets.ReadForCreative(ctx, actor, projectID, request.SourceVideo)
+		if readErr != nil {
+			return CreativeTask{}, readErr
+		}
+		snapshot := GamePrerollInputSnapshot{Source: intake.Source, SelectedRouteID: route.RouteID, SourceVideo: request.SourceVideo, SourceVideoRights: RightsConfirmed, CallToAction: request.CallToAction}
+		inputHash, hashErr := contract.CanonicalJSONHash(snapshot)
+		if hashErr != nil {
+			return CreativeTask{}, hashErr
+		}
+		gamePrerollDraft = &GamePrerollDraft{ContractVersion: GamePrerollV2ContractVersion, TaskID: task.ID, Revision: 1, SelectedRouteID: route.RouteID, InputSnapshot: snapshot, InputHash: "sha256:" + inputHash, Readiness: CreativeReadiness{PlanningReady: false, GenerationReady: false, ProductionReady: false, Blockers: []string{"analysis", "brief", "selected_candidate", "evidence_assets"}}, Stage: GamePrerollStageSourceReady, SourceMetadata: source, SourceVideoRights: RightsConfirmation{Status: RightsConfirmed, ConfirmedBy: actor.Principal.ID, ConfirmedAt: now}, Analysis: GamePrerollAnalysis{Status: GamePrerollResourceIdle}, GenerationConfig: GamePrerollGenerationConfig{SubtitleStyle: "high_contrast_dynamic", HookStrength: 4, PaceProfile: "punchy", DurationSeconds: route.TargetDurationSeconds, Channel: string(request.Channel), AspectRatio: "9:16", Resolution: "720p", AudioPolicy: string(provider.VideoAudioGenerated), CallToAction: request.CallToAction}, CreatedAt: now, UpdatedAt: now}
+		draft.GamePreroll = gamePrerollDraft
+		draft.Prompt = "等待游戏原视频理解"
+	} else if intake.Source == IntakeSourceManual && route.RouteType == PerformanceModeGamePreroll {
 		manual := intake.Request.ManualGamePreroll
 		if manual == nil {
 			return CreativeTask{}, fmt.Errorf("manual game preroll input is required")

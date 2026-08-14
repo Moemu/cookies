@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/creative-game-preroll-workspace-v2.schema.json",
+  "title": "creative-game-preroll-workspace/v2",
+  "description": "Creative-owned aggregate for source-video-driven game preroll analysis, human-confirmed planning and Provider generation.",
+  "type": "object",
+  "required": ["contract_version", "task_id", "revision", "stage", "input_snapshot", "readiness", "analysis", "generation_config"],
+  "properties": {
+    "contract_version": {"const": "creative-game-preroll-workspace/v2"},
+    "task_id": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 1},
+    "stage": {"enum": ["source_ready", "analysis_ready", "brief_confirmed", "candidates_ready", "candidate_selected", "video_generating", "video_ready"]},
+    "input_snapshot": {"$ref": "#/$defs/inputSnapshot"},
+    "readiness": {"type": "object"},
+    "analysis": {"$ref": "#/$defs/analysis"},
+    "confirmed_brief": {"$ref": "#/$defs/briefVersion"},
+    "active_candidate_batch": {"$ref": "#/$defs/candidateBatch"},
+    "candidates": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/candidate"}},
+    "selected_candidate_id": {"type": "string"},
+    "evidence_assets": {"type": "object"},
+    "generation_config": {"$ref": "#/$defs/generationConfig"},
+    "generation_spec": {"$ref": "#/$defs/generationSpec"},
+    "latest_video_attempt_id": {"type": "string"},
+    "output_asset": {"$ref": "#/$defs/projectAssetRef"},
+    "video_error": {"type": "object"}
+  },
+  "$defs": {
+    "assetVersionRef": {
+      "type": "object", "additionalProperties": false, "required": ["asset_id", "version"],
+      "properties": {"asset_id": {"type": "string", "minLength": 1}, "version": {"type": "integer", "minimum": 1}}
+    },
+    "projectAssetRef": {
+      "type": "object", "additionalProperties": false, "required": ["project_id", "asset_version"],
+      "properties": {"project_id": {"type": "string", "minLength": 1}, "asset_version": {"$ref": "#/$defs/assetVersionRef"}}
+    },
+    "inputSnapshot": {
+      "type": "object", "required": ["source_video", "source_video_rights", "call_to_action", "evidence_moments"],
+      "properties": {
+        "source_video": {"$ref": "#/$defs/assetVersionRef"},
+        "source_video_rights": {"const": "confirmed"},
+        "game_name": {"type": "string"}, "gameplay_summary": {"type": "string"}, "call_to_action": {"type": "string", "minLength": 1},
+        "evidence_moments": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
+      }
+    },
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "kind", "start_milliseconds", "end_milliseconds", "description", "verified_copy"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "kind": {"enum": ["skill_choice", "wave_progress", "battle", "gameplay", "operation", "result", "reward", "ui"]},
+        "start_milliseconds": {"type": "integer", "minimum": 0}, "end_milliseconds": {"type": "integer", "minimum": 1},
+        "description": {"type": "string", "minLength": 1}, "verified_copy": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "field": {
+      "type": "object", "additionalProperties": false, "required": ["id", "key", "label", "value", "provenance", "evidence_refs", "required"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1}, "key": {"type": "string", "minLength": 1}, "label": {"type": "string"}, "value": {"type": "string"},
+        "provenance": {"enum": ["video_evidence", "ai_inference", "manual"]}, "evidence_refs": {"type": "array", "items": {"type": "string"}}, "required": {"type": "boolean"}
+      }
+    },
+    "analysis": {
+      "type": "object", "required": ["status"],
+      "properties": {
+        "status": {"enum": ["idle", "running", "ready", "failed"]}, "revision": {"type": "integer", "minimum": 1}, "input_hash": {"type": "string"}, "prompt_version": {"type": "string"},
+        "game_name": {"type": "string"}, "gameplay_summary": {"type": "string"}, "facts": {"type": "array", "items": {"type": "object"}},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}, "unknowns": {"type": "array", "items": {"type": "string"}},
+        "suggested_brief": {"type": "array", "items": {"$ref": "#/$defs/field"}}
+      }
+    },
+    "briefVersion": {
+      "type": "object", "required": ["id", "version", "analysis_revision", "fields", "confirmed_by", "confirmed_at", "content_hash"],
+      "properties": {"id": {"type": "string"}, "version": {"type": "integer", "minimum": 1}, "analysis_revision": {"type": "integer", "minimum": 1}, "fields": {"type": "array", "minItems": 4, "items": {"$ref": "#/$defs/field"}}, "confirmed_by": {"type": "string"}, "confirmed_at": {"type": "string", "format": "date-time"}, "content_hash": {"type": "string"}}
+    },
+    "generationConfig": {
+      "type": "object", "required": ["subtitle_style", "hook_strength", "pace_profile", "duration_seconds", "channel", "aspect_ratio", "resolution", "audio_policy", "call_to_action"],
+      "properties": {"subtitle_style": {"enum": ["high_contrast_dynamic", "brand_minimal"]}, "hook_strength": {"type": "integer", "minimum": 1, "maximum": 5}, "pace_profile": {"enum": ["punchy", "balanced"]}, "duration_seconds": {"type": "integer", "minimum": 6, "maximum": 10}, "channel": {"const": "douyin"}, "aspect_ratio": {"const": "9:16"}, "resolution": {"const": "720p"}, "audio_policy": {"enum": ["generated", "silent"]}, "call_to_action": {"type": "string", "minLength": 1}}
+    },
+    "beat": {
+      "type": "object", "required": ["start_milliseconds", "end_milliseconds", "visual", "copy", "evidence_moment_id"],
+      "properties": {"start_milliseconds": {"type": "integer", "minimum": 0}, "end_milliseconds": {"type": "integer", "minimum": 1}, "visual": {"type": "string"}, "copy": {"type": "string"}, "evidence_moment_id": {"type": "string"}}
+    },
+    "candidate": {
+      "type": "object", "required": ["id", "hook_mechanism", "score", "score_meaning", "hook_line", "evidence_moment_ids", "storyboard", "prompt_package"],
+      "properties": {"id": {"type": "string"}, "hook_mechanism": {"enum": ["choice_challenge", "tactical_tradeoff", "wave_escalation", "failure_reversal", "merge_upgrade", "reward_reveal"]}, "score": {"type": "integer"}, "score_meaning": {"const": "evidence_grounded_hook_relevance"}, "hook_line": {"type": "string"}, "evidence_moment_ids": {"type": "array", "items": {"type": "string"}}, "storyboard": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/beat"}}, "prompt_package": {"type": "object"}}
+    },
+    "candidateBatch": {
+      "type": "object", "required": ["id", "revision", "planner_version", "prompt_compiler_version", "generation_config", "generated_candidate_count", "candidates", "created_at"],
+      "properties": {"id": {"type": "string"}, "revision": {"type": "integer", "minimum": 1}, "planner_version": {"type": "string"}, "prompt_compiler_version": {"type": "string"}, "generation_config": {"$ref": "#/$defs/generationConfig"}, "generated_candidate_count": {"const": 3}, "candidates": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/candidate"}}, "created_at": {"type": "string", "format": "date-time"}}
+    },
+    "generationSpec": {
+      "type": "object", "required": ["contract_version", "task_id", "draft_revision", "input_snapshot_hash", "candidate_batch_id", "candidate_id", "prompt_package_hash", "input_mode", "conditioning_assets", "duration_seconds", "aspect_ratio", "resolution", "audio_policy", "hash"],
+      "properties": {"contract_version": {"const": "creative-game-preroll-generation-spec/v2"}, "task_id": {"type": "string"}, "draft_revision": {"type": "integer", "minimum": 1}, "input_snapshot_hash": {"type": "string"}, "candidate_batch_id": {"type": "string"}, "candidate_id": {"type": "string"}, "prompt_package_hash": {"type": "string"}, "input_mode": {"const": "first_last_frame"}, "conditioning_assets": {"type": "array", "minItems": 2, "maxItems": 2}, "duration_seconds": {"type": "integer", "minimum": 6, "maximum": 10}, "aspect_ratio": {"const": "9:16"}, "resolution": {"const": "720p"}, "audio_policy": {"enum": ["generated", "silent"]}, "hash": {"type": "string"}}
+    }
+  }
+}

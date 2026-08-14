@@ -8,6 +8,8 @@ import (
 const (
 	ShortDramaPrerollV3ContractVersion = "creative-short-drama-preroll-workspace/v3"
 	ShortDramaGenerationSpecV3         = "creative-short-drama-preroll-generation-spec/v3"
+	ShortDramaPrerollV4ContractVersion = "creative-short-drama-preroll-workspace/v4"
+	ShortDramaGenerationSpecV4         = "creative-short-drama-preroll-generation-spec/v4"
 )
 
 type ShortDramaSourceCanvas struct {
@@ -40,6 +42,29 @@ type ShortDramaOutputCanvas struct {
 	PixelFormat   string `json:"pixel_format"`
 	AudioCodec    string `json:"audio_codec"`
 	NormalizeMode string `json:"normalize_mode"`
+}
+
+// ShortDramaBoardCanvas preserves the complete 2x2 reference board. Unlike an
+// opening frame, a board must never be cover-cropped to the source ratio or a
+// panel may disappear before it reaches the video model.
+type ShortDramaBoardCanvas struct {
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	AspectRatio string `json:"aspect_ratio"`
+	Layout      string `json:"layout"`
+	FitMode     string `json:"fit_mode"`
+	SafeInsetPX int    `json:"safe_inset_px"`
+}
+
+func deriveShortDramaBoardCanvas(model ShortDramaModelCanvas) ShortDramaBoardCanvas {
+	inset := model.ImageWidth / 64
+	if inset < 12 {
+		inset = 12
+	}
+	return ShortDramaBoardCanvas{
+		Width: model.ImageWidth, Height: model.ImageHeight, AspectRatio: model.Ratio,
+		Layout: "2x2_v1", FitMode: "contain_panels", SafeInsetPX: inset,
+	}
 }
 
 func deriveShortDramaCanvases(metadata CreativeAssetSnapshot) (ShortDramaSourceCanvas, ShortDramaModelCanvas, ShortDramaOutputCanvas, error) {

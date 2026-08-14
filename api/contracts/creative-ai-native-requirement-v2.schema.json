@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/creative-ai-native-requirement-v2.schema.json",
+  "title": "AI Native Ad Requirement Draft V2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "revision", "status", "product", "product_resolution", "product_name", "product_description", "target_audiences", "media", "core_selling_points", "supplemental_requirement", "channel", "aspect_ratio", "duration_seconds", "language", "output_preset", "delivery_treatment", "needs_confirmation", "generation"],
+  "properties": {
+    "contract_version": {"const": "creative.ai-native.requirement/v2"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"const": "draft"},
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "product_id", "name", "description", "images", "price", "sales", "source_url"],
+      "properties": {
+        "source": {"enum": ["douyin_mall", "taobao", "tmall", "xiaohongshu", "1688"]},
+        "product_id": {"type": "string"},
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "images": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/productImage"}},
+        "price": {"$ref": "#/$defs/price"},
+        "sales": {"type": "integer", "minimum": 0},
+        "source_url": {"type": "string", "format": "uri"},
+        "resolution_status": {"enum": ["recognized", "partial", "manual_required"]},
+        "resource_type": {"enum": ["product", "note"]},
+        "missing_fields": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "product_resolution": {"$ref": "#/$defs/productResolution"},
+    "product_name": {"type": "string"},
+    "product_description": {"type": "string"},
+    "target_audiences": {"$ref": "#/$defs/targetAudiences"},
+    "media": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/media"}},
+    "core_selling_points": {"$ref": "#/$defs/editableItems"},
+    "supplemental_requirement": {"type": "string", "maxLength": 2000},
+    "channel": {"type": "string", "minLength": 1},
+    "aspect_ratio": {"type": "string", "pattern": "^[1-9][0-9]*:[1-9][0-9]*$"},
+    "duration_seconds": {"type": "integer", "minimum": 15, "maximum": 30},
+    "language": {"const": "zh-CN"},
+    "output_preset": {"$ref": "#/$defs/outputPreset"},
+    "delivery_treatment": {"$ref": "#/$defs/deliveryTreatment"},
+    "needs_confirmation": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "generation": {"$ref": "#/$defs/generation"}
+  },
+  "$defs": {
+    "assetRef": {"type": "object", "additionalProperties": false, "required": ["asset_id", "version"], "properties": {"asset_id": {"type": "string", "minLength": 1}, "version": {"type": "integer", "minimum": 1}}},
+    "productImage": {"type": "object", "additionalProperties": false, "required": ["url", "role"], "properties": {"url": {"type": "string", "format": "uri"}, "role": {"type": "string", "minLength": 1}, "asset_ref": {"$ref": "#/$defs/assetRef"}}},
+    "price": {"type": "object", "additionalProperties": false, "required": ["min_raw", "max_raw", "currency", "display_unconfirmed"], "properties": {"min_raw": {"type": "integer", "minimum": 0}, "max_raw": {"type": "integer", "minimum": 0}, "currency": {"const": "CNY"}, "display_unconfirmed": {"type": "boolean"}}},
+    "productResolution": {"type": "object", "additionalProperties": false, "required": ["status", "source", "resource_type", "source_url", "missing_fields"], "properties": {"status": {"enum": ["recognized", "partial", "manual_required"]}, "source": {"enum": ["douyin_mall", "taobao", "tmall", "xiaohongshu", "1688"]}, "resource_type": {"enum": ["product", "note"]}, "external_id": {"type": "string"}, "source_url": {"type": "string", "format": "uri"}, "missing_fields": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}}},
+    "editableItem": {"type": "object", "additionalProperties": false, "required": ["id", "text"], "properties": {"id": {"type": "string", "minLength": 1}, "text": {"type": "string"}}},
+    "targetAudiences": {"type": "array", "maxItems": 10, "items": {"$ref": "#/$defs/editableItem"}},
+    "editableItems": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/editableItem"}},
+    "media": {"type": "object", "additionalProperties": false, "required": ["id", "url", "role", "source"], "properties": {"id": {"type": "string", "minLength": 1}, "url": {"type": "string"}, "role": {"type": "string", "minLength": 1}, "source": {"type": "string", "minLength": 1}, "asset_ref": {"$ref": "#/$defs/assetRef"}}, "anyOf": [{"required": ["asset_ref"]}, {"properties": {"url": {"type": "string", "format": "uri", "minLength": 1}}}]},
+    "safeZone": {"type": "object", "additionalProperties": false, "required": ["top", "right", "bottom", "left"], "properties": {"top": {"type": "integer", "minimum": 0}, "right": {"type": "integer", "minimum": 0}, "bottom": {"type": "integer", "minimum": 0}, "left": {"type": "integer", "minimum": 0}}},
+    "outputPreset": {"type": "object", "additionalProperties": false, "required": ["id", "label", "channel", "placement", "aspect_ratio", "width", "height", "resolution", "profile_id", "profile_version", "profile_hash", "safe_zone"], "properties": {"id": {"type": "string", "minLength": 1}, "label": {"type": "string", "minLength": 1}, "channel": {"type": "string", "minLength": 1}, "placement": {"type": "string", "minLength": 1}, "aspect_ratio": {"type": "string", "pattern": "^[1-9][0-9]*:[1-9][0-9]*$"}, "width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}, "resolution": {"enum": ["480p", "720p", "1080p"]}, "profile_id": {"type": "string", "minLength": 1}, "profile_version": {"type": "string", "minLength": 1}, "profile_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "safe_zone": {"$ref": "#/$defs/safeZone"}}},
+    "deliveryTreatment": {"type": "object", "additionalProperties": false, "required": ["preset", "voiceover_mode", "caption_mode", "sales_overlay_mode", "music_sfx_mode"], "properties": {"preset": {"enum": ["full_ad", "no_voiceover", "clean_material", "custom"]}, "voiceover_mode": {"enum": ["generated", "none"]}, "caption_mode": {"enum": ["from_voiceover", "editorial", "none"]}, "sales_overlay_mode": {"enum": ["key_points", "minimal", "none"]}, "music_sfx_mode": {"enum": ["auto", "none"]}}, "allOf": [{"if": {"properties": {"caption_mode": {"const": "from_voiceover"}}, "required": ["caption_mode"]}, "then": {"properties": {"voiceover_mode": {"const": "generated"}}}}, {"if": {"properties": {"preset": {"const": "full_ad"}}, "required": ["preset"]}, "then": {"properties": {"voiceover_mode": {"const": "generated"}, "caption_mode": {"const": "from_voiceover"}, "sales_overlay_mode": {"const": "key_points"}, "music_sfx_mode": {"const": "auto"}}}}, {"if": {"properties": {"preset": {"const": "no_voiceover"}}, "required": ["preset"]}, "then": {"properties": {"voiceover_mode": {"const": "none"}, "caption_mode": {"const": "editorial"}, "sales_overlay_mode": {"const": "key_points"}, "music_sfx_mode": {"const": "auto"}}}}, {"if": {"properties": {"preset": {"const": "clean_material"}}, "required": ["preset"]}, "then": {"properties": {"voiceover_mode": {"const": "none"}, "caption_mode": {"const": "none"}, "sales_overlay_mode": {"const": "none"}, "music_sfx_mode": {"const": "none"}}}}]},
+    "generation": {"type": "object", "additionalProperties": false, "required": ["mode", "model_alias", "model_version", "prompt_version"], "properties": {"mode": {"enum": ["model", "deterministic_fallback"]}, "model_alias": {"type": "string", "minLength": 1}, "model_version": {"type": "string", "minLength": 1}, "route_revision_id": {"type": "string"}, "prompt_version": {"type": "string", "minLength": 1}}}
+  }
+}

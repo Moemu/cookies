@@ -183,6 +183,8 @@ type UpdateAINativeRequirementRequest struct {
 	AspectRatio             string                     `json:"aspect_ratio"`
 	DurationSeconds         int                        `json:"duration_seconds"`
 	Language                string                     `json:"language"`
+	OutputPresetID          string                     `json:"output_preset_id,omitempty"`
+	DeliveryTreatment       *AINativeDeliveryTreatment `json:"delivery_treatment,omitempty"`
 }
 
 type ConfirmAINativeRequirementRequest struct {
@@ -277,8 +279,15 @@ func (s Service) UpdateAINativeRequirement(ctx context.Context, actor contract.A
 		if media.AssetRef == nil || media.AssetRef.Validate() != nil {
 			return AINativeRequirementWorkspace{}, fmt.Errorf("%w: requirement media must reference a Project Asset", ErrInvalidAINativeRequirement)
 		}
+		if s.Assets != nil {
+			asset, readErr := s.Assets.ReadForCreative(ctx, actor, projectID, *media.AssetRef)
+			if readErr != nil || !asset.Ready || asset.Kind != contract.AssetImage {
+				return AINativeRequirementWorkspace{}, fmt.Errorf("%w: requirement media must reference a ready Project image", ErrInvalidAINativeRequirement)
+			}
+		}
 	}
 	next := current
+	next.Requirement = upgradeAINativeRequirementV1(next.Requirement)
 	next.CurrentRevision = request.ExpectedRevision + 1
 	next.WorkspaceVersion = current.WorkspaceVersion + 1
 	next.Requirement.Revision = next.CurrentRevision
@@ -288,9 +297,32 @@ func (s Service) UpdateAINativeRequirement(ctx context.Context, actor contract.A
 	next.Requirement.Media = request.Media
 	next.Requirement.CoreSellingPoints = request.CoreSellingPoints
 	next.Requirement.SupplementalRequirement = strings.TrimSpace(request.SupplementalRequirement)
-	next.Requirement.AspectRatio = strings.TrimSpace(request.AspectRatio)
 	next.Requirement.DurationSeconds = request.DurationSeconds
 	next.Requirement.Language = strings.TrimSpace(request.Language)
+	presetID := strings.TrimSpace(request.OutputPresetID)
+	if presetID == "" {
+		presetID = next.Requirement.OutputPreset.ID
+	}
+	if presetID == "" {
+		presetID = AINativeOutputPresetDouyinFeed9x16V1
+	}
+	preset, err := s.outputPresetRegistry().Resolve(presetID)
+	if err != nil {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("%w: output preset is unavailable", ErrInvalidAINativeRequirement)
+	}
+	if legacyRatio := strings.TrimSpace(request.AspectRatio); legacyRatio != "" && legacyRatio != preset.AspectRatio {
+		return AINativeRequirementWorkspace{}, fmt.Errorf("%w: aspect_ratio conflicts with output_preset_id", ErrInvalidAINativeRequirement)
+	}
+	next.Requirement.OutputPreset = preset
+	next.Requirement.Channel = preset.Channel
+	next.Requirement.AspectRatio = preset.AspectRatio
+	if request.DeliveryTreatment != nil {
+		if err := request.DeliveryTreatment.Validate(); err != nil {
+			return AINativeRequirementWorkspace{}, fmt.Errorf("%w: %v", ErrInvalidAINativeRequirement, err)
+		}
+		next.Requirement.DeliveryTreatment = *request.DeliveryTreatment
+	}
+	next.Requirement.ReconcileProductResolution()
 	next.UpdatedAt = s.now()
 	if err := next.Validate(); err != nil {
 		return AINativeRequirementWorkspace{}, fmt.Errorf("%w: %v", ErrInvalidAINativeRequirement, err)
@@ -310,6 +342,19 @@ func (s Service) ConfirmAINativeRequirement(ctx context.Context, actor contract.
 	}
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return AINativeRequirementWorkspace{}, err
+	}
+	current, err := s.AINativeRequirements.GetAINativeRequirementWorkspace(ctx, actor.OrganizationID, projectID, strings.TrimSpace(workspaceID))
+	if err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	if current.CurrentRevision != request.ExpectedRevision {
+		return AINativeRequirementWorkspace{}, ErrVersionConflict
+	}
+	if current.Status != AINativeRequirementDraftStatus {
+		return AINativeRequirementWorkspace{}, ErrInvalidState
+	}
+	if issues := current.Requirement.ValidateForConfirmation(); len(issues) > 0 {
+		return AINativeRequirementWorkspace{}, AINativeRequirementConfirmationError{Issues: issues}
 	}
 	return s.AINativeRequirements.ConfirmAINativeRequirement(ctx, actor.OrganizationID, projectID, strings.TrimSpace(workspaceID), request.ExpectedRevision, actor.Principal.ID, s.now())
 }

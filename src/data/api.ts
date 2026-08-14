@@ -23,6 +23,7 @@ import type { CreativeIntakeStatus, CreativeTaskStatus } from '../contracts/crea
 // import type 会被 TS 完全擦除，运行时不成环。
 import type { Judgement, UpgradePath, Verdict } from './verdict'
 import { platformClient } from './platformClient.js'
+import { uploadProjectAssetFile } from './projectAssetUpload.js'
 
 export type ApiProject = {
   id: string
@@ -1502,8 +1503,26 @@ export type ApiShortDramaOutputCanvas = {
   normalize_mode: string
 }
 
+export type ApiShortDramaReferenceBoardPlan = {
+  version: string
+  layout: '2x2_v1'
+  vibe_intent: {
+    version: string
+    visual_anchor: string
+    behavior_state: string
+    local_tone: string
+    theme: string
+    hard_constraints: string[]
+    evidence_ids: string[]
+  }
+  panels: Array<{ slot: 'A' | 'B' | 'C' | 'D'; role: string; description: string; evidence_ids: string[] }>
+  global_style: string
+  negative_rules: string[]
+  content_hash: string
+}
+
 export type ApiShortDramaV2Workspace = {
-  contract_version: 'creative-short-drama-preroll-workspace/v2' | 'creative-short-drama-preroll-workspace/v3'
+  contract_version: 'creative-short-drama-preroll-workspace/v2' | 'creative-short-drama-preroll-workspace/v3' | 'creative-short-drama-preroll-workspace/v4'
   task_id: string
   revision: number
   active_stage: 'source_ready' | 'analyzing' | 'analysis_ready' | 'directions_ready' | 'prompts_ready' | 'first_frames_generating' | 'first_frames_ready' | 'first_frame_selected' | 'video_generating' | 'normalizing_output' | 'completed'
@@ -1530,7 +1549,7 @@ export type ApiShortDramaV2Workspace = {
   prompt_draft?: {
     revision: number
     direction_id: string
-    duration_seconds: 5 | 6 | 10 | 12 | 15
+    duration_seconds: 10 | 12 | 15
     image_prompt: string
     video_description: string
     video_prompt: string
@@ -1538,6 +1557,7 @@ export type ApiShortDramaV2Workspace = {
     selected_variant_key?: string
     compiler_version: string
     content_hash: string
+    reference_board_plan?: ApiShortDramaReferenceBoardPlan
   }
   first_frame_batch?: {
     status: string
@@ -1559,6 +1579,26 @@ export type ApiShortDramaV2Workspace = {
     }>
     selected_asset?: ApiShortDramaV2ProjectAssetRef
     selected_output_asset?: ApiShortDramaV2ProjectAssetRef
+  }
+  reference_board_batch?: {
+    status: string
+    id: string
+    revision: number
+    prompt_revision: number
+    analysis_revision: number
+    candidates: Array<{
+      id: string
+      variant_index: number
+      primary_test_variable: string
+      plan: ApiShortDramaReferenceBoardPlan
+      provider_job_id?: string
+      status: string
+      asset?: ApiShortDramaV2ProjectAssetRef
+      model_reference_asset?: ApiShortDramaV2ProjectAssetRef
+      error_message?: string
+    }>
+    selected_candidate_id?: string
+    selected_asset?: ApiShortDramaV2ProjectAssetRef
   }
   source_opening_frame?: { status: string; asset?: ApiShortDramaV2ProjectAssetRef; timestamp_ms: number }
   trusted_materials?: {
@@ -4401,39 +4441,8 @@ function deliverImageTextVersion(projectId: string, versionId: string) {
   )
 }
 
-async function putUploadedAsset(url: string, headers: Record<string, string>, file: File) {
-  const requestHeaders = new Headers()
-  for (const [name, value] of Object.entries(headers)) {
-    const normalized = name.toLowerCase()
-    if (normalized !== 'host' && normalized !== 'content-length') requestHeaders.set(name, value)
-  }
-  if (!requestHeaders.has('Content-Type')) requestHeaders.set('Content-Type', file.type)
-  const target = url.startsWith('/') ? `${backendOrigin}${url}` : url
-  const response = await fetch(target, { method: 'PUT', headers: requestHeaders, body: file })
-  if (!response.ok) throw new Error(`素材上传失败（HTTP ${response.status}）`)
-}
-
 async function uploadProjectAsset(projectId: string, file: File): Promise<ApiAssetVersionRef> {
-  const path = `/projects/${encodeURIComponent(projectId)}/assets/uploads`
-  const created = await platformRequest<{
-    session: { id: string; project_asset_ref: null | { asset_version: ApiAssetVersionRef } }
-    upload: null | { url: string; method: 'PUT'; headers: Record<string, string> }
-  }>(path, 'POST', {
-    filename: file.name,
-    declared_mime_type: file.type,
-    declared_size_bytes: file.size,
-    declared_sha256: null,
-  }, { 'Idempotency-Key': `viral-upload-${Date.now()}-${Math.random().toString(36).slice(2)}` })
-  const existing = created.session.project_asset_ref?.asset_version
-  if (existing) return existing
-  if (!created.upload) throw new Error('素材上传会话没有返回可用的上传地址。')
-  await putUploadedAsset(created.upload.url, created.upload.headers, file)
-  const completed = await platformRequest<{
-    project_asset_ref: null | { asset_version: ApiAssetVersionRef }
-  }>(`${path}/${encodeURIComponent(created.session.id)}:finalize`, 'POST')
-  const result = completed.project_asset_ref?.asset_version
-  if (!result) throw new Error('素材已经上传，但没有生成可用的 AssetVersionRef。')
-  return result
+  return uploadProjectAssetFile(backendOrigin, projectId, file, 'viral-upload')
 }
 
 async function createManualShortDramaPrerollV2Workspace(
@@ -4549,6 +4558,23 @@ const updateShortDramaV2Prompts = (projectId: string, taskId: string, expectedRe
 
 const prepareShortDramaV2OpeningFrame = (projectId: string, taskId: string, expectedRevision: number) =>
   shortDramaV2Command(projectId, taskId, 'prepare-opening-frame', { expected_revision: expectedRevision })
+
+const generateShortDramaReferenceBoards = (projectId: string, taskId: string, expectedRevision: number) =>
+  shortDramaV2Command(projectId, taskId, 'generate-reference-boards', { expected_revision: expectedRevision })
+
+const reconcileShortDramaReferenceBoard = (projectId: string, taskId: string, expectedRevision: number, candidateId: string, providerJobId: string) =>
+  shortDramaV2Command(projectId, taskId, 'reconcile-reference-board', {
+    expected_revision: expectedRevision,
+    candidate_id: candidateId,
+    provider_job_id: providerJobId,
+  })
+
+const selectShortDramaReferenceBoard = (projectId: string, taskId: string, expectedRevision: number, batchId: string, candidateId: string) =>
+  shortDramaV2Command(projectId, taskId, 'select-reference-board', {
+    expected_revision: expectedRevision,
+    batch_id: batchId,
+    candidate_id: candidateId,
+  })
 
 const generateShortDramaV2FirstFrames = (projectId: string, taskId: string, expectedRevision: number) =>
   shortDramaV2Command(projectId, taskId, 'generate-first-frames', { expected_revision: expectedRevision })
@@ -5970,6 +5996,9 @@ export const api = {
   selectShortDramaV2Direction,
   updateShortDramaV2Prompts,
   prepareShortDramaV2OpeningFrame,
+  generateShortDramaReferenceBoards,
+  reconcileShortDramaReferenceBoard,
+  selectShortDramaReferenceBoard,
   generateShortDramaV2FirstFrames,
   reconcileShortDramaV2FirstFrame,
   selectShortDramaV2FirstFrame,

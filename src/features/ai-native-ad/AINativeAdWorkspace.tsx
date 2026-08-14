@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useReducer, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import { analyzeRequirement, cancelProduction, confirmRequirement, confirmScript, confirmStoryboard, fitStoryboardVoiceover, generateScript, generateStoryboard, getAssetPreview, getLatestRequirementWorkspace, getRequirementReopenImpact, getRequirementWorkspace, listAINativeAdWorkspaces, regenerateScript as regenerateScriptRequest, regenerateStoryboardAsset, renameAINativeAdWorkspace, reopenRequirement, reopenScript, reopenStoryboard, retryProductionUnit, startProduction, updateStoryboard } from './api'
+import { analyzeRequirement, cancelProduction, confirmRequirement, confirmScript, confirmStoryboard, fitStoryboardVoiceover, generateScript, generateStoryboard, getAssetPreview, getLatestRequirementWorkspace, getRequirementReopenImpact, getRequirementWorkspace, listAINativeAdWorkspaces, listOutputPresets, regenerateScript as regenerateScriptRequest, regenerateStoryboardAsset, renameAINativeAdWorkspace, reopenRequirement, reopenScript, reopenStoryboard, retryProductionUnit, startProduction, updateStoryboard } from './api'
 import { aiNativeReducer, initialAINativeState, productionFailureMessage, productionReferenceFailure } from './reducer'
 import { AINativeStageStepper } from './AINativeStageStepper'
 import { RequirementStage } from './RequirementStage'
 import { ScriptStage } from './ScriptStage'
 import { StoryboardStage } from './StoryboardStage'
 import { VideoStage } from './VideoStage'
-import type { AdScriptDraft, AINativeAdWorkspaceSummary, AINativeRequirement, AINativeRequirementWorkspace, AINativeStageId, StoryboardDraft } from './types'
+import type { AdScriptDraft, AINativeAdWorkspaceSummary, AINativeOutputPreset, AINativeRequirement, AINativeRequirementWorkspace, AINativeStageId, StoryboardDraft } from './types'
 import { aiNativeWorkspaceLocation, clearAINativeWorkspaceLocation, readAINativeWorkspaceLocation } from './navigation'
 import { forgetAINativeWorkspace, readAINativeStageDraft, readAINativeWorkspacePointer, rememberAINativeStageDraft, rememberAINativeWorkspace } from './storage'
 import { useAINativeAutosave } from './useAINativeAutosave'
@@ -26,6 +26,7 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
   const [productLink, setProductLink] = useState('')
   const [supplementalRequirement, setSupplementalRequirement] = useState('')
   const [records, setRecords] = useState<AINativeAdWorkspaceSummary[]>([])
+  const [outputPresets, setOutputPresets] = useState<AINativeOutputPreset[]>([])
   const [catalogBusy, setCatalogBusy] = useState(false)
   const [newDialogOpen, setNewDialogOpen] = useState(false)
   const [recordName, setRecordName] = useState('')
@@ -48,6 +49,7 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     setSupplementalRequirement('')
 	const restore = async () => {
 	  const recordsPromise = listAINativeAdWorkspaces(projectId).catch(() => [] as AINativeAdWorkspaceSummary[])
+	  const presetsPromise = listOutputPresets(projectId).catch(() => [] as AINativeOutputPreset[])
 	  const urlLocation = readAINativeWorkspaceLocation(window.location.search)
 	  const savedLocation = readAINativeWorkspacePointer(projectId)
 	  const location = urlLocation ?? savedLocation
@@ -61,8 +63,10 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
 	  }
 	  if (!workspace) workspace = await getLatestRequirementWorkspace(projectId)
 	  const restoredRecords = await recordsPromise
+	  const restoredPresets = await presetsPromise
 	  if (!active) return
 	  setRecords(restoredRecords)
+	  setOutputPresets(restoredPresets)
 	  if (!workspace) return
 	  const requirementDraft = readAINativeStageDraft<AINativeRequirement>(projectId, workspace.workspace_id, 'requirement', workspace.requirement.revision)
 	  const scriptDraft = workspace.script ? readAINativeStageDraft<AdScriptDraft>(projectId, workspace.workspace_id, 'script', workspace.script.revision) : null
@@ -159,7 +163,13 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
       }
     }
     const timer = window.setInterval(() => { void refresh() }, 1500)
-    return () => { active = false; window.clearInterval(timer) }
+    const timeout = window.setTimeout(() => {
+      if (!active) return
+      active = false
+      window.clearInterval(timer)
+      dispatch({ type: 'operation-failed', stage: 'storyboard', message: '故事板生成已超过 10 分钟，任务可能停滞。已生成素材会保留，请重新生成故事板。' })
+    }, 600_000)
+    return () => { active = false; window.clearInterval(timer); window.clearTimeout(timeout) }
   }, [projectId, state.workspace?.storyboard_status, state.workspace?.workspace_id])
 
   useEffect(() => {
@@ -571,9 +581,13 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
     : autosave.savedAt ? `已自动保存 ${autosave.savedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ''
 
   const referenceFailure = state.workspace ? productionReferenceFailure(state.workspace) : null
+  const currentOutputPresetLabel = outputPresets.find(item => item.id === state.workspace?.requirement.output_preset?.id)?.label
+    || state.workspace?.requirement.output_preset?.label
+    || outputPresets[0]?.label
+    || '暂无可用规格'
 
   return <section className="ai-native-workspace" aria-label="AI 效果广告生成工作区">
-    <header className="ai-native-workspace-header"><div><h3>AI 效果广告生成</h3><p>从商品链接开始，依次完成需求、脚本、故事板和完整视频。</p></div><div className="ai-native-workspace-header-side"><AINativeAdCatalog records={records} currentId={state.workspace?.workspace_id ?? ''} busy={catalogBusy} onSelect={workspaceId => { void switchWorkspace(workspaceId) }} onNew={requestNewWorkspace}/><div className="ai-native-support-copy"><span>实际支持</span><b>抖音 · 9:16 · 15–30 秒</b>{autosaveCopy ? <small role="status">{autosaveCopy}</small> : null}</div></div></header>
+    <header className="ai-native-workspace-header"><div><h3>AI 效果广告生成</h3><p>从商品链接开始，依次完成需求、脚本、故事板和完整视频。</p></div><div className="ai-native-workspace-header-side"><AINativeAdCatalog records={records} currentId={state.workspace?.workspace_id ?? ''} busy={catalogBusy} onSelect={workspaceId => { void switchWorkspace(workspaceId) }} onNew={requestNewWorkspace}/><div className="ai-native-support-copy"><span>当前创作规格</span><b>{currentOutputPresetLabel} · 15–30 秒</b>{autosaveCopy ? <small role="status">{autosaveCopy}</small> : null}</div></div></header>
     <AINativeStageStepper active={state.active_stage} status={state.stage_status} onSelect={stage => {
       dispatch({ type: 'open-stage', stage })
       setFocusedStoryboardAssetId('')
@@ -585,6 +599,7 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
       productLink={productLink}
       supplementalRequirement={supplementalRequirement}
       requirement={state.workspace?.requirement ?? null}
+      outputPresets={outputPresets}
       error={state.error}
       onProductLinkChange={setProductLink}
       onSupplementalRequirementChange={setSupplementalRequirement}
@@ -626,10 +641,13 @@ export function AINativeAdWorkspace({ projectId, onNotice }: { projectId: string
       suggestedFeedback={referenceFailure?.asset_id === focusedStoryboardAssetId ? referenceFailure.recommended_feedback : ''}
       onRegenerateAsset={(assetId, feedback) => { void requestStoryboardAssetRegeneration(assetId, feedback) }}
       onReplaceSourceAsset={() => { void requestEdit('requirement') }}
+      deliveryTreatment={state.workspace?.requirement.delivery_treatment}
     /> : <VideoStage
       status={state.stage_status.video}
       video={state.video}
 	  referenceFailure={referenceFailure}
+	  outputPreset={state.workspace?.requirement.output_preset ?? outputPresets[0] ?? null}
+	  deliveryTreatment={state.workspace?.requirement.delivery_treatment}
 	  onRetry={() => { void retryVideo() }}
 	  onFitVoiceover={() => { void fitFailedVoiceover() }}
 	  voiceoverFitBusy={voiceoverFitBusy}

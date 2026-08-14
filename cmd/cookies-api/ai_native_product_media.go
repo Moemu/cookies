@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,30 +46,39 @@ func (i creativeProductMediaImporter) ImportProductMedia(ctx context.Context, ac
 		requestContext.Actor.Scopes = append(append([]contract.Scope{}, requestContext.Actor.Scopes...), contract.Scope("assets.write"))
 	}
 	result := append([]creative.AINativeRequirementMedia{}, media...)
+	imported := make([]creative.AINativeRequirementMedia, 0, len(result))
+	var importErrors []error
 	for index := range result {
-		parsed, err := url.Parse(result[index].URL)
+		item := result[index]
+		parsed, err := url.Parse(item.URL)
 		if err != nil || !allowedDouyinProductImageURL(parsed) {
-			return nil, fmt.Errorf("product image URL is outside the approved commerce CDN")
+			importErrors = append(importErrors, fmt.Errorf("product image URL is outside the approved commerce CDN"))
+			continue
 		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 		if err != nil {
-			return nil, err
+			importErrors = append(importErrors, err)
+			continue
 		}
 		response, err := client.Do(request)
 		if err != nil {
-			return nil, err
+			importErrors = append(importErrors, err)
+			continue
 		}
 		data, readErr := io.ReadAll(io.LimitReader(response.Body, assets.MaxImageBytes+1))
 		response.Body.Close()
 		if readErr != nil {
-			return nil, readErr
+			importErrors = append(importErrors, readErr)
+			continue
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 || len(data) == 0 || int64(len(data)) > assets.MaxImageBytes {
-			return nil, fmt.Errorf("product image download returned an invalid response")
+			importErrors = append(importErrors, fmt.Errorf("product image download returned an invalid response"))
+			continue
 		}
 		mimeType := http.DetectContentType(data[:min(len(data), 512)])
 		if mimeType != "image/jpeg" && mimeType != "image/png" {
-			return nil, fmt.Errorf("product image media type %q is unsupported", mimeType)
+			importErrors = append(importErrors, fmt.Errorf("product image media type %q is unsupported", mimeType))
+			continue
 		}
 		digest := sha256.Sum256(data)
 		digestText := hex.EncodeToString(digest[:])
@@ -81,27 +91,32 @@ func (i creativeProductMediaImporter) ImportProductMedia(ctx context.Context, ac
 			Filename: filename, DeclaredMIMEType: mimeType, DeclaredSizeBytes: int64(len(data)), DeclaredSHA256: &digestText,
 		})
 		if err != nil {
-			return nil, err
+			importErrors = append(importErrors, err)
+			continue
 		}
 		session := created.Session
 		if session.Status != assets.UploadSucceeded {
 			if session.Status == assets.UploadCreated {
 				if err = i.uploads.PutContent(ctx, requestContext.Actor, projectID, session.ID, bytes.NewReader(data), int64(len(data))); err != nil {
-					return nil, err
+					importErrors = append(importErrors, err)
+					continue
 				}
 			}
 			session, err = i.uploads.Finalize(ctx, requestContext, projectID, session.ID)
 			if err != nil {
-				return nil, err
+				importErrors = append(importErrors, err)
+				continue
 			}
 		}
 		if session.ProjectAssetRef == nil {
-			return nil, fmt.Errorf("product image import did not produce a stable asset")
+			importErrors = append(importErrors, fmt.Errorf("product image import did not produce a stable asset"))
+			continue
 		}
 		assetRef := session.ProjectAssetRef.AssetVersion
-		result[index].AssetRef = &assetRef
+		item.AssetRef = &assetRef
+		imported = append(imported, item)
 	}
-	return result, nil
+	return imported, errors.Join(importErrors...)
 }
 
 func allowedDouyinProductImageURL(value *url.URL) bool {

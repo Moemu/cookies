@@ -81,7 +81,9 @@ func (s Service) PrepareGamePrerollEvidence(ctx context.Context, requestContext 
 	next.Revision++
 	next.CreatedAt = now
 	updated := *game
-	updated.ContractVersion = "creative-game-preroll-draft/v2"
+	if updated.ContractVersion != GamePrerollV2ContractVersion {
+		updated.ContractVersion = "creative-game-preroll-draft/v2"
+	}
 	updated.Revision = next.Revision
 	updated.EvidenceAssets = &GameEvidenceAssetSet{SourceVideo: game.InputSnapshot.SourceVideo, Status: "ready", Frames: frames, ContentHash: "sha256:" + contentHash}
 	updated.Readiness.Blockers = removeStrings(updated.Readiness.Blockers, "evidence_assets")
@@ -177,6 +179,12 @@ func (s Service) SelectGamePrerollCandidate(
 	updated := *game
 	updated.Revision = next.Revision
 	updated.SelectedCandidateID = request.CandidateID
+	updated.OutputAsset = nil
+	updated.LatestVideoAttemptID = ""
+	updated.VideoError = nil
+	if updated.ContractVersion == GamePrerollV2ContractVersion {
+		updated.Stage = GamePrerollStageCandidateSelected
+	}
 	updated.Readiness.GenerationReady = false
 	updated.Readiness.ProductionReady = false
 	updated.Readiness.Blockers = removeStrings(updated.Readiness.Blockers, "selected_candidate")
@@ -255,6 +263,9 @@ func (s Service) RegenerateGamePrerollCandidates(
 	updated.Revision = nextRevision
 	updated.ActiveCandidateBatch = &batch
 	updated.Candidates = batch.Candidates
+	if updated.ContractVersion == GamePrerollV2ContractVersion {
+		updated.Stage = GamePrerollStageCandidatesReady
+	}
 	updated.SelectedCandidateID = ""
 	updated.GenerationSpec = nil
 	updated.Readiness.GenerationReady = false
@@ -333,7 +344,25 @@ func compileGamePrerollGenerationSpec(game GamePrerollDraft, candidate GamePrero
 			{Role: string(provider.VideoConditioningFirstFrame), EvidenceMomentID: first.EvidenceMomentID, Reference: first.FrameAsset},
 			{Role: string(provider.VideoConditioningLastFrame), EvidenceMomentID: last.EvidenceMomentID, Reference: last.FrameAsset},
 		},
-		DurationSeconds: 6, AspectRatio: "9:16", Resolution: "720p", AudioPolicy: string(provider.VideoAudioGenerated),
+		DurationSeconds: game.ActiveCandidateBatch.GenerationConfig.DurationSeconds,
+		AspectRatio:     game.ActiveCandidateBatch.GenerationConfig.AspectRatio,
+		Resolution:      game.ActiveCandidateBatch.GenerationConfig.Resolution,
+		AudioPolicy:     game.ActiveCandidateBatch.GenerationConfig.AudioPolicy,
+	}
+	if game.ContractVersion == GamePrerollV2ContractVersion {
+		spec.ContractVersion = "creative-game-preroll-generation-spec/v2"
+	}
+	if spec.DurationSeconds == 0 {
+		spec.DurationSeconds = 6
+	}
+	if spec.AspectRatio == "" {
+		spec.AspectRatio = "9:16"
+	}
+	if spec.Resolution == "" {
+		spec.Resolution = "720p"
+	}
+	if spec.AudioPolicy == "" {
+		spec.AudioPolicy = string(provider.VideoAudioGenerated)
 	}
 	for _, asset := range spec.ConditioningAssets {
 		if asset.Reference.ProjectID != projectID {

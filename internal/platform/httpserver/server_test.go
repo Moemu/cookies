@@ -38,6 +38,33 @@ func TestHealthDoesNotRequireIdentity(t *testing.T) {
 	}
 }
 
+func TestListEditTasksRouteIsRegistered(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewWithDependencies(Dependencies{
+		Resolver:          resolver,
+		ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"},
+	})
+	response := httptest.NewRecorder()
+
+	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/creative/v1/projects/project_1/edit-tasks", nil))
+
+	if got, want := response.Code, http.StatusServiceUnavailable; got != want {
+		t.Fatalf("status = %d, want %d; body=%s", got, want, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), `"code":"RESOURCE_NOT_FOUND"`) {
+		t.Fatalf("list route fell through to the 404 handler: %s", response.Body.String())
+	}
+}
+
 func TestKnowledgeOriginalStreamsAuthorizedImmutableBytes(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{
@@ -306,6 +333,7 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 		{name: "viral source unavailable", err: creative.ErrViralAnalysisSourceUnavailable, wantStatus: http.StatusUnprocessableEntity, wantCode: "VIRAL_ANALYSIS_SOURCE_UNAVAILABLE"},
 		{name: "viral provider unavailable", err: creative.ErrViralAnalysisProviderUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "VIRAL_ANALYSIS_PROVIDER_UNAVAILABLE", wantRetryable: true},
 		{name: "viral invalid response", err: creative.ErrViralAnalysisResponseInvalid, wantStatus: http.StatusBadGateway, wantCode: "VIRAL_ANALYSIS_RESPONSE_INVALID", wantRetryable: true},
+		{name: "incomplete AI native requirement", err: creative.AINativeRequirementConfirmationError{Issues: []creative.AINativeRequirementFieldIssue{{Field: "media", Code: "PRODUCT_IMAGE_REQUIRED", Message: "链接没有权限提取，需要用户手动上传"}}}, wantStatus: http.StatusBadRequest, wantCode: "AI_NATIVE_REQUIREMENT_INCOMPLETE"},
 		{name: "document vision reconciliation", err: knowledge.ErrDocumentVisionReconciliationRequired, wantStatus: http.StatusConflict, wantCode: "DOCUMENT_VISION_RECONCILIATION_REQUIRED"},
 		{name: "document vision reconciliation forbidden", err: knowledge.ErrDocumentVisionReconciliationForbidden, wantStatus: http.StatusForbidden, wantCode: "DOCUMENT_VISION_RECONCILIATION_FORBIDDEN"},
 		{name: "invalid document vision reconciliation", err: knowledge.ErrDocumentVisionReconciliationInvalid, wantStatus: http.StatusBadRequest, wantCode: "INVALID_DOCUMENT_VISION_RECONCILIATION"},
@@ -333,6 +361,9 @@ func TestCreativeDomainErrorsAreMappedToActionableHTTPProblems(t *testing.T) {
 			}
 			if problem.Error.Retryable != tt.wantRetryable {
 				t.Fatalf("retryable = %t, want %t", problem.Error.Retryable, tt.wantRetryable)
+			}
+			if tt.name == "incomplete AI native requirement" && (len(problem.Error.Details) != 1 || problem.Error.Details[0].Field != "media") {
+				t.Fatalf("field details = %#v", problem.Error.Details)
 			}
 		})
 	}
@@ -1851,6 +1882,24 @@ func TestGetLatestAINativeWorkspaceRestoresThePersistedStage(t *testing.T) {
 	}
 }
 
+func TestListAINativeOutputPresetsReturnsOnlyManagerCatalog(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user_1"}, Scopes: []contract.Scope{creative.ScopeRead}}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{aiNativeOutputPresets: []creative.AINativeOutputPreset{{
+		AINativeOutputPresetSnapshot: creative.DefaultAINativeOutputPreset(), Status: creative.AINativeOutputPresetAvailable,
+	}}}
+	server := NewWithDependencies(Dependencies{Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Creative: manager})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/creative/v1/projects/project_1/ai-native-ads/output-presets", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"douyin_feed_9x16_v1"`) || manager.aiNativeOutputPresetProjectID != "project_1" {
+		t.Fatalf("status=%d project=%q body=%s", response.Code, manager.aiNativeOutputPresetProjectID, response.Body.String())
+	}
+}
+
 func TestGamePrerollWorkspaceRestoresAndForwardsHumanSelection(t *testing.T) {
 	t.Parallel()
 	actor := contract.ActorContext{
@@ -1923,6 +1972,42 @@ func TestGamePrerollWorkspaceRestoresAndForwardsHumanSelection(t *testing.T) {
 		manager.selectedGameRequest.ExpectedRevision != 2 ||
 		manager.selectedGameRequest.CandidateID != "game_candidate_2" {
 		t.Fatalf("game selection was not forwarded: task=%q request=%+v", manager.selectedGameTaskID, manager.selectedGameRequest)
+	}
+}
+
+func TestGamePrerollV2RestoresExactTaskAndForwardsAnalysisRevision(t *testing.T) {
+	t.Parallel()
+	actor := contract.ActorContext{
+		OrganizationID: "org_1",
+		Principal:      contract.Principal{Kind: contract.PrincipalUser, ID: "usr_1"},
+		Scopes:         []contract.Scope{creative.ScopeRead, creative.ScopeWrite},
+	}
+	resolver, err := identity.NewStaticResolver(actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &creativeManagerStub{detail: creative.TaskDetail{
+		Task: creative.CreativeTask{ID: "game_task_v2", ProjectID: "project_1"},
+		VideoDraft: &creative.VideoDraft{Revision: 7, GamePreroll: &creative.GamePrerollDraft{
+			ContractVersion: creative.GamePrerollV2ContractVersion, TaskID: "game_task_v2",
+			Revision: 7, Stage: creative.GamePrerollStageSourceReady,
+		}},
+	}}
+	server := NewWithDependencies(Dependencies{
+		Resolver: resolver, ProjectAuthorizer: identity.StaticProjectAuthorizer{ProjectID: "project_1"}, Creative: manager,
+	})
+	getResponse := httptest.NewRecorder()
+	server.ServeHTTP(getResponse, httptest.NewRequest(http.MethodGet, "/api/creative/v1/projects/project_1/game-preroll-workspaces/game_task_v2", nil))
+	if getResponse.Code != http.StatusOK || manager.gameV2TaskID != "game_task_v2" || !strings.Contains(getResponse.Body.String(), creative.GamePrerollV2ContractVersion) {
+		t.Fatalf("restore status=%d task=%q body=%s", getResponse.Code, manager.gameV2TaskID, getResponse.Body.String())
+	}
+	analyze := httptest.NewRequest(http.MethodPost, "/api/creative/v1/projects/project_1/game-preroll-workspaces/game_task_v2/actions/analyze-source", bytes.NewBufferString(`{"expected_revision":7}`))
+	analyze.Header.Set("Content-Type", "application/json")
+	analyze.Header.Set("Idempotency-Key", "game-v2-analyze-1")
+	analyzeResponse := httptest.NewRecorder()
+	server.ServeHTTP(analyzeResponse, analyze)
+	if analyzeResponse.Code != http.StatusOK || manager.gameV2TaskID != "game_task_v2" || manager.gameV2AnalyzeRequest.ExpectedRevision != 7 {
+		t.Fatalf("analyze status=%d task=%q request=%+v body=%s", analyzeResponse.Code, manager.gameV2TaskID, manager.gameV2AnalyzeRequest, analyzeResponse.Body.String())
 	}
 }
 
@@ -2481,9 +2566,13 @@ type creativeManagerStub struct {
 	latestShortDramaProjectID          contract.ProjectID
 	latestAINativeWorkspace            creative.AINativeRequirementWorkspace
 	latestAINativeProjectID            contract.ProjectID
+	aiNativeOutputPresets              []creative.AINativeOutputPreset
+	aiNativeOutputPresetProjectID      contract.ProjectID
 	latestGamePrerollProjectID         contract.ProjectID
 	selectedGameTaskID                 string
 	selectedGameRequest                creative.SelectGamePrerollCandidateRequest
+	gameV2TaskID                       string
+	gameV2AnalyzeRequest               creative.AnalyzeGamePrerollV2SourceRequest
 	createdIntakeRequest               creative.CreateIntakeRequest
 	imageWorkspace                     creative.ImageTextWorkspace
 	imagePrompt                        creative.ImagePromptPackage
@@ -2495,6 +2584,33 @@ type creativeManagerStub struct {
 	getBrandWorkflowCalls              int
 	prepareBrandWorkflowCalls          int
 	prepareBrandWorkflowRequest        creative.PrepareStrategyBrandWorkflowRequest
+}
+
+func (s *creativeManagerStub) CreateGamePrerollV2Workspace(context.Context, contract.RequestContext, contract.ProjectID, contract.IdempotencyKey, creative.CreateGamePrerollV2WorkspaceRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) GetGamePrerollV2Workspace(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, taskID string) (creative.TaskDetail, error) {
+	s.gameV2TaskID = taskID
+	return s.detail, nil
+}
+func (s *creativeManagerStub) AnalyzeGamePrerollV2Source(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, taskID string, request creative.AnalyzeGamePrerollV2SourceRequest) (creative.TaskDetail, error) {
+	s.gameV2TaskID, s.gameV2AnalyzeRequest = taskID, request
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ConfirmGamePrerollV2Brief(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ConfirmGamePrerollV2BriefRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) PlanGamePrerollV2Candidates(context.Context, contract.ActorContext, contract.ProjectID, string, creative.PlanGamePrerollV2CandidatesRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) UpdateGamePrerollV2GenerationConfig(context.Context, contract.ActorContext, contract.ProjectID, string, creative.UpdateGamePrerollV2GenerationConfigRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) RegisterGamePrerollV2VideoJob(context.Context, contract.ActorContext, contract.ProjectID, string, int64, string) (creative.TaskDetail, error) {
+	return s.detail, nil
+}
+func (s *creativeManagerStub) ReconcileGamePrerollV2Video(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReconcileGamePrerollV2VideoRequest) (creative.TaskDetail, error) {
+	return s.detail, nil
 }
 
 func (s *creativeManagerStub) GetStrategyBrandWorkflow(context.Context, contract.ActorContext, contract.ProjectID, string) (creative.StrategyBrandWorkflowResult, error) {
@@ -2511,6 +2627,11 @@ func (s *creativeManagerStub) PrepareStrategyBrandWorkflow(_ context.Context, _ 
 func (s *creativeManagerStub) GetLatestAINativeRequirementWorkspace(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) (creative.AINativeRequirementWorkspace, error) {
 	s.latestAINativeProjectID = projectID
 	return s.latestAINativeWorkspace, nil
+}
+
+func (s *creativeManagerStub) ListAINativeOutputPresets(_ context.Context, _ contract.ActorContext, projectID contract.ProjectID) ([]creative.AINativeOutputPreset, error) {
+	s.aiNativeOutputPresetProjectID = projectID
+	return s.aiNativeOutputPresets, nil
 }
 
 func (s *creativeManagerStub) ListCommercePrerollSources(context.Context, contract.ActorContext, contract.ProjectID) ([]creative.CreativeSourceOption, error) {

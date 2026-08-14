@@ -47,7 +47,7 @@
         "model_alias": {"type": "string", "minLength": 1},
         "model_version": {"type": "string", "minLength": 1},
         "route_revision_id": {"type": "string"},
-        "prompt_version": {"const": "ai-ad-script/douyin/v1"},
+        "prompt_version": {"enum": ["ai-ad-script/douyin/v1", "ai-ad-script/kuaishou/v1", "ai-ad-script/wechat-channels/v1", "ai-ad-script/xiaohongshu/v1"]},
         "profile_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
         "input_tokens": {"type": "integer", "minimum": 0},
         "output_tokens": {"type": "integer", "minimum": 0},

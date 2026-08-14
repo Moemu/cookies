@@ -69,9 +69,16 @@ func (r MySQLRepository) CompleteAINativeStoryboardGeneration(ctx context.Contex
 	if !activeID.Valid || activeID.String != operation.ID || !activeVersion.Valid || activeVersion.Int64 != operation.Version {
 		return AINativeRequirementWorkspace{}, ErrVersionConflict
 	}
-	nextRevision := int64(1)
+	var maxRevision int64
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision), 0) FROM creative_ai_native_storyboard_revisions
+		WHERE organization_id=? AND project_id=? AND workspace_id=?`, organizationID, projectID, workspaceID).Scan(&maxRevision); err != nil {
+		return AINativeRequirementWorkspace{}, err
+	}
+	// The current revision pointer can legitimately be empty after upstream
+	// edits invalidate descendants. Historical revisions remain immutable, so
+	// the next identity must always advance from the history maximum.
+	nextRevision := maxRevision + 1
 	if currentRevision.Valid {
-		nextRevision = currentRevision.Int64 + 1
 		if _, err = tx.ExecContext(ctx, `UPDATE creative_ai_native_storyboard_revisions SET status=?, superseded_at=?
 			WHERE organization_id=? AND project_id=? AND workspace_id=? AND revision=?`, AINativeStoryboardSupersededStatus, now, organizationID, projectID, workspaceID, currentRevision.Int64); err != nil {
 			return AINativeRequirementWorkspace{}, err

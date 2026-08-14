@@ -40,7 +40,7 @@ func TestCreateShortDramaPrerollV2WorkspaceFreezesSourceVideo(t *testing.T) {
 		CreativeRoutes: []CreativeRouteSnapshot{{
 			RouteID: ManualShortDramaPrerollV2RouteID, RouteType: PerformanceModeShortDramaPreroll,
 			VideoPurpose: "performance", Channels: []string{"douyin"}, Reason: "用户选择短剧前贴 V2",
-			TargetDurationSeconds: 6, AspectRatio: "9:16", Resolution: "720p",
+			TargetDurationSeconds: 10, AspectRatio: "9:16", Resolution: "720p",
 			SourceAssetRefs: []contract.AssetVersionRef{source}, RequiresHumanConfirmation: true,
 		}},
 		ManualShortDramaPrerollV2: &ManualShortDramaPrerollV2Input{
@@ -105,7 +105,7 @@ func TestCreateShortDramaPrerollV2WorkspaceDoesNotRewriteLegacyV3ManualRoute(t *
 		CreativeRoutes: []CreativeRouteSnapshot{{
 			RouteID: ManualShortDramaPrerollV2RouteID, RouteType: PerformanceModeShortDramaPreroll,
 			VideoPurpose: "performance", Channels: []string{"douyin"}, Reason: "用户选择短剧前贴 V2",
-			TargetDurationSeconds: 6, AspectRatio: "9:16", Resolution: "720p",
+			TargetDurationSeconds: 10, AspectRatio: "9:16", Resolution: "720p",
 			SourceAssetRefs: []contract.AssetVersionRef{source}, RequiresHumanConfirmation: true,
 		}},
 		ManualShortDramaPrerollV2: &ManualShortDramaPrerollV2Input{
@@ -194,7 +194,7 @@ func TestShortDramaPrerollV3BuildsThreeFirstFramesAndSingleReferenceVideoInput(t
 	if err != nil {
 		t.Fatalf("compile provider input: %v", err)
 	}
-	if input.InputMode != provider.VideoInputReferenceImage || input.DurationSeconds != 6 || input.AspectRatio != "16:9" ||
+	if input.InputMode != provider.VideoInputReferenceImage || input.DurationSeconds != 10 || input.AspectRatio != "16:9" ||
 		len(input.ConditioningAssets) != 1 || input.ConditioningAssets[0].Role != provider.VideoConditioningReferenceImage ||
 		input.ConditioningAssets[0].AuthorizedAsset != nil || promptHash == "" || specHash == "" ||
 		selected.VideoDraft.ShortDramaPrerollV2.GenerationSpec == nil {
@@ -252,6 +252,109 @@ func TestShortDramaPrerollV3BuildsThreeFirstFramesAndSingleReferenceVideoInput(t
 	}
 }
 
+func TestShortDramaPrerollV4BuildsReferenceBoardsAndSingleReferenceVideoInput(t *testing.T) {
+	t.Parallel()
+
+	service, taskID, rc := createShortDramaV2TestWorkspace(t)
+	prompts := advanceShortDramaV2ToPrompts(t, &service, taskID, rc)
+	jobs := &shortDramaV2ImageJobsStub{}
+	service.ShortDramaV2Images = jobs
+
+	generated, err := service.GenerateShortDramaReferenceBoards(context.Background(), rc.Actor, "project_1", taskID, GenerateShortDramaReferenceBoardsRequest{ExpectedRevision: prompts.VideoDraft.Revision})
+	if err != nil {
+		t.Fatalf("generate reference boards: %v", err)
+	}
+	workspace := generated.VideoDraft.ShortDramaPrerollV2
+	batch := workspace.ReferenceBoardBatch
+	if workspace.ContractVersion != ShortDramaPrerollV4ContractVersion || batch == nil || len(batch.Candidates) != 3 || workspace.BoardCanvas == nil {
+		t.Fatalf("reference board workspace = %#v", workspace)
+	}
+	variables := map[string]struct{}{}
+	for _, candidate := range batch.Candidates {
+		variables[candidate.PrimaryTestVariable] = struct{}{}
+		if len(candidate.Plan.Panels) != 4 {
+			t.Fatalf("candidate plan = %#v", candidate.Plan)
+		}
+		for _, panel := range candidate.Plan.Panels {
+			if len(panel.EvidenceIDs) == 0 || panel.EvidenceIDs[0] != "evidence_1" {
+				t.Fatalf("panel is not evidence-grounded: %#v", panel)
+			}
+		}
+	}
+	if len(variables) != 3 || jobs.calls != 3 {
+		t.Fatalf("variables=%v calls=%d", variables, jobs.calls)
+	}
+
+	current := generated
+	for index, candidate := range batch.Candidates {
+		asset := contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: contract.AssetID(fmt.Sprintf("reference_board_%d", index+1)), Version: 1}}
+		current, err = service.ReconcileShortDramaReferenceBoard(context.Background(), rc.Actor, "project_1", taskID, ReconcileShortDramaReferenceBoardRequest{
+			ExpectedRevision: current.VideoDraft.Revision,
+			CandidateID:      candidate.ID,
+			Job:              contract.ProviderJob{ID: candidate.ProviderJobID, ProjectID: "project_1", ProviderStatus: contract.ProviderJobSucceeded, ProjectAssetRefs: []contract.ProjectAssetRef{asset}},
+		})
+		if err != nil {
+			t.Fatalf("reconcile reference board %d: %v", index, err)
+		}
+	}
+	batch = current.VideoDraft.ShortDramaPrerollV2.ReferenceBoardBatch
+	if batch.Status != ShortDramaV2ResourceReady || batch.Candidates[0].ModelReferenceAsset == nil {
+		t.Fatalf("ready reference board batch = %#v", batch)
+	}
+	selected, err := service.SelectShortDramaReferenceBoard(context.Background(), rc.Actor, "project_1", taskID, SelectShortDramaReferenceBoardRequest{
+		ExpectedRevision: current.VideoDraft.Revision,
+		BatchID:          batch.ID,
+		CandidateID:      batch.Candidates[0].ID,
+	})
+	if err != nil {
+		t.Fatalf("select reference board: %v", err)
+	}
+	spec := selected.VideoDraft.ShortDramaPrerollV2.GenerationSpec
+	if spec == nil || spec.ContractVersion != ShortDramaGenerationSpecV4 || spec.ReferenceBoardAsset == nil || spec.BoardCandidateID != batch.Candidates[0].ID {
+		t.Fatalf("generation spec = %#v", spec)
+	}
+	input, _, _, err := service.ShortDramaV2ProviderInput(context.Background(), rc.Actor, "project_1", taskID)
+	if err != nil {
+		t.Fatalf("provider input: %v", err)
+	}
+	if len(input.ConditioningAssets) != 1 || input.ConditioningAssets[0].Reference.AssetVersion != spec.ReferenceBoardAsset.AssetVersion ||
+		!strings.Contains(input.Prompt, "不得出现宫格、拼贴") {
+		t.Fatalf("provider input = %#v", input)
+	}
+}
+
+func TestShortDramaReferenceBoardUsesBoundedStableRenderJobID(t *testing.T) {
+	t.Parallel()
+
+	writer := &shortDramaV2RenderedImageWriterStub{}
+	service := Service{
+		ImageBaseAssets: shortDramaV2ImageReaderStub{},
+		RenderedImages:  writer,
+	}
+	candidate := ShortDramaReferenceBoardCandidate{
+		ID: "creativetask_65fe0960bd5997fa76be08ce0a02907e_reference_board_batch_5_candidate_1",
+		Asset: &contract.ProjectAssetRef{
+			ProjectID:    "project_1",
+			AssetVersion: contract.AssetVersionRef{AssetID: "provider_board", Version: 1},
+		},
+	}
+	board := ShortDramaBoardCanvas{Width: 1024, Height: 1536}
+	first, err := service.normalizeShortDramaReferenceBoardCandidate(context.Background(), contract.ActorContext{}, "project_1", "task_1", candidate, board)
+	if err != nil {
+		t.Fatalf("normalize reference board: %v", err)
+	}
+	second, err := service.normalizeShortDramaReferenceBoardCandidate(context.Background(), contract.ActorContext{}, "project_1", "task_1", candidate, board)
+	if err != nil {
+		t.Fatalf("normalize reference board again: %v", err)
+	}
+	if len(writer.renderJobIDs) != 2 || writer.renderJobIDs[0] != writer.renderJobIDs[1] || len(writer.renderJobIDs[0]) > 96 {
+		t.Fatalf("render job ids = %#v", writer.renderJobIDs)
+	}
+	if first.ModelReferenceAsset == nil || second.ModelReferenceAsset == nil || first.ModelReferenceAsset.AssetVersion != second.ModelReferenceAsset.AssetVersion {
+		t.Fatalf("normalized assets are not idempotent: first=%#v second=%#v", first.ModelReferenceAsset, second.ModelReferenceAsset)
+	}
+}
+
 func TestShortDramaPrerollV2AnalyzesVideoAndCompilesFourGroundedDirections(t *testing.T) {
 	t.Parallel()
 
@@ -302,13 +405,13 @@ func TestShortDramaPrerollV2AnalyzesVideoAndCompilesFourGroundedDirections(t *te
 
 	selected, err := service.SelectShortDramaV2Direction(context.Background(), rc.Actor, "project_1", taskID, SelectShortDramaV2DirectionRequest{
 		ExpectedRevision: planned.VideoDraft.Revision, DirectionBatchID: batch.ID,
-		DirectionID: batch.Items[0].ID, DurationSeconds: 6,
+		DirectionID: batch.Items[0].ID, DurationSeconds: 10,
 	})
 	if err != nil {
 		t.Fatalf("select direction: %v", err)
 	}
 	prompt := selected.VideoDraft.ShortDramaPrerollV2.PromptDraft
-	if prompt == nil || prompt.DurationSeconds != 6 || prompt.DirectionID != batch.Items[0].ID ||
+	if prompt == nil || prompt.DurationSeconds != 10 || prompt.DirectionID != batch.Items[0].ID ||
 		prompt.ContentHash == "" || selected.VideoDraft.ShortDramaPrerollV2.ActiveStage != ShortDramaV2StagePromptsReady {
 		t.Fatalf("compiled prompt draft = %#v", prompt)
 	}
@@ -406,9 +509,10 @@ func (shortDramaV2ImageReaderStub) OpenImage(context.Context, contract.ActorCont
 	return io.NopCloser(bytes.NewReader(output.Bytes())), nil
 }
 
-type shortDramaV2RenderedImageWriterStub struct{}
+type shortDramaV2RenderedImageWriterStub struct{ renderJobIDs []string }
 
-func (shortDramaV2RenderedImageWriterStub) IngestRenderedImage(_ context.Context, _ contract.RequestContext, projectID contract.ProjectID, renderJobID string, _ io.Reader, _ int64, _, _ int, _ []contract.AssetVersionRef, _ []contract.ResourceRef) (contract.ProjectAssetRef, error) {
+func (s *shortDramaV2RenderedImageWriterStub) IngestRenderedImage(_ context.Context, _ contract.RequestContext, projectID contract.ProjectID, renderJobID string, _ io.Reader, _ int64, _, _ int, _ []contract.AssetVersionRef, _ []contract.ResourceRef) (contract.ProjectAssetRef, error) {
+	s.renderJobIDs = append(s.renderJobIDs, renderJobID)
 	return contract.ProjectAssetRef{ProjectID: projectID, AssetVersion: contract.AssetVersionRef{AssetID: contract.AssetID("asset_" + renderJobID), Version: 1}}, nil
 }
 
@@ -418,7 +522,7 @@ func (shortDramaV2VideoNormalizerStub) NormalizeVideo(_ context.Context, request
 	content := "normalized-video"
 	return media.CompositionOutput{
 		Content: io.NopCloser(strings.NewReader(content)), SizeBytes: int64(len(content)),
-		Metadata: assets.VideoMetadata{DurationMS: 6000, WidthPixels: request.Width, HeightPixels: request.Height, FrameRate: "25/1", VideoCodec: "h264", AudioCodec: "aac"},
+		Metadata: assets.VideoMetadata{DurationMS: 10000, WidthPixels: request.Width, HeightPixels: request.Height, FrameRate: "25/1", VideoCodec: "h264", AudioCodec: "aac"},
 	}, nil
 }
 
@@ -466,7 +570,7 @@ func createShortDramaV2TestWorkspace(t *testing.T) (Service, string, contract.Re
 	source := contract.AssetVersionRef{AssetID: "asset_wuzetian", Version: 1}
 	service.Assets = testAssetReader{snapshot: CreativeAssetSnapshot{Ref: source, Kind: contract.AssetVideo, MIMEType: "video/mp4", Ready: true, WidthPixels: 1920, HeightPixels: 818, DurationMS: 182417, FrameRate: "30/1", VideoCodec: "h264", AudioCodec: "aac"}}
 	service.ImageBaseAssets = shortDramaV2ImageReaderStub{}
-	service.RenderedImages = shortDramaV2RenderedImageWriterStub{}
+	service.RenderedImages = &shortDramaV2RenderedImageWriterStub{}
 	service.ShortDramaV2OutputNormalizer = shortDramaV2VideoNormalizerStub{}
 	service.RenderedAssets = &testRenderedAssetWriter{ref: contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "generated_preroll_normalized", Version: 1}}}
 	rc := testRequestContext()
@@ -474,7 +578,7 @@ func createShortDramaV2TestWorkspace(t *testing.T) (Service, string, contract.Re
 		Source: IntakeSourceManual, Format: FormatVideo, PerformanceMode: PerformanceModeShortDramaPreroll,
 		Channel: ChannelDouyin, Objective: "用独立前贴吸引用户观看短剧", Audience: "竖屏短剧观众", CoreMessage: "基于真实剧情生成钩子", CallToAction: "点击观看正片", Concept: "短剧前贴 V2",
 		Tone: []string{"紧凑"}, VisualKeywords: []string{"人物连续"}, Mandatory: []string{}, Prohibited: []string{"不得虚构剧情"},
-		CreativeRoutes:            []CreativeRouteSnapshot{{RouteID: ManualShortDramaPrerollV2RouteID, RouteType: PerformanceModeShortDramaPreroll, VideoPurpose: "performance", Channels: []string{"douyin"}, Reason: "V2", TargetDurationSeconds: 6, AspectRatio: "9:16", Resolution: "720p", SourceAssetRefs: []contract.AssetVersionRef{source}, RequiresHumanConfirmation: true}},
+		CreativeRoutes:            []CreativeRouteSnapshot{{RouteID: ManualShortDramaPrerollV2RouteID, RouteType: PerformanceModeShortDramaPreroll, VideoPurpose: "performance", Channels: []string{"douyin"}, Reason: "V2", TargetDurationSeconds: 10, AspectRatio: "9:16", Resolution: "720p", SourceAssetRefs: []contract.AssetVersionRef{source}, RequiresHumanConfirmation: true}},
 		ManualShortDramaPrerollV2: &ManualShortDramaPrerollV2Input{SourceVideo: source, SourceVideoRights: RightsConfirmed},
 	})
 	if err != nil {
@@ -507,7 +611,7 @@ func advanceShortDramaV2ToPrompts(t *testing.T, service *Service, taskID string,
 		t.Fatal(err)
 	}
 	batch := planned.VideoDraft.ShortDramaPrerollV2.DirectionBatch
-	selected, err := service.SelectShortDramaV2Direction(context.Background(), rc.Actor, "project_1", taskID, SelectShortDramaV2DirectionRequest{ExpectedRevision: planned.VideoDraft.Revision, DirectionBatchID: batch.ID, DirectionID: batch.Items[0].ID, DurationSeconds: 6})
+	selected, err := service.SelectShortDramaV2Direction(context.Background(), rc.Actor, "project_1", taskID, SelectShortDramaV2DirectionRequest{ExpectedRevision: planned.VideoDraft.Revision, DirectionBatchID: batch.ID, DirectionID: batch.Items[0].ID, DurationSeconds: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

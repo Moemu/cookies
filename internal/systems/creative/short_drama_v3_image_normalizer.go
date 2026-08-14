@@ -3,6 +3,8 @@ package creative
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"image"
 	stdDraw "image/draw"
@@ -33,6 +35,76 @@ func renderShortDramaCoverPNG(source io.Reader, width, height int) ([]byte, erro
 		return nil, fmt.Errorf("encode normalized short drama first frame: %w", err)
 	}
 	return output.Bytes(), nil
+}
+
+func renderShortDramaBoardPNG(source io.Reader, width, height int) ([]byte, error) {
+	if source == nil || width < 2 || height < 2 || width%2 != 0 || height%2 != 0 {
+		return nil, fmt.Errorf("short drama reference board dimensions are invalid")
+	}
+	decoded, _, err := image.Decode(source)
+	if err != nil {
+		return nil, fmt.Errorf("decode short drama reference board: %w", err)
+	}
+	bounds := decoded.Bounds()
+	if bounds.Dx() < 2 || bounds.Dy() < 2 {
+		return nil, fmt.Errorf("short drama reference board is empty")
+	}
+	canvas := image.NewRGBA(image.Rect(0, 0, width, height))
+	stdDraw.Draw(canvas, canvas.Bounds(), image.Black, image.Point{}, stdDraw.Src)
+	scale := min(float64(width)/float64(bounds.Dx()), float64(height)/float64(bounds.Dy()))
+	drawWidth := max(2, int(float64(bounds.Dx())*scale))
+	drawHeight := max(2, int(float64(bounds.Dy())*scale))
+	destination := image.Rect((width-drawWidth)/2, (height-drawHeight)/2, (width+drawWidth)/2, (height+drawHeight)/2)
+	xdraw.CatmullRom.Scale(canvas, destination, decoded, bounds, stdDraw.Src, nil)
+	var output bytes.Buffer
+	if err := png.Encode(&output, canvas); err != nil {
+		return nil, fmt.Errorf("encode normalized short drama reference board: %w", err)
+	}
+	return output.Bytes(), nil
+}
+
+func (s Service) normalizeShortDramaReferenceBoardCandidate(
+	ctx context.Context,
+	actor contract.ActorContext,
+	projectID contract.ProjectID,
+	taskID string,
+	candidate ShortDramaReferenceBoardCandidate,
+	board ShortDramaBoardCanvas,
+) (ShortDramaReferenceBoardCandidate, error) {
+	if candidate.Asset == nil || s.ImageBaseAssets == nil || s.RenderedImages == nil {
+		return candidate, fmt.Errorf("short drama reference-board normalization capability is unavailable")
+	}
+	reader, err := s.ImageBaseAssets.OpenImage(ctx, actor, projectID, candidate.Asset.AssetVersion)
+	if err != nil {
+		return candidate, err
+	}
+	defer reader.Close()
+	content, err := renderShortDramaBoardPNG(reader, board.Width, board.Height)
+	if err != nil {
+		return candidate, err
+	}
+	requestContext := contract.RequestContext{RequestID: "short-drama-board-" + candidate.ID, TraceID: taskID, Actor: actor}
+	asset, err := s.RenderedImages.IngestRenderedImage(
+		ctx, requestContext, projectID, shortDramaRenderedImageJobID(candidate.ID, "model-reference"), bytes.NewReader(content), int64(len(content)),
+		board.Width, board.Height, []contract.AssetVersionRef{candidate.Asset.AssetVersion}, nil,
+	)
+	if err != nil {
+		return candidate, err
+	}
+	candidate.ModelReferenceAsset = &asset
+	return candidate, nil
+}
+
+func shortDramaRenderedImageJobID(candidateID, purpose string) string {
+	const maxRenderJobIDLength = 96
+	value := candidateID + "-" + purpose
+	if len(value) <= maxRenderJobIDLength {
+		return value
+	}
+	digest := sha256.Sum256([]byte(value))
+	suffix := "-" + hex.EncodeToString(digest[:8])
+	prefixLength := maxRenderJobIDLength - len(suffix)
+	return value[:prefixLength] + suffix
 }
 
 func coverCropBounds(bounds image.Rectangle, targetWidth, targetHeight int) image.Rectangle {

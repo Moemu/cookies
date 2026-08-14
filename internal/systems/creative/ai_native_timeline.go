@@ -2,7 +2,6 @@ package creative
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/media"
@@ -12,8 +11,21 @@ func CompileAINativeTimeline(plan AINativeProductionPlan, storyboard AINativeSto
 	if plan.Status != AINativeProductionReadyStatus && plan.Status != AINativeProductionRenderingStatus || storyboard.Status != AINativeStoryboardConfirmedStatus || plan.BasedOnStoryboardRevision != storyboard.Revision {
 		return media.TimelineRenderRequest{}, ErrInvalidState
 	}
-	request := media.TimelineRenderRequest{OrganizationID: organizationID, ProjectID: projectID, DurationMS: plan.TotalDurationMS, Width: 720, Height: 1280, FrameRate: 30, SampleRate: 48000,
-		Video: []media.TimelineVideoClip{}, Audio: []media.TimelineAudioClip{}, Captions: []media.TimelineCaption{}}
+	preset := plan.OutputPreset
+	if err := preset.Validate(); err != nil {
+		// Production plans created before the v2 preset snapshot are restored as
+		// the only legacy specification that existed at that time.
+		if plan.AspectRatio != "9:16" {
+			return media.TimelineRenderRequest{}, fmt.Errorf("production plan has no valid output preset")
+		}
+		preset = DefaultAINativeOutputPreset()
+		preset.ProfileID, preset.ProfileHash = plan.ChannelProfileID, plan.ChannelProfileHash
+	}
+	if plan.AspectRatio != preset.AspectRatio || plan.ChannelProfileID != preset.ProfileID || plan.ChannelProfileHash != preset.ProfileHash {
+		return media.TimelineRenderRequest{}, fmt.Errorf("production plan conflicts with its frozen output preset")
+	}
+	request := media.TimelineRenderRequest{OrganizationID: organizationID, ProjectID: projectID, DurationMS: plan.TotalDurationMS, Width: preset.Width, Height: preset.Height, FrameRate: 30, SampleRate: 48000,
+		Video: []media.TimelineVideoClip{}, Audio: []media.TimelineAudioClip{}, Captions: []media.TimelineCaption{}, Overlays: []media.TimelineOverlay{}, OmitAudio: plan.DeliveryTreatment.Preset == AINativeDeliveryPresetCleanMaterial}
 	for _, unit := range plan.Units {
 		ref, ok := selectedAttemptAsset(unit.Attempts, unit.SelectedAttemptID)
 		if !ok {
@@ -32,14 +44,21 @@ func CompileAINativeTimeline(plan AINativeProductionPlan, storyboard AINativeSto
 		}
 		request.Audio = append(request.Audio, media.TimelineAudioClip{ID: unit.ID, Role: media.TimelineAudioVoiceover, Asset: ref, StartMS: unit.StartMS, EndMS: endMS, GainDB: 0})
 	}
-	for _, shot := range storyboard.Shots {
-		text := strings.TrimSpace(shot.Subtitle)
-		if text == "" {
-			text = strings.TrimSpace(shot.Voiceover)
+	for _, cue := range plan.CaptionCues {
+		request.Captions = append(request.Captions, media.TimelineCaption{StartMS: cue.StartMS, EndMS: cue.EndMS, Text: cue.Text})
+	}
+	for _, cue := range plan.SalesOverlayCues {
+		request.Overlays = append(request.Overlays, media.TimelineOverlay{StartMS: cue.StartMS, EndMS: cue.EndMS, Text: cue.Text, Kind: cue.Kind})
+	}
+	for _, cue := range plan.AudioCues {
+		if cue.AssetRef == nil {
+			continue
 		}
-		if text != "" {
-			request.Captions = append(request.Captions, media.TimelineCaption{StartMS: shot.StartMS, EndMS: shot.EndMS, Text: text})
+		role := media.TimelineAudioSFX
+		if cue.Role == "music" {
+			role = media.TimelineAudioMusic
 		}
+		request.Audio = append(request.Audio, media.TimelineAudioClip{ID: "audio-" + cue.Role + "-" + cue.ShotID, Role: role, Asset: *cue.AssetRef, StartMS: cue.StartMS, EndMS: cue.EndMS, GainDB: -12, FadeInMS: 200, FadeOutMS: 300, Loop: cue.Role == "music"})
 	}
 	if err := request.Validate(); err != nil {
 		return media.TimelineRenderRequest{}, err

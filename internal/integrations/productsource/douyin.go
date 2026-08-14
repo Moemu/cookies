@@ -48,14 +48,17 @@ type ProductPrice struct {
 }
 
 type ProductSnapshot struct {
-	Source      string         `json:"source"`
-	ProductID   string         `json:"product_id"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Images      []ProductImage `json:"images"`
-	Price       ProductPrice   `json:"price"`
-	Sales       int64          `json:"sales"`
-	SourceURL   string         `json:"source_url"`
+	Source           string         `json:"source"`
+	ProductID        string         `json:"product_id"`
+	Name             string         `json:"name"`
+	Description      string         `json:"description"`
+	Images           []ProductImage `json:"images"`
+	Price            ProductPrice   `json:"price"`
+	Sales            int64          `json:"sales"`
+	SourceURL        string         `json:"source_url"`
+	ResolutionStatus string         `json:"resolution_status"`
+	ResourceType     string         `json:"resource_type"`
+	MissingFields    []string       `json:"missing_fields"`
 }
 
 // DouyinResolver follows a Douyin share link and extracts the product snapshot
@@ -204,6 +207,19 @@ func snapshotFromResolvedURL(sourceURL, resolvedURL *url.URL) (ProductSnapshot, 
 		},
 		Sales:     detail.Sales,
 		SourceURL: canonicalSourceURL(sourceURL, productID),
+		ResolutionStatus: func() string {
+			if len(images) == 0 {
+				return ResolutionManualRequired
+			}
+			return ResolutionPartial
+		}(),
+		ResourceType: ResourceProduct,
+		MissingFields: func() []string {
+			if len(images) == 0 {
+				return []string{"images", "description", "core_selling_points"}
+			}
+			return []string{"description", "core_selling_points"}
+		}(),
 	}, nil
 }
 

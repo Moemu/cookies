@@ -46,8 +46,59 @@ func TestCompileAINativeTimelineUsesSelectedAssetsAndStoryboardCaptions(t *testi
 	if timeline.DurationMS != 20000 || len(timeline.Video) != 4 || len(timeline.Audio) != len(plan.SpeechUnits) || len(timeline.Captions) != len(storyboard.Shots) {
 		t.Fatalf("unexpected final timeline: %#v", timeline)
 	}
+	if timeline.Width != plan.OutputPreset.Width || timeline.Height != plan.OutputPreset.Height {
+		t.Fatalf("timeline canvas %dx%d does not match frozen preset %#v", timeline.Width, timeline.Height, plan.OutputPreset)
+	}
 	if timeline.Audio[0].Role != media.TimelineAudioVoiceover || timeline.Video[0].Asset.AssetID != "video-video-unit-01" || timeline.Captions[0].Text != storyboard.Shots[0].Subtitle {
 		t.Fatalf("timeline lost frozen production lineage: %#v", timeline)
+	}
+}
+
+func TestAINativeDeliveryTreatmentControlsIndependentProductionTracks(t *testing.T) {
+	requirement, _ := validAINativeStoryboardInputs()
+	storyboard := readyConfirmedAINativeStoryboard()
+	storyboard.Shots[0].SalesOverlays = []AINativeSalesOverlay{{Text: "轻巧随行", StartMS: 500, EndMS: 3000, Kind: "selling_point"}}
+
+	noVoice, _ := AINativeDeliveryTreatmentForPreset(AINativeDeliveryPresetNoVoiceover)
+	requirement.DeliveryTreatment = noVoice
+	for index := range storyboard.Shots {
+		storyboard.Shots[index].Voiceover = ""
+	}
+	plan, err := CompileAINativeProductionPlan(requirement, storyboard, "project_1", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.SpeechUnits) != 0 || len(plan.CaptionCues) != len(storyboard.Shots) || len(plan.SalesOverlayCues) != 1 {
+		t.Fatalf("no-voiceover tracks = speech:%d captions:%d overlays:%d", len(plan.SpeechUnits), len(plan.CaptionCues), len(plan.SalesOverlayCues))
+	}
+
+	clean, _ := AINativeDeliveryTreatmentForPreset(AINativeDeliveryPresetCleanMaterial)
+	requirement.DeliveryTreatment = clean
+	for index := range storyboard.Shots {
+		storyboard.Shots[index].Subtitle = ""
+		storyboard.Shots[index].SoundEffect = ""
+		storyboard.Shots[index].BGMDirection = ""
+		storyboard.Shots[index].SalesOverlays = nil
+	}
+	cleanPlan, err := CompileAINativeProductionPlan(requirement, storyboard, "project_1", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cleanPlan.SpeechUnits) != 0 || len(cleanPlan.CaptionCues) != 0 || len(cleanPlan.SalesOverlayCues) != 0 || len(cleanPlan.AudioCues) != 0 {
+		t.Fatalf("clean material leaked post-production tracks: %#v", cleanPlan)
+	}
+	for index := range cleanPlan.Units {
+		ref := contract.AssetVersionRef{AssetID: contract.AssetID("clean-video-" + cleanPlan.Units[index].ID), Version: 1}
+		attempt := AINativeGenerationAttempt{ID: "attempt-" + cleanPlan.Units[index].ID, Status: AINativeAttemptSucceededStatus, OutputAssetRef: &ref}
+		cleanPlan.Units[index].Attempts, cleanPlan.Units[index].SelectedAttemptID = []AINativeGenerationAttempt{attempt}, attempt.ID
+	}
+	cleanPlan.Status = AINativeProductionReadyStatus
+	timeline, err := CompileAINativeTimeline(cleanPlan, storyboard, "org_1", "project_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !timeline.OmitAudio || len(timeline.Captions) != 0 || len(timeline.Overlays) != 0 {
+		t.Fatalf("clean timeline contains delivery tracks: %#v", timeline)
 	}
 }
 
@@ -176,6 +227,9 @@ func TestCompileAINativeProductionPlanMapsConfirmedStoryboardToProviderUnits(t *
 	if len(plan.Units) != len(wantDurations) {
 		t.Fatalf("generation units = %d, want %d: %#v", len(plan.Units), len(wantDurations), plan.Units)
 	}
+	if plan.OutputPreset.ID != AINativeOutputPresetDouyinFeed9x16V1 || plan.ChannelProfileID != plan.OutputPreset.ProfileID || plan.ChannelProfileHash != plan.OutputPreset.ProfileHash {
+		t.Fatalf("production plan lost the frozen output preset: %#v", plan)
+	}
 	for index, unit := range plan.Units {
 		if unit.DurationSeconds != wantDurations[index] {
 			t.Fatalf("unit %d duration = %d, want %d", index, unit.DurationSeconds, wantDurations[index])
@@ -189,6 +243,9 @@ func TestCompileAINativeProductionPlanMapsConfirmedStoryboardToProviderUnits(t *
 		}
 		if input.AudioPolicy != provider.VideoAudioSilent {
 			t.Fatalf("unit %d must generate silent video", index)
+		}
+		if input.AspectRatio != plan.OutputPreset.AspectRatio || input.Resolution != plan.OutputPreset.Resolution {
+			t.Fatalf("unit %d spec = %s/%s, want frozen preset %s/%s", index, input.AspectRatio, input.Resolution, plan.OutputPreset.AspectRatio, plan.OutputPreset.Resolution)
 		}
 		if input.InputMode != provider.VideoInputReferenceImage || len(input.ConditioningAssets) != 1 || input.ConditioningAssets[0].Reference.AssetVersion.AssetID != "asset_product" {
 			t.Fatalf("unit %d lost product identity conditioning: %#v", index, input)

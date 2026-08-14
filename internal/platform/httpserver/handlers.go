@@ -2101,6 +2101,7 @@ func (s *Server) notImplemented(w http.ResponseWriter, r *http.Request) {
 func writerHeaderNoStore(w http.ResponseWriter) { w.Header().Set("Cache-Control", "private, no-store") }
 func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err error) {
 	status, code, message, retryable := http.StatusInternalServerError, "INTERNAL", "The service could not complete the request.", true
+	details := []contract.FieldViolation{}
 	switch {
 	case errors.Is(err, identity.ErrMembershipForbidden):
 		status, code, message, retryable = http.StatusForbidden, "MEMBERSHIP_OPERATION_FORBIDDEN", "当前身份无权执行该成员操作。", false
@@ -2208,6 +2209,13 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusBadGateway, "SHORT_DRAMA_ANALYSIS_RESPONSE_INVALID", "视频理解模型没有返回符合剧情分析合约的结果，请重新生成。", true
 	case errors.Is(err, creative.ErrInvalidAINativeRequirement):
 		status, code, message, retryable = http.StatusBadRequest, "INVALID_AI_NATIVE_REQUIREMENT", "AI 原生广告需求参数不符合当前抖音 P0 规则。", false
+		var confirmationErr creative.AINativeRequirementConfirmationError
+		if errors.As(err, &confirmationErr) {
+			code, message = "AI_NATIVE_REQUIREMENT_INCOMPLETE", "请补充必需的商品信息后再生成脚本。"
+			for _, issue := range confirmationErr.Issues {
+				details = append(details, contract.FieldViolation{Field: issue.Field, Reason: issue.Message})
+			}
+		}
 	case errors.Is(err, creative.ErrAINativeProductLinkIncomplete):
 		status, code, message, retryable = http.StatusUnprocessableEntity, "AI_NATIVE_PRODUCT_LINK_INCOMPLETE", "复制内容不完整，商品参数在中途被截断。请从抖音商品页重新复制完整链接。", false
 	case errors.Is(err, creative.ErrAINativeProductLinkUnsupported):
@@ -2230,5 +2238,5 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 	if status == http.StatusInternalServerError {
 		log.Printf("request %s failed: %v", requestIDFrom(r.Context()), err)
 	}
-	writeProblem(w, status, contract.Error{Code: code, Message: message, RequestID: requestIDFrom(r.Context()), Retryable: retryable})
+	writeProblem(w, status, contract.Error{Code: code, Message: message, RequestID: requestIDFrom(r.Context()), Retryable: retryable, Details: details})
 }
