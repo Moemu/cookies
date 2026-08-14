@@ -135,6 +135,7 @@ test("OceanEngine SkillDefinition records controlled gate-two submit without cla
   const runtimePolicy = definition.runtime_policy as Record<string, unknown>;
   assert.equal(runtimePolicy.existing_project_edit_surface_live_observed, true);
   assert.equal(runtimePolicy.existing_promotion_edit_surface_live_observed, true);
+  assert.equal(runtimePolicy.promotion_budget_gate_one_live_calibrated, true);
   assert.equal(runtimePolicy.remote_modification_live_calibrated, false);
   const editCalibration = definition.existing_object_edit_calibration as Record<string, unknown>;
   assert.equal(editCalibration.parent_project_owns_schedule, true);
@@ -173,6 +174,66 @@ test("existing-object inventory records field ownership, locator drift and zero 
   assert.equal(drift.old_selector_total_matches, 2);
   assert.equal(drift.replacement_unique_visible, true);
   assert.equal(drift.classification, "PAGE_DRIFT");
+});
+
+test("promotion budget gate one proves an exact no-write edit and preserves status-snapshot semantics", () => {
+  const evidencePath = join(
+    root,
+    "docs",
+    "delivery",
+    "evidence",
+    "oceanengine-promotion-budget-gate-one-2026-08-14.json",
+  );
+  const rawEvidence = readFileSync(evidencePath, "utf8");
+  const evidence = JSON.parse(rawEvidence) as Record<string, unknown>;
+  assert.doesNotMatch(rawEvidence, /\b\d{15,20}\b/);
+  assert.equal(evidence.result, "passed_no_write");
+
+  const mapping = evidence.mapping_snapshot as Record<string, unknown>;
+  assert.equal(mapping.status, "confirmed");
+  assert.equal(mapping.revision, 2);
+  assert.equal(mapping.platform_status, "pending_review");
+  assert.equal(mapping.platform_status_semantics, "last_dual_readback_snapshot_from_creation_not_live_platform_state");
+  assert.equal(mapping.mapping_changed, false);
+
+  const fill = evidence.unsubmitted_fill as Record<string, unknown>;
+  assert.equal(fill.current_daily_budget_minor, 30000);
+  assert.equal(fill.target_daily_budget_minor, 31000);
+  assert.equal(fill.readback_daily_budget_minor, 31000);
+  assert.equal(fill.unchanged_field_group_count, 23);
+  assert.equal(fill.stable_fields_before_sha256, fill.stable_fields_after_sha256);
+  assert.deepEqual(fill.diff_keys, ["daily_budget_minor"]);
+
+  const list = evidence.list_verification as Record<string, unknown>;
+  assert.equal(list.daily_budget_minor, 30000);
+  assert.equal(list.target_daily_budget_absent, true);
+  assert.equal(list.review_transition, "expected_asynchronous_platform_review_completion");
+  assert.equal(list.remote_write_detected, false);
+
+  const control = evidence.control_plane_evidence as Record<string, unknown>;
+  assert.equal(control.controlled_action_attempt_count, 0);
+  assert.equal(control.final_confirmation_count, 0);
+  assert.equal(control.run_terminal_state, "cancelled");
+  assert.equal(control.lease_released, true);
+  assert.equal(control.change_set_executed, false);
+
+  const adjudication = evidence.operator_adjudication as Record<string, unknown>;
+  assert.equal(adjudication.reviewed_classification, "expected_composite_status_evolution");
+  assert.equal(adjudication.audit_record_rewritten, false);
+  assert.equal(adjudication.gate_result_after_review, "passed_no_write");
+
+  const locators = readJSON(join(
+    root,
+    "docs",
+    "delivery",
+    "fixtures",
+    "oceanengine-existing-object-live-locators-v0.1.json",
+  ));
+  const gate = locators.promotion_budget_gate_one as Record<string, unknown>;
+  assert.equal(gate.status, "passed_no_write");
+  assert.equal(gate.write_boundary_clicks, 0);
+  assert.equal(gate.controlled_action_attempt_count, 0);
+  assert.equal(gate.remote_write_detected, false);
 });
 
 test("PR 50 preserves takeover calibration and per-execution submit instructions without claiming an automated Browser Driver", () => {

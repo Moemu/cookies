@@ -90,6 +90,25 @@
       "classification": "PAGE_DRIFT"
     }
   ],
+  "promotion_budget_gate_one": {
+    "observed_at": "2026-08-14",
+    "status": "passed_no_write",
+    "mapping_revision": 2,
+    "page_mode": "promotion_edit",
+    "budget_selector": "[data-e2e='createad_adBudget_input_component'] input",
+    "current_daily_budget_minor": 30000,
+    "target_daily_budget_minor": 31000,
+    "readback_daily_budget_minor": 31000,
+    "stable_field_group_count": 23,
+    "diff_keys": ["daily_budget_minor"],
+    "write_boundary": "role=button[name='保存并关闭'][exact=true]",
+    "write_boundary_clicks": 0,
+    "safe_exit": "[data-e2e='createad_save_cancel']",
+    "list_daily_budget_minor_after_discard": 30000,
+    "controlled_action_attempt_count": 0,
+    "remote_write_detected": false,
+    "evidence_ref": "docs/delivery/evidence/oceanengine-promotion-budget-gate-one-2026-08-14.json"
+  },
   "calibration_limits": {
     "observed_promotion_status": "pending_review",
     "fields_filled": 0,

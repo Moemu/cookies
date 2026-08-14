@@ -61,6 +61,17 @@ current field values, prepare only the approved target values, read every
 changed field back, and exit without saving. Record `PAGE_DRIFT` or the
 platform's own edit restriction instead of selecting a different object.
 
+The CNY 300 to CNY 310 budget path passed this no-write gate on 2026-08-14.
+The exact mapped promotion was opened in edit mode, only the daily-budget field
+changed, 23 other field groups retained the same digest, the draft was
+discarded, and the list still showed CNY 300. No final confirmation or
+ControlledActionAttempt existed. Treat `PlatformEntityMapping.platform_status`
+as the last result/list snapshot, not a live status feed. Ocean Engine can show
+delivery, pause and review dimensions together, and asynchronous review
+completion does not by itself prove a form write or page drift. Require the
+approved fields and remote-write proof to remain stable instead of requiring
+every independent platform status dimension to remain frozen.
+
 Use the existing-object locator baseline for read-only calibration. In
 particular, the former brand selector now matches both the visible field and a
 hidden search input; locate the visible field by the exact placeholder

@@ -16,14 +16,17 @@ func TestOceanEngineEcommerceManualAllowsOnlyControlledSubmitWithoutClaimingDriv
 	if len(definition.PageTypes) < 9 || len(definition.Capabilities.Allowed) == 0 || len(definition.Capabilities.Forbidden) == 0 || len(definition.DynamicConditionKeys) < 6 {
 		t.Fatalf("stage B page and capability boundaries were not loadable: %#v", definition)
 	}
-	if definition.SafetyExit.Method != "discard_unsubmitted_local_form" || len(definition.WriteValidationPending) < 6 {
+	if definition.SafetyExit.Method != "discard_unsubmitted_local_form" || definition.SafetyExit.RequiredProof != "return_to_known_readonly_page_and_confirm_no_platform_write_or_approved_field_change" || len(definition.WriteValidationPending) < 6 {
 		t.Fatalf("stage B safe exit or pending write boundary was not preserved: %#v", definition)
 	}
-	if !definition.RuntimePolicy.ProjectFormLiveCalibrated || !definition.RuntimePolicy.PromotionFormLiveCalibrated || !definition.RuntimePolicy.ExistingProjectEditSurfaceLiveObserved || !definition.RuntimePolicy.ExistingPromotionEditSurfaceObserved || definition.RuntimePolicy.RemoteModificationLiveCalibrated || !definition.RuntimePolicy.ControlPlaneEvidenceRecorded || !definition.GateOne.Ready || definition.GateOne.Result != "passed" {
+	if !definition.RuntimePolicy.ProjectFormLiveCalibrated || !definition.RuntimePolicy.PromotionFormLiveCalibrated || !definition.RuntimePolicy.ExistingProjectEditSurfaceLiveObserved || !definition.RuntimePolicy.ExistingPromotionEditSurfaceObserved || !definition.RuntimePolicy.PromotionBudgetGateOneLiveCalibrated || definition.RuntimePolicy.RemoteModificationLiveCalibrated || !definition.RuntimePolicy.ControlPlaneEvidenceRecorded || !definition.GateOne.Ready || definition.GateOne.Result != "passed" {
 		t.Fatalf("passed takeover calibration status was overstated or lost: %#v", definition)
 	}
 	if !definition.ExistingObjectEditCalibration.ParentProjectOwnsSchedule || !definition.ExistingObjectEditCalibration.ProjectMappingRequiredForSchedule || !definition.ExistingObjectEditCalibration.PromotionScheduleActionForbidden || definition.ExistingObjectEditCalibration.PromotionBrandLocatorDrift != "PAGE_DRIFT" || definition.ExistingObjectEditCalibration.LiveRemoteModificationAllowed {
 		t.Fatalf("existing-object edit ownership or no-write boundary was lost: %#v", definition)
+	}
+	if definition.PromotionBudgetGateOne.Result != "passed_no_write" || definition.PromotionBudgetGateOne.MappingRevision != 2 || definition.PromotionBudgetGateOne.CurrentDailyBudgetMinor != 30000 || definition.PromotionBudgetGateOne.TargetDailyBudgetMinor != 31000 || !definition.PromotionBudgetGateOne.DraftDiscarded || definition.PromotionBudgetGateOne.ListDailyBudgetMinor != 30000 || definition.PromotionBudgetGateOne.ControlledActionAttemptCount != 0 || definition.PromotionBudgetGateOne.FinalConfirmationCount != 0 || definition.PromotionBudgetGateOne.RunTerminalState != "cancelled" || definition.PromotionBudgetGateOne.RemoteWriteDetected || definition.PromotionBudgetGateOne.LiveRemoteModificationAllowed {
+		t.Fatalf("promotion budget gate one was not preserved: %#v", definition)
 	}
 	if definition.RuntimePolicy.AgentFinalSubmitDocumentation != "available_in_skill_md_with_per_execution_authorization" {
 		t.Fatalf("agent final-submit documentation is not bound to per-execution authorization: %#v", definition)

@@ -4,7 +4,7 @@
   "title": "Delivery Platform Skill Definition v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "id", "version", "display_name", "platform", "capability", "status", "owner", "executable", "real_browser_driver", "submit_allowed", "evidence_observed_at", "last_reviewed_at", "ui_baseline", "schema_ref", "evidence_refs", "page_types", "capabilities", "dynamic_condition_keys", "safety_exit", "write_validation_pending", "runtime_policy", "rollback", "gate_one", "gate_two_preparation", "gate_two_validation", "existing_object_edit_calibration"],
+  "required": ["schema_version", "id", "version", "display_name", "platform", "capability", "status", "owner", "executable", "real_browser_driver", "submit_allowed", "evidence_observed_at", "last_reviewed_at", "ui_baseline", "schema_ref", "evidence_refs", "page_types", "capabilities", "dynamic_condition_keys", "safety_exit", "write_validation_pending", "runtime_policy", "rollback", "gate_one", "gate_two_preparation", "gate_two_validation", "existing_object_edit_calibration", "promotion_budget_gate_one"],
   "properties": {
     "schema_version": { "const": "delivery-platform-skill-definition/v1" },
     "id": { "const": "oceanengine-ecommerce-manual" },
@@ -62,19 +62,20 @@
       "required": ["method", "required_proof"],
       "properties": {
         "method": { "const": "discard_unsubmitted_local_form" },
-        "required_proof": { "const": "return_to_known_readonly_page_and_confirm_no_platform_object_or_status_change" }
+        "required_proof": { "const": "return_to_known_readonly_page_and_confirm_no_platform_write_or_approved_field_change" }
       }
     },
     "write_validation_pending": { "type": "array", "items": { "enum": ["unattended_browser_driver", "enable_delivery", "remote_object_modification", "delete", "write_compensation", "additional_submit_without_new_authority"] }, "minItems": 6, "uniqueItems": true },
     "runtime_policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["project_form_live_calibrated", "promotion_form_live_calibrated", "existing_project_edit_surface_live_observed", "existing_promotion_edit_surface_live_observed", "remote_modification_live_calibrated", "control_plane_evidence_recorded", "agent_final_submit_documentation"],
+      "required": ["project_form_live_calibrated", "promotion_form_live_calibrated", "existing_project_edit_surface_live_observed", "existing_promotion_edit_surface_live_observed", "promotion_budget_gate_one_live_calibrated", "remote_modification_live_calibrated", "control_plane_evidence_recorded", "agent_final_submit_documentation"],
       "properties": {
         "project_form_live_calibrated": { "const": true },
         "promotion_form_live_calibrated": { "const": true },
         "existing_project_edit_surface_live_observed": { "const": true },
         "existing_promotion_edit_surface_live_observed": { "const": true },
+        "promotion_budget_gate_one_live_calibrated": { "const": true },
         "remote_modification_live_calibrated": { "const": false },
         "control_plane_evidence_recorded": { "const": true },
         "agent_final_submit_documentation": { "const": "available_in_skill_md_with_per_execution_authorization" }
@@ -150,6 +151,30 @@
         "project_mapping_required_for_schedule": { "const": true },
         "promotion_schedule_action_forbidden": { "const": true },
         "promotion_brand_locator_drift": { "const": "PAGE_DRIFT" },
+        "live_remote_modification_allowed": { "const": false }
+      }
+    },
+    "promotion_budget_gate_one": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_at", "evidence_ref", "result", "mapping_revision", "mapping_status", "mapping_platform_status_snapshot", "current_daily_budget_minor", "target_daily_budget_minor", "diff_keys", "draft_discarded", "list_daily_budget_minor", "controlled_action_attempt_count", "final_confirmation_count", "run_terminal_state", "remote_write_detected", "operator_adjudication", "live_remote_modification_allowed"],
+      "properties": {
+        "observed_at": { "const": "2026-08-14" },
+        "evidence_ref": { "const": "docs/delivery/evidence/oceanengine-promotion-budget-gate-one-2026-08-14.json" },
+        "result": { "const": "passed_no_write" },
+        "mapping_revision": { "const": 2 },
+        "mapping_status": { "const": "confirmed" },
+        "mapping_platform_status_snapshot": { "const": "pending_review" },
+        "current_daily_budget_minor": { "const": 30000 },
+        "target_daily_budget_minor": { "const": 31000 },
+        "diff_keys": { "const": ["daily_budget_minor"] },
+        "draft_discarded": { "const": true },
+        "list_daily_budget_minor": { "const": 30000 },
+        "controlled_action_attempt_count": { "const": 0 },
+        "final_confirmation_count": { "const": 0 },
+        "run_terminal_state": { "const": "cancelled" },
+        "remote_write_detected": { "const": false },
+        "operator_adjudication": { "const": "expected_async_review_completion" },
         "live_remote_modification_allowed": { "const": false }
       }
     }

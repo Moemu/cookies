@@ -182,3 +182,38 @@ No field was filled and no save, pause or restart control was clicked. The
 redacted evidence and locator baseline are respectively
 `evidence/oceanengine-existing-object-edit-readonly-2026-08-14.json` and
 `fixtures/oceanengine-existing-object-live-locators-v0.1.json`.
+
+## Promotion budget modification gate one
+
+On 2026-08-14 a fresh server-resolved authority chain bound the confirmed
+promotion Mapping at revision 2, its exact account and parent project, a current
+daily budget of CNY 300 and an unsubmitted target of CNY 310. The visible edit
+page matched all three hashed platform references. The daily-budget input was
+enabled, and 24 field groups covering identity, materials, copy, landing and
+direct links, product data, settings, inherited schedule, bid and name were
+captured before the fill.
+
+Only the daily-budget field changed. Its readback was CNY 310; the other 23
+field groups retained the same aggregate SHA-256. The unique save-and-close
+boundary was located but never clicked. The calibrated cancel path discarded
+the draft, and an independent reload of the exact mapped list row still showed
+CNY 300 with no CNY 310 value.
+
+The list also demonstrated that Ocean Engine exposes status as multiple
+dimensions: delivery, pause and review indicators can coexist. During the
+walkthrough the review dimension advanced from initial review to review
+completion while the delivery and pause dimensions remained visible. Operator
+review confirmed this as expected asynchronous platform processing, not a
+draft side effect. The Mapping's `platform_status=pending_review` remains the
+last creation-time result/list snapshot; it is not a live status subscription
+and its revision did not change.
+
+Five redacted takeover Evidence records preserve the original conservative
+classification. The checked-in evidence adds the later operator adjudication
+without rewriting those control-plane records. The Run was cancelled, both
+leases were released, no final
+confirmation was issued, `ControlledActionAttempt` count remained zero and no
+remote write occurred. The budget-modification gate-one result is therefore
+`passed_no_write`. Real budget modification remains forbidden until a separate
+current-turn gate-two authorization. The complete record is
+`evidence/oceanengine-promotion-budget-gate-one-2026-08-14.json`.
