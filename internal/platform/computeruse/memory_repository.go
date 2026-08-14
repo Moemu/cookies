@@ -512,7 +512,7 @@ func (r *MemoryRepository) RecordTakeoverOutcome(_ context.Context, run Computer
 	foundAttempt := false
 	var matchedAttempt ControlledActionAttempt
 	for _, attempt := range r.attempts {
-		if attempt.ID == attemptID && attempt.RunID == run.ID && attempt.LeaseID == run.LeaseID {
+		if attempt.ID == attemptID && attempt.RunID == run.ID {
 			foundAttempt = true
 			matchedAttempt = attempt
 			break
@@ -525,8 +525,8 @@ func (r *MemoryRepository) RecordTakeoverOutcome(_ context.Context, run Computer
 		(attemptStatus != ControlledActionVerified && attemptStatus != ControlledActionFailed && attemptStatus != ControlledActionResultUnknown) {
 		return ComputerUseRun{}, ErrInvalidTransition
 	}
-	storedLease, ok := r.leases[scopeKey(run.OrganizationID, run.ProjectID, matchedAttempt.LeaseID)]
-	if !ok || storedLease.FencingToken != matchedAttempt.FencingToken || !storedLease.ValidAt(now) {
+	currentLease, ok := r.leases[scopeKey(run.OrganizationID, run.ProjectID, run.LeaseID)]
+	if !ok || currentLease.RunID != run.ID || !currentLease.ValidAt(now) {
 		return ComputerUseRun{}, ErrLeaseUnavailable
 	}
 	for _, existing := range r.steps {

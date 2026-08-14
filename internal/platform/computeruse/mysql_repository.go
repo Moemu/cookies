@@ -560,14 +560,14 @@ func (r MySQLRepository) RecordTakeoverOutcome(ctx context.Context, run Computer
 	defer tx.Rollback()
 	var storedAttemptID, storedLeaseID, storedAttemptStatus string
 	var storedFencingToken int64
-	if err := tx.QueryRowContext(ctx, `SELECT id,lease_id,fencing_token,status FROM computer_use_controlled_action_attempts WHERE organization_id=? AND project_id=? AND id=? AND run_id=? AND lease_id=? FOR UPDATE`, run.OrganizationID, run.ProjectID, attemptID, run.ID, run.LeaseID).Scan(&storedAttemptID, &storedLeaseID, &storedFencingToken, &storedAttemptStatus); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id,lease_id,fencing_token,status FROM computer_use_controlled_action_attempts WHERE organization_id=? AND project_id=? AND id=? AND run_id=? FOR UPDATE`, run.OrganizationID, run.ProjectID, attemptID, run.ID).Scan(&storedAttemptID, &storedLeaseID, &storedFencingToken, &storedAttemptStatus); err != nil {
 		return ComputerUseRun{}, ErrNotFound
 	}
 	if (storedAttemptStatus != ControlledActionAuthorized && storedAttemptStatus != ControlledActionVerified) || (attemptStatus != ControlledActionVerified && attemptStatus != ControlledActionFailed && attemptStatus != ControlledActionResultUnknown) {
 		return ComputerUseRun{}, ErrInvalidTransition
 	}
-	storedLease, err := scanLease(tx.QueryRowContext(ctx, leaseSelect+` WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, run.OrganizationID, run.ProjectID, storedLeaseID))
-	if err != nil || storedLease.FencingToken != storedFencingToken || !storedLease.ValidAt(now) {
+	currentLease, err := scanLease(tx.QueryRowContext(ctx, leaseSelect+` WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, run.OrganizationID, run.ProjectID, run.LeaseID))
+	if err != nil || currentLease.RunID != run.ID || !currentLease.ValidAt(now) {
 		return ComputerUseRun{}, ErrLeaseUnavailable
 	}
 	if storedAttemptStatus != attemptStatus {

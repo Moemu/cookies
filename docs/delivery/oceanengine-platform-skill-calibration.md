@@ -18,8 +18,8 @@ It binds:
   native anchor, and landing-page selection;
 - filling and reading back an unsubmitted local form;
 - discarding the draft and returning to a known read-only page;
-- the invariant that save, create, submit, enable, remote modification, upload,
-  and authorization remain forbidden.
+- the default invariant that write actions remain forbidden unless a current-turn,
+  exact gate-two authority permits one final click.
 
 ## Readiness
 
@@ -45,10 +45,8 @@ The 2026-08-12 and 2026-08-13 live walkthroughs advanced the definition to
 - the live observations were replayed through the persisted Observatory,
   ChangeSet, Approval, ControlledExecution, ComputerUseRun, fenced Lease,
   Step, Event, and redacted Evidence chain;
-- PR #50 has no real Browser Driver;
-- save, submit, server validation, write idempotency, object-ID readback, and
-  post-write status remain `write_validation_pending`;
-- gate two remains disabled.
+- PR #50 has no unattended real Browser Driver;
+- gate two was still disabled at the end of these gate-one observations.
 
 The calibration definition is bound into controlled ChangeSets and formal
 Approvals by ID and version. That binding proves which stage B baseline was
@@ -116,7 +114,7 @@ The formal control-plane replay recorded all five non-write takeover actions:
 Gate one is therefore `passed`, and the visible-browser takeover path is
 calibrated. No automated Browser Driver is mounted in the production API, so
 the Skill remains `executable=false` and `real_browser_driver=false`.
-Submission capabilities remain disabled.
+Submission capabilities remained disabled until a separate gate-two authorization.
 
 The persisted replay contract is frozen in
 `oceanengine-gate-one-replay-runbook.md` and
@@ -129,15 +127,32 @@ DOM locator and is not evidence of calibration. The separate 2026-08-13 live
 locator file contains only controls confirmed on the visible page; selected
 reference values remain redacted and unvisited branches remain explicit gaps.
 
-Agent final-submit behavior must not be added to a `SKILL.md` until the complete
-project → promotion flow has been validated. Even after gate one passes, save,
-final submit, enable, and all other gate-two actions remain disabled until a
-separate explicit gate-two authorization and implementation review.
+## Gate two: one-click validation
 
-The non-write gate-two preparation baseline is frozen in
-`oceanengine-gate-two-preparation.md` and
-`fixtures/oceanengine-gate-two-preflight-v0.1.json`. It records the reusable
-authority and recovery primitives, the fresh objects required at execution
-time, the one-click limit, double-readback Mapping rule, and the deferred
-post-validation Skill documentation. Its status is `ports_ready_authorization_required`;
-it does not issue a confirmation or enable submit.
+On 2026-08-14 the operator explicitly authorized one promotion under the persisted
+account reference SHA-256 `a8c499f7e22dc70d392d8de9b7bd093a4e7371cb17ba3e53c4bf8e0eea15667c`,
+the current parent project, and a CNY 300 daily-budget ceiling. Public evidence
+retains only irreversible SHA-256 references for platform objects and internal
+names. The previous day's parent had been deleted and was excluded from the
+rebuilt ChangeSet, Approval, Execution and Run.
+
+The visible form was read back with an empty diff, one final confirmation was
+consumed, and `保存并关闭` was clicked exactly once. The promotion list then exposed
+the single hashed promotion reference with budget CNY 300, bid CNY 0.01 and normalized
+status `pending_review`; delivery was not enabled. A second independent reload and
+exact-name query returned the same ID and status. Server-loaded Evidence confirmed
+the Mapping, and the same transaction closed the ControlledExecution as `succeeded`
+and ChangeSet as `executed`.
+
+The original submission lease heartbeat expired during the post-write readback.
+No submit retry occurred. A higher-fencing recovery lease was used only for result
+reconciliation, preserving the original Attempt binding. This recovery rule is now
+covered by a unit test. The complete audit record is
+`evidence/oceanengine-gate-two-promotion-submit-2026-08-14.json`.
+
+The Skill now has a `SKILL.md` with final-submit instructions. At rest no execution
+is authorized: each write still requires a fresh exact current-turn authorization,
+fresh control-plane objects, zero-diff readback, one short-lived confirmation and a
+single click. `submit_allowed=true` expresses only this controlled takeover path;
+`executable=false` and `real_browser_driver=false` remain unchanged, and enable,
+unattended submit, resubmit, remote modification, delete and upload remain forbidden.

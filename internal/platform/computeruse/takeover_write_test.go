@@ -70,6 +70,51 @@ func TestTakeoverWriteRejectsDriftAndUnknownResultCannotResubmit(t *testing.T) {
 	}
 }
 
+func TestTakeoverWriteOutcomeCanUseReacquiredRecoveryLease(t *testing.T) {
+	now := time.Date(2026, 8, 14, 1, 0, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	run := validRun(now)
+	run.State, run.Paused, run.TakeoverActive, run.LeaseID = RunAwaitingTakeover, true, true, "lease_1"
+	run.PolicyID = "policy_1"
+	if _, _, err := repo.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	originalLease := validLease(now)
+	if _, err := repo.AcquireLease(context.Background(), originalLease); err != nil {
+		t.Fatal(err)
+	}
+	repo.PutSitePolicy(SitePolicy{ID: run.PolicyID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, Platform: run.Platform, AccountID: run.AccountID, AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create", "project_result"}, AllowedPlatformProjects: []string{"test-project-1"}, Version: 1})
+	sequence := 0
+	service := Service{Repository: repo, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { sequence++; return fmt.Sprintf("%s_%d", prefix, sequence), nil }}
+
+	issued, err := service.IssueFinalConfirmation(context.Background(), run.OrganizationID, run.ProjectID, run.ID, run.Version, run.Authority.ApprovalActionHash, "operator_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized, err := service.AuthorizeTakeoverAction(context.Background(), AuthorizeTakeoverActionRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, ExpectedVersion: run.Version, StepID: "step_submit", Sequence: 1, ConfirmationID: issued.Confirmation.ID, Token: issued.Token, LeaseID: originalLease.ID, FencingToken: originalLease.FencingToken, IdempotencyKey: "final-click-recovery", PageKind: "project_create", PlatformProjectID: "test-project-1", FieldReadback: map[string]string{"daily_budget": "300"}, DiffKeys: []string{}, PageReference: "https://ad.oceanengine.com/project/create", SelectorVersion: "live/v1", ActionVersion: "takeover-submit/v1", Actor: "operator_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now = now.Add(SessionHeartbeatTTL + time.Second)
+	released, err := service.ReleaseRunLease(context.Background(), run.OrganizationID, run.ProjectID, run.ID, originalLease.ID, authorized.Run.Version, originalLease.Version, originalLease.FencingToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reacquired, err := service.AcquireRunLease(context.Background(), run.OrganizationID, run.ProjectID, run.ID, released.Run.Version, "recovery_operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.RecordTakeoverOutcome(context.Background(), RecordTakeoverOutcomeRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, AttemptID: authorized.Attempt.ID, ExpectedVersion: reacquired.Run.Version, LeaseID: reacquired.Lease.ID, FencingToken: reacquired.Lease.FencingToken, StepID: "step_result", Sequence: 2, Outcome: TakeoverResultObserved, PageKind: "project_result", PlatformProjectID: "test-project-1", FieldReadback: map[string]string{"platform_object_id": "platform-1", "platform_status": "pending_review"}, PageReference: "https://ad.oceanengine.com/project/result", SelectorVersion: "live/v1", ActionVersion: "takeover-result/v1", Actor: "recovery_operator"})
+	if err != nil || result.Run.State != RunVerifying {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	stored := repo.attempts[scopeKey(run.OrganizationID, run.ProjectID, "final-click-recovery")]
+	if stored.LeaseID != originalLease.ID || stored.FencingToken != originalLease.FencingToken || stored.Status != ControlledActionVerified {
+		t.Fatalf("attempt=%#v", stored)
+	}
+}
+
 func takeoverWriteFixture(t *testing.T) (Service, *MemoryRepository, ComputerUseRun, SessionLease) {
 	t.Helper()
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)

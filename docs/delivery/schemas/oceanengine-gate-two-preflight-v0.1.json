@@ -9,11 +9,11 @@
     "schema_version": { "const": "oceanengine-gate-two-preflight/v0.1" },
     "skill_id": { "const": "oceanengine-ecommerce-manual" },
     "skill_version": { "const": "v0.1-calibration" },
-    "status": { "const": "ports_ready_authorization_required" },
+    "status": { "const": "gate_two_validated_authorization_required_per_execution" },
     "execution_authorized": { "const": false },
     "final_confirmation_issued": { "const": false },
     "production_submit_port_mounted": { "const": true },
-    "skill_submit_allowed": { "const": false },
+    "skill_submit_allowed": { "const": true },
     "maximum_final_clicks": { "const": 1 },
     "execution_scope": {
       "type": "object",
@@ -44,9 +44,7 @@
     "implementation_gaps": {
       "type": "array",
       "uniqueItems": true,
-      "minItems": 1,
-      "maxItems": 1,
-      "items": { "const": "skill_final_submit_instructions_after_validation" }
+      "maxItems": 0
     }
   }
 }

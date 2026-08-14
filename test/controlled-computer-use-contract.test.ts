@@ -48,7 +48,7 @@ test("stage B Skill calibration is bound and partial Skill identity is rejected"
   }
 });
 
-test("OceanEngine SkillDefinition records passed gate-one takeover calibration without enabling execution", () => {
+test("OceanEngine SkillDefinition records controlled gate-two submit without claiming an unattended driver", () => {
   const definitionPath = join(root, "internal", "systems", "delivery", "platformskills", "definitions", "oceanengine-ecommerce-manual-v0.1.json");
   const definition = readJSON(definitionPath);
   const schema = readJSON(join(contracts, "delivery-platform-skill-definition-v1.schema.json"));
@@ -57,30 +57,34 @@ test("OceanEngine SkillDefinition records passed gate-one takeover calibration w
   assert.equal(validate(definition), true, ajv.errorsText(validate.errors));
   assert.equal(definition.executable, false);
   assert.equal(definition.real_browser_driver, false);
-  assert.equal(definition.submit_allowed, false);
-  assert.equal(definition.status, "gate_one_passed_takeover_calibration");
+  assert.equal(definition.submit_allowed, true);
+  assert.equal(definition.status, "gate_two_passed_takeover_submit_calibration");
   assert.equal((definition.gate_one as Record<string, unknown>).ready, true);
   assert.equal((definition.gate_one as Record<string, unknown>).result, "passed");
   assert.equal((definition.gate_one as Record<string, unknown>).project_form_status, "passed");
   assert.equal((definition.gate_one as Record<string, unknown>).promotion_form_status, "passed");
   assert.equal((definition.ui_baseline as Record<string, unknown>).observed_at, "2026-08-06");
-  assert.equal((definition.ui_baseline as Record<string, unknown>).revalidated_at, "2026-08-13");
+  assert.equal((definition.ui_baseline as Record<string, unknown>).revalidated_at, "2026-08-14");
   assert.equal(
     (definition.ui_baseline as Record<string, unknown>).drift_check,
-    "promotion_configuration_branches_revalidated",
+    "promotion_submit_and_independent_list_readback_revalidated",
   );
   for (const reference of [definition.schema_ref, ...(definition.evidence_refs as string[])]) {
     assert.equal(existsSync(join(root, String(reference))), true, `missing stage B evidence ${reference}`);
   }
 });
 
-test("PR 50 preserves passed takeover calibration without claiming an installed automated Browser Driver", () => {
+test("PR 50 preserves takeover calibration and per-execution submit instructions without claiming an automated Browser Driver", () => {
   assert.equal(existsSync(join(root, "internal", "systems", "delivery", "oceanengineskill", "gate_one.go")), false);
   const definition = readFileSync(join(root, "internal", "systems", "delivery", "platformskills", "definitions", "oceanengine-ecommerce-manual-v0.1.json"), "utf8");
   assert.match(definition, /"locator_contract": "project_and_promotion_forms_live_dom"/);
   assert.match(definition, /"promotion_form_live_calibrated": true/);
   assert.match(definition, /"control_plane_evidence_recorded": true/);
-  assert.match(definition, /"agent_final_submit_documentation": "deferred_until_end_to_end_flow_validated"/);
+  assert.match(definition, /"agent_final_submit_documentation": "available_in_skill_md_with_per_execution_authorization"/);
+  assert.equal(
+    existsSync(join(root, "internal", "systems", "delivery", "platformskills", "skills", "oceanengine-ecommerce-manual", "SKILL.md")),
+    true,
+  );
 });
 
 test("live gate-one evidence proves project-form readback and no write without persisting raw account identity", () => {
@@ -245,7 +249,7 @@ test("promotion live locators use stable semantics and retain the write boundary
   assert.deepEqual(locators.reference_gaps, []);
 });
 
-test("gate-two preflight mounts manual ports without granting final submit", () => {
+test("gate-two preflight permits only per-execution controlled submit", () => {
   const schemaPath = join(root, "docs", "delivery", "schemas", "oceanengine-gate-two-preflight-v0.1.json");
   const fixturePath = join(root, "docs", "delivery", "fixtures", "oceanengine-gate-two-preflight-v0.1.json");
   const rawFixture = readFileSync(fixturePath, "utf8");
@@ -256,12 +260,53 @@ test("gate-two preflight mounts manual ports without granting final submit", () 
   assert.equal(fixture.execution_authorized, false);
   assert.equal(fixture.final_confirmation_issued, false);
   assert.equal(fixture.production_submit_port_mounted, true);
-  assert.equal(fixture.skill_submit_allowed, false);
+  assert.equal(fixture.skill_submit_allowed, true);
   assert.equal(fixture.maximum_final_clicks, 1);
   assert.equal(fixture.result_unknown_policy, "query_or_takeover_never_resubmit");
   assert.equal(fixture.mapping_confirmation_policy, "result_page_and_list_page_ids_and_statuses_must_match");
-  assert.deepEqual(fixture.implementation_gaps, ["skill_final_submit_instructions_after_validation"]);
+  assert.deepEqual(fixture.implementation_gaps, []);
   assert.doesNotMatch(rawFixture, /\b\d{16}\b/);
+});
+
+test("gate-two evidence proves one click, two server-owned readbacks, and no delivery enable", () => {
+  const evidencePath = join(
+    root,
+    "docs",
+    "delivery",
+    "evidence",
+    "oceanengine-gate-two-promotion-submit-2026-08-14.json",
+  );
+  const rawEvidence = readFileSync(evidencePath, "utf8");
+  const evidence = JSON.parse(rawEvidence) as Record<string, unknown>;
+  assert.doesNotMatch(rawEvidence, /\b\d{15,20}\b/);
+  assert.match(String(evidence.account_reference_sha256), /^[a-f0-9]{64}$/);
+  const activeParent = evidence.active_parent_project as Record<string, unknown>;
+  assert.equal("id" in activeParent, false);
+  assert.equal("name" in activeParent, false);
+  assert.match(String(activeParent.reference_sha256), /^[a-f0-9]{64}$/);
+  assert.match(String(activeParent.name_reference_sha256), /^[a-f0-9]{64}$/);
+  assert.equal((evidence.superseded_parent_project as Record<string, unknown>).used_by_final_authority, false);
+  const submit = evidence.single_submit as Record<string, unknown>;
+  assert.equal(submit.click_count, 1);
+  assert.equal(submit.resubmit_attempted, false);
+  assert.equal(submit.attempt_status, "verified");
+  const result = evidence.platform_result as Record<string, unknown>;
+  assert.equal("promotion_id" in result, false);
+  assert.equal("promotion_name" in result, false);
+  assert.equal("parent_project_id" in result, false);
+  assert.match(String(result.promotion_reference_sha256), /^[a-f0-9]{64}$/);
+  assert.equal(result.delivery_enabled, false);
+  assert.equal(result.independent_list_match_count, 1);
+  const mapping = evidence.mapping as Record<string, unknown>;
+  assert.equal("id" in mapping, false);
+  assert.equal("platform_object_id" in mapping, false);
+  assert.equal(mapping.status, "confirmed");
+  assert.equal(mapping.values_loaded_from_server_evidence, true);
+  const terminal = evidence.terminal_control_plane as Record<string, unknown>;
+  assert.equal(terminal.computer_use_run_status, "succeeded");
+  assert.equal(terminal.controlled_execution_status, "succeeded");
+  assert.equal(terminal.controlled_change_set_status, "executed");
+  assert.equal(terminal.lease_released, true);
 });
 
 test("run-time blocks cannot reuse the Phase C compile-time prohibition", () => {

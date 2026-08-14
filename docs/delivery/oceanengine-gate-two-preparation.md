@@ -1,8 +1,8 @@
 # 巨量电商手动投放：门二准备基线
 
-本文只冻结进入门二前的授权、单次动作、写后回读和恢复契约，不构成真实写入授权。
-当前 `submit_allowed=false`，生产 API 仍为 takeover-only，自动 `prepare`/`submit`
-端口未挂载，也不会签发最终确认或修改 `SKILL.md`。
+本文冻结门二授权、单次动作、写后回读和恢复契约，并记录 2026-08-14 首次真实门二验证。
+文档本身不构成任何后续写入授权。`submit_allowed=true` 仅表示 Skill 已验证“当轮精确授权下
+的一次受控接管点击”；生产 API 仍为 takeover-only，自动 `prepare`/`submit` 端口未挂载。
 
 机器可读契约位于：
 
@@ -48,7 +48,23 @@ Delivery Mapping HTTP API 同样已挂载，并保持平台对象值由两份证
 
 ## 尚未实现、因此继续关闭的能力
 
-- 首次真实门二验证完成后的 Skill 最终提交说明。
+- 无人值守真实 Browser Driver。
+- 开启投放、远端修改、删除、补偿写入或未经新授权的再次提交。
 
-首次真实门二完成并复核前，不得把 `executable`、`real_browser_driver` 或
-`submit_allowed` 改为 true，也不得把最终提交行为写入 `SKILL.md`。
+## 2026-08-14 验证结果
+
+- 昨日父项目已删除，最终 authority 仅绑定今日父项目；两者在公开证据中仅保留
+  不可逆 SHA-256 引用，不公开平台 ID 或企业内部名称。
+- 账户引用 SHA-256 `a8c499f7e22dc70d392d8de9b7bd093a4e7371cb17ba3e53c4bf8e0eea15667c`
+  下只创建 1 个推广单元（公开证据仅保留 SHA-256 引用）；日预算
+  CNY 300、出价 CNY 0.01，状态归一化为 `pending_review`，未开启投放。
+- 最终确认只消费一次，`保存并关闭` 只点击一次，没有重提。
+- `result_observed` 与独立刷新后的 `list_confirmed` ID/状态一致；Mapping 为
+  `confirmed`，Run/ControlledExecution 为 `succeeded`，ChangeSet 为 `executed`。
+- 提交租约在写后核对期间过期时，只重新获取查询恢复租约；原 Attempt 绑定保持不变，
+  不产生第二次提交入口。
+
+完整证据位于 `evidence/oceanengine-gate-two-promotion-submit-2026-08-14.json`，最终提交
+操作约束位于
+`../../internal/systems/delivery/platformskills/skills/oceanengine-ecommerce-manual/SKILL.md`。
+`executable=false`、`real_browser_driver=false` 继续保持；每次门二仍必须重新获得当轮精确授权。

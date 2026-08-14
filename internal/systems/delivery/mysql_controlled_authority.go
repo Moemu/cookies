@@ -180,8 +180,11 @@ func (r MySQLRepository) ConfirmPlatformEntityMapping(ctx context.Context, org c
 	if err != nil {
 		return PlatformEntityMapping{}, err
 	}
-	if value.Version != expectedVersion || value.Status != PlatformEntityMappingPending {
+	if value.Version != expectedVersion {
 		return PlatformEntityMapping{}, ErrVersionConflict
+	}
+	if value.Status != PlatformEntityMappingPending && value.Status != PlatformEntityMappingConfirmed {
+		return PlatformEntityMapping{}, ErrInvalidState
 	}
 	resultEvidence, err := loadPlatformMappingEvidence(ctx, tx, value, resultEvidenceID)
 	if err != nil {
@@ -195,7 +198,46 @@ func (r MySQLRepository) ConfirmPlatformEntityMapping(ctx context.Context, org c
 	if err != nil {
 		return PlatformEntityMapping{}, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE delivery_platform_entity_mappings SET platform_object_id=?,platform_status=?,result_evidence_id=?,list_evidence_id=?,status='confirmed',version=version+1 WHERE organization_id=? AND project_id=? AND id=? AND status='pending_verification' AND version=?`, platformObjectID, platformStatus, resultEvidenceID, listEvidenceID, org, project, id, expectedVersion)
+	if value.Status == PlatformEntityMappingPending {
+		result, err := tx.ExecContext(ctx, `UPDATE delivery_platform_entity_mappings SET platform_object_id=?,platform_status=?,result_evidence_id=?,list_evidence_id=?,status='confirmed',version=version+1 WHERE organization_id=? AND project_id=? AND id=? AND status='pending_verification' AND version=?`, platformObjectID, platformStatus, resultEvidenceID, listEvidenceID, org, project, id, expectedVersion)
+		if err != nil {
+			return PlatformEntityMapping{}, err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return PlatformEntityMapping{}, err
+		}
+		if affected != 1 {
+			return PlatformEntityMapping{}, ErrVersionConflict
+		}
+	} else if value.PlatformObjectID != platformObjectID || value.PlatformStatus != platformStatus || value.ResultEvidenceID != resultEvidenceID || value.ListEvidenceID != listEvidenceID {
+		return PlatformEntityMapping{}, ErrApprovalContentMismatch
+	}
+
+	var changeSetID, executionRunID, executionStatus string
+	if err := tx.QueryRowContext(ctx, `SELECT controlled_change_set_id,COALESCE(computer_use_run_id,''),status FROM delivery_controlled_executions WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, org, project, value.BusinessExecutionID).Scan(&changeSetID, &executionRunID, &executionStatus); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return PlatformEntityMapping{}, ErrNotFound
+		}
+		return PlatformEntityMapping{}, err
+	}
+	if executionRunID != value.ComputerUseRunID {
+		return PlatformEntityMapping{}, ErrApprovalContentMismatch
+	}
+	completedAt := listEvidence.Evidence.CreatedAt
+	if executionStatus == "running" {
+		result, err := tx.ExecContext(ctx, `UPDATE delivery_controlled_executions SET status='succeeded',version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND status='running' AND computer_use_run_id=?`, completedAt, org, project, value.BusinessExecutionID, value.ComputerUseRunID)
+		if err != nil {
+			return PlatformEntityMapping{}, err
+		}
+		affected, _ := result.RowsAffected()
+		if affected != 1 {
+			return PlatformEntityMapping{}, ErrVersionConflict
+		}
+	} else if executionStatus != "succeeded" {
+		return PlatformEntityMapping{}, ErrInvalidState
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE delivery_controlled_change_sets SET status='executed',version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND status='executing'`, completedAt, org, project, changeSetID)
 	if err != nil {
 		return PlatformEntityMapping{}, err
 	}
@@ -203,8 +245,14 @@ func (r MySQLRepository) ConfirmPlatformEntityMapping(ctx context.Context, org c
 	if err != nil {
 		return PlatformEntityMapping{}, err
 	}
-	if affected != 1 {
-		return PlatformEntityMapping{}, ErrVersionConflict
+	if affected == 0 {
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM delivery_controlled_change_sets WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, org, project, changeSetID).Scan(&status); err != nil {
+			return PlatformEntityMapping{}, err
+		}
+		if status != string(ControlledChangeSetExecuted) {
+			return PlatformEntityMapping{}, ErrInvalidState
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return PlatformEntityMapping{}, err

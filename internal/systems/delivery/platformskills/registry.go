@@ -15,7 +15,7 @@ const (
 var ErrInvalidDefinition = errors.New("invalid delivery Platform Skill definition")
 
 var gateTwoRequiredRuntimeChecks = []string{"fresh_controlled_authority", "explicit_user_authorization_in_execution_turn", "responsible_user_online", "account_project_action_budget_exact_match", "current_page_values_match_approval", "unexpired_single_use_confirmation", "valid_fenced_lease", "kill_switch_inactive", "single_click_budget", "post_write_result_and_list_readback", "result_unknown_no_resubmit", "confirmed_mapping_requires_two_matching_readbacks"}
-var gateTwoImplementationGaps = []string{"skill_final_submit_instructions_after_validation"}
+var gateTwoImplementationGaps = []string{}
 
 //go:embed definitions/*.json
 var definitions embed.FS
@@ -89,6 +89,17 @@ type Definition struct {
 		RequiredRuntimeChecks       []string `json:"required_runtime_checks"`
 		ImplementationGaps          []string `json:"implementation_gaps"`
 	} `json:"gate_two_preparation"`
+	GateTwoValidation struct {
+		ObservedAt                           string `json:"observed_at"`
+		AccountReferenceSHA256               string `json:"account_reference_sha256"`
+		ParentPlatformProjectReferenceSHA256 string `json:"parent_platform_project_reference_sha256"`
+		PromotionReferenceSHA256             string `json:"promotion_reference_sha256"`
+		MaximumFinalClicksObserved           int    `json:"maximum_final_clicks_observed"`
+		RunStatus                            string `json:"run_status"`
+		MappingStatus                        string `json:"mapping_status"`
+		DeliveryEnabled                      bool   `json:"delivery_enabled"`
+		EvidenceRef                          string `json:"evidence_ref"`
+	} `json:"gate_two_validation"`
 }
 
 func Get(id, version string) (Definition, error) {
@@ -116,17 +127,17 @@ func (d Definition) Validate() error {
 		d.DisplayName != "巨量引擎·电商手动投放" ||
 		d.Platform != "ocean_engine" ||
 		d.Capability != "ecommerce_manual_delivery" ||
-		d.Status != "gate_one_passed_takeover_calibration" ||
+		d.Status != "gate_two_passed_takeover_submit_calibration" ||
 		d.Owner != "delivery" ||
-		d.Executable || d.RealBrowserDriver || d.SubmitAllowed ||
+		d.Executable || d.RealBrowserDriver || !d.SubmitAllowed ||
 		d.EvidenceObserved != "2026-08-06" ||
-		d.UIBaseline.RevalidatedAt != "2026-08-13" ||
+		d.UIBaseline.RevalidatedAt != "2026-08-14" ||
 		d.UIBaseline.LocatorContract != "project_and_promotion_forms_live_dom" ||
-		d.UIBaseline.DriftCheck != "promotion_configuration_branches_revalidated" ||
+		d.UIBaseline.DriftCheck != "promotion_submit_and_independent_list_readback_revalidated" ||
 		!d.RuntimePolicy.ProjectFormLiveCalibrated ||
 		!d.RuntimePolicy.PromotionFormLiveCalibrated ||
 		!d.RuntimePolicy.ControlPlaneEvidenceRecorded ||
-		d.RuntimePolicy.AgentFinalSubmitDocumentation != "deferred_until_end_to_end_flow_validated" ||
+		d.RuntimePolicy.AgentFinalSubmitDocumentation != "available_in_skill_md_with_per_execution_authorization" ||
 		d.Rollback.Method != "disable_skill_version_and_fall_back_to_human_takeover" ||
 		!d.GateOne.Ready ||
 		d.GateOne.Result != "passed" ||
@@ -134,15 +145,24 @@ func (d Definition) Validate() error {
 		d.GateOne.PromotionFormStatus != "passed" ||
 		d.GateOne.ControlPlaneEvidenceStatus != "passed" ||
 		d.GateOne.LiveEvidenceRef == "" ||
-		d.GateTwoPreparation.Status != "ports_ready_authorization_required" ||
+		d.GateTwoPreparation.Status != "gate_two_validated_authorization_required_per_execution" ||
 		d.GateTwoPreparation.ExecutionAuthorized ||
 		d.GateTwoPreparation.FinalConfirmationIssued ||
 		!d.GateTwoPreparation.ProductionSubmitPortMounted ||
-		d.GateTwoPreparation.SkillSubmitAllowed ||
+		!d.GateTwoPreparation.SkillSubmitAllowed ||
 		d.GateTwoPreparation.MaximumFinalClicks != 1 ||
 		d.GateTwoPreparation.PreflightRef != "docs/delivery/fixtures/oceanengine-gate-two-preflight-v0.1.json" ||
 		!slices.Equal(d.GateTwoPreparation.RequiredRuntimeChecks, gateTwoRequiredRuntimeChecks) ||
 		!slices.Equal(d.GateTwoPreparation.ImplementationGaps, gateTwoImplementationGaps) ||
+		d.GateTwoValidation.ObservedAt != "2026-08-14" ||
+		d.GateTwoValidation.AccountReferenceSHA256 != "a8c499f7e22dc70d392d8de9b7bd093a4e7371cb17ba3e53c4bf8e0eea15667c" ||
+		d.GateTwoValidation.ParentPlatformProjectReferenceSHA256 != "07f55315c832782799372a190c3a7c263717634543e81d253919cfa180317f89" ||
+		d.GateTwoValidation.PromotionReferenceSHA256 != "199672dd7e6d506b8ef3da3b3011c2b192ba5339d743a0c57f6fc3a5f444aab2" ||
+		d.GateTwoValidation.MaximumFinalClicksObserved != 1 ||
+		d.GateTwoValidation.RunStatus != "succeeded" ||
+		d.GateTwoValidation.MappingStatus != "confirmed" ||
+		d.GateTwoValidation.DeliveryEnabled ||
+		d.GateTwoValidation.EvidenceRef != "docs/delivery/evidence/oceanengine-gate-two-promotion-submit-2026-08-14.json" ||
 		len(d.EvidenceRefs) < 11 ||
 		len(d.PageTypes) < 9 ||
 		len(d.Capabilities.Allowed) == 0 ||

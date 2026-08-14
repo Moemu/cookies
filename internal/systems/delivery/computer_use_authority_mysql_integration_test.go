@@ -126,4 +126,15 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	if err != nil || mapping.Status != PlatformEntityMappingConfirmed || mapping.PlatformObjectID != "platform_1" || mapping.PlatformStatus != "pending_review" {
 		t.Fatalf("mapping=%+v err=%v", mapping, err)
 	}
+	linked, err = deliveryRepo.GetControlledExecution(ctx, org, project, execution.ID)
+	if err != nil || linked.Status != "succeeded" {
+		t.Fatalf("completed execution=%+v err=%v", linked, err)
+	}
+	loadedChange, err = deliveryRepo.GetControlledChangeSet(ctx, org, project, change.ID)
+	if err != nil || loadedChange.Status != ControlledChangeSetExecuted {
+		t.Fatalf("executed change=%+v err=%v", loadedChange, err)
+	}
+	if replayedMapping, replayErr := deliveryRepo.ConfirmPlatformEntityMapping(ctx, org, project, mapping.ID, mapping.Version, resultEvidence.ID, listEvidence.ID); replayErr != nil || replayedMapping.ID != mapping.ID {
+		t.Fatalf("mapping confirmation replay=%+v err=%v", replayedMapping, replayErr)
+	}
 }
