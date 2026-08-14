@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -15,11 +16,12 @@ type controlledMemoryRepository struct {
 	approvals  map[string]RemoteWriteApproval
 	executions map[string]ControlledExecution
 	mappings   map[string]PlatformEntityMapping
+	revisions  map[string]PlatformEntityMappingRevision
 	evidence   map[string]platformMappingEvidence
 }
 
 func newControlledMemoryRepository() *controlledMemoryRepository {
-	return &controlledMemoryRepository{memoryRepository: newMemoryRepository(), changes: map[string]ControlledChangeSet{}, approvals: map[string]RemoteWriteApproval{}, executions: map[string]ControlledExecution{}, mappings: map[string]PlatformEntityMapping{}, evidence: map[string]platformMappingEvidence{}}
+	return &controlledMemoryRepository{memoryRepository: newMemoryRepository(), changes: map[string]ControlledChangeSet{}, approvals: map[string]RemoteWriteApproval{}, executions: map[string]ControlledExecution{}, mappings: map[string]PlatformEntityMapping{}, revisions: map[string]PlatformEntityMappingRevision{}, evidence: map[string]platformMappingEvidence{}}
 }
 func (r *controlledMemoryRepository) CreateControlledChangeSet(_ context.Context, v ControlledChangeSet) (ControlledChangeSet, bool, error) {
 	for _, existing := range r.changes {
@@ -54,6 +56,12 @@ func (r *controlledMemoryRepository) GetRemoteWriteApproval(_ context.Context, o
 }
 func (r *controlledMemoryRepository) CreateControlledExecution(_ context.Context, v ControlledExecution) (ControlledExecution, error) {
 	r.executions[repositoryKey(v.OrganizationID, v.ProjectID, v.ID)] = v
+	changeKey := repositoryKey(v.OrganizationID, v.ProjectID, v.ControlledChangeSetID)
+	change := r.changes[changeKey]
+	change.Status = ControlledChangeSetExecuting
+	change.Version++
+	change.UpdatedAt = v.CreatedAt
+	r.changes[changeKey] = change
 	return v, nil
 }
 func (r *controlledMemoryRepository) GetControlledExecution(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (ControlledExecution, error) {
@@ -90,6 +98,18 @@ func (r *controlledMemoryRepository) GetPlatformEntityMapping(_ context.Context,
 	}
 	return v, nil
 }
+func (r *controlledMemoryRepository) ValidateControlledMaterialReferences(_ context.Context, org contract.OrganizationID, project contract.ProjectID, _ string, references []ControlledMaterialReference) error {
+	for _, reference := range references {
+		evidence, ok := r.evidence[reference.AuthorizationEvidenceID]
+		if !ok {
+			return ErrNotFound
+		}
+		if evidence.Evidence.OrganizationID != org || evidence.Evidence.ProjectID != project || evidence.Evidence.FieldReadback["authorized_material_reference_id"] != reference.ReferenceID {
+			return ErrApprovalContentMismatch
+		}
+	}
+	return nil
+}
 func (r *controlledMemoryRepository) ConfirmPlatformEntityMapping(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion int64, resultEvidenceID, listEvidenceID string) (PlatformEntityMapping, error) {
 	key := repositoryKey(org, project, id)
 	current, ok := r.mappings[key]
@@ -111,15 +131,76 @@ func (r *controlledMemoryRepository) ConfirmPlatformEntityMapping(_ context.Cont
 	current.PlatformObjectID, current.PlatformStatus = objectID, status
 	current.ResultEvidenceID, current.ListEvidenceID = resultEvidenceID, listEvidenceID
 	current.Status, current.Version = PlatformEntityMappingConfirmed, current.Version+1
+	current.UpdatedAt = list.Evidence.CreatedAt
 	r.mappings[key] = current
+	if execution, exists := r.executions[repositoryKey(org, project, current.BusinessExecutionID)]; exists {
+		execution.Status = "succeeded"
+		execution.Version++
+		r.executions[repositoryKey(org, project, execution.ID)] = execution
+		change := r.changes[repositoryKey(org, project, execution.ControlledChangeSetID)]
+		change.Status = ControlledChangeSetExecuted
+		change.Version++
+		r.changes[repositoryKey(org, project, change.ID)] = change
+	}
 	return current, nil
+}
+
+func (r *controlledMemoryRepository) ConfirmPlatformEntityMappingMutation(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion int64, businessExecutionID, resultEvidenceID, listEvidenceID string) (PlatformEntityMapping, PlatformEntityMappingRevision, error) {
+	key := repositoryKey(org, project, id)
+	mapping, ok := r.mappings[key]
+	if !ok {
+		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrNotFound
+	}
+	if mapping.Version != expectedVersion || mapping.Status != PlatformEntityMappingConfirmed {
+		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrVersionConflict
+	}
+	execution, ok := r.executions[repositoryKey(org, project, businessExecutionID)]
+	if !ok || execution.Status != "running" {
+		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrInvalidState
+	}
+	change := r.changes[repositoryKey(org, project, execution.ControlledChangeSetID)]
+	mutation := change.Binding.PromotionMutation
+	if mutation == nil || change.Binding.TargetMappingID != mapping.ID || change.Binding.TargetMappingVersion != mapping.Version || change.Binding.TargetPlatformObjectID != mapping.PlatformObjectID {
+		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrApprovalContentMismatch
+	}
+	result, resultOK := r.evidence[resultEvidenceID]
+	list, listOK := r.evidence[listEvidenceID]
+	if !resultOK || !listOK {
+		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrNotFound
+	}
+	evidenceScope := mapping
+	evidenceScope.ComputerUseRunID = execution.ComputerUseRunID
+	evidenceScope.InternalObjectID = change.Binding.ObjectFingerprint
+	objectID, status, err := validatePlatformMappingEvidence(evidenceScope, result, list)
+	if err != nil || objectID != mapping.PlatformObjectID || result.Evidence.FieldReadback["target_state_hash"] != mutation.TargetStateHash || list.Evidence.FieldReadback["target_state_hash"] != mutation.TargetStateHash {
+		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrApprovalContentMismatch
+	}
+	revision := PlatformEntityMappingRevision{MappingID: mapping.ID, OrganizationID: org, ProjectID: project, Version: mapping.Version + 1, Action: change.Action, BusinessExecutionID: execution.ID, ComputerUseRunID: execution.ComputerUseRunID, PlatformObjectID: objectID, PlatformStatus: status, PreviousStateAction: mapping.CurrentStateAction, PreviousStateHash: mapping.CurrentStateHash, CurrentStateAction: change.Action, CurrentStateHash: mutation.TargetStateHash, ResultEvidenceID: resultEvidenceID, ListEvidenceID: listEvidenceID, CreatedAt: list.Evidence.CreatedAt}
+	mapping.PlatformStatus = status
+	mapping.BusinessExecutionID = execution.ID
+	mapping.ComputerUseRunID = execution.ComputerUseRunID
+	mapping.CurrentStateAction = change.Action
+	mapping.CurrentStateHash = mutation.TargetStateHash
+	mapping.ResultEvidenceID = resultEvidenceID
+	mapping.ListEvidenceID = listEvidenceID
+	mapping.Version++
+	mapping.UpdatedAt = list.Evidence.CreatedAt
+	r.mappings[key] = mapping
+	r.revisions[repositoryKey(org, project, id+"-"+strconv.FormatInt(mapping.Version, 10))] = revision
+	execution.Status = "succeeded"
+	execution.Version++
+	r.executions[repositoryKey(org, project, execution.ID)] = execution
+	change.Status = ControlledChangeSetExecuted
+	change.Version++
+	r.changes[repositoryKey(org, project, change.ID)] = change
+	return mapping, revision, nil
 }
 
 func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *testing.T) {
 	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
 	repo := newControlledMemoryRepository()
 	counter := 0
-	service := Service{Repository: repo, Projects: testProjects{}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { counter++; return prefix + "_test", nil }}
+	service := Service{Repository: repo, Projects: testProjects{}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { counter++; return prefix + "_" + strconv.Itoa(counter), nil }}
 	actor := contract.ActorContext{OrganizationID: "org_a", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "operator_1"}, Scopes: contract.ScopesFromStrings([]string{string(ScopeWrite), string(ScopeApprove), string(ScopeExecute)})}
 	selection := validObservatorySelection(t)
 	selection.OrganizationID, selection.ProjectID = actor.OrganizationID, "project_a"
@@ -182,7 +263,7 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	if err != nil || execution.Status != "running" || execution.ComputerUseRunID != "run_1" || execution.Version != 2 {
 		t.Fatalf("attached execution=%#v err=%v", execution, err)
 	}
-	mapping, err := service.CreatePendingPlatformEntityMapping(context.Background(), actor, PlatformEntityMapping{ID: "mapping_1", ProjectID: "project_a", AccountReferenceID: change.Binding.AccountReferenceID, PlanID: change.Binding.PlanID, ConfigurationID: change.Binding.ConfigurationID, BusinessExecutionID: execution.ID, ComputerUseRunID: execution.ComputerUseRunID, InternalObjectKind: "project", InternalObjectID: change.Binding.ObjectFingerprint, PlatformObjectKind: "project"})
+	mapping, err := service.CreatePendingPlatformEntityMapping(context.Background(), actor, PlatformEntityMapping{ID: "mapping_1", ProjectID: "project_a", AccountReferenceID: change.Binding.AccountReferenceID, PlanID: change.Binding.PlanID, ConfigurationID: change.Binding.ConfigurationID, BusinessExecutionID: execution.ID, ComputerUseRunID: execution.ComputerUseRunID, InternalObjectKind: "promotion", InternalObjectID: change.Binding.ObjectFingerprint, PlatformObjectKind: "promotion"})
 	if err != nil || mapping.Status != PlatformEntityMappingPending || mapping.PlatformObjectID != "" || mapping.PlatformStatus != "" || mapping.ResultEvidenceID != "" || mapping.ListEvidenceID != "" {
 		t.Fatalf("pending mapping=%#v err=%v", mapping, err)
 	}
@@ -192,11 +273,60 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	if err != nil || mapping.Status != PlatformEntityMappingConfirmed || mapping.Version != 2 {
 		t.Fatalf("confirmed mapping=%#v err=%v", mapping, err)
 	}
+
+	mutationChange, mutationReplay, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", mapping.ID, CompileMappedControlledChangeSetRequest{ExpectedMappingVersion: mapping.Version, Action: ControlledActionUpdatePromotionBudget, CurrentDailyBudgetMinor: 30000, TargetDailyBudgetMinor: 36000})
+	if err != nil || mutationReplay {
+		t.Fatalf("compile mutation replay=%t err=%v", mutationReplay, err)
+	}
+	mutation := mutationChange.Binding.PromotionMutation
+	if mutation == nil || mutationChange.Action != ControlledActionUpdatePromotionBudget || mutationChange.Binding.TargetMappingID != mapping.ID || mutationChange.Binding.TargetMappingVersion != mapping.Version || mutationChange.Binding.TargetPlatformObjectID != mapping.PlatformObjectID || mutation.CurrentDailyBudgetMinor != 30000 || mutation.TargetDailyBudgetMinor != 36000 || mutationChange.BudgetLimitMinor != 36000 {
+		t.Fatalf("mutation change=%#v", mutationChange)
+	}
+	if mutationChange.Binding.ObjectFingerprint == change.Binding.ObjectFingerprint {
+		t.Fatal("mutation reused the creation object fingerprint")
+	}
+	approvedMutation, mutationApproval, err := service.ApproveControlledChangeSet(context.Background(), actor, "project_a", mutationChange.ID, ApproveControlledChangeSetRequest{ExpectedVersion: mutationChange.Version})
+	if err != nil || mutationApproval.ID == approval.ID || mutationApproval.ControlledChangeSetID != mutationChange.ID {
+		t.Fatalf("mutation approval=%#v err=%v", mutationApproval, err)
+	}
+	mutationExecution, err := service.CreateControlledExecution(context.Background(), actor, "project_a", approvedMutation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutationExecution, err = service.AttachComputerUseRun(context.Background(), actor, "project_a", mutationExecution.ID, mutationExecution.Version, "run_mutation_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceScope := mapping
+	evidenceScope.ComputerUseRunID = mutationExecution.ComputerUseRunID
+	evidenceScope.InternalObjectID = mutationChange.Binding.ObjectFingerprint
+	resultMutationEvidence := validMappingEvidence(evidenceScope, "evidence_mutation_result", "step_mutation_result", 2, computeruse.TakeoverResultObserved, mapping.PlatformObjectID, "pending_review")
+	resultMutationEvidence.Evidence.FieldReadback["target_state_hash"] = mutation.TargetStateHash
+	listMutationEvidence := validMappingEvidence(evidenceScope, "evidence_mutation_list", "step_mutation_list", 3, computeruse.TakeoverListConfirmed, mapping.PlatformObjectID, "pending_review")
+	listMutationEvidence.Evidence.FieldReadback["target_state_hash"] = mutation.TargetStateHash
+	repo.evidence[resultMutationEvidence.Evidence.ID] = resultMutationEvidence
+	repo.evidence[listMutationEvidence.Evidence.ID] = listMutationEvidence
+	updatedMapping, revision, err := service.ConfirmPlatformEntityMappingMutation(context.Background(), actor, "project_a", mapping.ID, ConfirmPlatformEntityMappingMutationRequest{ExpectedVersion: mapping.Version, BusinessExecutionID: mutationExecution.ID, ResultEvidenceID: resultMutationEvidence.Evidence.ID, ListEvidenceID: listMutationEvidence.Evidence.ID})
+	if err != nil || updatedMapping.Version != mapping.Version+1 || updatedMapping.BusinessExecutionID != mutationExecution.ID || updatedMapping.ComputerUseRunID != mutationExecution.ComputerUseRunID || updatedMapping.CurrentStateAction != ControlledActionUpdatePromotionBudget || updatedMapping.CurrentStateHash != mutation.TargetStateHash || revision.PreviousStateHash != "" || revision.CurrentStateAction != ControlledActionUpdatePromotionBudget || revision.CurrentStateHash != mutation.TargetStateHash || revision.Action != ControlledActionUpdatePromotionBudget {
+		t.Fatalf("updated mapping=%#v revision=%#v err=%v", updatedMapping, revision, err)
+	}
+	scheduleStart := now.Add(24 * time.Hour)
+	scheduleChange, _, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", updatedMapping.ID, CompileMappedControlledChangeSetRequest{ExpectedMappingVersion: updatedMapping.Version, Action: ControlledActionUpdatePromotionSchedule, CurrentDailyBudgetMinor: 36000, TargetDailyBudgetMinor: 36000, CurrentSchedule: &ControlledScheduleWindow{StartAt: scheduleStart, EndAt: scheduleStart.Add(24 * time.Hour), Timezone: "Asia/Shanghai"}, TargetSchedule: &ControlledScheduleWindow{StartAt: scheduleStart, EndAt: scheduleStart.Add(48 * time.Hour), Timezone: "Asia/Shanghai"}})
+	if err != nil || scheduleChange.Binding.PromotionMutation == nil {
+		t.Fatalf("schedule change=%#v err=%v", scheduleChange, err)
+	}
+	for _, material := range []struct{ reference, evidence string }{{"asset_a", "material_evidence_a"}, {"asset_b", "material_evidence_b"}} {
+		repo.evidence[material.evidence] = platformMappingEvidence{Evidence: computeruse.Evidence{ID: material.evidence, OrganizationID: actor.OrganizationID, ProjectID: "project_a", FieldReadback: map[string]string{"authorized_material_reference_id": material.reference}}}
+	}
+	materialChange, _, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", updatedMapping.ID, CompileMappedControlledChangeSetRequest{ExpectedMappingVersion: updatedMapping.Version, Action: ControlledActionUpdatePromotionMaterials, CurrentDailyBudgetMinor: 36000, TargetDailyBudgetMinor: 36000, CurrentMaterials: []ControlledMaterialReference{{ReferenceID: "asset_a", AuthorizationEvidenceID: "material_evidence_a"}}, TargetMaterials: []ControlledMaterialReference{{ReferenceID: "asset_a", AuthorizationEvidenceID: "material_evidence_a"}, {ReferenceID: "asset_b", AuthorizationEvidenceID: "material_evidence_b"}}})
+	if err != nil || materialChange.Binding.PromotionMutation == nil || len(materialChange.Binding.PromotionMutation.TargetMaterials) != 2 {
+		t.Fatalf("material change=%#v err=%v", materialChange, err)
+	}
 }
 
 func validMappingEvidence(mapping PlatformEntityMapping, evidenceID, stepID string, sequence int, action computeruse.TakeoverWriteOutcome, objectID, status string) platformMappingEvidence {
 	return platformMappingEvidence{
-		Evidence: computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: evidenceID, OrganizationID: mapping.OrganizationID, ProjectID: mapping.ProjectID, RunID: mapping.ComputerUseRunID, StepID: stepID, ObjectFingerprint: mapping.InternalObjectID, FieldReadback: map[string]string{"platform_object_id": objectID, "platform_status": status}},
+		Evidence: computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: evidenceID, OrganizationID: mapping.OrganizationID, ProjectID: mapping.ProjectID, RunID: mapping.ComputerUseRunID, StepID: stepID, ObjectFingerprint: mapping.InternalObjectID, FieldReadback: map[string]string{"platform_object_id": objectID, "platform_status": status}, CreatedAt: time.Date(2026, 8, 13, 13, 0, sequence, 0, time.UTC)},
 		Step:     computeruse.RunStep{ID: stepID, RunID: mapping.ComputerUseRunID, Sequence: sequence, Action: string(action), Status: computeruse.StepSucceeded},
 	}
 }

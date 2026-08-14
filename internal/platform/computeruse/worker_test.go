@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 func TestDeterministicFakeWorkerTerminalOutcomes(t *testing.T) {
@@ -78,6 +80,35 @@ func TestFakeWorkerRejectsAccountDriftBeforeConfirmation(t *testing.T) {
 	}
 	if result.State != RunFailed || result.BlockingReason != BlockAccountMismatch {
 		t.Fatalf("result=%#v", result)
+	}
+}
+
+func TestDeterministicFakeAdapterProjectsExactPromotionMutationReadback(t *testing.T) {
+	now := time.Date(2026, 8, 14, 5, 0, 0, 0, time.UTC)
+	run := validRun(now)
+	currentHash, _ := contract.CanonicalJSONHash(struct {
+		DailyBudgetMinor int64 `json:"daily_budget_minor"`
+	}{30000})
+	targetHash, _ := contract.CanonicalJSONHash(struct {
+		DailyBudgetMinor int64 `json:"daily_budget_minor"`
+	}{36000})
+	run.Authority.Action = "update_promotion_budget"
+	run.Authority.ParentPlatformProjectID = "project_test"
+	run.Authority.TargetMappingID = "mapping_test"
+	run.Authority.TargetMappingVersion = 2
+	run.Authority.TargetPlatformObjectID = "promotion_test"
+	run.Authority.TargetPlatformObjectKind = "promotion"
+	run.Authority.PromotionBudgetLimitMinor = 36000
+	run.Authority.BudgetLimitMinor = 36000
+	run.Authority.PromotionMutation = &PromotionMutationBinding{CurrentDailyBudgetMinor: 30000, TargetDailyBudgetMinor: 36000, CurrentStateHash: currentHash, TargetStateHash: targetHash}
+	adapter := DeterministicFakeAdapter{Outcome: WorkerSuccess, AccountID: run.AccountID}
+	prepared, err := adapter.Prepare(context.Background(), run)
+	if err != nil || prepared.Readback["platform_object_id"] != "promotion_test" || prepared.Readback["current_state_hash"] != currentHash || prepared.Readback["target_state_hash"] != targetHash || len(prepared.DiffKeys) != 0 {
+		t.Fatalf("prepared=%#v err=%v", prepared, err)
+	}
+	_, outcome, err := adapter.Submit(context.Background(), run, ControlledActionAttempt{})
+	if err != nil || outcome.Readback["platform_object_id"] != "promotion_test" || outcome.Readback["target_state_hash"] != targetHash {
+		t.Fatalf("outcome=%#v err=%v", outcome, err)
 	}
 }
 

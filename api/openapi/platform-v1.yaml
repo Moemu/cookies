@@ -3449,8 +3449,17 @@ components:
         approval_id: {type: string}
         approval_action_hash: {$ref: '#/components/schemas/ComputerUseHash'}
         account_reference_id: {type: string}
+        parent_platform_project_id: {type: string}
+        target_mapping_id: {type: string}
+        target_mapping_version: {type: integer, minimum: 1}
+        target_platform_object_id: {type: string}
+        target_platform_object_kind: {type: string, enum: [promotion]}
+        promotion_mutation: {$ref: '#/components/schemas/ComputerUsePromotionMutation'}
         object_fingerprint: {type: string}
         action: {type: string}
+        project_budget_mode: {type: string, enum: [daily, unlimited]}
+        project_budget_limit_minor: {type: integer, minimum: 0}
+        promotion_budget_limit_minor: {type: integer, minimum: 0}
         budget_limit_minor: {type: integer, minimum: 0}
         currency: {type: string, const: CNY}
         plan_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
@@ -3463,6 +3472,38 @@ components:
         workflow_step_id: {type: string}
         skill_id: {type: string}
         skill_version: {type: string}
+    ComputerUsePromotionScheduleWindow:
+      type: object
+      additionalProperties: false
+      required: [start_at, end_at, timezone]
+      properties:
+        start_at: {type: string, format: date-time}
+        end_at: {type: string, format: date-time}
+        timezone: {type: string}
+    ComputerUsePromotionMaterialReference:
+      type: object
+      additionalProperties: false
+      required: [reference_id, authorization_evidence_id]
+      properties:
+        reference_id: {type: string}
+        authorization_evidence_id: {type: string}
+    ComputerUsePromotionMutation:
+      type: object
+      additionalProperties: false
+      required: [current_daily_budget_minor, target_daily_budget_minor, current_state_hash, target_state_hash]
+      properties:
+        current_daily_budget_minor: {type: integer, minimum: 30000}
+        target_daily_budget_minor: {type: integer, minimum: 30000}
+        current_schedule: {$ref: '#/components/schemas/ComputerUsePromotionScheduleWindow'}
+        target_schedule: {$ref: '#/components/schemas/ComputerUsePromotionScheduleWindow'}
+        current_materials:
+          type: array
+          items: {$ref: '#/components/schemas/ComputerUsePromotionMaterialReference'}
+        target_materials:
+          type: array
+          items: {$ref: '#/components/schemas/ComputerUsePromotionMaterialReference'}
+        current_state_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        target_state_hash: {$ref: '#/components/schemas/ComputerUseHash'}
     ComputerUseRun:
       type: object
       additionalProperties: false

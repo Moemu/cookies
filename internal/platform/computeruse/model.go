@@ -60,33 +60,124 @@ type Platform string
 
 const PlatformOceanEngine Platform = "ocean_engine"
 
+type PromotionScheduleWindow struct {
+	StartAt  time.Time `json:"start_at"`
+	EndAt    time.Time `json:"end_at"`
+	Timezone string    `json:"timezone"`
+}
+
+type PromotionMaterialReference struct {
+	ReferenceID             string `json:"reference_id"`
+	AuthorizationEvidenceID string `json:"authorization_evidence_id"`
+}
+
+type PromotionMutationBinding struct {
+	CurrentDailyBudgetMinor int64                        `json:"current_daily_budget_minor"`
+	TargetDailyBudgetMinor  int64                        `json:"target_daily_budget_minor"`
+	CurrentSchedule         *PromotionScheduleWindow     `json:"current_schedule,omitempty"`
+	TargetSchedule          *PromotionScheduleWindow     `json:"target_schedule,omitempty"`
+	CurrentMaterials        []PromotionMaterialReference `json:"current_materials,omitempty"`
+	TargetMaterials         []PromotionMaterialReference `json:"target_materials,omitempty"`
+	CurrentStateHash        string                       `json:"current_state_hash"`
+	TargetStateHash         string                       `json:"target_state_hash"`
+}
+
+func (m PromotionMutationBinding) Validate(action string) error {
+	if !modifiesExistingPromotionAction(action) || m.CurrentDailyBudgetMinor < 30000 || m.TargetDailyBudgetMinor < 30000 || !isSHA256(m.CurrentStateHash) || !isSHA256(m.TargetStateHash) || m.CurrentStateHash == m.TargetStateHash {
+		return ErrInvalidContract
+	}
+	var current, target any
+	switch action {
+	case "update_promotion_budget":
+		if m.CurrentDailyBudgetMinor == m.TargetDailyBudgetMinor || m.CurrentSchedule != nil || m.TargetSchedule != nil || len(m.CurrentMaterials) != 0 || len(m.TargetMaterials) != 0 {
+			return ErrInvalidContract
+		}
+		current = struct {
+			DailyBudgetMinor int64 `json:"daily_budget_minor"`
+		}{m.CurrentDailyBudgetMinor}
+		target = struct {
+			DailyBudgetMinor int64 `json:"daily_budget_minor"`
+		}{m.TargetDailyBudgetMinor}
+	case "update_promotion_schedule":
+		if m.CurrentDailyBudgetMinor != m.TargetDailyBudgetMinor || m.CurrentSchedule == nil || m.TargetSchedule == nil || !validPromotionSchedule(*m.CurrentSchedule) || !validPromotionSchedule(*m.TargetSchedule) || len(m.CurrentMaterials) != 0 || len(m.TargetMaterials) != 0 {
+			return ErrInvalidContract
+		}
+		current = struct {
+			DailyBudgetMinor int64                   `json:"daily_budget_minor"`
+			Schedule         PromotionScheduleWindow `json:"schedule"`
+		}{m.CurrentDailyBudgetMinor, *m.CurrentSchedule}
+		target = struct {
+			DailyBudgetMinor int64                   `json:"daily_budget_minor"`
+			Schedule         PromotionScheduleWindow `json:"schedule"`
+		}{m.TargetDailyBudgetMinor, *m.TargetSchedule}
+	case "update_promotion_materials":
+		if m.CurrentDailyBudgetMinor != m.TargetDailyBudgetMinor || m.CurrentSchedule != nil || m.TargetSchedule != nil || len(m.TargetMaterials) == 0 || !validPromotionMaterials(m.CurrentMaterials) || !validPromotionMaterials(m.TargetMaterials) {
+			return ErrInvalidContract
+		}
+		current = struct {
+			DailyBudgetMinor int64                        `json:"daily_budget_minor"`
+			Materials        []PromotionMaterialReference `json:"materials"`
+		}{m.CurrentDailyBudgetMinor, m.CurrentMaterials}
+		target = struct {
+			DailyBudgetMinor int64                        `json:"daily_budget_minor"`
+			Materials        []PromotionMaterialReference `json:"materials"`
+		}{m.TargetDailyBudgetMinor, m.TargetMaterials}
+	}
+	currentHash, currentErr := contract.CanonicalJSONHash(current)
+	targetHash, targetErr := contract.CanonicalJSONHash(target)
+	if currentErr != nil || targetErr != nil || currentHash != m.CurrentStateHash || targetHash != m.TargetStateHash {
+		return ErrInvalidContract
+	}
+	return nil
+}
+
+func validPromotionSchedule(value PromotionScheduleWindow) bool {
+	return !value.StartAt.IsZero() && value.EndAt.After(value.StartAt) && strings.TrimSpace(value.Timezone) != ""
+}
+
+func validPromotionMaterials(values []PromotionMaterialReference) bool {
+	previous := ""
+	for _, value := range values {
+		if strings.TrimSpace(value.ReferenceID) == "" || strings.TrimSpace(value.AuthorizationEvidenceID) == "" || value.ReferenceID <= previous {
+			return false
+		}
+		previous = value.ReferenceID
+	}
+	return true
+}
+
 type AuthorityBinding struct {
-	SchemaVersion              string                  `json:"schema_version"`
-	OrganizationID             contract.OrganizationID `json:"organization_id"`
-	ProjectID                  contract.ProjectID      `json:"project_id"`
-	BusinessExecutionID        string                  `json:"business_execution_id"`
-	ChangeSetID                string                  `json:"change_set_id"`
-	ApprovalID                 string                  `json:"approval_id"`
-	ApprovalActionHash         string                  `json:"approval_action_hash"`
-	AccountReferenceID         string                  `json:"account_reference_id"`
-	ParentPlatformProjectID    string                  `json:"parent_platform_project_id,omitempty"`
-	ObjectFingerprint          string                  `json:"object_fingerprint"`
-	Action                     string                  `json:"action"`
-	ProjectBudgetMode          string                  `json:"project_budget_mode,omitempty"`
-	ProjectBudgetLimitMinor    int64                   `json:"project_budget_limit_minor"`
-	PromotionBudgetLimitMinor  int64                   `json:"promotion_budget_limit_minor"`
-	BudgetLimitMinor           int64                   `json:"budget_limit_minor"`
-	Currency                   string                  `json:"currency"`
-	PlanCanonicalHash          string                  `json:"plan_canonical_hash"`
-	IntentCanonicalHash        string                  `json:"intent_canonical_hash"`
-	FeedbackCanonicalHash      string                  `json:"feedback_canonical_hash"`
-	DecisionCanonicalHash      string                  `json:"decision_canonical_hash"`
-	ConfigurationCanonicalHash string                  `json:"configuration_canonical_hash"`
-	WorkflowID                 string                  `json:"workflow_id"`
-	WorkflowCanonicalHash      string                  `json:"workflow_canonical_hash"`
-	WorkflowStepID             string                  `json:"workflow_step_id"`
-	SkillID                    string                  `json:"skill_id,omitempty"`
-	SkillVersion               string                  `json:"skill_version,omitempty"`
+	SchemaVersion              string                    `json:"schema_version"`
+	OrganizationID             contract.OrganizationID   `json:"organization_id"`
+	ProjectID                  contract.ProjectID        `json:"project_id"`
+	BusinessExecutionID        string                    `json:"business_execution_id"`
+	ChangeSetID                string                    `json:"change_set_id"`
+	ApprovalID                 string                    `json:"approval_id"`
+	ApprovalActionHash         string                    `json:"approval_action_hash"`
+	AccountReferenceID         string                    `json:"account_reference_id"`
+	ParentPlatformProjectID    string                    `json:"parent_platform_project_id,omitempty"`
+	TargetMappingID            string                    `json:"target_mapping_id,omitempty"`
+	TargetMappingVersion       int64                     `json:"target_mapping_version,omitempty"`
+	TargetPlatformObjectID     string                    `json:"target_platform_object_id,omitempty"`
+	TargetPlatformObjectKind   string                    `json:"target_platform_object_kind,omitempty"`
+	PromotionMutation          *PromotionMutationBinding `json:"promotion_mutation,omitempty"`
+	ObjectFingerprint          string                    `json:"object_fingerprint"`
+	Action                     string                    `json:"action"`
+	ProjectBudgetMode          string                    `json:"project_budget_mode,omitempty"`
+	ProjectBudgetLimitMinor    int64                     `json:"project_budget_limit_minor"`
+	PromotionBudgetLimitMinor  int64                     `json:"promotion_budget_limit_minor"`
+	BudgetLimitMinor           int64                     `json:"budget_limit_minor"`
+	Currency                   string                    `json:"currency"`
+	PlanCanonicalHash          string                    `json:"plan_canonical_hash"`
+	IntentCanonicalHash        string                    `json:"intent_canonical_hash"`
+	FeedbackCanonicalHash      string                    `json:"feedback_canonical_hash"`
+	DecisionCanonicalHash      string                    `json:"decision_canonical_hash"`
+	ConfigurationCanonicalHash string                    `json:"configuration_canonical_hash"`
+	WorkflowID                 string                    `json:"workflow_id"`
+	WorkflowCanonicalHash      string                    `json:"workflow_canonical_hash"`
+	WorkflowStepID             string                    `json:"workflow_step_id"`
+	SkillID                    string                    `json:"skill_id,omitempty"`
+	SkillVersion               string                    `json:"skill_version,omitempty"`
 }
 
 func (b AuthorityBinding) Validate() error {
@@ -99,12 +190,27 @@ func (b AuthorityBinding) Validate() error {
 	if b.Action == "create_promotions_in_existing_project" && (strings.TrimSpace(b.ParentPlatformProjectID) == "" || b.PromotionBudgetLimitMinor < 1 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor) {
 		return ErrInvalidContract
 	}
+	if modifiesExistingPromotionAction(b.Action) {
+		if strings.TrimSpace(b.ParentPlatformProjectID) == "" || b.TargetMappingID == "" || b.TargetMappingVersion < 2 || b.TargetPlatformObjectID == "" || b.TargetPlatformObjectKind != "promotion" || b.PromotionMutation == nil || b.PromotionBudgetLimitMinor < 30000 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor || b.PromotionBudgetLimitMinor != b.PromotionMutation.TargetDailyBudgetMinor || b.PromotionMutation.Validate(b.Action) != nil {
+			return ErrInvalidContract
+		}
+	} else if b.TargetMappingID != "" || b.TargetMappingVersion != 0 || b.TargetPlatformObjectID != "" || b.TargetPlatformObjectKind != "" || b.PromotionMutation != nil {
+		return ErrInvalidContract
+	}
 	for _, hash := range []string{b.ApprovalActionHash, b.PlanCanonicalHash, b.IntentCanonicalHash, b.FeedbackCanonicalHash, b.DecisionCanonicalHash, b.ConfigurationCanonicalHash, b.WorkflowCanonicalHash} {
 		if !isSHA256(hash) {
 			return ErrInvalidContract
 		}
 	}
 	return nil
+}
+
+func modifiesExistingPromotionAction(action string) bool {
+	return slices.Contains([]string{"update_promotion_budget", "update_promotion_schedule", "update_promotion_materials"}, action)
+}
+
+func actionRequiresBoundPlatformProject(action string) bool {
+	return action == "create_promotions_in_existing_project" || modifiesExistingPromotionAction(action)
 }
 
 type ExecutionEnvironment struct {
@@ -259,7 +365,10 @@ type ComputerUseRun struct {
 }
 
 func (r ComputerUseRun) authorizesPlatformProject(platformProjectID string) bool {
-	return r.Authority.Action != "create_promotions_in_existing_project" || (r.Authority.ParentPlatformProjectID != "" && platformProjectID == r.Authority.ParentPlatformProjectID)
+	if actionRequiresBoundPlatformProject(r.Authority.Action) {
+		return r.Authority.ParentPlatformProjectID != "" && platformProjectID == r.Authority.ParentPlatformProjectID
+	}
+	return true
 }
 
 func (r ComputerUseRun) Validate() error {

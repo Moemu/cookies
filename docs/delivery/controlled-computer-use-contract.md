@@ -3,7 +3,7 @@
 | Property | Decision |
 | --- | --- |
 | Status | Frozen control-plane contract plus verified gate-one and gate-two visible-browser takeover calibration; unattended real Browser Driver remains unavailable |
-| Baseline | `upstream/main` at `0603b1a` (PR #49 merged) |
+| Baseline | `upstream/main` at `e62a95c` (PR #50 merged) |
 | Delivery owner | Final configuration, accepted/modified feedback binding, controlled ChangeSet, remote-write Approval, business Execution, `oceanengine-ecommerce-manual` calibration definition, business diff and result interpretation |
 | Platform owner | Environment, BrowserProfile, SessionLease, ComputerUseRun/Step/Event/Evidence, site policy, takeover, final-confirmation audit and Kill Switch |
 | Real-driver phase | The 2026-08-12/13 walkthroughs calibrated project and promotion forms. On 2026-08-14 one explicitly authorized promotion was submitted exactly once and independently read back; PR #50 still has no unattended real Browser Driver. |
@@ -32,6 +32,8 @@ This contract is additive. It does not reinterpret, rewrite, or migrate any hist
 | 16 | Worker and takeover ports | Fake and future real workers use the same authorize-step, begin/complete-step, heartbeat, pause/resume/cancel/takeover and confirmation-consume service ports. A visible-browser takeover records gate-one evidence actions and may atomically authorize exactly one operator-controlled final click after zero-diff readback. Post-click ports record only result outcomes and independent list confirmation; they never perform or retry the browser click. HTTP handlers only call the authority service. Unit, migration, contract and normal E2E tests cannot configure a real advertising-platform transport. |
 | 17 | Platform Skill status | `oceanengine-ecommerce-manual@v0.1-calibration` is the frozen implementation ID for “巨量引擎·电商手动投放”. After the 2026-08-14 one-click validation its status is `gate_two_passed_takeover_submit_calibration`: `submit_allowed=true` only under the current-turn exact authority documented in its `SKILL.md`, while `executable=false` and `real_browser_driver=false` continue to reject unattended execution. See `oceanengine-platform-skill-calibration.md`. |
 | 18 | Production control-plane assembly | The API host mounts the persisted takeover-only Computer Use surface. Environment, BrowserProfile and SitePolicy registration, Run/Lease/Event/Evidence control, and Kill Switch administration therefore survive process restarts. A client creates a Run by naming a formal Delivery `ControlledExecution`; the server resolves and revalidates the immutable ChangeSet/Approval binding and attaches the resulting Run back to that Execution. Clients cannot supply authority JSON. The production mount has no deterministic fake adapter, no unattended page driver, and no `prepare` or `submit` worker command. |
+| 19 | Finite promotion modifications | Budget, schedule and authorized-material modifications always start from one confirmed promotion `PlatformEntityMapping`. The server, not the client, resolves the exact platform object ID and original creation provenance. Each modification freezes the current/target values and their canonical hashes in a new ChangeSet, receives a new Approval and Execution, and binds the target Mapping ID/version. Creation Approval reuse and in-place edits of an already confirmed Mapping are invalid. |
+| 20 | Mutation readback and Mapping revisions | Before the one permitted save click, takeover evidence must match the exact platform object ID plus current and target state hashes with zero diff keys. Result and independent list evidence must both match the same object ID, platform status and target state hash. Only then may one transaction increment the Mapping version, set its current-state hash, append an immutable `delivery_platform_entity_mapping_revisions` row, and close the new Execution and ChangeSet. The original creation revision and evidence remain queryable. |
 
 ## Stable blocking reasons
 
@@ -77,3 +79,31 @@ commands. Gate one has completed the promotion-form and persisted live-evidence
 calibration. The 2026-08-14 visible takeover validated one exact final click and
 two-readback Mapping reconciliation. Future final submissions remain outside any
 unattended production worker and require a fresh separate execution-turn authorization.
+
+## Finite modification readiness
+
+The control plane and deterministic fake path support three exact actions:
+
+- `update_promotion_budget`
+- `update_promotion_schedule`
+- `update_promotion_materials`
+
+Every material reference must carry a server-owned authorization Evidence ID
+from the same organization, cookies Project and platform account. That Evidence
+must expose the exact `authorized_material_reference_id`; an arbitrary client
+reference or cross-account Evidence record is rejected.
+
+The public compile port is
+`POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-change-sets`.
+It accepts an expected Mapping version and typed current/target values; it does
+not accept a platform object ID. Mapping advancement uses
+`POST .../platform-entity-mappings/{mapping_id}:confirm-mutation` with one new
+business Execution and two server-loaded Evidence IDs.
+
+This implementation does not itself authorize a real edit. The current Skill
+still marks remote-object modification as pending. The first live calibration,
+if separately authorized in that execution turn, is limited to one budget
+change on the previously created dedicated test promotion. If the platform
+disallows editing while the promotion is under review, the run records the
+platform blocker and stops; it must not evade the platform state or substitute
+another object.

@@ -37,14 +37,30 @@ func (a DeterministicFakeAdapter) Prepare(_ context.Context, run ComputerUseRun)
 	if a.AccountID != "" && a.AccountID != run.AccountID {
 		return PreparedPage{}, fmt.Errorf("%s", BlockAccountMismatch)
 	}
-	return PreparedPage{BeforeFacts: map[string]string{"account_id": run.AccountID, "page_kind": "review"}, Readback: map[string]string{"account_id": run.AccountID, "object_fingerprint": run.Authority.ObjectFingerprint}, DiffKeys: []string{}, PageRef: "fake://oceanengine/review"}, nil
+	readback := map[string]string{"account_id": run.AccountID, "object_fingerprint": run.Authority.ObjectFingerprint}
+	if modifiesExistingPromotionAction(run.Authority.Action) {
+		readback["platform_object_id"] = run.Authority.TargetPlatformObjectID
+		if run.Authority.PromotionMutation != nil {
+			readback["current_state_hash"] = run.Authority.PromotionMutation.CurrentStateHash
+			readback["target_state_hash"] = run.Authority.PromotionMutation.TargetStateHash
+		}
+	}
+	return PreparedPage{BeforeFacts: map[string]string{"account_id": run.AccountID, "page_kind": "review"}, Readback: readback, DiffKeys: []string{}, PageRef: "fake://oceanengine/review"}, nil
 }
 func (a DeterministicFakeAdapter) Submit(_ context.Context, run ComputerUseRun, _ ControlledActionAttempt) (WorkerOutcome, PreparedPage, error) {
 	outcome := a.Outcome
 	if outcome == "" {
 		outcome = WorkerSuccess
 	}
-	page := PreparedPage{BeforeFacts: map[string]string{"object_fingerprint": run.Authority.ObjectFingerprint}, Readback: map[string]string{"platform_object_id": "fake-object-" + run.ID, "status": string(outcome)}, DiffKeys: []string{}, PageRef: "fake://oceanengine/result"}
+	objectID := "fake-object-" + run.ID
+	if modifiesExistingPromotionAction(run.Authority.Action) {
+		objectID = run.Authority.TargetPlatformObjectID
+	}
+	targetStateHash := ""
+	if run.Authority.PromotionMutation != nil {
+		targetStateHash = run.Authority.PromotionMutation.TargetStateHash
+	}
+	page := PreparedPage{BeforeFacts: map[string]string{"object_fingerprint": run.Authority.ObjectFingerprint}, Readback: map[string]string{"platform_object_id": objectID, "platform_status": string(outcome), "target_state_hash": targetStateHash}, DiffKeys: []string{}, PageRef: "fake://oceanengine/result"}
 	return outcome, page, nil
 }
 

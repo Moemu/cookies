@@ -20,12 +20,21 @@ type controlledAuthorityRepository interface {
 	CreatePlatformEntityMapping(context.Context, PlatformEntityMapping) (PlatformEntityMapping, error)
 	GetPlatformEntityMapping(context.Context, contract.OrganizationID, contract.ProjectID, string) (PlatformEntityMapping, error)
 	ConfirmPlatformEntityMapping(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, string) (PlatformEntityMapping, error)
+	ConfirmPlatformEntityMappingMutation(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, string, string) (PlatformEntityMapping, PlatformEntityMappingRevision, error)
+	ValidateControlledMaterialReferences(context.Context, contract.OrganizationID, contract.ProjectID, string, []ControlledMaterialReference) error
 }
 
 type ConfirmPlatformEntityMappingRequest struct {
 	ExpectedVersion  int64  `json:"expected_version"`
 	ResultEvidenceID string `json:"result_evidence_id"`
 	ListEvidenceID   string `json:"list_evidence_id"`
+}
+
+type ConfirmPlatformEntityMappingMutationRequest struct {
+	ExpectedVersion     int64  `json:"expected_version"`
+	BusinessExecutionID string `json:"business_execution_id"`
+	ResultEvidenceID    string `json:"result_evidence_id"`
+	ListEvidenceID      string `json:"list_evidence_id"`
 }
 
 func (s Service) AttachComputerUseRun(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string, expectedVersion int64, runID string) (ControlledExecution, error) {
@@ -55,6 +64,7 @@ func (s Service) CreatePendingPlatformEntityMapping(ctx context.Context, actor c
 	value.ListEvidenceID = ""
 	value.Version = 1
 	value.CreatedAt = s.now()
+	value.UpdatedAt = value.CreatedAt
 	if err := value.Validate(); err != nil {
 		return PlatformEntityMapping{}, err
 	}
@@ -63,6 +73,20 @@ func (s Service) CreatePendingPlatformEntityMapping(ctx context.Context, actor c
 		return PlatformEntityMapping{}, ErrUnsupportedConfigurationWorkflow
 	}
 	return repo.CreatePlatformEntityMapping(ctx, value)
+}
+
+func (s Service) ConfirmPlatformEntityMappingMutation(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, request ConfirmPlatformEntityMappingMutationRequest) (PlatformEntityMapping, PlatformEntityMappingRevision, error) {
+	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
+		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, err
+	}
+	if request.ExpectedVersion < 2 || strings.TrimSpace(request.BusinessExecutionID) == "" || strings.TrimSpace(request.ResultEvidenceID) == "" || strings.TrimSpace(request.ListEvidenceID) == "" || request.ResultEvidenceID == request.ListEvidenceID {
+		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrApprovalContentMismatch
+	}
+	repo, ok := s.Repository.(controlledAuthorityRepository)
+	if !ok {
+		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrUnsupportedConfigurationWorkflow
+	}
+	return repo.ConfirmPlatformEntityMappingMutation(ctx, actor.OrganizationID, projectID, id, request.ExpectedVersion, request.BusinessExecutionID, request.ResultEvidenceID, request.ListEvidenceID)
 }
 
 func (s Service) ConfirmPlatformEntityMapping(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, request ConfirmPlatformEntityMappingRequest) (PlatformEntityMapping, error) {
@@ -115,6 +139,130 @@ type CompileControlledChangeSetRequest struct {
 	ObservatoryRunID        string           `json:"observatory_run_id"`
 	Action                  ControlledAction `json:"action,omitempty"`
 	ParentPlatformProjectID string           `json:"parent_platform_project_id,omitempty"`
+}
+
+type CompileMappedControlledChangeSetRequest struct {
+	ExpectedMappingVersion  int64                         `json:"expected_mapping_version"`
+	Action                  ControlledAction              `json:"action"`
+	CurrentDailyBudgetMinor int64                         `json:"current_daily_budget_minor"`
+	TargetDailyBudgetMinor  int64                         `json:"target_daily_budget_minor"`
+	CurrentSchedule         *ControlledScheduleWindow     `json:"current_schedule,omitempty"`
+	TargetSchedule          *ControlledScheduleWindow     `json:"target_schedule,omitempty"`
+	CurrentMaterials        []ControlledMaterialReference `json:"current_materials,omitempty"`
+	TargetMaterials         []ControlledMaterialReference `json:"target_materials,omitempty"`
+}
+
+func (r CompileMappedControlledChangeSetRequest) mutation() (ControlledPromotionMutation, error) {
+	mutation := ControlledPromotionMutation{
+		CurrentDailyBudgetMinor: r.CurrentDailyBudgetMinor,
+		TargetDailyBudgetMinor:  r.TargetDailyBudgetMinor,
+		CurrentSchedule:         r.CurrentSchedule,
+		TargetSchedule:          r.TargetSchedule,
+		CurrentMaterials:        r.CurrentMaterials,
+		TargetMaterials:         r.TargetMaterials,
+	}
+	current, err := mutation.statePayload(r.Action, false)
+	if err != nil {
+		return ControlledPromotionMutation{}, err
+	}
+	target, err := mutation.statePayload(r.Action, true)
+	if err != nil {
+		return ControlledPromotionMutation{}, err
+	}
+	mutation.CurrentStateHash, err = contract.CanonicalJSONHash(current)
+	if err != nil {
+		return ControlledPromotionMutation{}, err
+	}
+	mutation.TargetStateHash, err = contract.CanonicalJSONHash(target)
+	if err != nil {
+		return ControlledPromotionMutation{}, err
+	}
+	if err := mutation.Validate(r.Action); err != nil {
+		return ControlledPromotionMutation{}, err
+	}
+	return mutation, nil
+}
+
+func (s Service) CompileMappedControlledChangeSet(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, mappingID string, request CompileMappedControlledChangeSetRequest) (ControlledChangeSet, bool, error) {
+	if err := s.ready(actor, projectID, ScopeWrite); err != nil {
+		return ControlledChangeSet{}, false, err
+	}
+	if strings.TrimSpace(mappingID) == "" || request.ExpectedMappingVersion < 2 || !request.Action.ModifiesExistingPromotion() {
+		return ControlledChangeSet{}, false, ErrInvalidRequest
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ControlledChangeSet{}, false, err
+	}
+	repo, ok := s.Repository.(controlledAuthorityRepository)
+	if !ok {
+		return ControlledChangeSet{}, false, ErrUnsupportedConfigurationWorkflow
+	}
+	mapping, err := repo.GetPlatformEntityMapping(ctx, actor.OrganizationID, projectID, mappingID)
+	if err != nil {
+		return ControlledChangeSet{}, false, err
+	}
+	if mapping.Status != PlatformEntityMappingConfirmed || mapping.Version != request.ExpectedMappingVersion || mapping.PlatformObjectKind != "promotion" || strings.TrimSpace(mapping.PlatformObjectID) == "" {
+		return ControlledChangeSet{}, false, ErrVersionConflict
+	}
+	sourceExecution, err := repo.GetControlledExecution(ctx, actor.OrganizationID, projectID, mapping.BusinessExecutionID)
+	if err != nil {
+		return ControlledChangeSet{}, false, err
+	}
+	sourceChange, err := repo.GetControlledChangeSet(ctx, actor.OrganizationID, projectID, sourceExecution.ControlledChangeSetID)
+	if err != nil {
+		return ControlledChangeSet{}, false, err
+	}
+	if sourceChange.Status != ControlledChangeSetExecuted || sourceChange.Binding.AccountReferenceID != mapping.AccountReferenceID || sourceChange.Binding.PlanID != mapping.PlanID || sourceChange.Binding.ConfigurationID != mapping.ConfigurationID || sourceChange.Binding.ParentPlatformProjectID == "" {
+		return ControlledChangeSet{}, false, ErrApprovalContentMismatch
+	}
+	mutation, err := request.mutation()
+	if err != nil {
+		return ControlledChangeSet{}, false, err
+	}
+	if mapping.CurrentStateAction == request.Action && mapping.CurrentStateHash != mutation.CurrentStateHash {
+		return ControlledChangeSet{}, false, ErrApprovalContentMismatch
+	}
+	if request.Action == ControlledActionUpdatePromotionMaterials {
+		references := append([]ControlledMaterialReference{}, mutation.CurrentMaterials...)
+		references = append(references, mutation.TargetMaterials...)
+		if err := repo.ValidateControlledMaterialReferences(ctx, actor.OrganizationID, projectID, mapping.AccountReferenceID, references); err != nil {
+			return ControlledChangeSet{}, false, err
+		}
+	}
+	fingerprint, err := contract.CanonicalJSONHash(struct {
+		AccountReferenceID string           `json:"account_reference_id"`
+		Action             ControlledAction `json:"action"`
+		MappingID          string           `json:"mapping_id"`
+		MappingVersion     int64            `json:"mapping_version"`
+		PlatformObjectID   string           `json:"platform_object_id"`
+		CurrentStateHash   string           `json:"current_state_hash"`
+		TargetStateHash    string           `json:"target_state_hash"`
+	}{mapping.AccountReferenceID, request.Action, mapping.ID, mapping.Version, mapping.PlatformObjectID, mutation.CurrentStateHash, mutation.TargetStateHash})
+	if err != nil {
+		return ControlledChangeSet{}, false, err
+	}
+	binding := sourceChange.Binding
+	binding.TargetMappingID = mapping.ID
+	binding.TargetMappingVersion = mapping.Version
+	binding.TargetPlatformObjectID = mapping.PlatformObjectID
+	binding.TargetPlatformObjectKind = mapping.PlatformObjectKind
+	binding.PromotionBudgetLimitMinor = mutation.TargetDailyBudgetMinor
+	binding.ObjectFingerprint = fingerprint
+	binding.PromotionMutation = &mutation
+	id, err := s.idGenerator()("controlledchangeset")
+	if err != nil {
+		return ControlledChangeSet{}, false, err
+	}
+	now := s.now()
+	change := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: id, OrganizationID: actor.OrganizationID, ProjectID: projectID, Binding: binding, Action: request.Action, BudgetLimitMinor: mutation.TargetDailyBudgetMinor, Currency: "CNY", Status: ControlledChangeSetReady, Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now}
+	change.CanonicalHash, err = change.ComputeCanonicalHash()
+	if err != nil {
+		return ControlledChangeSet{}, false, err
+	}
+	if err := change.Validate(); err != nil {
+		return ControlledChangeSet{}, false, err
+	}
+	return repo.CreateControlledChangeSet(ctx, change)
 }
 
 func (s Service) CompileControlledChangeSet(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CompileControlledChangeSetRequest) (ControlledChangeSet, bool, error) {

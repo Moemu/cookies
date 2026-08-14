@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/computeruse"
@@ -33,35 +34,11 @@ func (p ComputerUseAuthorityProvider) ResolveAuthority(ctx context.Context, orga
 	if execution.Status != "pending" && execution.Status != "running" {
 		return computeruse.AuthorityResolution{}, computeruse.ErrInvalidContract
 	}
-	binding := approval.Binding
-	return computeruse.AuthorityResolution{Binding: computeruse.AuthorityBinding{
-		SchemaVersion:              computeruse.AuthoritySchemaV1,
-		OrganizationID:             organizationID,
-		ProjectID:                  projectID,
-		BusinessExecutionID:        execution.ID,
-		ChangeSetID:                change.ID,
-		ApprovalID:                 approval.ID,
-		ApprovalActionHash:         approval.ActionHash,
-		AccountReferenceID:         binding.AccountReferenceID,
-		ParentPlatformProjectID:    binding.ParentPlatformProjectID,
-		ObjectFingerprint:          binding.ObjectFingerprint,
-		Action:                     string(approval.Action),
-		ProjectBudgetMode:          binding.ProjectBudgetMode,
-		ProjectBudgetLimitMinor:    binding.ProjectBudgetLimitMinor,
-		PromotionBudgetLimitMinor:  binding.PromotionBudgetLimitMinor,
-		BudgetLimitMinor:           approval.BudgetLimitMinor,
-		Currency:                   approval.Currency,
-		PlanCanonicalHash:          binding.PlanCanonicalHash,
-		IntentCanonicalHash:        binding.IntentCanonicalHash,
-		FeedbackCanonicalHash:      binding.OperatorFeedbackCanonicalHash,
-		DecisionCanonicalHash:      binding.DecisionCanonicalHash,
-		ConfigurationCanonicalHash: binding.ConfigurationCanonicalHash,
-		WorkflowID:                 binding.WorkflowID,
-		WorkflowCanonicalHash:      binding.WorkflowCanonicalHash,
-		WorkflowStepID:             computerUseRemoteWriteStepID,
-		SkillID:                    binding.SkillID,
-		SkillVersion:               binding.SkillVersion,
-	}, BoundRunID: execution.ComputerUseRunID}, nil
+	authority, err := p.authorityFromLoaded(execution, change, approval)
+	if err != nil {
+		return computeruse.AuthorityResolution{}, err
+	}
+	return computeruse.AuthorityResolution{Binding: authority, BoundRunID: execution.ComputerUseRunID}, nil
 }
 
 func (p ComputerUseAuthorityProvider) BindRun(ctx context.Context, authority computeruse.AuthorityBinding, runID string, now time.Time) error {
@@ -88,7 +65,7 @@ func (p ComputerUseAuthorityProvider) VerifyAuthority(ctx context.Context, autho
 		return computeruse.ErrInvalidContract
 	}
 	expected, err := p.authorityFromLoaded(execution, change, approval)
-	if err != nil || expected != authority {
+	if err != nil || !reflect.DeepEqual(expected, authority) {
 		return computeruse.ErrInvalidContract
 	}
 	return nil
@@ -110,7 +87,7 @@ func (p ComputerUseAuthorityProvider) load(ctx context.Context, organizationID c
 	if err != nil {
 		return ControlledExecution{}, ControlledChangeSet{}, RemoteWriteApproval{}, mapComputerUseAuthorityError(err)
 	}
-	if change.Status != ControlledChangeSetExecuting || execution.RemoteWriteApprovalID != approval.ID || approval.ControlledChangeSetID != change.ID || approval.ControlledChangeSetHash != change.CanonicalHash || approval.Binding != change.Binding {
+	if change.Status != ControlledChangeSetExecuting || execution.RemoteWriteApprovalID != approval.ID || approval.ControlledChangeSetID != change.ID || approval.ControlledChangeSetHash != change.CanonicalHash || !reflect.DeepEqual(approval.Binding, change.Binding) {
 		return ControlledExecution{}, ControlledChangeSet{}, RemoteWriteApproval{}, computeruse.ErrInvalidContract
 	}
 	if err := change.Validate(); err != nil {
@@ -124,8 +101,28 @@ func (p ComputerUseAuthorityProvider) load(ctx context.Context, organizationID c
 
 func (p ComputerUseAuthorityProvider) authorityFromLoaded(execution ControlledExecution, change ControlledChangeSet, approval RemoteWriteApproval) (computeruse.AuthorityBinding, error) {
 	binding := approval.Binding
-	value := computeruse.AuthorityBinding{SchemaVersion: computeruse.AuthoritySchemaV1, OrganizationID: execution.OrganizationID, ProjectID: execution.ProjectID, BusinessExecutionID: execution.ID, ChangeSetID: change.ID, ApprovalID: approval.ID, ApprovalActionHash: approval.ActionHash, AccountReferenceID: binding.AccountReferenceID, ParentPlatformProjectID: binding.ParentPlatformProjectID, ObjectFingerprint: binding.ObjectFingerprint, Action: string(approval.Action), ProjectBudgetMode: binding.ProjectBudgetMode, ProjectBudgetLimitMinor: binding.ProjectBudgetLimitMinor, PromotionBudgetLimitMinor: binding.PromotionBudgetLimitMinor, BudgetLimitMinor: approval.BudgetLimitMinor, Currency: approval.Currency, PlanCanonicalHash: binding.PlanCanonicalHash, IntentCanonicalHash: binding.IntentCanonicalHash, FeedbackCanonicalHash: binding.OperatorFeedbackCanonicalHash, DecisionCanonicalHash: binding.DecisionCanonicalHash, ConfigurationCanonicalHash: binding.ConfigurationCanonicalHash, WorkflowID: binding.WorkflowID, WorkflowCanonicalHash: binding.WorkflowCanonicalHash, WorkflowStepID: computerUseRemoteWriteStepID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion}
+	value := computeruse.AuthorityBinding{SchemaVersion: computeruse.AuthoritySchemaV1, OrganizationID: execution.OrganizationID, ProjectID: execution.ProjectID, BusinessExecutionID: execution.ID, ChangeSetID: change.ID, ApprovalID: approval.ID, ApprovalActionHash: approval.ActionHash, AccountReferenceID: binding.AccountReferenceID, ParentPlatformProjectID: binding.ParentPlatformProjectID, TargetMappingID: binding.TargetMappingID, TargetMappingVersion: binding.TargetMappingVersion, TargetPlatformObjectID: binding.TargetPlatformObjectID, TargetPlatformObjectKind: binding.TargetPlatformObjectKind, ObjectFingerprint: binding.ObjectFingerprint, Action: string(approval.Action), ProjectBudgetMode: binding.ProjectBudgetMode, ProjectBudgetLimitMinor: binding.ProjectBudgetLimitMinor, PromotionBudgetLimitMinor: binding.PromotionBudgetLimitMinor, BudgetLimitMinor: approval.BudgetLimitMinor, Currency: approval.Currency, PlanCanonicalHash: binding.PlanCanonicalHash, IntentCanonicalHash: binding.IntentCanonicalHash, FeedbackCanonicalHash: binding.OperatorFeedbackCanonicalHash, DecisionCanonicalHash: binding.DecisionCanonicalHash, ConfigurationCanonicalHash: binding.ConfigurationCanonicalHash, WorkflowID: binding.WorkflowID, WorkflowCanonicalHash: binding.WorkflowCanonicalHash, WorkflowStepID: computerUseRemoteWriteStepID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion}
+	if binding.PromotionMutation != nil {
+		value.PromotionMutation = toComputerUsePromotionMutation(*binding.PromotionMutation)
+	}
 	return value, value.Validate()
+}
+
+func toComputerUsePromotionMutation(value ControlledPromotionMutation) *computeruse.PromotionMutationBinding {
+	converted := &computeruse.PromotionMutationBinding{CurrentDailyBudgetMinor: value.CurrentDailyBudgetMinor, TargetDailyBudgetMinor: value.TargetDailyBudgetMinor, CurrentStateHash: value.CurrentStateHash, TargetStateHash: value.TargetStateHash}
+	if value.CurrentSchedule != nil {
+		converted.CurrentSchedule = &computeruse.PromotionScheduleWindow{StartAt: value.CurrentSchedule.StartAt, EndAt: value.CurrentSchedule.EndAt, Timezone: value.CurrentSchedule.Timezone}
+	}
+	if value.TargetSchedule != nil {
+		converted.TargetSchedule = &computeruse.PromotionScheduleWindow{StartAt: value.TargetSchedule.StartAt, EndAt: value.TargetSchedule.EndAt, Timezone: value.TargetSchedule.Timezone}
+	}
+	for _, reference := range value.CurrentMaterials {
+		converted.CurrentMaterials = append(converted.CurrentMaterials, computeruse.PromotionMaterialReference{ReferenceID: reference.ReferenceID, AuthorizationEvidenceID: reference.AuthorizationEvidenceID})
+	}
+	for _, reference := range value.TargetMaterials {
+		converted.TargetMaterials = append(converted.TargetMaterials, computeruse.PromotionMaterialReference{ReferenceID: reference.ReferenceID, AuthorizationEvidenceID: reference.AuthorizationEvidenceID})
+	}
+	return converted
 }
 
 func mapComputerUseAuthorityError(err error) error {

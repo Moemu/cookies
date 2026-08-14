@@ -42,3 +42,21 @@ func TestControlledObjectFingerprintMigrationPreventsDuplicateTargets(t *testing
 		}
 	}
 }
+
+func TestControlledPromotionMutationMigrationVersionsMappingsAndKeepsMockAuthorityIsolated(t *testing.T) {
+	payload, err := os.ReadFile("../../../migrations/delivery/20260814120000_delivery_controlled_promotion_mutations.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(payload))
+	for _, required := range []string{"update_promotion_budget", "update_promotion_schedule", "update_promotion_materials", "current_state_action", "current_state_hash", "updated_at", "delivery_platform_entity_mapping_revisions", "previous_state_action", "previous_state_hash", "mapping_version", "business_execution_id", "result_evidence_id", "list_evidence_id"} {
+		if !strings.Contains(sql, required) {
+			t.Errorf("promotion mutation migration omitted %q", required)
+		}
+	}
+	for _, forbidden := range []string{"update delivery_approvals", "drop table delivery_approvals", "execute_mock", "remote_write_enabled = true"} {
+		if strings.Contains(sql, forbidden) {
+			t.Errorf("promotion mutation migration widens historical authority with %q", forbidden)
+		}
+	}
+}

@@ -114,6 +114,7 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
 
     <AuthorityChain run={run} />
     <StatusBanner presentation={presentation} />
+    {run.authority.promotion_mutation ? <PromotionMutationDiff run={run} /> : null}
 
     <div className="controlled-execution-layout">
       <section className="controlled-execution-main" aria-label="运行状态与步骤">
@@ -128,9 +129,11 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
           <div><dt>账户</dt><dd>{run.account_id}</dd></div>
           <div><dt>ChangeSet</dt><dd title={run.authority.change_set_id}>{run.authority.change_set_id}</dd></div>
           <div><dt>正式 Approval</dt><dd title={run.authority.approval_id}>{run.authority.approval_id}</dd></div>
+          {run.authority.target_mapping_id ? <div><dt>目标映射版本</dt><dd title={run.authority.target_mapping_id}>{shortHash(run.authority.target_mapping_id)} · v{run.authority.target_mapping_version}</dd></div> : null}
+          {run.authority.target_platform_object_id ? <div><dt>目标推广单元</dt><dd title={run.authority.target_platform_object_id}>{shortHash(run.authority.target_platform_object_id)}</dd></div> : null}
           <div><dt>预算上限</dt><dd>¥{formatMinor(run.authority.budget_limit_minor)} {run.authority.currency}</dd></div>
           <div><dt>Workflow</dt><dd title={run.authority.workflow_canonical_hash}>{shortHash(run.authority.workflow_canonical_hash)}</dd></div>
-          <div><dt>Platform Skill</dt><dd>{run.authority.skill_id && run.authority.skill_version ? <>{run.authority.skill_id} · {run.authority.skill_version}<small>项目表单已复核；单元 DOM 与真实 Driver 待校准</small></> : '未绑定；真实执行不可用'}</dd></div>
+          <div><dt>Platform Skill</dt><dd>{run.authority.skill_id && run.authority.skill_version ? <>{run.authority.skill_id} · {run.authority.skill_version}<small>仅代表已校准路径；执行当轮仍须复核页面和字段。</small></> : '未绑定；真实执行不可用'}</dd></div>
           <div><dt>租约</dt><dd title={run.lease_id}>{run.lease_id}</dd></div>
           <div><dt>策略</dt><dd title={run.policy_id}>{run.policy_id}</dd></div>
         </dl>
@@ -141,14 +144,48 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
 }
 
 function AuthorityChain({ run }: { run: ComputerUseRun }) {
+  const modifying = Boolean(run.authority.promotion_mutation)
   const formalApproved = run.blocking_reason !== 'APPROVAL_INVALID'
   const confirmationReady = ['submitting', 'verifying', 'succeeded', 'failed', 'partial', 'result_unknown'].includes(run.state)
     && run.blocking_reason !== 'FINAL_CONFIRMATION_INVALID'
   return <ol className="controlled-execution-authority-chain" aria-label="受控写入授权链">
-    <li className="complete"><span>1</span><div><b>接受优化方案</b><small>已接受/修改的反馈才可创建 ChangeSet；这不是写入批准。</small></div></li>
+    <li className="complete"><span>1</span><div><b>{modifying ? '读取当前值并创建新变更' : '接受优化方案'}</b><small>{modifying ? '当前值、目标值、对象和 Mapping 版本已经冻结；创建时的审批不可复用。' : '已接受/修改的反馈才可创建 ChangeSet；这不是写入批准。'}</small></div></li>
     <li className={formalApproved ? 'complete' : 'blocked'}><span>2</span><div><b>批准平台写入</b><small>正式 Approval 绑定账户、预算、配置、Workflow 与阶段 B Skill 校准版本；这不代表实时 DOM 已复核。</small></div></li>
     <li className={confirmationReady ? 'complete' : 'waiting'}><span>3</span><div><b>一次性最终确认</b><small>仅对当前 Run 有效；签发或过期都不等于已经提交。</small></div></li>
   </ol>
+}
+
+function PromotionMutationDiff({ run }: { run: ComputerUseRun }) {
+  const mutation = run.authority.promotion_mutation
+  if (!mutation) return null
+  const actionLabel = ({
+    update_promotion_budget: '修改推广单元日预算',
+    update_promotion_schedule: '修改推广单元排期',
+    update_promotion_materials: '更换或增减授权素材',
+  } as Record<string, string>)[run.authority.action] ?? '修改推广单元'
+  const rows = mutationRows(run.authority.action, mutation)
+  return <section className="controlled-execution-mutation" aria-label="当前值与目标值">
+    <header><div><span className="section-label">本次受控变更</span><h3>{actionLabel}</h3></div><small>提交前必须逐字段回读一致；任何差异都会阻止一次性确认。</small></header>
+    <div className="controlled-execution-mutation-table" role="table" aria-label="变更差异">
+      <div className="heading" role="row"><b role="columnheader">字段</b><b role="columnheader">当前值</b><b role="columnheader">目标值</b></div>
+      {rows.map(row => <div key={row.label} role="row"><span role="cell">{row.label}</span><strong role="cell">{row.current}</strong><strong role="cell" className="target">{row.target}</strong></div>)}
+    </div>
+  </section>
+}
+
+function mutationRows(action: string, mutation: NonNullable<ComputerUseRun['authority']['promotion_mutation']>) {
+  if (action === 'update_promotion_schedule') {
+    return [{ label: '投放排期', current: formatSchedule(mutation.current_schedule), target: formatSchedule(mutation.target_schedule) }]
+  }
+  if (action === 'update_promotion_materials') {
+    return [{ label: '已授权素材', current: `${mutation.current_materials?.length ?? 0} 个`, target: `${mutation.target_materials?.length ?? 0} 个` }]
+  }
+  return [{ label: '每日预算', current: `¥${formatMinor(mutation.current_daily_budget_minor)}`, target: `¥${formatMinor(mutation.target_daily_budget_minor)}` }]
+}
+
+function formatSchedule(value?: { start_at: string; end_at: string; timezone: string }) {
+  if (!value) return '未提供'
+  return `${formatTime(value.start_at)} 至 ${formatTime(value.end_at)}（${value.timezone}）`
 }
 
 function StatusBanner({ presentation }: { presentation: ReturnType<typeof presentControlledExecution> }) {

@@ -369,6 +369,39 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PlatformEntityMapping' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-change-sets:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: mapping_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: createMappedControlledDeliveryChangeSet
+      summary: Freeze one finite modification of an exact confirmed promotion mapping
+      description: >-
+        Compiles a new ChangeSet and requires a new Approval. The server owns the mapped
+        platform object identity and binds the current and target state hashes. It never
+        reuses the creation Approval or mutates the confirmed mapping in place.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateMappedControlledChangeSetRequest' }
+      responses:
+        '201':
+          description: New controlled promotion modification ready for approval.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlledChangeSet' }
+        '200':
+          description: Idempotent replay of the same mapping version and target state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlledChangeSet' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}:confirm:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -391,6 +424,30 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PlatformEntityMapping' }
         '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}:confirm-mutation:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: mapping_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: confirmDeliveryPlatformEntityMappingMutation
+      summary: Advance a mapping version from two matching post-write Computer Use readbacks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmPlatformEntityMappingMutationRequest' }
+      responses:
+        '200':
+          description: Versioned mapping mutation and immutable revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfirmPlatformEntityMappingMutationResult' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/change-sets:
     parameters:
@@ -1336,12 +1393,49 @@ components:
         workflow_canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
         account_reference_id: { type: string }
         parent_platform_project_id: { type: string }
+        target_mapping_id: { type: string }
+        target_mapping_version: { type: integer, minimum: 1 }
+        target_platform_object_id: { type: string }
+        target_platform_object_kind: { type: string, enum: [promotion] }
         project_budget_mode: { type: string, enum: [daily, unlimited] }
         project_budget_limit_minor: { type: integer, minimum: 0 }
         promotion_budget_limit_minor: { type: integer, minimum: 0 }
         object_fingerprint: { type: string }
         skill_id: { type: string }
         skill_version: { type: string }
+        promotion_mutation: { $ref: '#/components/schemas/ControlledPromotionMutation' }
+    ControlledScheduleWindow:
+      type: object
+      additionalProperties: false
+      required: [start_at, end_at, timezone]
+      properties:
+        start_at: { type: string, format: date-time }
+        end_at: { type: string, format: date-time }
+        timezone: { type: string, minLength: 1 }
+    ControlledMaterialReference:
+      type: object
+      additionalProperties: false
+      required: [reference_id, authorization_evidence_id]
+      properties:
+        reference_id: { type: string, minLength: 1 }
+        authorization_evidence_id: { type: string, minLength: 1 }
+    ControlledPromotionMutation:
+      type: object
+      additionalProperties: false
+      required: [current_daily_budget_minor, target_daily_budget_minor, current_state_hash, target_state_hash]
+      properties:
+        current_daily_budget_minor: { type: integer, minimum: 30000 }
+        target_daily_budget_minor: { type: integer, minimum: 30000 }
+        current_schedule: { $ref: '#/components/schemas/ControlledScheduleWindow' }
+        target_schedule: { $ref: '#/components/schemas/ControlledScheduleWindow' }
+        current_materials:
+          type: array
+          items: { $ref: '#/components/schemas/ControlledMaterialReference' }
+        target_materials:
+          type: array
+          items: { $ref: '#/components/schemas/ControlledMaterialReference' }
+        current_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        target_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
     CreateControlledChangeSetRequest:
       type: object
       additionalProperties: false
@@ -1350,6 +1444,23 @@ components:
         observatory_run_id: { type: string, minLength: 1 }
         action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project] }
         parent_platform_project_id: { type: string, minLength: 1 }
+    CreateMappedControlledChangeSetRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_mapping_version, action, current_daily_budget_minor, target_daily_budget_minor]
+      properties:
+        expected_mapping_version: { type: integer, minimum: 2 }
+        action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        current_daily_budget_minor: { type: integer, minimum: 30000 }
+        target_daily_budget_minor: { type: integer, minimum: 30000 }
+        current_schedule: { $ref: '#/components/schemas/ControlledScheduleWindow' }
+        target_schedule: { $ref: '#/components/schemas/ControlledScheduleWindow' }
+        current_materials:
+          type: array
+          items: { $ref: '#/components/schemas/ControlledMaterialReference' }
+        target_materials:
+          type: array
+          items: { $ref: '#/components/schemas/ControlledMaterialReference' }
     ControlledChangeSet:
       type: object
       additionalProperties: false
@@ -1360,7 +1471,7 @@ components:
         organization_id: { type: string }
         project_id: { type: string }
         binding: { $ref: '#/components/schemas/ControlledAuthorityBinding' }
-        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project] }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
         budget_limit_minor: { type: integer, minimum: 0 }
         currency: { type: string, const: CNY }
         status: { type: string, enum: [ready_for_approval, approved, rejected, executing, executed, invalidated] }
@@ -1382,7 +1493,7 @@ components:
         controlled_change_set_id: { type: string }
         controlled_change_set_hash: { $ref: '#/components/schemas/CanonicalHash' }
         binding: { $ref: '#/components/schemas/ControlledAuthorityBinding' }
-        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project] }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
         scope: { type: string, const: controlled_remote_write }
         budget_limit_minor: { type: integer, minimum: 0 }
         currency: { type: string, const: CNY }
@@ -1423,7 +1534,7 @@ components:
     PlatformEntityMapping:
       type: object
       additionalProperties: false
-      required: [schema_version, id, organization_id, project_id, account_reference_id, plan_id, configuration_id, business_execution_id, computer_use_run_id, internal_object_kind, internal_object_id, platform_object_kind, status, version, created_at]
+      required: [schema_version, id, organization_id, project_id, account_reference_id, plan_id, configuration_id, business_execution_id, computer_use_run_id, internal_object_kind, internal_object_id, platform_object_kind, status, version, created_at, updated_at]
       properties:
         schema_version: { type: string, const: delivery-platform-entity-mapping/v1 }
         id: { type: string }
@@ -1439,10 +1550,34 @@ components:
         platform_object_kind: { type: string }
         platform_object_id: { type: string }
         platform_status: { type: string }
+        current_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        current_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
         result_evidence_id: { type: string }
         list_evidence_id: { type: string }
         status: { type: string, enum: [pending_verification, confirmed] }
         version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PlatformEntityMappingRevision:
+      type: object
+      additionalProperties: false
+      required: [mapping_id, organization_id, project_id, version, action, business_execution_id, computer_use_run_id, platform_object_id, platform_status, result_evidence_id, list_evidence_id, created_at]
+      properties:
+        mapping_id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        version: { type: integer, minimum: 1 }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        business_execution_id: { type: string }
+        computer_use_run_id: { type: string }
+        platform_object_id: { type: string }
+        platform_status: { type: string }
+        previous_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        previous_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        current_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        current_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        result_evidence_id: { type: string }
+        list_evidence_id: { type: string }
         created_at: { type: string, format: date-time }
     ConfirmPlatformEntityMappingRequest:
       type: object
@@ -1452,6 +1587,22 @@ components:
         expected_version: { type: integer, minimum: 1 }
         result_evidence_id: { type: string, minLength: 1 }
         list_evidence_id: { type: string, minLength: 1 }
+    ConfirmPlatformEntityMappingMutationRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_version, business_execution_id, result_evidence_id, list_evidence_id]
+      properties:
+        expected_version: { type: integer, minimum: 2 }
+        business_execution_id: { type: string, minLength: 1 }
+        result_evidence_id: { type: string, minLength: 1 }
+        list_evidence_id: { type: string, minLength: 1 }
+    ConfirmPlatformEntityMappingMutationResult:
+      type: object
+      additionalProperties: false
+      required: [mapping, revision]
+      properties:
+        mapping: { $ref: '#/components/schemas/PlatformEntityMapping' }
+        revision: { $ref: '#/components/schemas/PlatformEntityMappingRevision' }
     Principal:
       type: object
       additionalProperties: false

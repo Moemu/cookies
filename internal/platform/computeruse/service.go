@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -152,7 +153,7 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 	if environment.Platform != request.Platform || environment.AccountID != request.AccountID || environment.Mode != "local_visible" || !environment.Healthy || environment.Version < 1 || profile.EnvironmentID != environment.ID || profile.Platform != request.Platform || profile.AccountID != request.AccountID || profile.State != "ready" || profile.Version < 1 || policy.Platform != request.Platform || policy.AccountID != request.AccountID || policy.Version < 1 {
 		return ComputerUseRun{}, false, ErrInvalidContract
 	}
-	if authority.Action == "create_promotions_in_existing_project" && !slices.Contains(policy.AllowedPlatformProjects, authority.ParentPlatformProjectID) {
+	if actionRequiresBoundPlatformProject(authority.Action) && !slices.Contains(policy.AllowedPlatformProjects, authority.ParentPlatformProjectID) {
 		return ComputerUseRun{}, false, ErrInvalidContract
 	}
 	hashInput, err := json.Marshal(struct {
@@ -175,7 +176,7 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 		if err != nil {
 			return ComputerUseRun{}, false, err
 		}
-		if existing.IdempotencyKey != request.IdempotencyKey || existing.RequestHash != requestHash || existing.Authority != authority {
+		if existing.IdempotencyKey != request.IdempotencyKey || existing.RequestHash != requestHash || !reflect.DeepEqual(existing.Authority, authority) {
 			return ComputerUseRun{}, false, ErrIdempotencyConflict
 		}
 		return existing, true, nil
@@ -441,6 +442,9 @@ func (s Service) AuthorizeTakeoverAction(ctx context.Context, request AuthorizeT
 	if run.Version != request.ExpectedVersion {
 		return TakeoverActionAuthorization{}, ErrVersionConflict
 	}
+	if modifiesExistingPromotionAction(run.Authority.Action) && (run.Authority.PromotionMutation == nil || request.FieldReadback["platform_object_id"] != run.Authority.TargetPlatformObjectID || request.FieldReadback["current_state_hash"] != run.Authority.PromotionMutation.CurrentStateHash || request.FieldReadback["target_state_hash"] != run.Authority.PromotionMutation.TargetStateHash) {
+		return TakeoverActionAuthorization{}, ErrInvalidContract
+	}
 	if run.State != RunAwaitingTakeover || !run.Paused || !run.TakeoverActive || run.LeaseID != request.LeaseID {
 		return TakeoverActionAuthorization{}, ErrConfirmationInvalid
 	}
@@ -524,6 +528,9 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 		if run.State != RunSubmitting || request.FieldReadback["platform_object_id"] == "" || request.FieldReadback["platform_status"] == "" {
 			return TakeoverEvidenceResult{}, ErrInvalidTransition
 		}
+		if modifiesExistingPromotionAction(run.Authority.Action) && (run.Authority.PromotionMutation == nil || request.FieldReadback["platform_object_id"] != run.Authority.TargetPlatformObjectID || request.FieldReadback["target_state_hash"] != run.Authority.PromotionMutation.TargetStateHash) {
+			return TakeoverEvidenceResult{}, ErrInvalidContract
+		}
 		next, status, attemptStatus = RunVerifying, StepSucceeded, ControlledActionVerified
 	case TakeoverListConfirmed:
 		if run.State != RunVerifying || request.FieldReadback["platform_object_id"] == "" || request.FieldReadback["platform_status"] == "" {
@@ -556,6 +563,18 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 		}
 		if resultStepID == "" || resultObjectID != request.FieldReadback["platform_object_id"] || resultStatus != request.FieldReadback["platform_status"] {
 			return TakeoverEvidenceResult{}, ErrInvalidContract
+		}
+		if modifiesExistingPromotionAction(run.Authority.Action) {
+			resultTargetHash := ""
+			for _, candidate := range evidence {
+				if candidate.StepID == resultStepID {
+					resultTargetHash = candidate.FieldReadback["target_state_hash"]
+					break
+				}
+			}
+			if run.Authority.PromotionMutation == nil || resultObjectID != run.Authority.TargetPlatformObjectID || resultTargetHash != run.Authority.PromotionMutation.TargetStateHash || request.FieldReadback["target_state_hash"] != run.Authority.PromotionMutation.TargetStateHash {
+				return TakeoverEvidenceResult{}, ErrInvalidContract
+			}
 		}
 		next, status, attemptStatus = RunSucceeded, StepSucceeded, ControlledActionVerified
 	case TakeoverWriteRejected:

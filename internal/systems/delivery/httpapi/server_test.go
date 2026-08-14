@@ -40,7 +40,8 @@ func TestDeliveryHTTPExposesPlanAndControlledActions(t *testing.T) {
 }
 
 func TestPlatformEntityMappingHTTPKeepsPlatformValuesServerOwnedAndRequiresTwoReadbacks(t *testing.T) {
-	app := &mappingApplicationStub{applicationStub: applicationStub{}, mapping: delivery.PlatformEntityMapping{SchemaVersion: delivery.PlatformEntityMappingV1, ID: "mapping_1", OrganizationID: "org_1", ProjectID: "project_1", AccountReferenceID: "account_1", PlanID: "plan_1", ConfigurationID: "configuration_1", BusinessExecutionID: "execution_1", ComputerUseRunID: "run_1", InternalObjectKind: "project", InternalObjectID: "draft_1", PlatformObjectKind: "project", Status: delivery.PlatformEntityMappingPending, Version: 1, CreatedAt: time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)}}
+	createdAt := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	app := &mappingApplicationStub{applicationStub: applicationStub{}, mapping: delivery.PlatformEntityMapping{SchemaVersion: delivery.PlatformEntityMappingV1, ID: "mapping_1", OrganizationID: "org_1", ProjectID: "project_1", AccountReferenceID: "account_1", PlanID: "plan_1", ConfigurationID: "configuration_1", BusinessExecutionID: "execution_1", ComputerUseRunID: "run_1", InternalObjectKind: "promotion", InternalObjectID: "draft_1", PlatformObjectKind: "promotion", Status: delivery.PlatformEntityMappingPending, Version: 1, CreatedAt: createdAt, UpdatedAt: createdAt}, controlledChange: delivery.ControlledChangeSet{SchemaVersion: delivery.ControlledChangeSetSchemaV1, ID: "change_mutation"}}
 	server := New(app)
 	body := `{"id":"mapping_1","account_reference_id":"account_1","plan_id":"plan_1","configuration_id":"configuration_1","business_execution_id":"execution_1","computer_use_run_id":"run_1","internal_object_kind":"project","internal_object_id":"draft_1","platform_object_kind":"project"}`
 	response := httptest.NewRecorder()
@@ -63,6 +64,16 @@ func TestPlatformEntityMappingHTTPKeepsPlatformValuesServerOwnedAndRequiresTwoRe
 	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1:confirm", `{"expected_version":1,"result_evidence_id":"evidence_result","list_evidence_id":"evidence_list","platform_object_id":"forged"}`))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("client-owned platform value status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1/controlled-change-sets", `{"expected_mapping_version":2,"action":"update_promotion_budget","current_daily_budget_minor":30000,"target_daily_budget_minor":36000}`))
+	if response.Code != http.StatusCreated || app.mappedCompile.Action != delivery.ControlledActionUpdatePromotionBudget || app.mappedCompile.ExpectedMappingVersion != 2 || !strings.Contains(response.Body.String(), `"id":"change_mutation"`) {
+		t.Fatalf("compile mutation status=%d request=%#v body=%s", response.Code, app.mappedCompile, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1:confirm-mutation", `{"expected_version":2,"business_execution_id":"mutation_execution","result_evidence_id":"mutation_result","list_evidence_id":"mutation_list"}`))
+	if response.Code != http.StatusOK || app.confirmMutation.BusinessExecutionID != "mutation_execution" || !strings.Contains(response.Body.String(), `"revision"`) {
+		t.Fatalf("confirm mutation status=%d request=%#v body=%s", response.Code, app.confirmMutation, response.Body.String())
 	}
 }
 
@@ -298,9 +309,12 @@ type applicationStub struct {
 
 type mappingApplicationStub struct {
 	applicationStub
-	mapping delivery.PlatformEntityMapping
-	created delivery.PlatformEntityMapping
-	confirm delivery.ConfirmPlatformEntityMappingRequest
+	mapping          delivery.PlatformEntityMapping
+	created          delivery.PlatformEntityMapping
+	confirm          delivery.ConfirmPlatformEntityMappingRequest
+	confirmMutation  delivery.ConfirmPlatformEntityMappingMutationRequest
+	controlledChange delivery.ControlledChangeSet
+	mappedCompile    delivery.CompileMappedControlledChangeSetRequest
 }
 
 func (s *mappingApplicationStub) CreatePendingPlatformEntityMapping(_ context.Context, _ contract.ActorContext, value delivery.PlatformEntityMapping) (delivery.PlatformEntityMapping, error) {
@@ -315,6 +329,31 @@ func (s *mappingApplicationStub) ConfirmPlatformEntityMapping(_ context.Context,
 	value := s.mapping
 	value.Status, value.PlatformObjectID, value.PlatformStatus, value.ResultEvidenceID, value.ListEvidenceID = delivery.PlatformEntityMappingConfirmed, "platform_1", "pending_review", request.ResultEvidenceID, request.ListEvidenceID
 	return value, nil
+}
+func (s *mappingApplicationStub) ConfirmPlatformEntityMappingMutation(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request delivery.ConfirmPlatformEntityMappingMutationRequest) (delivery.PlatformEntityMapping, delivery.PlatformEntityMappingRevision, error) {
+	s.confirmMutation = request
+	value := s.mapping
+	value.Version++
+	return value, delivery.PlatformEntityMappingRevision{MappingID: value.ID, Version: value.Version, BusinessExecutionID: request.BusinessExecutionID, ResultEvidenceID: request.ResultEvidenceID, ListEvidenceID: request.ListEvidenceID}, nil
+}
+func (s *mappingApplicationStub) CompileControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, delivery.CompileControlledChangeSetRequest) (delivery.ControlledChangeSet, bool, error) {
+	return s.controlledChange, false, nil
+}
+func (s *mappingApplicationStub) CompileMappedControlledChangeSet(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request delivery.CompileMappedControlledChangeSetRequest) (delivery.ControlledChangeSet, bool, error) {
+	s.mappedCompile = request
+	return s.controlledChange, false, nil
+}
+func (s *mappingApplicationStub) GetControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledChangeSet, error) {
+	return s.controlledChange, nil
+}
+func (s *mappingApplicationStub) ApproveControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ApproveControlledChangeSetRequest) (delivery.ControlledChangeSet, delivery.RemoteWriteApproval, error) {
+	return s.controlledChange, delivery.RemoteWriteApproval{}, nil
+}
+func (s *mappingApplicationStub) CreateControlledExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledExecution, error) {
+	return delivery.ControlledExecution{}, nil
+}
+func (s *mappingApplicationStub) GetControlledExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledExecution, error) {
+	return delivery.ControlledExecution{}, nil
 }
 
 func (s *applicationStub) GenerateDecision(context.Context, contract.ActorContext, contract.ProjectID, string, int) (delivery.DeliveryDecision, error) {

@@ -22,7 +22,9 @@ for (const schemaName of ["platform-computer-use-run-v1.schema.json", "delivery-
 test("controlled Computer Use fixtures satisfy the frozen contracts", () => {
   for (const [schemaName, fixtureName] of [
     ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-awaiting-confirmation.json"],
+    ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-budget-mutation.json"],
     ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-ready.json"],
+    ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-budget-mutation.json"],
   ] as const) {
     const schema = readJSON(join(contracts, schemaName));
     const validate = ajv.getSchema(String(schema.$id));

@@ -34,7 +34,7 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		for _, statement := range []string{`DELETE FROM delivery_platform_entity_mappings WHERE organization_id=?`, `DELETE FROM computer_use_evidence WHERE organization_id=?`, `DELETE FROM computer_use_run_steps WHERE organization_id=?`, `DELETE FROM computer_use_events WHERE organization_id=?`, `UPDATE computer_use_runs SET lease_id=NULL WHERE organization_id=?`, `DELETE FROM computer_use_session_leases WHERE organization_id=?`, `DELETE FROM computer_use_runs WHERE organization_id=?`, `DELETE FROM computer_use_site_policies WHERE organization_id=?`, `DELETE FROM computer_use_browser_profiles WHERE organization_id=?`, `DELETE FROM computer_use_environments WHERE organization_id=?`, `DELETE FROM delivery_controlled_executions WHERE organization_id=?`, `DELETE FROM delivery_remote_write_approvals WHERE organization_id=?`, `DELETE FROM delivery_controlled_change_sets WHERE organization_id=?`, `DELETE FROM projects WHERE organization_id=?`, `DELETE FROM organizations WHERE id=?`} {
+		for _, statement := range []string{`DELETE FROM delivery_platform_entity_mapping_revisions WHERE organization_id=?`, `DELETE FROM delivery_platform_entity_mappings WHERE organization_id=?`, `DELETE FROM computer_use_evidence WHERE organization_id=?`, `DELETE FROM computer_use_run_steps WHERE organization_id=?`, `DELETE FROM computer_use_events WHERE organization_id=?`, `UPDATE computer_use_runs SET lease_id=NULL WHERE organization_id=?`, `DELETE FROM computer_use_session_leases WHERE organization_id=?`, `DELETE FROM computer_use_runs WHERE organization_id=?`, `DELETE FROM computer_use_site_policies WHERE organization_id=?`, `DELETE FROM computer_use_browser_profiles WHERE organization_id=?`, `DELETE FROM computer_use_environments WHERE organization_id=?`, `DELETE FROM delivery_controlled_executions WHERE organization_id=?`, `DELETE FROM delivery_remote_write_approvals WHERE organization_id=?`, `DELETE FROM delivery_controlled_change_sets WHERE organization_id=?`, `DELETE FROM projects WHERE organization_id=?`, `DELETE FROM organizations WHERE id=?`} {
 			_, _ = db.ExecContext(context.Background(), statement, org)
 		}
 	})
@@ -114,7 +114,7 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	if err := computerUseRepo.AppendEvidence(ctx, listEvidence); err != nil {
 		t.Fatal(err)
 	}
-	mapping := PlatformEntityMapping{SchemaVersion: PlatformEntityMappingV1, ID: "mapping_" + suffix, OrganizationID: org, ProjectID: project, AccountReferenceID: binding.AccountReferenceID, PlanID: binding.PlanID, ConfigurationID: binding.ConfigurationID, BusinessExecutionID: execution.ID, ComputerUseRunID: run.ID, InternalObjectKind: "project", InternalObjectID: binding.ObjectFingerprint, PlatformObjectKind: "project", Status: PlatformEntityMappingPending, Version: 1, CreatedAt: now}
+	mapping := PlatformEntityMapping{SchemaVersion: PlatformEntityMappingV1, ID: "mapping_" + suffix, OrganizationID: org, ProjectID: project, AccountReferenceID: binding.AccountReferenceID, PlanID: binding.PlanID, ConfigurationID: binding.ConfigurationID, BusinessExecutionID: execution.ID, ComputerUseRunID: run.ID, InternalObjectKind: "promotion", InternalObjectID: binding.ObjectFingerprint, PlatformObjectKind: "promotion", Status: PlatformEntityMappingPending, Version: 1, CreatedAt: now, UpdatedAt: now}
 	mapping, err = deliveryRepo.CreatePlatformEntityMapping(ctx, mapping)
 	if err != nil {
 		t.Fatal(err)
@@ -136,5 +136,67 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	}
 	if replayedMapping, replayErr := deliveryRepo.ConfirmPlatformEntityMapping(ctx, org, project, mapping.ID, mapping.Version, resultEvidence.ID, listEvidence.ID); replayErr != nil || replayedMapping.ID != mapping.ID {
 		t.Fatalf("mapping confirmation replay=%+v err=%v", replayedMapping, replayErr)
+	}
+
+	mutation, err := (CompileMappedControlledChangeSetRequest{Action: ControlledActionUpdatePromotionBudget, CurrentDailyBudgetMinor: 30000, TargetDailyBudgetMinor: 36000}).mutation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutationBinding := loadedChange.Binding
+	mutationBinding.TargetMappingID = mapping.ID
+	mutationBinding.TargetMappingVersion = mapping.Version
+	mutationBinding.TargetPlatformObjectID = mapping.PlatformObjectID
+	mutationBinding.TargetPlatformObjectKind = mapping.PlatformObjectKind
+	mutationBinding.PromotionBudgetLimitMinor = mutation.TargetDailyBudgetMinor
+	mutationBinding.PromotionMutation = &mutation
+	mutationBinding.ObjectFingerprint, err = contract.CanonicalJSONHash(struct {
+		MappingID       string `json:"mapping_id"`
+		MappingVersion  int64  `json:"mapping_version"`
+		TargetStateHash string `json:"target_state_hash"`
+	}{mapping.ID, mapping.Version, mutation.TargetStateHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutationChange := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: "mutation_change_" + suffix, OrganizationID: org, ProjectID: project, Binding: mutationBinding, Action: ControlledActionUpdatePromotionBudget, BudgetLimitMinor: mutation.TargetDailyBudgetMinor, Currency: "CNY", Status: ControlledChangeSetReady, Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	mutationChange.CanonicalHash, _ = mutationChange.ComputeCanonicalHash()
+	mutationChange, _, err = deliveryRepo.CreateControlledChangeSet(ctx, mutationChange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutationApproval := RemoteWriteApproval{SchemaVersion: RemoteWriteApprovalSchemaV1, ID: "mutation_approval_" + suffix, OrganizationID: org, ProjectID: project, ControlledChangeSetID: mutationChange.ID, ControlledChangeSetHash: mutationChange.CanonicalHash, Binding: mutationBinding, Action: mutationChange.Action, Scope: "controlled_remote_write", BudgetLimitMinor: mutationChange.BudgetLimitMinor, Currency: mutationChange.Currency, ApprovedBy: "approver", ApprovedAt: now, ExpiresAt: now.Add(RemoteWriteApprovalTTL)}
+	mutationApproval.ActionHash, _ = mutationApproval.ComputeActionHash()
+	mutationChange, mutationApproval, err = deliveryRepo.ApproveControlledChangeSet(ctx, mutationChange, mutationApproval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutationExecution := ControlledExecution{ID: "mutation_execution_" + suffix, OrganizationID: org, ProjectID: project, ControlledChangeSetID: mutationChange.ID, RemoteWriteApprovalID: mutationApproval.ID, Status: "pending", Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	mutationExecution, err = deliveryRepo.CreateControlledExecution(ctx, mutationExecution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutationComputerUseService := computeruse.Service{Repository: computerUseRepo, AuthorityProvider: ComputerUseAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_mutation_" + suffix, nil }}
+	mutationRun, replayed, err := mutationComputerUseService.CreateBoundRun(ctx, computeruse.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: mutationExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "mutation-run-key-" + suffix, CreatedBy: "operator"})
+	if err != nil || replayed || mutationRun.Authority.TargetMappingID != mapping.ID || mutationRun.Authority.PromotionMutation == nil || mutationRun.Authority.PromotionMutation.TargetStateHash != mutation.TargetStateHash {
+		t.Fatalf("mutation run=%+v replayed=%t err=%v", mutationRun, replayed, err)
+	}
+	mutationResultStep := computeruse.RunStep{ID: "mutation_result_step_" + suffix, RunID: mutationRun.ID, Sequence: 1, WorkflowStepID: mutationRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverResultObserved), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
+	mutationListStep := computeruse.RunStep{ID: "mutation_list_step_" + suffix, RunID: mutationRun.ID, Sequence: 2, WorkflowStepID: mutationRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverListConfirmed), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
+	if err := computerUseRepo.PutStep(ctx, org, project, mutationResultStep); err != nil {
+		t.Fatal(err)
+	}
+	if err := computerUseRepo.PutStep(ctx, org, project, mutationListStep); err != nil {
+		t.Fatal(err)
+	}
+	mutationResultEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "mutation_result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: mutationRun.ID, StepID: mutationResultStep.ID, FieldReadback: map[string]string{"platform_object_id": mapping.PlatformObjectID, "platform_status": "pending_review", "target_state_hash": mutation.TargetStateHash}, ObjectFingerprint: mutationBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "mutation-result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(2 * time.Second)}
+	mutationListEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "mutation_list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: mutationRun.ID, StepID: mutationListStep.ID, FieldReadback: map[string]string{"platform_object_id": mapping.PlatformObjectID, "platform_status": "pending_review", "target_state_hash": mutation.TargetStateHash}, ObjectFingerprint: mutationBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "mutation-list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(3 * time.Second)}
+	if err := computerUseRepo.AppendEvidence(ctx, mutationResultEvidence); err != nil {
+		t.Fatal(err)
+	}
+	if err := computerUseRepo.AppendEvidence(ctx, mutationListEvidence); err != nil {
+		t.Fatal(err)
+	}
+	updatedMapping, revision, err := deliveryRepo.ConfirmPlatformEntityMappingMutation(ctx, org, project, mapping.ID, mapping.Version, mutationExecution.ID, mutationResultEvidence.ID, mutationListEvidence.ID)
+	if err != nil || updatedMapping.Version != mapping.Version+1 || updatedMapping.CurrentStateHash != mutation.TargetStateHash || revision.Action != ControlledActionUpdatePromotionBudget || revision.CurrentStateHash != mutation.TargetStateHash {
+		t.Fatalf("updated mapping=%+v revision=%+v err=%v", updatedMapping, revision, err)
 	}
 }

@@ -43,6 +43,26 @@ After the click:
 
 If the submission result is unclear, record `result_unknown`; permit only query, reidentification, or human reconciliation. If the original submission Lease expires after the click, release it and acquire a new fenced recovery Lease for readback. Keep the original Attempt binding immutable and never authorize or perform another submit.
 
+## Calibrate finite modifications separately
+
+The shared control plane can now freeze and simulate exact promotion budget,
+schedule and authorized-material modifications. That implementation does not
+expand this Skill's live write capability: `modify_remote_object` remains
+forbidden until the specific edit path is calibrated in a visible browser.
+
+For a no-write calibration, require a confirmed promotion Mapping and a new
+ChangeSet/Approval. Reidentify the exact parent project and promotion, read the
+current field values, prepare only the approved target values, read every
+changed field back, and exit without saving. Record `PAGE_DRIFT` or the
+platform's own edit restriction instead of selecting a different object.
+
+If the user separately authorizes the first real modification in that same
+execution turn, limit it to one budget change on the dedicated test promotion.
+Require an exact pre-click object/current-state/target-state readback, consume a
+new one-time confirmation, click the unique save boundary once, and reconcile
+the same object and target-state hash from the result and promotion list. Never
+reuse the creation Approval or the creation final confirmation.
+
 ## Read the verified baseline
 
 - Read the [control contract](../../../../../../docs/delivery/controlled-computer-use-contract.md) for state and authority invariants.

@@ -53,6 +53,28 @@ func (s *Server) compileControlledChangeSet(w http.ResponseWriter, r *http.Reque
 	}
 	writeJSON(w, status, value)
 }
+
+func (s *Server) compileMappedControlledChangeSet(w http.ResponseWriter, r *http.Request) {
+	app, err := s.controlledApp()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var body delivery.CompileMappedControlledChangeSetRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	value, replay, err := app.CompileMappedControlledChangeSet(r.Context(), mustActor(r), projectID(r), r.PathValue("mapping_id"), body)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	status := http.StatusCreated
+	if replay {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, value)
+}
 func (s *Server) getControlledChangeSet(w http.ResponseWriter, r *http.Request) {
 	app, err := s.controlledApp()
 	if err != nil {
@@ -129,7 +151,7 @@ func (s *Server) createPlatformEntityMapping(w http.ResponseWriter, r *http.Requ
 	if !decode(w, r, &body) {
 		return
 	}
-	if body.OrganizationID != "" || body.ProjectID != "" || body.SchemaVersion != "" || body.Status != "" || body.PlatformObjectID != "" || body.PlatformStatus != "" || body.ResultEvidenceID != "" || body.ListEvidenceID != "" || body.Version != 0 || !body.CreatedAt.IsZero() {
+	if body.OrganizationID != "" || body.ProjectID != "" || body.SchemaVersion != "" || body.Status != "" || body.PlatformObjectID != "" || body.PlatformStatus != "" || body.CurrentStateAction != "" || body.CurrentStateHash != "" || body.ResultEvidenceID != "" || body.ListEvidenceID != "" || body.Version != 0 || !body.CreatedAt.IsZero() || !body.UpdatedAt.IsZero() {
 		writeError(w, r, delivery.ErrInvalidRequest)
 		return
 	}
@@ -158,7 +180,7 @@ func (s *Server) getPlatformEntityMapping(w http.ResponseWriter, r *http.Request
 
 func (s *Server) platformEntityMappingAction(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(r.PathValue("mapping_action"), ":", 2)
-	if len(parts) != 2 || parts[1] != "confirm" {
+	if len(parts) != 2 || (parts[1] != "confirm" && parts[1] != "confirm-mutation") {
 		http.NotFound(w, r)
 		return
 	}
@@ -168,14 +190,27 @@ func (s *Server) platformEntityMappingAction(w http.ResponseWriter, r *http.Requ
 		writeError(w, r, err)
 		return
 	}
-	var body delivery.ConfirmPlatformEntityMappingRequest
+	if parts[1] == "confirm" {
+		var body delivery.ConfirmPlatformEntityMappingRequest
+		if !decode(w, r, &body) {
+			return
+		}
+		value, err := app.ConfirmPlatformEntityMapping(r.Context(), mustActor(r), projectID(r), r.PathValue("mapping_id"), body)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, value)
+		return
+	}
+	var body delivery.ConfirmPlatformEntityMappingMutationRequest
 	if !decode(w, r, &body) {
 		return
 	}
-	value, err := app.ConfirmPlatformEntityMapping(r.Context(), mustActor(r), projectID(r), r.PathValue("mapping_id"), body)
+	mapping, revision, err := app.ConfirmPlatformEntityMappingMutation(r.Context(), mustActor(r), projectID(r), r.PathValue("mapping_id"), body)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, value)
+	writeJSON(w, http.StatusOK, map[string]any{"mapping": mapping, "revision": revision})
 }
