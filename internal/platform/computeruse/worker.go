@@ -3,6 +3,7 @@ package computeruse
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
@@ -37,14 +38,48 @@ func (a DeterministicFakeAdapter) Prepare(_ context.Context, run ComputerUseRun)
 	if a.AccountID != "" && a.AccountID != run.AccountID {
 		return PreparedPage{}, fmt.Errorf("%s", BlockAccountMismatch)
 	}
-	return PreparedPage{BeforeFacts: map[string]string{"account_id": run.AccountID, "page_kind": "review"}, Readback: map[string]string{"account_id": run.AccountID, "object_fingerprint": run.Authority.ObjectFingerprint}, DiffKeys: []string{}, PageRef: "fake://oceanengine/review"}, nil
+	readback := map[string]string{"account_id": run.AccountID, "object_fingerprint": run.Authority.ObjectFingerprint}
+	if changesExistingPromotionAction(run.Authority.Action) {
+		readback["platform_object_id"] = run.Authority.TargetPlatformObjectID
+		if currentStateHash, targetStateHash, err := run.Authority.existingPromotionStateHashes(); err == nil {
+			readback["current_state_hash"] = currentStateHash
+			readback["target_state_hash"] = targetStateHash
+		}
+		if restart := run.Authority.PromotionRestart; restart != nil {
+			scheduleHash, materialsHash, err := restart.readbackHashes()
+			if err != nil {
+				return PreparedPage{}, err
+			}
+			readback["platform_project_id"] = run.Authority.ParentPlatformProjectID
+			readback["platform_status"] = restart.CurrentPlatformStatus
+			readback["daily_budget_minor"] = strconv.FormatInt(restart.ApprovedDailyBudgetMinor, 10)
+			readback["schedule_hash"] = scheduleHash
+			readback["material_references_hash"] = materialsHash
+			readback["landing_page_reference_id"] = restart.LandingPage.ReferenceID
+			readback["materials_available"] = "true"
+			readback["landing_page_available"] = "true"
+		}
+	}
+	return PreparedPage{BeforeFacts: map[string]string{"account_id": run.AccountID, "page_kind": "review"}, Readback: readback, DiffKeys: []string{}, PageRef: "fake://oceanengine/review"}, nil
 }
 func (a DeterministicFakeAdapter) Submit(_ context.Context, run ComputerUseRun, _ ControlledActionAttempt) (WorkerOutcome, PreparedPage, error) {
 	outcome := a.Outcome
 	if outcome == "" {
 		outcome = WorkerSuccess
 	}
-	page := PreparedPage{BeforeFacts: map[string]string{"object_fingerprint": run.Authority.ObjectFingerprint}, Readback: map[string]string{"platform_object_id": "fake-object-" + run.ID, "status": string(outcome)}, DiffKeys: []string{}, PageRef: "fake://oceanengine/result"}
+	objectID := "fake-object-" + run.ID
+	if changesExistingPromotionAction(run.Authority.Action) {
+		objectID = run.Authority.TargetPlatformObjectID
+	}
+	targetStateHash := ""
+	if _, stateHash, err := run.Authority.existingPromotionStateHashes(); err == nil {
+		targetStateHash = stateHash
+	}
+	platformStatus := string(outcome)
+	if targetStatus := run.Authority.existingPromotionTargetStatus(); targetStatus != "" && outcome == WorkerSuccess {
+		platformStatus = targetStatus
+	}
+	page := PreparedPage{BeforeFacts: map[string]string{"object_fingerprint": run.Authority.ObjectFingerprint}, Readback: map[string]string{"platform_object_id": objectID, "platform_status": platformStatus, "target_state_hash": targetStateHash}, DiffKeys: []string{}, PageRef: "fake://oceanengine/result"}
 	return outcome, page, nil
 }
 
@@ -81,6 +116,9 @@ func (w Worker) Prepare(ctx context.Context, org contract.OrganizationID, projec
 			reason = BlockAccountMismatch
 		}
 		return w.Service.TransitionRun(ctx, org, project, runID, run.Version, RunFailed, reason)
+	}
+	if changesExistingPromotionAction(run.Authority.Action) && run.Authority.validatePreSubmitReadback(prepared.Readback, w.Service.now()) != nil {
+		return w.Service.TransitionRun(ctx, org, project, runID, run.Version, RunFailed, BlockPageDrift)
 	}
 	step := RunStep{ID: run.ID + "-prepare", RunID: run.ID, Sequence: 1, WorkflowStepID: run.Authority.WorkflowStepID, Action: "prepare_and_readback", Status: StepSucceeded, Attempt: 1, Version: 1}
 	if err := w.Service.Repository.PutStep(ctx, org, project, step); err != nil {

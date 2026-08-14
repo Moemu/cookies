@@ -17,7 +17,7 @@
     "revalidated_at": "2026-08-14",
     "platform_build": "unknown",
     "locator_contract": "project_and_promotion_forms_live_dom",
-    "drift_check": "promotion_submit_and_independent_list_readback_revalidated"
+    "drift_check": "existing_object_edit_surfaces_revalidated_with_brand_locator_drift"
   },
   "schema_ref": "docs/delivery/schemas/oceanengine-bidding-schema-v0.1.json",
   "evidence_refs": [
@@ -38,6 +38,9 @@
     "docs/delivery/oceanengine-gate-two-preparation.md",
     "docs/delivery/fixtures/oceanengine-gate-two-preflight-v0.1.json",
     "docs/delivery/evidence/oceanengine-gate-two-promotion-submit-2026-08-14.json",
+    "docs/delivery/fixtures/oceanengine-existing-object-live-locators-v0.1.json",
+    "docs/delivery/evidence/oceanengine-existing-object-edit-readonly-2026-08-14.json",
+    "docs/delivery/evidence/oceanengine-controlled-actions-batch-2026-08-14.json",
     "internal/systems/delivery/platformskills/skills/oceanengine-ecommerce-manual/SKILL.md"
   ],
   "page_types": [
@@ -46,7 +49,7 @@
     { "kind": "project_create", "evidence_state": "operator_reviewed" },
     { "kind": "promotion_list", "evidence_state": "observed" },
     { "kind": "promotion_create", "evidence_state": "operator_reviewed" },
-    { "kind": "promotion_edit", "evidence_state": "observed" },
+    { "kind": "promotion_edit", "evidence_state": "operator_reviewed" },
     { "kind": "data_center", "evidence_state": "observed" },
     { "kind": "account_project_promotion_reports", "evidence_state": "observed" },
     { "kind": "material_report", "evidence_state": "observed" }
@@ -58,12 +61,16 @@
   "dynamic_condition_keys": ["marketing_purpose", "marketing_scenario", "marketing_product_ref", "optimization_target_reference", "deep_optimization_mode", "delivery_mode", "schedule", "daily_budget", "bidding_strategy", "charging_mode", "bid", "roi_coefficient"],
   "safety_exit": {
     "method": "discard_unsubmitted_local_form",
-    "required_proof": "return_to_known_readonly_page_and_confirm_no_platform_object_or_status_change"
+    "required_proof": "return_to_known_readonly_page_and_confirm_no_platform_write_or_approved_field_change"
   },
   "write_validation_pending": ["unattended_browser_driver", "enable_delivery", "remote_object_modification", "delete", "write_compensation", "additional_submit_without_new_authority"],
   "runtime_policy": {
     "project_form_live_calibrated": true,
     "promotion_form_live_calibrated": true,
+    "existing_project_edit_surface_live_observed": true,
+    "existing_promotion_edit_surface_live_observed": true,
+    "controlled_action_batch_live_calibrated": true,
+    "remote_modification_live_calibrated": false,
     "control_plane_evidence_recorded": true,
     "agent_final_submit_documentation": "available_in_skill_md_with_per_execution_authorization"
   },
@@ -103,5 +110,38 @@
     "mapping_status": "confirmed",
     "delivery_enabled": false,
     "evidence_ref": "docs/delivery/evidence/oceanengine-gate-two-promotion-submit-2026-08-14.json"
+  },
+  "existing_object_edit_calibration": {
+    "observed_at": "2026-08-14",
+    "evidence_ref": "docs/delivery/evidence/oceanengine-existing-object-edit-readonly-2026-08-14.json",
+    "locator_ref": "docs/delivery/fixtures/oceanengine-existing-object-live-locators-v0.1.json",
+    "observed_promotion_status": "pending_review",
+    "parent_project_owns_schedule": true,
+    "project_mapping_required_for_schedule": true,
+    "promotion_schedule_action_forbidden": true,
+    "promotion_brand_locator_drift": "PAGE_DRIFT",
+    "live_remote_modification_allowed": false
+  },
+  "controlled_action_batch_calibration": {
+    "observed_at": "2026-08-14",
+    "evidence_ref": "docs/delivery/evidence/oceanengine-controlled-actions-batch-2026-08-14.json",
+    "mapping_revision": 2,
+    "mapping_status": "confirmed",
+    "mapping_platform_status_snapshot": "pending_review",
+    "ordered_actions": ["update_promotion_budget", "update_promotion_materials", "pause_promotion", "resume_promotion"],
+    "capability_matrix": [
+      { "action": "update_promotion_budget", "calibration_status": "passed_no_write", "controlled_action_status": "blocked_by_lease_expiry" },
+      { "action": "update_promotion_materials", "calibration_status": "passed_no_write", "controlled_action_status": "blocked_by_dependency" },
+      { "action": "pause_promotion", "calibration_status": "blocked_by_eligible_test_object", "controlled_action_status": "not_started" },
+      { "action": "resume_promotion", "calibration_status": "blocked_by_eligible_test_object", "controlled_action_status": "not_started" }
+    ],
+    "maximum_remote_write_clicks_authorized": 2,
+    "actual_remote_write_clicks": 0,
+    "controlled_action_attempt_count": 0,
+    "final_confirmation_count": 0,
+    "run_terminal_state": "cancelled",
+    "stop_reason": "lease_expired_before_final_confirmation",
+    "remote_write_detected": false,
+    "live_remote_modification_allowed": false
   }
 }

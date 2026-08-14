@@ -1,0 +1,157 @@
+{
+  "schema_version": "oceanengine-existing-object-edit-readonly-evidence/v1",
+  "observed_at": "2026-08-14",
+  "platform": "ocean_engine",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "scope": {
+    "account_reference_sha256": "a8c499f7e22dc70d392d8de9b7bd093a4e7371cb17ba3e53c4bf8e0eea15667c",
+    "parent_project_reference_sha256": "07f55315c832782799372a190c3a7c263717634543e81d253919cfa180317f89",
+    "promotion_reference_sha256": "199672dd7e6d506b8ef3da3b3011c2b192ba5339d743a0c57f6fc3a5f444aab2",
+    "promotion_platform_status": "pending_review",
+    "delivery_enabled": false,
+    "object_identity_method": "exact_sha256_match_against_gate_two_authority"
+  },
+  "project_edit_surface": {
+    "pathname": "/superior/create-project",
+    "required_query_keys": ["aadvid", "cascade_id", "is_update", "project_id", "uuid"],
+    "locked_fields": [
+      "marketing_purpose",
+      "marketing_scenario",
+      "marketing_product_kind",
+      "marketing_product_ref",
+      "delivery_carrier",
+      "optimization_target",
+      "deep_optimization",
+      "delivery_mode",
+      "placement",
+      "billing_method"
+    ],
+    "editable_fields_observed": [
+      "targeting",
+      "schedule_type",
+      "schedule_end",
+      "dayparting",
+      "bid_strategy",
+      "project_budget_mode",
+      "search_keywords",
+      "search_bid_coefficient",
+      "search_targeting_extension",
+      "tracking_links",
+      "project_name"
+    ],
+    "conditional_fields": [
+      {
+        "field": "schedule_start",
+        "observed_state": "disabled_on_current_existing_project"
+      },
+      {
+        "field": "project_budget_amount",
+        "observed_state": "not_rendered_while_project_budget_is_unlimited"
+      }
+    ],
+    "write_boundaries": ["save_and_create_promotion", "save_and_close"],
+    "safe_exit": "close_unmodified_edit_tab"
+  },
+  "promotion_edit_surface": {
+    "pathname": "/superior/ads",
+    "required_query_keys": ["aadvid", "cascade_id", "is_update", "project_id", "promotion_id", "temp_id", "uuid"],
+    "locked_or_inherited_fields": [
+      "parent_project",
+      "delivery_identity",
+      "primary_product_name",
+      "bid_strategy",
+      "optimization_target",
+      "deep_optimization",
+      "billing_method",
+      "schedule",
+      "budget_type",
+      "client_video_download"
+    ],
+    "editable_fields_observed": [
+      "base_materials",
+      "copy_items",
+      "landing_page",
+      "direct_link",
+      "backup_link",
+      "additional_product_name",
+      "product_images",
+      "selling_points",
+      "creative_components",
+      "source_label",
+      "comment_setting",
+      "category",
+      "brand",
+      "daily_budget_amount",
+      "bid_amount",
+      "promotion_name"
+    ],
+    "material_capacity_observed": {
+      "video": 10,
+      "image": 10,
+      "image_text": 10,
+      "copy": 10,
+      "landing_page": 10
+    },
+    "write_boundary": "save_and_close",
+    "safe_exit": "cancel"
+  },
+  "locator_drift": [
+    {
+      "field": "promotion.brand",
+      "previous_selector": "[data-e2e='createad_cdpBrand'] input",
+      "previous_visible_match_count": 1,
+      "current_total_match_count": 2,
+      "current_visible_match_count": 1,
+      "replacement": "placeholder_exact:选择或手动输入品牌",
+      "classification": "PAGE_DRIFT"
+    }
+  ],
+  "status_control_observation": {
+    "promotion_status": "pending_review",
+    "visible_non_edit_actions": ["schedule_delivery", "details"],
+    "pause_control_visible": false,
+    "restart_control_visible": false,
+    "conclusion": "pause_and_restart_require_a_separately_authorized_object_in_the_required_state"
+  },
+  "implementation_boundary": {
+    "promotion_mapping_actions_supported_by_observed_field_ownership": [
+      "update_promotion_budget",
+      "update_promotion_materials"
+    ],
+    "invalid_promotion_mapping_action": "update_promotion_schedule",
+    "invalid_action_reason": "schedule_is_owned_by_the_parent_project_edit_surface",
+    "project_mapping_required_for_schedule": true,
+    "observed_not_implemented": [
+      "update_promotion_bid",
+      "update_promotion_copy",
+      "update_promotion_landing_page",
+      "update_promotion_settings",
+      "update_project_targeting",
+      "update_project_schedule",
+      "update_project_budget",
+      "update_project_search",
+      "update_project_tracking",
+      "update_project_name"
+    ],
+    "live_remote_modification_allowed": false
+  },
+  "no_write_verification": {
+    "fields_filled": 0,
+    "write_boundary_clicks": 0,
+    "status_control_clicks": 0,
+    "exact_promotion_match_after_reload": 1,
+    "budget_unchanged": true,
+    "bid_unchanged": true,
+    "platform_status_unchanged": true,
+    "remote_side_effect_detected": false
+  },
+  "locator_ref": "docs/delivery/fixtures/oceanengine-existing-object-live-locators-v0.1.json",
+  "redaction_policy": {
+    "platform_ids": "sha256_only",
+    "business_names": "omitted",
+    "account_name": "omitted",
+    "landing_page_urls": "omitted",
+    "direct_links": "omitted"
+  }
+}

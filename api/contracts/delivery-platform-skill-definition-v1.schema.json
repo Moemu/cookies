@@ -4,7 +4,7 @@
   "title": "Delivery Platform Skill Definition v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "id", "version", "display_name", "platform", "capability", "status", "owner", "executable", "real_browser_driver", "submit_allowed", "evidence_observed_at", "last_reviewed_at", "ui_baseline", "schema_ref", "evidence_refs", "page_types", "capabilities", "dynamic_condition_keys", "safety_exit", "write_validation_pending", "runtime_policy", "rollback", "gate_one", "gate_two_preparation", "gate_two_validation"],
+  "required": ["schema_version", "id", "version", "display_name", "platform", "capability", "status", "owner", "executable", "real_browser_driver", "submit_allowed", "evidence_observed_at", "last_reviewed_at", "ui_baseline", "schema_ref", "evidence_refs", "page_types", "capabilities", "dynamic_condition_keys", "safety_exit", "write_validation_pending", "runtime_policy", "rollback", "gate_one", "gate_two_preparation", "gate_two_validation", "existing_object_edit_calibration", "controlled_action_batch_calibration"],
   "properties": {
     "schema_version": { "const": "delivery-platform-skill-definition/v1" },
     "id": { "const": "oceanengine-ecommerce-manual" },
@@ -28,7 +28,7 @@
         "revalidated_at": { "const": "2026-08-14" },
         "platform_build": { "const": "unknown" },
         "locator_contract": { "const": "project_and_promotion_forms_live_dom" },
-        "drift_check": { "const": "promotion_submit_and_independent_list_readback_revalidated" }
+        "drift_check": { "const": "existing_object_edit_surfaces_revalidated_with_brand_locator_drift" }
       }
     },
     "schema_ref": { "const": "docs/delivery/schemas/oceanengine-bidding-schema-v0.1.json" },
@@ -62,17 +62,21 @@
       "required": ["method", "required_proof"],
       "properties": {
         "method": { "const": "discard_unsubmitted_local_form" },
-        "required_proof": { "const": "return_to_known_readonly_page_and_confirm_no_platform_object_or_status_change" }
+        "required_proof": { "const": "return_to_known_readonly_page_and_confirm_no_platform_write_or_approved_field_change" }
       }
     },
     "write_validation_pending": { "type": "array", "items": { "enum": ["unattended_browser_driver", "enable_delivery", "remote_object_modification", "delete", "write_compensation", "additional_submit_without_new_authority"] }, "minItems": 6, "uniqueItems": true },
     "runtime_policy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["project_form_live_calibrated", "promotion_form_live_calibrated", "control_plane_evidence_recorded", "agent_final_submit_documentation"],
+      "required": ["project_form_live_calibrated", "promotion_form_live_calibrated", "existing_project_edit_surface_live_observed", "existing_promotion_edit_surface_live_observed", "controlled_action_batch_live_calibrated", "remote_modification_live_calibrated", "control_plane_evidence_recorded", "agent_final_submit_documentation"],
       "properties": {
         "project_form_live_calibrated": { "const": true },
         "promotion_form_live_calibrated": { "const": true },
+        "existing_project_edit_surface_live_observed": { "const": true },
+        "existing_promotion_edit_surface_live_observed": { "const": true },
+        "controlled_action_batch_live_calibrated": { "const": true },
+        "remote_modification_live_calibrated": { "const": false },
         "control_plane_evidence_recorded": { "const": true },
         "agent_final_submit_documentation": { "const": "available_in_skill_md_with_per_execution_authorization" }
       }
@@ -132,6 +136,58 @@
         "mapping_status": { "const": "confirmed" },
         "delivery_enabled": { "const": false },
         "evidence_ref": { "const": "docs/delivery/evidence/oceanengine-gate-two-promotion-submit-2026-08-14.json" }
+      }
+    },
+    "existing_object_edit_calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_at", "evidence_ref", "locator_ref", "observed_promotion_status", "parent_project_owns_schedule", "project_mapping_required_for_schedule", "promotion_schedule_action_forbidden", "promotion_brand_locator_drift", "live_remote_modification_allowed"],
+      "properties": {
+        "observed_at": { "const": "2026-08-14" },
+        "evidence_ref": { "const": "docs/delivery/evidence/oceanengine-existing-object-edit-readonly-2026-08-14.json" },
+        "locator_ref": { "const": "docs/delivery/fixtures/oceanengine-existing-object-live-locators-v0.1.json" },
+        "observed_promotion_status": { "const": "pending_review" },
+        "parent_project_owns_schedule": { "const": true },
+        "project_mapping_required_for_schedule": { "const": true },
+        "promotion_schedule_action_forbidden": { "const": true },
+        "promotion_brand_locator_drift": { "const": "PAGE_DRIFT" },
+        "live_remote_modification_allowed": { "const": false }
+      }
+    },
+    "controlled_action_batch_calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_at", "evidence_ref", "mapping_revision", "mapping_status", "mapping_platform_status_snapshot", "ordered_actions", "capability_matrix", "maximum_remote_write_clicks_authorized", "actual_remote_write_clicks", "controlled_action_attempt_count", "final_confirmation_count", "run_terminal_state", "stop_reason", "remote_write_detected", "live_remote_modification_allowed"],
+      "properties": {
+        "observed_at": { "const": "2026-08-14" },
+        "evidence_ref": { "const": "docs/delivery/evidence/oceanengine-controlled-actions-batch-2026-08-14.json" },
+        "mapping_revision": { "const": 2 },
+        "mapping_status": { "const": "confirmed" },
+        "mapping_platform_status_snapshot": { "const": "pending_review" },
+        "ordered_actions": { "const": ["update_promotion_budget", "update_promotion_materials", "pause_promotion", "resume_promotion"] },
+        "capability_matrix": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action", "calibration_status", "controlled_action_status"],
+            "properties": {
+              "action": { "enum": ["update_promotion_budget", "update_promotion_materials", "pause_promotion", "resume_promotion"] },
+              "calibration_status": { "enum": ["passed_no_write", "blocked_by_eligible_test_object"] },
+              "controlled_action_status": { "enum": ["blocked_by_lease_expiry", "blocked_by_dependency", "not_started"] }
+            }
+          }
+        },
+        "maximum_remote_write_clicks_authorized": { "const": 2 },
+        "actual_remote_write_clicks": { "const": 0 },
+        "controlled_action_attempt_count": { "const": 0 },
+        "final_confirmation_count": { "const": 0 },
+        "run_terminal_state": { "const": "cancelled" },
+        "stop_reason": { "const": "lease_expired_before_final_confirmation" },
+        "remote_write_detected": { "const": false },
+        "live_remote_modification_allowed": { "const": false }
       }
     }
   }

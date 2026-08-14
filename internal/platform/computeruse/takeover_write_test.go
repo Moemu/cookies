@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
 func TestTakeoverWriteConsumesConfirmationAndPersistsTwoPhaseResultEvidence(t *testing.T) {
@@ -112,6 +114,253 @@ func TestTakeoverWriteOutcomeCanUseReacquiredRecoveryLease(t *testing.T) {
 	stored := repo.attempts[scopeKey(run.OrganizationID, run.ProjectID, "final-click-recovery")]
 	if stored.LeaseID != originalLease.ID || stored.FencingToken != originalLease.FencingToken || stored.Status != ControlledActionVerified {
 		t.Fatalf("attempt=%#v", stored)
+	}
+}
+
+func TestPromotionMutationTakeoverRequiresExactObjectAndStateReadback(t *testing.T) {
+	now := time.Date(2026, 8, 14, 4, 0, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	run := validRun(now)
+	currentHash, _ := contract.CanonicalJSONHash(struct {
+		DailyBudgetMinor int64 `json:"daily_budget_minor"`
+	}{30000})
+	targetHash, _ := contract.CanonicalJSONHash(struct {
+		DailyBudgetMinor int64 `json:"daily_budget_minor"`
+	}{36000})
+	run.Authority.Action = "update_promotion_budget"
+	run.Authority.ParentPlatformProjectID = "test-project-1"
+	run.Authority.TargetMappingID = "mapping_test"
+	run.Authority.TargetMappingVersion = 2
+	run.Authority.TargetPlatformObjectID = "promotion_test"
+	run.Authority.TargetPlatformObjectKind = "promotion"
+	run.Authority.OperatorPrincipalID = "operator_1"
+	run.Authority.PromotionBudgetLimitMinor = 36000
+	run.Authority.BudgetLimitMinor = 36000
+	run.Authority.PromotionMutation = &PromotionMutationBinding{CurrentDailyBudgetMinor: 30000, TargetDailyBudgetMinor: 36000, CurrentStateHash: currentHash, TargetStateHash: targetHash}
+	run.State, run.Paused, run.TakeoverActive, run.LeaseID = RunAwaitingTakeover, true, true, "lease_1"
+	run.PolicyID = "policy_1"
+	if err := run.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	lease := validLease(now)
+	if _, err := repo.AcquireLease(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	repo.PutSitePolicy(SitePolicy{ID: run.PolicyID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, Platform: run.Platform, AccountID: run.AccountID, AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"promotion_edit", "promotion_result", "promotion_list"}, AllowedPlatformProjects: []string{"test-project-1"}, Version: 1})
+	sequence := 0
+	service := Service{Repository: repo, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { sequence++; return fmt.Sprintf("%s_%d", prefix, sequence), nil }}
+	issued, err := service.IssueFinalConfirmation(context.Background(), run.OrganizationID, run.ProjectID, run.ID, run.Version, run.Authority.ApprovalActionHash, "operator_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := AuthorizeTakeoverActionRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, ExpectedVersion: run.Version, StepID: "step_mutation_submit", Sequence: 1, ConfirmationID: issued.Confirmation.ID, Token: issued.Token, LeaseID: lease.ID, FencingToken: lease.FencingToken, IdempotencyKey: "test", PageKind: "promotion_edit", PlatformProjectID: "test-project-1", FieldReadback: map[string]string{"platform_object_id": "promotion_test", "current_state_hash": currentHash, "target_state_hash": currentHash}, DiffKeys: []string{}, PageReference: "https://ad.oceanengine.com/promotion/edit", SelectorVersion: "live/v1", ActionVersion: "takeover-mutation/v1", Actor: "operator_1"}
+	if _, err := service.AuthorizeTakeoverAction(context.Background(), request); err != ErrInvalidContract {
+		t.Fatalf("target state drift err=%v", err)
+	}
+	request.FieldReadback["target_state_hash"] = targetHash
+	authorized, err := service.AuthorizeTakeoverAction(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultRequest := RecordTakeoverOutcomeRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, AttemptID: authorized.Attempt.ID, ExpectedVersion: authorized.Run.Version, LeaseID: lease.ID, FencingToken: lease.FencingToken, StepID: "step_mutation_result", Sequence: 2, Outcome: TakeoverResultObserved, PageKind: "promotion_result", PlatformProjectID: "test-project-1", FieldReadback: map[string]string{"platform_object_id": "promotion_other", "platform_status": "pending_review", "target_state_hash": targetHash}, PageReference: "https://ad.oceanengine.com/promotion/result", SelectorVersion: "live/v1", ActionVersion: "takeover-mutation-result/v1", Actor: "operator_1"}
+	if _, err := service.RecordTakeoverOutcome(context.Background(), resultRequest); err != ErrInvalidContract {
+		t.Fatalf("wrong promotion outcome err=%v", err)
+	}
+	resultRequest.FieldReadback["platform_object_id"] = "promotion_test"
+	result, err := service.RecordTakeoverOutcome(context.Background(), resultRequest)
+	if err != nil || result.Run.State != RunVerifying {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	listRequest := RecordTakeoverOutcomeRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, AttemptID: authorized.Attempt.ID, ExpectedVersion: result.Run.Version, LeaseID: lease.ID, FencingToken: lease.FencingToken, StepID: "step_mutation_list", Sequence: 3, Outcome: TakeoverListConfirmed, PageKind: "promotion_list", PlatformProjectID: "test-project-1", FieldReadback: map[string]string{"platform_object_id": "promotion_test", "platform_status": "pending_review", "target_state_hash": currentHash}, PageReference: "https://ad.oceanengine.com/promotion/list", SelectorVersion: "live/v1", ActionVersion: "takeover-mutation-list/v1", Actor: "operator_1"}
+	if _, err := service.RecordTakeoverOutcome(context.Background(), listRequest); err != ErrInvalidContract {
+		t.Fatalf("list target drift err=%v", err)
+	}
+	listRequest.FieldReadback["target_state_hash"] = targetHash
+	confirmed, err := service.RecordTakeoverOutcome(context.Background(), listRequest)
+	if err != nil || confirmed.Run.State != RunSucceeded {
+		t.Fatalf("confirmed=%#v err=%v", confirmed, err)
+	}
+}
+
+func TestEmergencyPauseTakeoverBindsOperatorAndRequiresPausedDoubleReadback(t *testing.T) {
+	now := time.Date(2026, 8, 14, 6, 0, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	run := validRun(now)
+	currentHash, _ := contract.CanonicalJSONHash(struct {
+		DailyBudgetMinor int64  `json:"daily_budget_minor"`
+		PlatformStatus   string `json:"platform_status"`
+	}{30000, "delivering"})
+	targetHash, _ := contract.CanonicalJSONHash(struct {
+		DailyBudgetMinor int64  `json:"daily_budget_minor"`
+		PlatformStatus   string `json:"platform_status"`
+	}{30000, "paused"})
+	run.Authority.Action = "pause_promotion"
+	run.Authority.ParentPlatformProjectID = "test-project-1"
+	run.Authority.TargetMappingID = "mapping_test"
+	run.Authority.TargetMappingVersion = 2
+	run.Authority.TargetPlatformObjectID = "promotion_test"
+	run.Authority.TargetPlatformObjectKind = "promotion"
+	run.Authority.OperatorPrincipalID = "operator_1"
+	run.Authority.PromotionBudgetLimitMinor = 30000
+	run.Authority.BudgetLimitMinor = 30000
+	run.Authority.PromotionControl = &PromotionControlBinding{CurrentDailyBudgetMinor: 30000, CurrentPlatformStatus: "delivering", TargetPlatformStatus: "paused", CurrentStateHash: currentHash, TargetStateHash: targetHash}
+	run.State, run.Paused, run.TakeoverActive, run.LeaseID = RunAwaitingTakeover, true, true, "lease_1"
+	run.PolicyID = "policy_1"
+	if err := run.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	lease := validLease(now)
+	if _, err := repo.AcquireLease(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	repo.PutSitePolicy(SitePolicy{ID: run.PolicyID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, Platform: run.Platform, AccountID: run.AccountID, AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"promotion_list"}, AllowedPlatformProjects: []string{"test-project-1"}, Version: 1})
+	sequence := 0
+	service := Service{Repository: repo, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { sequence++; return fmt.Sprintf("%s_%d", prefix, sequence), nil }}
+	if _, err := service.IssueFinalConfirmation(context.Background(), run.OrganizationID, run.ProjectID, run.ID, run.Version, run.Authority.ApprovalActionHash, "other_operator"); err != ErrConfirmationInvalid {
+		t.Fatalf("wrong confirmation operator err=%v", err)
+	}
+	issued, err := service.IssueFinalConfirmation(context.Background(), run.OrganizationID, run.ProjectID, run.ID, run.Version, run.Authority.ApprovalActionHash, "operator_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorize := AuthorizeTakeoverActionRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, ExpectedVersion: run.Version, StepID: "step_pause_submit", Sequence: 1, ConfirmationID: issued.Confirmation.ID, Token: issued.Token, LeaseID: lease.ID, FencingToken: lease.FencingToken, IdempotencyKey: "pause-final-click-1", PageKind: "promotion_list", PlatformProjectID: "test-project-1", FieldReadback: map[string]string{"platform_object_id": "promotion_test", "current_state_hash": currentHash, "target_state_hash": targetHash}, DiffKeys: []string{}, PageReference: "https://ad.oceanengine.com/promotion/list", SelectorVersion: "live/v1", ActionVersion: "takeover-pause/v1", Actor: "other_operator"}
+	if _, err := service.AuthorizeTakeoverAction(context.Background(), authorize); err != ErrInvalidContract {
+		t.Fatalf("wrong click operator err=%v", err)
+	}
+	authorize.Actor = "operator_1"
+	authorized, err := service.AuthorizeTakeoverAction(context.Background(), authorize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultRequest := RecordTakeoverOutcomeRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, AttemptID: authorized.Attempt.ID, ExpectedVersion: authorized.Run.Version, LeaseID: lease.ID, FencingToken: lease.FencingToken, StepID: "step_pause_result", Sequence: 2, Outcome: TakeoverResultObserved, PageKind: "promotion_list", PlatformProjectID: "test-project-1", FieldReadback: map[string]string{"platform_object_id": "promotion_test", "platform_status": "delivering", "target_state_hash": targetHash}, PageReference: "https://ad.oceanengine.com/promotion/list", SelectorVersion: "live/v1", ActionVersion: "takeover-pause-result/v1", Actor: "operator_1"}
+	if _, err := service.RecordTakeoverOutcome(context.Background(), resultRequest); err != ErrInvalidContract {
+		t.Fatalf("unpaused result err=%v", err)
+	}
+	resultRequest.FieldReadback["platform_status"] = "paused"
+	result, err := service.RecordTakeoverOutcome(context.Background(), resultRequest)
+	if err != nil || result.Run.State != RunVerifying {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	listRequest := RecordTakeoverOutcomeRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, AttemptID: authorized.Attempt.ID, ExpectedVersion: result.Run.Version, LeaseID: lease.ID, FencingToken: lease.FencingToken, StepID: "step_pause_list", Sequence: 3, Outcome: TakeoverListConfirmed, PageKind: "promotion_list", PlatformProjectID: "test-project-1", FieldReadback: map[string]string{"platform_object_id": "promotion_test", "platform_status": "paused", "target_state_hash": targetHash}, PageReference: "https://ad.oceanengine.com/promotion/list", SelectorVersion: "live/v1", ActionVersion: "takeover-pause-list/v1", Actor: "recovery_operator"}
+	confirmed, err := service.RecordTakeoverOutcome(context.Background(), listRequest)
+	if err != nil || confirmed.Run.State != RunSucceeded {
+		t.Fatalf("confirmed=%#v err=%v", confirmed, err)
+	}
+}
+
+func TestControlledRestartRechecksAuthorityAvailabilityAndKillSwitch(t *testing.T) {
+	now := time.Date(2026, 8, 14, 7, 0, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	run := validRun(now)
+	restart := PromotionRestartBinding{
+		CurrentDailyBudgetMinor:  30000,
+		ApprovedDailyBudgetMinor: 30000,
+		CurrentPlatformStatus:    "paused",
+		TargetPlatformStatus:     "delivering",
+		Schedule:                 PromotionScheduleWindow{StartAt: now.Add(-time.Hour), EndAt: now.Add(24 * time.Hour), Timezone: "Asia/Shanghai"},
+		Materials:                []PromotionMaterialReference{{ReferenceID: "asset_test", AuthorizationEvidenceID: "material_evidence_test"}},
+		LandingPage:              PromotionLandingPageReference{ReferenceID: "landing_test", AuthorizationEvidenceID: "landing_evidence_test"},
+	}
+	current, _ := restart.statePayload(false)
+	target, _ := restart.statePayload(true)
+	restart.CurrentStateHash, _ = contract.CanonicalJSONHash(current)
+	restart.TargetStateHash, _ = contract.CanonicalJSONHash(target)
+	run.Authority.Action = "resume_promotion"
+	run.Authority.ParentPlatformProjectID = "test-project-1"
+	run.Authority.TargetMappingID = "mapping_test"
+	run.Authority.TargetMappingVersion = 3
+	run.Authority.TargetPlatformObjectID = "promotion_test"
+	run.Authority.TargetPlatformObjectKind = "promotion"
+	run.Authority.OperatorPrincipalID = "operator_1"
+	run.Authority.PromotionBudgetLimitMinor = 30000
+	run.Authority.BudgetLimitMinor = 30000
+	run.Authority.PromotionRestart = &restart
+	run.State, run.Paused, run.TakeoverActive, run.LeaseID = RunAwaitingTakeover, true, true, "lease_1"
+	run.PolicyID = "policy_1"
+	if err := run.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	lease := validLease(now)
+	if _, err := repo.AcquireLease(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	repo.PutSitePolicy(SitePolicy{ID: run.PolicyID, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, Platform: run.Platform, AccountID: run.AccountID, AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"promotion_list"}, AllowedPlatformProjects: []string{"test-project-1"}, Version: 1})
+	sequence := 0
+	service := Service{Repository: repo, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { sequence++; return fmt.Sprintf("%s_%d", prefix, sequence), nil }}
+	expiredService := service
+	expiredService.Now = func() time.Time { return restart.Schedule.EndAt }
+	if _, err := expiredService.IssueFinalConfirmation(context.Background(), run.OrganizationID, run.ProjectID, run.ID, run.Version, run.Authority.ApprovalActionHash, "operator_1"); err != ErrConfirmationInvalid {
+		t.Fatalf("expired restart confirmation err=%v", err)
+	}
+	issued, err := service.IssueFinalConfirmation(context.Background(), run.OrganizationID, run.ProjectID, run.ID, run.Version, run.Authority.ApprovalActionHash, "operator_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := (DeterministicFakeAdapter{AccountID: run.AccountID}).Prepare(context.Background(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorize := AuthorizeTakeoverActionRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, ExpectedVersion: run.Version, StepID: "step_restart_submit", Sequence: 1, ConfirmationID: issued.Confirmation.ID, Token: issued.Token, LeaseID: lease.ID, FencingToken: lease.FencingToken, IdempotencyKey: "restart-final-click-1", PageKind: "promotion_list", PlatformProjectID: "test-project-1", FieldReadback: prepared.Readback, DiffKeys: []string{}, PageReference: "https://ad.oceanengine.com/promotion/list", SelectorVersion: "live/v1", ActionVersion: "takeover-restart/v1", Actor: "operator_1"}
+	for _, drift := range []struct {
+		name  string
+		field string
+		value string
+	}{
+		{"account", "account_id", "other_account"},
+		{"parent project", "platform_project_id", "other_project"},
+		{"promotion", "platform_object_id", "other_promotion"},
+		{"paused status", "platform_status", "delivering"},
+		{"approved budget", "daily_budget_minor", "31000"},
+		{"schedule", "schedule_hash", "drifted_schedule"},
+		{"material set", "material_references_hash", "drifted_materials"},
+		{"landing page", "landing_page_reference_id", "other_landing"},
+		{"material availability", "materials_available", "false"},
+		{"landing availability", "landing_page_available", "false"},
+	} {
+		original := authorize.FieldReadback[drift.field]
+		authorize.FieldReadback[drift.field] = drift.value
+		if _, err := service.AuthorizeTakeoverAction(context.Background(), authorize); err != ErrInvalidContract {
+			t.Fatalf("%s drift err=%v", drift.name, err)
+		}
+		authorize.FieldReadback[drift.field] = original
+	}
+	activeSwitch := KillSwitch{ID: "kill_org", Scope: KillSwitchOrganization, OrganizationID: run.OrganizationID, Active: true, Reason: "test stop", Version: 1, UpdatedBy: "operator_1", UpdatedAt: now}
+	if _, err := repo.PutKillSwitch(context.Background(), activeSwitch, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.AuthorizeTakeoverAction(context.Background(), authorize); err != ErrKillSwitchActive {
+		t.Fatalf("active kill switch err=%v", err)
+	}
+	activeSwitch.Active, activeSwitch.Version = false, 2
+	if _, err := repo.PutKillSwitch(context.Background(), activeSwitch, 1); err != nil {
+		t.Fatal(err)
+	}
+	authorized, err := service.AuthorizeTakeoverAction(context.Background(), authorize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultRequest := RecordTakeoverOutcomeRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, AttemptID: authorized.Attempt.ID, ExpectedVersion: authorized.Run.Version, LeaseID: lease.ID, FencingToken: lease.FencingToken, StepID: "step_restart_result", Sequence: 2, Outcome: TakeoverResultObserved, PageKind: "promotion_list", PlatformProjectID: "test-project-1", FieldReadback: map[string]string{"platform_object_id": "promotion_test", "platform_status": "paused", "target_state_hash": restart.TargetStateHash}, PageReference: "https://ad.oceanengine.com/promotion/list", SelectorVersion: "live/v1", ActionVersion: "takeover-restart-result/v1", Actor: "operator_1"}
+	if _, err := service.RecordTakeoverOutcome(context.Background(), resultRequest); err != ErrInvalidContract {
+		t.Fatalf("unresumed result err=%v", err)
+	}
+	resultRequest.FieldReadback["platform_status"] = "delivering"
+	result, err := service.RecordTakeoverOutcome(context.Background(), resultRequest)
+	if err != nil || result.Run.State != RunVerifying {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	listRequest := RecordTakeoverOutcomeRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, AttemptID: authorized.Attempt.ID, ExpectedVersion: result.Run.Version, LeaseID: lease.ID, FencingToken: lease.FencingToken, StepID: "step_restart_list", Sequence: 3, Outcome: TakeoverListConfirmed, PageKind: "promotion_list", PlatformProjectID: "test-project-1", FieldReadback: map[string]string{"platform_object_id": "promotion_test", "platform_status": "delivering", "target_state_hash": restart.TargetStateHash}, PageReference: "https://ad.oceanengine.com/promotion/list", SelectorVersion: "live/v1", ActionVersion: "takeover-restart-list/v1", Actor: "recovery_operator"}
+	confirmed, err := service.RecordTakeoverOutcome(context.Background(), listRequest)
+	if err != nil || confirmed.Run.State != RunSucceeded {
+		t.Fatalf("confirmed=%#v err=%v", confirmed, err)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -137,6 +138,9 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 	if err := authority.Validate(); err != nil || authority.OrganizationID != request.OrganizationID || authority.ProjectID != request.ProjectID || authority.BusinessExecutionID != request.ExecutionID || authority.AccountReferenceID != request.AccountID {
 		return ComputerUseRun{}, false, ErrInvalidContract
 	}
+	if authority.OperatorPrincipalID != "" && request.CreatedBy != authority.OperatorPrincipalID {
+		return ComputerUseRun{}, false, ErrInvalidContract
+	}
 	environment, err := s.Repository.GetEnvironment(ctx, request.OrganizationID, request.ProjectID, request.EnvironmentID)
 	if err != nil {
 		return ComputerUseRun{}, false, err
@@ -152,7 +156,7 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 	if environment.Platform != request.Platform || environment.AccountID != request.AccountID || environment.Mode != "local_visible" || !environment.Healthy || environment.Version < 1 || profile.EnvironmentID != environment.ID || profile.Platform != request.Platform || profile.AccountID != request.AccountID || profile.State != "ready" || profile.Version < 1 || policy.Platform != request.Platform || policy.AccountID != request.AccountID || policy.Version < 1 {
 		return ComputerUseRun{}, false, ErrInvalidContract
 	}
-	if authority.Action == "create_promotions_in_existing_project" && !slices.Contains(policy.AllowedPlatformProjects, authority.ParentPlatformProjectID) {
+	if actionRequiresBoundPlatformProject(authority.Action) && !slices.Contains(policy.AllowedPlatformProjects, authority.ParentPlatformProjectID) {
 		return ComputerUseRun{}, false, ErrInvalidContract
 	}
 	hashInput, err := json.Marshal(struct {
@@ -175,7 +179,7 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 		if err != nil {
 			return ComputerUseRun{}, false, err
 		}
-		if existing.IdempotencyKey != request.IdempotencyKey || existing.RequestHash != requestHash || existing.Authority != authority {
+		if existing.IdempotencyKey != request.IdempotencyKey || existing.RequestHash != requestHash || !reflect.DeepEqual(existing.Authority, authority) {
 			return ComputerUseRun{}, false, ErrIdempotencyConflict
 		}
 		return existing, true, nil
@@ -367,13 +371,17 @@ func (s Service) IssueFinalConfirmation(ctx context.Context, organizationID cont
 	if expectedVersion < 1 || run.Version != expectedVersion {
 		return IssuedConfirmation{}, ErrVersionConflict
 	}
+	now := s.now()
 	confirmationReady := run.State == RunAwaitingConfirmation && !run.Paused && !run.TakeoverActive
 	takeoverReady := run.State == RunAwaitingTakeover && run.Paused && run.TakeoverActive
-	if (!confirmationReady && !takeoverReady) || bindingHash != run.Authority.ApprovalActionHash || strings.TrimSpace(actor) == "" {
+	if (!confirmationReady && !takeoverReady) || bindingHash != run.Authority.ApprovalActionHash || strings.TrimSpace(actor) == "" || (run.Authority.OperatorPrincipalID != "" && actor != run.Authority.OperatorPrincipalID) {
+		return IssuedConfirmation{}, ErrConfirmationInvalid
+	}
+	if run.Authority.Action == "resume_promotion" && (run.Authority.PromotionRestart == nil || run.Authority.PromotionRestart.ValidateAt(run.Authority.Action, now) != nil) {
 		return IssuedConfirmation{}, ErrConfirmationInvalid
 	}
 	if s.AuthorityProvider != nil {
-		if err := s.AuthorityProvider.VerifyAuthority(ctx, run.Authority, run.ID, s.now()); err != nil {
+		if err := s.AuthorityProvider.VerifyAuthority(ctx, run.Authority, run.ID, now); err != nil {
 			return IssuedConfirmation{}, ErrConfirmationInvalid
 		}
 	}
@@ -387,7 +395,6 @@ func (s Service) IssueFinalConfirmation(ctx context.Context, organizationID cont
 	if err != nil {
 		return IssuedConfirmation{}, err
 	}
-	now := s.now()
 	confirmation := FinalConfirmation{SchemaVersion: ConfirmationSchemaV1, ID: id, OrganizationID: organizationID, ProjectID: projectID, RunID: runID, BindingHash: bindingHash, TokenDigest: hex.EncodeToString(digest[:]), IssuedBy: actor, IssuedAt: now, ExpiresAt: now.Add(FinalConfirmationTTL), Version: 1}
 	confirmation, err = s.Repository.IssueConfirmation(ctx, confirmation)
 	if err != nil {
@@ -438,13 +445,18 @@ func (s Service) AuthorizeTakeoverAction(ctx context.Context, request AuthorizeT
 	if err != nil {
 		return TakeoverActionAuthorization{}, err
 	}
+	now := s.now()
 	if run.Version != request.ExpectedVersion {
 		return TakeoverActionAuthorization{}, ErrVersionConflict
+	}
+	if changesExistingPromotionAction(run.Authority.Action) {
+		if request.Actor != run.Authority.OperatorPrincipalID || run.Authority.validatePreSubmitReadback(request.FieldReadback, now) != nil {
+			return TakeoverActionAuthorization{}, ErrInvalidContract
+		}
 	}
 	if run.State != RunAwaitingTakeover || !run.Paused || !run.TakeoverActive || run.LeaseID != request.LeaseID {
 		return TakeoverActionAuthorization{}, ErrConfirmationInvalid
 	}
-	now := s.now()
 	if s.AuthorityProvider != nil {
 		if err := s.AuthorityProvider.VerifyAuthority(ctx, run.Authority, run.ID, now); err != nil {
 			return TakeoverActionAuthorization{}, ErrConfirmationInvalid
@@ -524,6 +536,13 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 		if run.State != RunSubmitting || request.FieldReadback["platform_object_id"] == "" || request.FieldReadback["platform_status"] == "" {
 			return TakeoverEvidenceResult{}, ErrInvalidTransition
 		}
+		if changesExistingPromotionAction(run.Authority.Action) {
+			_, targetStateHash, stateErr := run.Authority.existingPromotionStateHashes()
+			targetStatus := run.Authority.existingPromotionTargetStatus()
+			if stateErr != nil || request.FieldReadback["platform_object_id"] != run.Authority.TargetPlatformObjectID || request.FieldReadback["target_state_hash"] != targetStateHash || (targetStatus != "" && request.FieldReadback["platform_status"] != targetStatus) {
+				return TakeoverEvidenceResult{}, ErrInvalidContract
+			}
+		}
 		next, status, attemptStatus = RunVerifying, StepSucceeded, ControlledActionVerified
 	case TakeoverListConfirmed:
 		if run.State != RunVerifying || request.FieldReadback["platform_object_id"] == "" || request.FieldReadback["platform_status"] == "" {
@@ -556,6 +575,20 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 		}
 		if resultStepID == "" || resultObjectID != request.FieldReadback["platform_object_id"] || resultStatus != request.FieldReadback["platform_status"] {
 			return TakeoverEvidenceResult{}, ErrInvalidContract
+		}
+		if changesExistingPromotionAction(run.Authority.Action) {
+			resultTargetHash := ""
+			for _, candidate := range evidence {
+				if candidate.StepID == resultStepID {
+					resultTargetHash = candidate.FieldReadback["target_state_hash"]
+					break
+				}
+			}
+			_, targetStateHash, stateErr := run.Authority.existingPromotionStateHashes()
+			targetStatus := run.Authority.existingPromotionTargetStatus()
+			if stateErr != nil || resultObjectID != run.Authority.TargetPlatformObjectID || resultTargetHash != targetStateHash || request.FieldReadback["target_state_hash"] != targetStateHash || (targetStatus != "" && request.FieldReadback["platform_status"] != targetStatus) {
+				return TakeoverEvidenceResult{}, ErrInvalidContract
+			}
 		}
 		next, status, attemptStatus = RunSucceeded, StepSucceeded, ControlledActionVerified
 	case TakeoverWriteRejected:
@@ -617,6 +650,9 @@ func (s Service) AuthorizeAction(ctx context.Context, request AuthorizeActionReq
 	}
 	now := s.now()
 	if run.State != RunAwaitingConfirmation || run.Paused || run.TakeoverActive {
+		return ControlledActionAttempt{}, ErrConfirmationInvalid
+	}
+	if run.Authority.Action == "resume_promotion" && (run.Authority.PromotionRestart == nil || run.Authority.PromotionRestart.ValidateAt(run.Authority.Action, now) != nil) {
 		return ControlledActionAttempt{}, ErrConfirmationInvalid
 	}
 	if s.AuthorityProvider != nil {

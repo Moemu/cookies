@@ -11,7 +11,7 @@
     "organization_id": { "type": "string", "minLength": 1 },
     "project_id": { "type": "string", "minLength": 1 },
     "binding": { "$ref": "#/$defs/binding" },
-    "action": { "enum": ["create_project_and_promotions", "create_promotions_in_existing_project"] },
+    "action": { "enum": ["create_project_and_promotions", "create_promotions_in_existing_project", "update_promotion_budget", "update_promotion_materials", "pause_promotion", "resume_promotion"] },
     "budget_limit_minor": { "type": "integer", "minimum": 0 },
     "currency": { "const": "CNY" },
     "status": { "enum": ["ready_for_approval", "approved", "rejected", "executing", "executed", "invalidated"] },
@@ -53,12 +53,90 @@
         "workflow_canonical_hash": { "$ref": "#/$defs/hash" },
         "account_reference_id": { "type": "string", "minLength": 1 },
         "parent_platform_project_id": { "type": "string", "minLength": 1 },
+        "target_mapping_id": { "type": "string", "minLength": 1 },
+        "target_mapping_version": { "type": "integer", "minimum": 1 },
+        "target_platform_object_id": { "type": "string", "minLength": 1 },
+        "target_platform_object_kind": { "const": "promotion" },
+        "operator_principal_id": { "type": "string", "minLength": 1 },
+        "supersedes_controlled_change_set_id": { "type": "string", "minLength": 1 },
         "project_budget_mode": { "enum": ["daily", "unlimited"] },
         "project_budget_limit_minor": { "type": "integer", "minimum": 0 },
         "promotion_budget_limit_minor": { "type": "integer", "minimum": 0 },
         "object_fingerprint": { "type": "string", "minLength": 1 },
         "skill_id": { "type": "string", "minLength": 1 },
-        "skill_version": { "type": "string", "minLength": 1 }
+        "skill_version": { "type": "string", "minLength": 1 },
+        "promotion_mutation": { "$ref": "#/$defs/promotionMutation" },
+        "promotion_control": { "$ref": "#/$defs/promotionControl" },
+        "promotion_restart": { "$ref": "#/$defs/promotionRestart" }
+      }
+    },
+    "scheduleWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_at", "end_at", "timezone"],
+      "properties": {
+        "start_at": { "type": "string", "format": "date-time" },
+        "end_at": { "type": "string", "format": "date-time" },
+        "timezone": { "type": "string", "minLength": 1 }
+      }
+    },
+    "materialReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_id", "authorization_evidence_id"],
+      "properties": {
+        "reference_id": { "type": "string", "minLength": 1 },
+        "authorization_evidence_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "landingPageReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_id", "authorization_evidence_id"],
+      "properties": {
+        "reference_id": { "type": "string", "minLength": 1 },
+        "authorization_evidence_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "promotionMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current_daily_budget_minor", "target_daily_budget_minor", "current_state_hash", "target_state_hash"],
+      "properties": {
+        "current_daily_budget_minor": { "type": "integer", "minimum": 30000 },
+        "target_daily_budget_minor": { "type": "integer", "minimum": 30000 },
+        "current_materials": { "type": "array", "items": { "$ref": "#/$defs/materialReference" } },
+        "target_materials": { "type": "array", "items": { "$ref": "#/$defs/materialReference" } },
+        "current_state_hash": { "$ref": "#/$defs/hash" },
+        "target_state_hash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "promotionControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current_daily_budget_minor", "current_platform_status", "target_platform_status", "current_state_hash", "target_state_hash"],
+      "properties": {
+        "current_daily_budget_minor": { "type": "integer", "minimum": 30000 },
+        "current_platform_status": { "const": "delivering" },
+        "target_platform_status": { "const": "paused" },
+        "current_state_hash": { "$ref": "#/$defs/hash" },
+        "target_state_hash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "promotionRestart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current_daily_budget_minor", "approved_daily_budget_minor", "current_platform_status", "target_platform_status", "schedule", "materials", "landing_page", "current_state_hash", "target_state_hash"],
+      "properties": {
+        "current_daily_budget_minor": { "type": "integer", "minimum": 30000 },
+        "approved_daily_budget_minor": { "type": "integer", "minimum": 30000 },
+        "current_platform_status": { "const": "paused" },
+        "target_platform_status": { "const": "delivering" },
+        "schedule": { "$ref": "#/$defs/scheduleWindow" },
+        "materials": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/materialReference" } },
+        "landing_page": { "$ref": "#/$defs/landingPageReference" },
+        "current_state_hash": { "$ref": "#/$defs/hash" },
+        "target_state_hash": { "$ref": "#/$defs/hash" }
       }
     }
   }

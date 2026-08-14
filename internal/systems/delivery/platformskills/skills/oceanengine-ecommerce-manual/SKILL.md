@@ -43,9 +43,54 @@ After the click:
 
 If the submission result is unclear, record `result_unknown`; permit only query, reidentification, or human reconciliation. If the original submission Lease expires after the click, release it and acquire a new fenced recovery Lease for readback. Keep the original Attempt binding immutable and never authorize or perform another submit.
 
+## Calibrate finite actions as one ordered batch
+
+Use one visible-browser session, one shared promotion-form fixture, and one
+machine-readable batch evidence record for `update_promotion_budget`,
+`update_promotion_materials`, `pause_promotion`, and `resume_promotion`. Do not
+split these paths into separate calibration narratives. Resolve the exact object
+only from a server-loaded confirmed Mapping; page search results and operator
+text cannot substitute it.
+
+During no-write calibration, reidentify the account, parent project, promotion,
+Mapping revision, live composite status, and current values. The only permitted
+form differences are the approved budget field or the approved material
+reference. Material selection is restricted to a server-authorized existing
+asset in the same test account. Read every field back, stop before the unique
+save or status boundary, discard the draft, and reopen or return to the list to
+prove the remote values are unchanged. Reject `update_promotion_schedule` for a
+promotion Mapping because schedule remains parent-project owned.
+
+`PlatformEntityMapping.platform_status` is the last accepted result/list
+snapshot, not a live status feed. Ocean Engine can expose delivery, pause, and
+review dimensions simultaneously. Compare live dimensions explicitly without
+rewriting the Mapping merely because asynchronous review completed. If no
+authorized mapped object is already `delivering`, mark pause and restart
+`blocked_by_eligible_test_object`; never enable an object to manufacture a test.
+
+Each real action still requires its own ChangeSet, Approval,
+ControlledExecution, ComputerUseRun, one-time confirmation, Attempt, and exact
+Mapping revision. Execute budget before materials so the material authority can
+bind the post-budget revision. Execute restart only after a successful pause
+revision. Immediately before each remote-write click, require an unexpired
+fenced Lease and zero unexpected field differences. Click at most once. Any
+page drift, lease expiry, or `result_unknown` stops all dependent actions without
+retry.
+
+The 2026-08-14 batch passed no-write calibration for the CNY 300 to CNY 310
+budget path and one same-account existing-material replacement. Both drafts were
+discarded and the fresh form returned to the shared baseline. Pause and restart
+were blocked because no eligible delivering mapped test object existed. The
+authorized real batch then stopped when its Lease expired before final
+confirmation: no confirmation, Attempt, save click, or remote write occurred,
+and the abandoned calibration authority was invalidated while its Approval
+history remained immutable. Read the batch evidence before claiming any live
+modification capability.
+
 ## Read the verified baseline
 
 - Read the [control contract](../../../../../../docs/delivery/controlled-computer-use-contract.md) for state and authority invariants.
 - Read the [gate-one runbook](../../../../../../docs/delivery/oceanengine-gate-one-replay-runbook.md) for no-write calibration.
 - Read the [gate-two baseline](../../../../../../docs/delivery/oceanengine-gate-two-preparation.md) for the one-click and recovery contract.
 - Read the [2026-08-14 gate-two evidence](../../../../../../docs/delivery/evidence/oceanengine-gate-two-promotion-submit-2026-08-14.json) before claiming real-submit calibration.
+- Read the [2026-08-14 controlled-action batch evidence](../../../../../../docs/delivery/evidence/oceanengine-controlled-actions-batch-2026-08-14.json) before calibrating or authorizing any existing-promotion change.

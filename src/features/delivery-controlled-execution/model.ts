@@ -33,8 +33,43 @@ export type ComputerUseAuthorityBinding = {
   approval_id: string
   approval_action_hash: string
   account_reference_id: string
+  parent_platform_project_id?: string
+  target_mapping_id?: string
+  target_mapping_version?: number
+  target_platform_object_id?: string
+  target_platform_object_kind?: 'promotion'
+  operator_principal_id?: string
+  promotion_mutation?: {
+    current_daily_budget_minor: number
+    target_daily_budget_minor: number
+    current_materials?: Array<{ reference_id: string; authorization_evidence_id: string }>
+    target_materials?: Array<{ reference_id: string; authorization_evidence_id: string }>
+    current_state_hash: string
+    target_state_hash: string
+  }
+  promotion_control?: {
+    current_daily_budget_minor: number
+    current_platform_status: 'delivering'
+    target_platform_status: 'paused'
+    current_state_hash: string
+    target_state_hash: string
+  }
+  promotion_restart?: {
+    current_daily_budget_minor: number
+    approved_daily_budget_minor: number
+    current_platform_status: 'paused'
+    target_platform_status: 'delivering'
+    schedule: { start_at: string; end_at: string; timezone: string }
+    materials: Array<{ reference_id: string; authorization_evidence_id: string }>
+    landing_page: { reference_id: string; authorization_evidence_id: string }
+    current_state_hash: string
+    target_state_hash: string
+  }
   object_fingerprint: string
   action: string
+  project_budget_mode?: 'daily' | 'unlimited'
+  project_budget_limit_minor?: number
+  promotion_budget_limit_minor?: number
   budget_limit_minor: number
   currency: 'CNY'
   plan_canonical_hash: string
