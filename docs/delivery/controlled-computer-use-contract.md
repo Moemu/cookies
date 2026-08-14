@@ -35,6 +35,7 @@ This contract is additive. It does not reinterpret, rewrite, or migrate any hist
 | 19 | Finite promotion modifications | Budget, schedule and authorized-material modifications always start from one confirmed promotion `PlatformEntityMapping`. The server, not the client, resolves the exact platform object ID and original creation provenance. Each modification freezes the current/target values and their canonical hashes in a new ChangeSet, receives a new Approval and Execution, and binds the target Mapping ID/version. Creation Approval reuse and in-place edits of an already confirmed Mapping are invalid. |
 | 20 | Mutation readback and Mapping revisions | Before the one permitted save click, takeover evidence must match the exact platform object ID plus current and target state hashes with zero diff keys. Result and independent list evidence must both match the same object ID, platform status and target state hash. Only then may one transaction increment the Mapping version, set its current-state hash, append an immutable `delivery_platform_entity_mapping_revisions` row, and close the new Execution and ChangeSet. The original creation revision and evidence remain queryable. |
 | 21 | Emergency pause | `pause_promotion` is an independent high-priority action, not a budget mutation and not the ComputerUseRun pause control. It starts only from a confirmed promotion Mapping whose normalized status is exactly `delivering`, binds the account, parent project, exact object, Mapping version, unchanged daily budget and one operator, and server-forces the target status to `paused`. A fresh ChangeSet, Approval, Execution, Run and one-time confirmation are mandatory. Result and list readbacks must both prove the same object is `paused`; uncertainty permits query or takeover only, never another click. |
+| 22 | Controlled restart | `resume_promotion` is a fresh action after, and only after, an authoritative `pause_promotion` Mapping revision. It is neither automatic compensation nor Approval reuse. The current budget must equal the paused authority; the new ChangeSet binds an active `Asia/Shanghai` schedule, authorized available materials, an authorized available landing page, the exact account/project/object/Mapping and one operator. Approval validation and the final click recheck schedule validity; pre-click evidence must also prove no account/project/object drift. Any active Kill Switch wins the authorization transaction. Result and list readbacks must both normalize to `delivering`. |
 
 ## Stable blocking reasons
 
@@ -127,3 +128,27 @@ created during the earlier one-click validation remains `pending_review` and
 must never be enabled merely to manufacture a pause test. If the page, status,
 account, object or operator is uncertain, record the blocker or `PAGE_DRIFT`
 and stop without a second click.
+
+## Controlled restart readiness
+
+The control plane and deterministic fake path support `resume_promotion` only
+when the confirmed Mapping's latest state action is `pause_promotion`, its
+normalized status remains `paused`, and its state hash matches that pause. The
+request cannot choose a new budget: current and approved daily budget must both
+equal the value frozen by the pause. It supplies one currently active
+`Asia/Shanghai` schedule plus sorted material references and one landing-page
+reference whose server-loaded evidence proves the same organization, cookies
+Project, account, authorization and availability.
+
+The final visible-browser readback must match the exact account, parent project,
+promotion, paused status, daily budget, schedule hash, material-reference hash
+and landing-page reference, with both availability checks true. The schedule is
+revalidated when the final confirmation is issued and again immediately before
+authorization. Global, platform or organization Kill Switch state is checked
+transactionally and blocks the click. Successful result and list evidence must
+both show the same object as `delivering` before the Mapping advances.
+
+This remains a fake/no-write readiness claim. The current Skill forbids live
+remote-object restart until the specific status-control path is calibrated and
+the user grants current-turn authority for that exact object and action. No
+Connector, mock metric or recovery routine may trigger a restart.

@@ -205,6 +205,45 @@ func (r MySQLRepository) ValidateControlledMaterialReferences(ctx context.Contex
 	return nil
 }
 
+func (r MySQLRepository) ValidateControlledRestartReferences(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, accountReferenceID string, materials []ControlledMaterialReference, landingPage ControlledLandingPageReference) error {
+	for _, reference := range materials {
+		evidence, err := r.loadControlledReferenceEvidence(ctx, org, project, accountReferenceID, reference.AuthorizationEvidenceID)
+		if err != nil {
+			return err
+		}
+		if evidence.FieldReadback["authorized_material_reference_id"] != reference.ReferenceID || evidence.FieldReadback["material_available"] != "true" {
+			return ErrApprovalContentMismatch
+		}
+	}
+	evidence, err := r.loadControlledReferenceEvidence(ctx, org, project, accountReferenceID, landingPage.AuthorizationEvidenceID)
+	if err != nil {
+		return err
+	}
+	if evidence.FieldReadback["authorized_landing_page_reference_id"] != landingPage.ReferenceID || evidence.FieldReadback["landing_page_available"] != "true" {
+		return ErrApprovalContentMismatch
+	}
+	return nil
+}
+
+func (r MySQLRepository) loadControlledReferenceEvidence(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, accountReferenceID, evidenceID string) (computeruse.Evidence, error) {
+	var payload []byte
+	err := r.DB.QueryRowContext(ctx, `SELECT e.evidence_json FROM computer_use_evidence e JOIN computer_use_runs r ON r.organization_id=e.organization_id AND r.project_id=e.project_id AND r.id=e.run_id WHERE e.organization_id=? AND e.project_id=? AND e.id=? AND r.account_id=?`, org, project, evidenceID, accountReferenceID).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return computeruse.Evidence{}, ErrNotFound
+	}
+	if err != nil {
+		return computeruse.Evidence{}, err
+	}
+	var evidence computeruse.Evidence
+	if err := json.Unmarshal(payload, &evidence); err != nil {
+		return computeruse.Evidence{}, fmt.Errorf("decode controlled reference evidence: %w", err)
+	}
+	if evidence.OrganizationID != org || evidence.ProjectID != project {
+		return computeruse.Evidence{}, ErrApprovalContentMismatch
+	}
+	return evidence, nil
+}
+
 func (r MySQLRepository) ConfirmPlatformEntityMapping(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion int64, resultEvidenceID, listEvidenceID string) (PlatformEntityMapping, error) {
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -371,7 +410,8 @@ func (r MySQLRepository) ConfirmPlatformEntityMappingMutation(ctx context.Contex
 	if err != nil {
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, err
 	}
-	if platformObjectID != mapping.PlatformObjectID || resultEvidence.Evidence.FieldReadback["target_state_hash"] != targetStateHash || listEvidence.Evidence.FieldReadback["target_state_hash"] != targetStateHash || (change.Action == ControlledActionPausePromotion && platformStatus != change.Binding.PromotionControl.TargetPlatformStatus) {
+	targetStatus := change.Binding.existingPromotionTargetStatus()
+	if platformObjectID != mapping.PlatformObjectID || resultEvidence.Evidence.FieldReadback["target_state_hash"] != targetStateHash || listEvidence.Evidence.FieldReadback["target_state_hash"] != targetStateHash || (targetStatus != "" && platformStatus != targetStatus) {
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrApprovalContentMismatch
 	}
 	completedAt := listEvidence.Evidence.CreatedAt

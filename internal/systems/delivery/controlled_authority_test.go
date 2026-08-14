@@ -114,6 +114,39 @@ func TestFinitePromotionMutationContractsBindScheduleAndAuthorizedMaterials(t *t
 	}
 }
 
+func TestControlledRestartBindsBudgetScheduleReferencesAndActiveWindow(t *testing.T) {
+	now := time.Date(2026, 8, 14, 14, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	restart := ControlledPromotionRestart{
+		CurrentDailyBudgetMinor:  36000,
+		ApprovedDailyBudgetMinor: 36000,
+		CurrentPlatformStatus:    "paused",
+		TargetPlatformStatus:     "delivering",
+		Schedule:                 ControlledScheduleWindow{StartAt: now.Add(-time.Hour), EndAt: now.Add(24 * time.Hour), Timezone: "Asia/Shanghai"},
+		Materials:                []ControlledMaterialReference{{ReferenceID: "asset_a", AuthorizationEvidenceID: "material_evidence_a"}},
+		LandingPage:              ControlledLandingPageReference{ReferenceID: "landing_a", AuthorizationEvidenceID: "landing_evidence_a"},
+	}
+	current, err := restart.statePayload(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := restart.statePayload(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restart.CurrentStateHash, _ = contract.CanonicalJSONHash(current)
+	restart.TargetStateHash, _ = contract.CanonicalJSONHash(target)
+	if err := restart.ValidateAt(ControlledActionResumePromotion, now); err != nil {
+		t.Fatalf("valid restart err=%v", err)
+	}
+	if err := restart.ValidateAt(ControlledActionResumePromotion, restart.Schedule.EndAt); err != ErrInvalidState {
+		t.Fatalf("expired schedule err=%v", err)
+	}
+	restart.ApprovedDailyBudgetMinor++
+	if err := restart.Validate(ControlledActionResumePromotion); err != ErrApprovalContentMismatch {
+		t.Fatalf("budget drift err=%v", err)
+	}
+}
+
 func testHash(character string) string {
 	value := ""
 	for len(value) < 64 {

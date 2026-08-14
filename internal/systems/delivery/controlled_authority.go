@@ -35,6 +35,7 @@ const (
 	ControlledActionUpdatePromotionSchedule           ControlledAction = "update_promotion_schedule"
 	ControlledActionUpdatePromotionMaterials          ControlledAction = "update_promotion_materials"
 	ControlledActionPausePromotion                    ControlledAction = "pause_promotion"
+	ControlledActionResumePromotion                   ControlledAction = "resume_promotion"
 )
 
 func (a ControlledAction) Valid() bool {
@@ -45,6 +46,7 @@ func (a ControlledAction) Valid() bool {
 		ControlledActionUpdatePromotionSchedule,
 		ControlledActionUpdatePromotionMaterials,
 		ControlledActionPausePromotion,
+		ControlledActionResumePromotion,
 	}, a)
 }
 
@@ -57,7 +59,7 @@ func (a ControlledAction) ModifiesExistingPromotion() bool {
 }
 
 func (a ControlledAction) ChangesExistingPromotion() bool {
-	return a.ModifiesExistingPromotion() || a == ControlledActionPausePromotion
+	return a.ModifiesExistingPromotion() || a == ControlledActionPausePromotion || a == ControlledActionResumePromotion
 }
 
 type ControlledScheduleWindow struct {
@@ -74,6 +76,11 @@ func (s ControlledScheduleWindow) Validate() error {
 }
 
 type ControlledMaterialReference struct {
+	ReferenceID             string `json:"reference_id"`
+	AuthorizationEvidenceID string `json:"authorization_evidence_id"`
+}
+
+type ControlledLandingPageReference struct {
 	ReferenceID             string `json:"reference_id"`
 	AuthorizationEvidenceID string `json:"authorization_evidence_id"`
 }
@@ -215,6 +222,75 @@ func (c ControlledPromotionControl) Validate(action ControlledAction) error {
 	return nil
 }
 
+type ControlledPromotionRestart struct {
+	CurrentDailyBudgetMinor  int64                          `json:"current_daily_budget_minor"`
+	ApprovedDailyBudgetMinor int64                          `json:"approved_daily_budget_minor"`
+	CurrentPlatformStatus    string                         `json:"current_platform_status"`
+	TargetPlatformStatus     string                         `json:"target_platform_status"`
+	Schedule                 ControlledScheduleWindow       `json:"schedule"`
+	Materials                []ControlledMaterialReference  `json:"materials"`
+	LandingPage              ControlledLandingPageReference `json:"landing_page"`
+	CurrentStateHash         string                         `json:"current_state_hash"`
+	TargetStateHash          string                         `json:"target_state_hash"`
+}
+
+func (r ControlledPromotionRestart) statePayload(target bool) (any, error) {
+	status := r.CurrentPlatformStatus
+	if target {
+		status = r.TargetPlatformStatus
+	}
+	if r.CurrentDailyBudgetMinor < 30000 || r.CurrentDailyBudgetMinor != r.ApprovedDailyBudgetMinor || r.CurrentPlatformStatus != "paused" || r.TargetPlatformStatus != "delivering" || r.Schedule.Validate() != nil || r.Schedule.Timezone != "Asia/Shanghai" || len(r.Materials) == 0 || strings.TrimSpace(r.LandingPage.ReferenceID) == "" || strings.TrimSpace(r.LandingPage.AuthorizationEvidenceID) == "" {
+		return nil, ErrApprovalContentMismatch
+	}
+	previous := ""
+	for _, reference := range r.Materials {
+		if strings.TrimSpace(reference.ReferenceID) == "" || strings.TrimSpace(reference.AuthorizationEvidenceID) == "" || reference.ReferenceID <= previous {
+			return nil, ErrInvalidRequest
+		}
+		previous = reference.ReferenceID
+	}
+	return struct {
+		DailyBudgetMinor int64                          `json:"daily_budget_minor"`
+		PlatformStatus   string                         `json:"platform_status"`
+		Schedule         ControlledScheduleWindow       `json:"schedule"`
+		Materials        []ControlledMaterialReference  `json:"materials"`
+		LandingPage      ControlledLandingPageReference `json:"landing_page"`
+	}{r.CurrentDailyBudgetMinor, status, r.Schedule, r.Materials, r.LandingPage}, nil
+}
+
+func (r ControlledPromotionRestart) Validate(action ControlledAction) error {
+	if action != ControlledActionResumePromotion || !isLowercaseSHA256(r.CurrentStateHash) || !isLowercaseSHA256(r.TargetStateHash) || r.CurrentStateHash == r.TargetStateHash {
+		return ErrInvalidRequest
+	}
+	current, err := r.statePayload(false)
+	if err != nil {
+		return err
+	}
+	target, err := r.statePayload(true)
+	if err != nil {
+		return err
+	}
+	currentHash, err := contract.CanonicalJSONHash(current)
+	if err != nil || currentHash != r.CurrentStateHash {
+		return ErrApprovalContentMismatch
+	}
+	targetHash, err := contract.CanonicalJSONHash(target)
+	if err != nil || targetHash != r.TargetStateHash {
+		return ErrApprovalContentMismatch
+	}
+	return nil
+}
+
+func (r ControlledPromotionRestart) ValidateAt(action ControlledAction, now time.Time) error {
+	if err := r.Validate(action); err != nil {
+		return err
+	}
+	if now.Before(r.Schedule.StartAt) || !now.Before(r.Schedule.EndAt) {
+		return ErrInvalidState
+	}
+	return nil
+}
+
 type ControlledAuthorityBinding struct {
 	SelectionID                   string                         `json:"selection_id"`
 	ObservatoryRunID              string                         `json:"observatory_run_id"`
@@ -250,6 +326,7 @@ type ControlledAuthorityBinding struct {
 	SkillVersion                  string                         `json:"skill_version,omitempty"`
 	PromotionMutation             *ControlledPromotionMutation   `json:"promotion_mutation,omitempty"`
 	PromotionControl              *ControlledPromotionControl    `json:"promotion_control,omitempty"`
+	PromotionRestart              *ControlledPromotionRestart    `json:"promotion_restart,omitempty"`
 }
 
 func (b ControlledAuthorityBinding) Validate() error {
@@ -267,7 +344,7 @@ func (b ControlledAuthorityBinding) Validate() error {
 			return ErrApprovalContentMismatch
 		}
 	}
-	if (b.PromotionMutation != nil || b.PromotionControl != nil) && !b.HasMutationTarget() {
+	if (b.PromotionMutation != nil || b.PromotionControl != nil || b.PromotionRestart != nil) && !b.HasMutationTarget() {
 		return ErrInvalidRequest
 	}
 	return nil
@@ -283,9 +360,21 @@ func (b ControlledAuthorityBinding) existingPromotionStateHashes(action Controll
 		return b.PromotionMutation.CurrentStateHash, b.PromotionMutation.TargetStateHash, nil
 	case action == ControlledActionPausePromotion && b.PromotionMutation == nil && b.PromotionControl != nil:
 		return b.PromotionControl.CurrentStateHash, b.PromotionControl.TargetStateHash, nil
+	case action == ControlledActionResumePromotion && b.PromotionMutation == nil && b.PromotionControl == nil && b.PromotionRestart != nil:
+		return b.PromotionRestart.CurrentStateHash, b.PromotionRestart.TargetStateHash, nil
 	default:
 		return "", "", ErrApprovalContentMismatch
 	}
+}
+
+func (b ControlledAuthorityBinding) existingPromotionTargetStatus() string {
+	if b.PromotionControl != nil {
+		return b.PromotionControl.TargetPlatformStatus
+	}
+	if b.PromotionRestart != nil {
+		return b.PromotionRestart.TargetPlatformStatus
+	}
+	return ""
 }
 
 type ControlledChangeSet struct {
@@ -390,6 +479,14 @@ func (a RemoteWriteApproval) Validate(now time.Time) error {
 	if err := validateControlledActionBinding(a.Action, a.Binding, a.BudgetLimitMinor); err != nil {
 		return err
 	}
+	if a.Action == ControlledActionResumePromotion {
+		if a.Binding.PromotionRestart == nil {
+			return ErrApprovalContentMismatch
+		}
+		if err := a.Binding.PromotionRestart.ValidateAt(a.Action, now); err != nil {
+			return err
+		}
+	}
 	hash, err := a.ComputeActionHash()
 	if err != nil || hash != a.ActionHash {
 		return ErrApprovalContentMismatch
@@ -403,15 +500,15 @@ func (a RemoteWriteApproval) Validate(now time.Time) error {
 func validateControlledActionBinding(action ControlledAction, binding ControlledAuthorityBinding, budgetLimitMinor int64) error {
 	switch action {
 	case ControlledActionCreateProjectAndPromotions:
-		if binding.ParentPlatformProjectID != "" || binding.OperatorPrincipalID != "" || hasMutationTargetFields(binding) || binding.PromotionMutation != nil || binding.PromotionControl != nil || (binding.ProjectBudgetMode != "" && budgetLimitMinor != binding.ProjectBudgetLimitMinor) {
+		if binding.ParentPlatformProjectID != "" || binding.OperatorPrincipalID != "" || hasMutationTargetFields(binding) || binding.PromotionMutation != nil || binding.PromotionControl != nil || binding.PromotionRestart != nil || (binding.ProjectBudgetMode != "" && budgetLimitMinor != binding.ProjectBudgetLimitMinor) {
 			return ErrApprovalContentMismatch
 		}
 	case ControlledActionCreatePromotionsInExistingProject:
-		if strings.TrimSpace(binding.ParentPlatformProjectID) == "" || binding.OperatorPrincipalID != "" || hasMutationTargetFields(binding) || binding.PromotionMutation != nil || binding.PromotionControl != nil || binding.PromotionBudgetLimitMinor < 1 || budgetLimitMinor != binding.PromotionBudgetLimitMinor {
+		if strings.TrimSpace(binding.ParentPlatformProjectID) == "" || binding.OperatorPrincipalID != "" || hasMutationTargetFields(binding) || binding.PromotionMutation != nil || binding.PromotionControl != nil || binding.PromotionRestart != nil || binding.PromotionBudgetLimitMinor < 1 || budgetLimitMinor != binding.PromotionBudgetLimitMinor {
 			return ErrApprovalContentMismatch
 		}
 	case ControlledActionUpdatePromotionBudget, ControlledActionUpdatePromotionSchedule, ControlledActionUpdatePromotionMaterials:
-		if strings.TrimSpace(binding.ParentPlatformProjectID) == "" || strings.TrimSpace(binding.OperatorPrincipalID) == "" || !binding.HasMutationTarget() || binding.PromotionMutation == nil || binding.PromotionControl != nil {
+		if strings.TrimSpace(binding.ParentPlatformProjectID) == "" || strings.TrimSpace(binding.OperatorPrincipalID) == "" || !binding.HasMutationTarget() || binding.PromotionMutation == nil || binding.PromotionControl != nil || binding.PromotionRestart != nil {
 			return ErrApprovalContentMismatch
 		}
 		if err := binding.PromotionMutation.Validate(action); err != nil {
@@ -421,13 +518,23 @@ func validateControlledActionBinding(action ControlledAction, binding Controlled
 			return ErrApprovalScopeExceeded
 		}
 	case ControlledActionPausePromotion:
-		if strings.TrimSpace(binding.ParentPlatformProjectID) == "" || strings.TrimSpace(binding.OperatorPrincipalID) == "" || !binding.HasMutationTarget() || binding.PromotionMutation != nil || binding.PromotionControl == nil {
+		if strings.TrimSpace(binding.ParentPlatformProjectID) == "" || strings.TrimSpace(binding.OperatorPrincipalID) == "" || !binding.HasMutationTarget() || binding.PromotionMutation != nil || binding.PromotionControl == nil || binding.PromotionRestart != nil {
 			return ErrApprovalContentMismatch
 		}
 		if err := binding.PromotionControl.Validate(action); err != nil {
 			return err
 		}
 		if budgetLimitMinor != binding.PromotionControl.CurrentDailyBudgetMinor || binding.PromotionBudgetLimitMinor != binding.PromotionControl.CurrentDailyBudgetMinor {
+			return ErrApprovalScopeExceeded
+		}
+	case ControlledActionResumePromotion:
+		if strings.TrimSpace(binding.ParentPlatformProjectID) == "" || strings.TrimSpace(binding.OperatorPrincipalID) == "" || !binding.HasMutationTarget() || binding.PromotionMutation != nil || binding.PromotionControl != nil || binding.PromotionRestart == nil {
+			return ErrApprovalContentMismatch
+		}
+		if err := binding.PromotionRestart.Validate(action); err != nil {
+			return err
+		}
+		if budgetLimitMinor != binding.PromotionRestart.ApprovedDailyBudgetMinor || binding.PromotionBudgetLimitMinor != binding.PromotionRestart.ApprovedDailyBudgetMinor {
 			return ErrApprovalScopeExceeded
 		}
 	default:

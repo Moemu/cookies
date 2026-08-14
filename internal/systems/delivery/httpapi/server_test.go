@@ -81,6 +81,11 @@ func TestPlatformEntityMappingHTTPKeepsPlatformValuesServerOwnedAndRequiresTwoRe
 		t.Fatalf("compile pause status=%d request=%#v body=%s", response.Code, app.pauseCompile, response.Body.String())
 	}
 	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1/controlled-restart-change-sets", `{"expected_mapping_version":4,"current_daily_budget_minor":30000,"approved_daily_budget_minor":30000,"current_platform_status":"paused","schedule":{"start_at":"2026-08-14T00:00:00+08:00","end_at":"2026-08-15T00:00:00+08:00","timezone":"Asia/Shanghai"},"materials":[{"reference_id":"asset_test","authorization_evidence_id":"material_evidence_test"}],"landing_page":{"reference_id":"landing_test","authorization_evidence_id":"landing_evidence_test"}}`))
+	if response.Code != http.StatusCreated || app.restartCompile.ExpectedMappingVersion != 4 || app.restartCompile.CurrentPlatformStatus != "paused" || app.restartCompile.LandingPage.ReferenceID != "landing_test" || !strings.Contains(response.Body.String(), `"id":"change_mutation"`) {
+		t.Fatalf("compile restart status=%d request=%#v body=%s", response.Code, app.restartCompile, response.Body.String())
+	}
+	response = httptest.NewRecorder()
 	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1:confirm-change", `{"expected_version":3,"business_execution_id":"pause_execution","result_evidence_id":"pause_result","list_evidence_id":"pause_list"}`))
 	if response.Code != http.StatusOK || app.confirmChange.BusinessExecutionID != "pause_execution" || !strings.Contains(response.Body.String(), `"revision"`) {
 		t.Fatalf("confirm change status=%d request=%#v body=%s", response.Code, app.confirmChange, response.Body.String())
@@ -327,6 +332,7 @@ type mappingApplicationStub struct {
 	controlledChange delivery.ControlledChangeSet
 	mappedCompile    delivery.CompileMappedControlledChangeSetRequest
 	pauseCompile     delivery.CompileEmergencyPauseChangeSetRequest
+	restartCompile   delivery.CompileControlledRestartChangeSetRequest
 }
 
 func (s *mappingApplicationStub) CreatePendingPlatformEntityMapping(_ context.Context, _ contract.ActorContext, value delivery.PlatformEntityMapping) (delivery.PlatformEntityMapping, error) {
@@ -363,6 +369,10 @@ func (s *mappingApplicationStub) CompileMappedControlledChangeSet(_ context.Cont
 }
 func (s *mappingApplicationStub) CompileEmergencyPauseChangeSet(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request delivery.CompileEmergencyPauseChangeSetRequest) (delivery.ControlledChangeSet, bool, error) {
 	s.pauseCompile = request
+	return s.controlledChange, false, nil
+}
+func (s *mappingApplicationStub) CompileControlledRestartChangeSet(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request delivery.CompileControlledRestartChangeSetRequest) (delivery.ControlledChangeSet, bool, error) {
+	s.restartCompile = request
 	return s.controlledChange, false, nil
 }
 func (s *mappingApplicationStub) GetControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledChangeSet, error) {

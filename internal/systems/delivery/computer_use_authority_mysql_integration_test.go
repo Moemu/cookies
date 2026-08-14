@@ -290,4 +290,97 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	if err != nil || pausedMapping.Version != updatedMapping.Version+1 || pausedMapping.PlatformStatus != "paused" || pausedMapping.CurrentStateAction != ControlledActionPausePromotion || pausedMapping.CurrentStateHash != pauseControl.TargetStateHash || pauseRevision.Action != ControlledActionPausePromotion || pauseRevision.PreviousStateAction != ControlledActionUpdatePromotionBudget || pauseRevision.PreviousStateHash != mutation.TargetStateHash {
 		t.Fatalf("paused mapping=%+v revision=%+v err=%v", pausedMapping, pauseRevision, err)
 	}
+
+	materialReference := ControlledMaterialReference{ReferenceID: "asset_test", AuthorizationEvidenceID: "restart_material_evidence_" + suffix}
+	landingReference := ControlledLandingPageReference{ReferenceID: "landing_test", AuthorizationEvidenceID: "restart_landing_evidence_" + suffix}
+	materialEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: materialReference.AuthorizationEvidenceID, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseListStep.ID, FieldReadback: map[string]string{"authorized_material_reference_id": materialReference.ReferenceID, "material_available": "true"}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "material-availability/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(6 * time.Second)}
+	landingEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: landingReference.AuthorizationEvidenceID, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseListStep.ID, FieldReadback: map[string]string{"authorized_landing_page_reference_id": landingReference.ReferenceID, "landing_page_available": "true"}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "landing-availability/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(7 * time.Second)}
+	if err := computerUseRepo.AppendEvidence(ctx, materialEvidence); err != nil {
+		t.Fatal(err)
+	}
+	if err := computerUseRepo.AppendEvidence(ctx, landingEvidence); err != nil {
+		t.Fatal(err)
+	}
+	if err := deliveryRepo.ValidateControlledRestartReferences(ctx, org, project, binding.AccountReferenceID, []ControlledMaterialReference{materialReference}, landingReference); err != nil {
+		t.Fatal(err)
+	}
+	restart := ControlledPromotionRestart{CurrentDailyBudgetMinor: pauseControl.CurrentDailyBudgetMinor, ApprovedDailyBudgetMinor: pauseControl.CurrentDailyBudgetMinor, CurrentPlatformStatus: "paused", TargetPlatformStatus: "delivering", Schedule: ControlledScheduleWindow{StartAt: now.Add(-time.Hour), EndAt: now.Add(24 * time.Hour), Timezone: "Asia/Shanghai"}, Materials: []ControlledMaterialReference{materialReference}, LandingPage: landingReference}
+	restartCurrentState, err := restart.statePayload(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartTargetState, err := restart.statePayload(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restart.CurrentStateHash, err = contract.CanonicalJSONHash(restartCurrentState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restart.TargetStateHash, err = contract.CanonicalJSONHash(restartTargetState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartBinding := pauseBinding
+	restartBinding.TargetMappingVersion = pausedMapping.Version
+	restartBinding.PromotionBudgetLimitMinor = restart.ApprovedDailyBudgetMinor
+	restartBinding.PromotionMutation = nil
+	restartBinding.PromotionControl = nil
+	restartBinding.PromotionRestart = &restart
+	restartBinding.ObjectFingerprint, err = contract.CanonicalJSONHash(struct {
+		MappingID       string `json:"mapping_id"`
+		MappingVersion  int64  `json:"mapping_version"`
+		TargetStateHash string `json:"target_state_hash"`
+	}{pausedMapping.ID, pausedMapping.Version, restart.TargetStateHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartChange := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: "restart_change_" + suffix, OrganizationID: org, ProjectID: project, Binding: restartBinding, Action: ControlledActionResumePromotion, BudgetLimitMinor: restart.ApprovedDailyBudgetMinor, Currency: "CNY", Status: ControlledChangeSetReady, Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	restartChange.CanonicalHash, err = restartChange.ComputeCanonicalHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartChange, _, err = deliveryRepo.CreateControlledChangeSet(ctx, restartChange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartApproval := RemoteWriteApproval{SchemaVersion: RemoteWriteApprovalSchemaV1, ID: "restart_approval_" + suffix, OrganizationID: org, ProjectID: project, ControlledChangeSetID: restartChange.ID, ControlledChangeSetHash: restartChange.CanonicalHash, Binding: restartBinding, Action: restartChange.Action, Scope: "controlled_remote_write", BudgetLimitMinor: restartChange.BudgetLimitMinor, Currency: restartChange.Currency, ApprovedBy: "approver", ApprovedAt: now, ExpiresAt: now.Add(RemoteWriteApprovalTTL)}
+	restartApproval.ActionHash, err = restartApproval.ComputeActionHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartChange, restartApproval, err = deliveryRepo.ApproveControlledChangeSet(ctx, restartChange, restartApproval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartExecution := ControlledExecution{ID: "restart_execution_" + suffix, OrganizationID: org, ProjectID: project, ControlledChangeSetID: restartChange.ID, RemoteWriteApprovalID: restartApproval.ID, Status: "pending", Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	restartExecution, err = deliveryRepo.CreateControlledExecution(ctx, restartExecution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartComputerUseService := computeruse.Service{Repository: computerUseRepo, AuthorityProvider: ComputerUseAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_restart_" + suffix, nil }}
+	restartRun, replayed, err := restartComputerUseService.CreateBoundRun(ctx, computeruse.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: restartExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "restart-run-key-" + suffix, CreatedBy: "operator"})
+	if err != nil || replayed || restartRun.Authority.TargetMappingID != pausedMapping.ID || restartRun.Authority.PromotionRestart == nil || restartRun.Authority.PromotionRestart.TargetStateHash != restart.TargetStateHash {
+		t.Fatalf("restart run=%+v replayed=%t err=%v", restartRun, replayed, err)
+	}
+	restartResultStep := computeruse.RunStep{ID: "restart_result_step_" + suffix, RunID: restartRun.ID, Sequence: 1, WorkflowStepID: restartRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverResultObserved), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
+	restartListStep := computeruse.RunStep{ID: "restart_list_step_" + suffix, RunID: restartRun.ID, Sequence: 2, WorkflowStepID: restartRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverListConfirmed), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
+	if err := computerUseRepo.PutStep(ctx, org, project, restartResultStep); err != nil {
+		t.Fatal(err)
+	}
+	if err := computerUseRepo.PutStep(ctx, org, project, restartListStep); err != nil {
+		t.Fatal(err)
+	}
+	restartResultEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "restart_result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: restartRun.ID, StepID: restartResultStep.ID, FieldReadback: map[string]string{"platform_object_id": pausedMapping.PlatformObjectID, "platform_status": "delivering", "target_state_hash": restart.TargetStateHash}, ObjectFingerprint: restartBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "restart-result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(8 * time.Second)}
+	restartListEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "restart_list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: restartRun.ID, StepID: restartListStep.ID, FieldReadback: map[string]string{"platform_object_id": pausedMapping.PlatformObjectID, "platform_status": "delivering", "target_state_hash": restart.TargetStateHash}, ObjectFingerprint: restartBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "restart-list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(9 * time.Second)}
+	if err := computerUseRepo.AppendEvidence(ctx, restartResultEvidence); err != nil {
+		t.Fatal(err)
+	}
+	if err := computerUseRepo.AppendEvidence(ctx, restartListEvidence); err != nil {
+		t.Fatal(err)
+	}
+	resumedMapping, restartRevision, err := deliveryRepo.ConfirmPlatformEntityMappingMutation(ctx, org, project, pausedMapping.ID, pausedMapping.Version, restartExecution.ID, restartResultEvidence.ID, restartListEvidence.ID)
+	if err != nil || resumedMapping.Version != pausedMapping.Version+1 || resumedMapping.PlatformStatus != "delivering" || resumedMapping.CurrentStateAction != ControlledActionResumePromotion || resumedMapping.CurrentStateHash != restart.TargetStateHash || restartRevision.Action != ControlledActionResumePromotion || restartRevision.PreviousStateAction != ControlledActionPausePromotion || restartRevision.PreviousStateHash != pauseControl.TargetStateHash {
+		t.Fatalf("resumed mapping=%+v revision=%+v err=%v", resumedMapping, restartRevision, err)
+	}
 }

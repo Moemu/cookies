@@ -24,9 +24,11 @@ test("controlled Computer Use fixtures satisfy the frozen contracts", () => {
     ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-awaiting-confirmation.json"],
     ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-budget-mutation.json"],
     ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-emergency-pause.json"],
+    ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-restart.json"],
     ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-ready.json"],
     ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-budget-mutation.json"],
     ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-emergency-pause.json"],
+    ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-restart.json"],
   ] as const) {
     const schema = readJSON(join(contracts, schemaName));
     const validate = ajv.getSchema(String(schema.$id));
@@ -48,6 +50,31 @@ test("emergency pause fixtures bind one operator and a delivering-to-paused stat
     assert.equal(control.target_platform_status, "paused");
     assert.equal("promotion_mutation" in binding, false);
     assert.equal(fixture.action ?? binding.action, "pause_promotion");
+  }
+});
+
+test("controlled restart fixtures bind strict paused-object rechecks without reusing pause authority", () => {
+  for (const fixtureName of [
+    "delivery-controlled-change-set-v1-restart.json",
+    "platform-computer-use-run-v1-restart.json",
+  ]) {
+    const fixture = readJSON(join(fixtures, fixtureName));
+    const binding = (fixture.binding ?? fixture.authority) as Record<string, unknown>;
+    const restart = binding.promotion_restart as Record<string, unknown>;
+    const schedule = restart.schedule as Record<string, unknown>;
+    const materials = restart.materials as Array<Record<string, unknown>>;
+    const landingPage = restart.landing_page as Record<string, unknown>;
+    assert.equal(binding.operator_principal_id, "operator_test");
+    assert.equal(restart.current_platform_status, "paused");
+    assert.equal(restart.target_platform_status, "delivering");
+    assert.equal(restart.current_daily_budget_minor, restart.approved_daily_budget_minor);
+    assert.equal(schedule.timezone, "Asia/Shanghai");
+    assert.equal(materials.length, 1);
+    assert.equal(materials[0].authorization_evidence_id, "material_evidence_test");
+    assert.equal(landingPage.authorization_evidence_id, "landing_evidence_test");
+    assert.equal("promotion_mutation" in binding, false);
+    assert.equal("promotion_control" in binding, false);
+    assert.equal(fixture.action ?? binding.action, "resume_promotion");
   }
 });
 

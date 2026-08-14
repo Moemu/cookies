@@ -86,3 +86,29 @@ func TestEmergencyPauseMigrationExpandsOnlyControlledPostLaunchAuthority(t *test
 		t.Fatal("emergency pause down migration did not restore the prior action set")
 	}
 }
+
+func TestControlledRestartMigrationRestoresEmergencyPauseBaselineOnRollback(t *testing.T) {
+	up, err := os.ReadFile("../../../migrations/delivery/20260814140000_delivery_controlled_restart.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	down, err := os.ReadFile("../../../migrations/delivery/20260814140000_delivery_controlled_restart.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	upSQL := strings.ToLower(string(up))
+	downSQL := strings.ToLower(string(down))
+	for _, required := range []string{"resume_promotion", "pause_promotion", "chk_delivery_controlled_change_set_action", "chk_delivery_remote_write_approval_authority", "chk_delivery_platform_mapping_state_hash", "chk_delivery_platform_mapping_revision_action", "chk_delivery_platform_mapping_revision_state_hash"} {
+		if !strings.Contains(upSQL, required) {
+			t.Errorf("controlled restart migration omitted %q", required)
+		}
+	}
+	if strings.Contains(downSQL, "resume_promotion") || !strings.Contains(downSQL, "pause_promotion") {
+		t.Fatal("controlled restart down migration did not restore the emergency-pause action set")
+	}
+	for _, forbidden := range []string{"execute_mock", "remote_write_enabled = true", "delete from delivery_platform_entity_mappings"} {
+		if strings.Contains(upSQL, forbidden) {
+			t.Errorf("controlled restart migration widened or deleted historical authority with %q", forbidden)
+		}
+	}
+}

@@ -58,6 +58,7 @@
         "operator_principal_id": { "type": "string", "minLength": 1 },
         "promotion_mutation": { "$ref": "#/$defs/promotionMutation" },
         "promotion_control": { "$ref": "#/$defs/promotionControl" },
+        "promotion_restart": { "$ref": "#/$defs/promotionRestart" },
         "object_fingerprint": { "type": "string", "minLength": 1 },
         "action": { "type": "string", "minLength": 1 },
         "project_budget_mode": { "enum": ["daily", "unlimited"] },
@@ -96,6 +97,15 @@
         "authorization_evidence_id": { "type": "string", "minLength": 1 }
       }
     },
+    "landingPageReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_id", "authorization_evidence_id"],
+      "properties": {
+        "reference_id": { "type": "string", "minLength": 1 },
+        "authorization_evidence_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "promotionMutation": {
       "type": "object",
       "additionalProperties": false,
@@ -119,6 +129,22 @@
         "current_daily_budget_minor": { "type": "integer", "minimum": 30000 },
         "current_platform_status": { "const": "delivering" },
         "target_platform_status": { "const": "paused" },
+        "current_state_hash": { "$ref": "#/$defs/hash" },
+        "target_state_hash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "promotionRestart": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current_daily_budget_minor", "approved_daily_budget_minor", "current_platform_status", "target_platform_status", "schedule", "materials", "landing_page", "current_state_hash", "target_state_hash"],
+      "properties": {
+        "current_daily_budget_minor": { "type": "integer", "minimum": 30000 },
+        "approved_daily_budget_minor": { "type": "integer", "minimum": 30000 },
+        "current_platform_status": { "const": "paused" },
+        "target_platform_status": { "const": "delivering" },
+        "schedule": { "$ref": "#/$defs/scheduleWindow" },
+        "materials": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/materialReference" } },
+        "landing_page": { "$ref": "#/$defs/landingPageReference" },
         "current_state_hash": { "$ref": "#/$defs/hash" },
         "target_state_hash": { "$ref": "#/$defs/hash" }
       }

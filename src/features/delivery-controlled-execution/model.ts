@@ -56,6 +56,17 @@ export type ComputerUseAuthorityBinding = {
     current_state_hash: string
     target_state_hash: string
   }
+  promotion_restart?: {
+    current_daily_budget_minor: number
+    approved_daily_budget_minor: number
+    current_platform_status: 'paused'
+    target_platform_status: 'delivering'
+    schedule: { start_at: string; end_at: string; timezone: string }
+    materials: Array<{ reference_id: string; authorization_evidence_id: string }>
+    landing_page: { reference_id: string; authorization_evidence_id: string }
+    current_state_hash: string
+    target_state_hash: string
+  }
   object_fingerprint: string
   action: string
   project_budget_mode?: 'daily' | 'unlimited'

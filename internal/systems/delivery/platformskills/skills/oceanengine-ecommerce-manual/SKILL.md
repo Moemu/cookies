@@ -82,6 +82,28 @@ to create a pause test. After the click, require both the result and an
 independent list readback to show the same object as `paused`; on uncertainty,
 query or take over without clicking again.
 
+## Treat restart as a new high-risk action
+
+The shared control plane can freeze and simulate `resume_promotion`, but this
+Skill still forbids live remote-object restart until the exact status-control
+surface has its own visible-browser calibration. Restart is not compensation
+for pause and never happens automatically.
+
+Start only from a confirmed Mapping whose latest controlled action is
+`pause_promotion` and whose normalized status remains `paused`. Create a fresh
+ChangeSet and Approval. Reidentify the exact account, parent project and
+promotion; require the daily budget to equal the paused authority; verify that
+the approved `Asia/Shanghai` schedule is active; and prove every authorized
+material plus the authorized landing page remains available. Stop on any drift,
+expired schedule, missing reference or active Kill Switch.
+
+A future real restart additionally requires current-turn authorization naming
+that exact paused test promotion and action. Bind one operator, consume one new
+confirmation and activate the unique restart control once. Require result and
+independent list readback to agree on `delivering`. Never use Connector output,
+mock/replay metrics or a recovery routine to initiate restart, and never retry
+an uncertain activation.
+
 ## Read the verified baseline
 
 - Read the [control contract](../../../../../../docs/delivery/controlled-computer-use-contract.md) for state and authority invariants.

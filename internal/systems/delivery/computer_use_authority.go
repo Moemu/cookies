@@ -108,7 +108,27 @@ func (p ComputerUseAuthorityProvider) authorityFromLoaded(execution ControlledEx
 	if binding.PromotionControl != nil {
 		value.PromotionControl = &computeruse.PromotionControlBinding{CurrentDailyBudgetMinor: binding.PromotionControl.CurrentDailyBudgetMinor, CurrentPlatformStatus: binding.PromotionControl.CurrentPlatformStatus, TargetPlatformStatus: binding.PromotionControl.TargetPlatformStatus, CurrentStateHash: binding.PromotionControl.CurrentStateHash, TargetStateHash: binding.PromotionControl.TargetStateHash}
 	}
+	if binding.PromotionRestart != nil {
+		value.PromotionRestart = toComputerUsePromotionRestart(*binding.PromotionRestart)
+	}
 	return value, value.Validate()
+}
+
+func toComputerUsePromotionRestart(value ControlledPromotionRestart) *computeruse.PromotionRestartBinding {
+	converted := &computeruse.PromotionRestartBinding{
+		CurrentDailyBudgetMinor:  value.CurrentDailyBudgetMinor,
+		ApprovedDailyBudgetMinor: value.ApprovedDailyBudgetMinor,
+		CurrentPlatformStatus:    value.CurrentPlatformStatus,
+		TargetPlatformStatus:     value.TargetPlatformStatus,
+		Schedule:                 computeruse.PromotionScheduleWindow{StartAt: value.Schedule.StartAt, EndAt: value.Schedule.EndAt, Timezone: value.Schedule.Timezone},
+		LandingPage:              computeruse.PromotionLandingPageReference{ReferenceID: value.LandingPage.ReferenceID, AuthorizationEvidenceID: value.LandingPage.AuthorizationEvidenceID},
+		CurrentStateHash:         value.CurrentStateHash,
+		TargetStateHash:          value.TargetStateHash,
+	}
+	for _, reference := range value.Materials {
+		converted.Materials = append(converted.Materials, computeruse.PromotionMaterialReference{ReferenceID: reference.ReferenceID, AuthorizationEvidenceID: reference.AuthorizationEvidenceID})
+	}
+	return converted
 }
 
 func toComputerUsePromotionMutation(value ControlledPromotionMutation) *computeruse.PromotionMutationBinding {

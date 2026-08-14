@@ -145,6 +145,43 @@ func TestDeterministicFakeAdapterProjectsEmergencyPauseReadback(t *testing.T) {
 	}
 }
 
+func TestDeterministicFakeAdapterProjectsControlledRestartRechecks(t *testing.T) {
+	now := time.Date(2026, 8, 14, 7, 30, 0, 0, time.UTC)
+	run := validRun(now)
+	restart := PromotionRestartBinding{
+		CurrentDailyBudgetMinor:  30000,
+		ApprovedDailyBudgetMinor: 30000,
+		CurrentPlatformStatus:    "paused",
+		TargetPlatformStatus:     "delivering",
+		Schedule:                 PromotionScheduleWindow{StartAt: now.Add(-time.Hour), EndAt: now.Add(24 * time.Hour), Timezone: "Asia/Shanghai"},
+		Materials:                []PromotionMaterialReference{{ReferenceID: "asset_test", AuthorizationEvidenceID: "material_evidence_test"}},
+		LandingPage:              PromotionLandingPageReference{ReferenceID: "landing_test", AuthorizationEvidenceID: "landing_evidence_test"},
+	}
+	current, _ := restart.statePayload(false)
+	target, _ := restart.statePayload(true)
+	restart.CurrentStateHash, _ = contract.CanonicalJSONHash(current)
+	restart.TargetStateHash, _ = contract.CanonicalJSONHash(target)
+	run.Authority.Action = "resume_promotion"
+	run.Authority.ParentPlatformProjectID = "project_test"
+	run.Authority.TargetMappingID = "mapping_test"
+	run.Authority.TargetMappingVersion = 3
+	run.Authority.TargetPlatformObjectID = "promotion_test"
+	run.Authority.TargetPlatformObjectKind = "promotion"
+	run.Authority.OperatorPrincipalID = "operator_1"
+	run.Authority.PromotionBudgetLimitMinor = 30000
+	run.Authority.BudgetLimitMinor = 30000
+	run.Authority.PromotionRestart = &restart
+	adapter := DeterministicFakeAdapter{Outcome: WorkerSuccess, AccountID: run.AccountID}
+	prepared, err := adapter.Prepare(context.Background(), run)
+	if err != nil || run.Authority.validatePreSubmitReadback(prepared.Readback, now) != nil || prepared.Readback["platform_status"] != "paused" || prepared.Readback["materials_available"] != "true" || prepared.Readback["landing_page_available"] != "true" {
+		t.Fatalf("prepared=%#v err=%v", prepared, err)
+	}
+	_, outcome, err := adapter.Submit(context.Background(), run, ControlledActionAttempt{})
+	if err != nil || outcome.Readback["platform_object_id"] != "promotion_test" || outcome.Readback["platform_status"] != "delivering" || outcome.Readback["target_state_hash"] != restart.TargetStateHash {
+		t.Fatalf("outcome=%#v err=%v", outcome, err)
+	}
+}
+
 func fakeWorkerFixture(outcome WorkerOutcome) (Worker, Service, *MemoryRepository, ComputerUseRun, time.Time) {
 	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
 	repo := NewMemoryRepository()

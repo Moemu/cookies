@@ -114,7 +114,7 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
 
     <AuthorityChain run={run} />
     <StatusBanner presentation={presentation} />
-    {run.authority.promotion_mutation || run.authority.promotion_control ? <PromotionChangeDiff run={run} /> : null}
+    {run.authority.promotion_mutation || run.authority.promotion_control || run.authority.promotion_restart ? <PromotionChangeDiff run={run} /> : null}
 
     <div className="controlled-execution-layout">
       <section className="controlled-execution-main" aria-label="运行状态与步骤">
@@ -145,13 +145,14 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
 }
 
 function AuthorityChain({ run }: { run: ComputerUseRun }) {
-  const changing = Boolean(run.authority.promotion_mutation || run.authority.promotion_control)
+  const changing = Boolean(run.authority.promotion_mutation || run.authority.promotion_control || run.authority.promotion_restart)
   const emergencyPause = run.authority.action === 'pause_promotion'
+  const controlledRestart = run.authority.action === 'resume_promotion'
   const formalApproved = run.blocking_reason !== 'APPROVAL_INVALID'
   const confirmationReady = ['submitting', 'verifying', 'succeeded', 'failed', 'partial', 'result_unknown'].includes(run.state)
     && run.blocking_reason !== 'FINAL_CONFIRMATION_INVALID'
   return <ol className="controlled-execution-authority-chain" aria-label="受控写入授权链">
-    <li className="complete"><span>1</span><div><b>{emergencyPause ? '核对投放状态并创建紧急暂停' : changing ? '读取当前值并创建新变更' : '接受优化方案'}</b><small>{changing ? '当前值、目标值、对象、操作人和 Mapping 版本已经冻结；创建时的审批不可复用。' : '已接受/修改的反馈才可创建 ChangeSet；这不是写入批准。'}</small></div></li>
+    <li className="complete"><span>1</span><div><b>{emergencyPause ? '核对投放状态并创建紧急暂停' : controlledRestart ? '完成全部重检并创建受控重启' : changing ? '读取当前值并创建新变更' : '接受优化方案'}</b><small>{changing ? '当前值、目标值、对象、操作人和 Mapping 版本已经冻结；创建时的审批不可复用。' : '已接受/修改的反馈才可创建 ChangeSet；这不是写入批准。'}</small></div></li>
     <li className={formalApproved ? 'complete' : 'blocked'}><span>2</span><div><b>批准平台写入</b><small>正式 Approval 绑定账户、预算、配置、Workflow 与阶段 B Skill 校准版本；这不代表实时 DOM 已复核。</small></div></li>
     <li className={confirmationReady ? 'complete' : 'waiting'}><span>3</span><div><b>一次性最终确认</b><small>仅对当前 Run 有效；签发或过期都不等于已经提交。</small></div></li>
   </ol>
@@ -160,22 +161,33 @@ function AuthorityChain({ run }: { run: ComputerUseRun }) {
 function PromotionChangeDiff({ run }: { run: ComputerUseRun }) {
   const mutation = run.authority.promotion_mutation
   const control = run.authority.promotion_control
-  if (!mutation && !control) return null
+  const restart = run.authority.promotion_restart
+  if (!mutation && !control && !restart) return null
   const emergencyPause = run.authority.action === 'pause_promotion' && Boolean(control)
+  const controlledRestart = run.authority.action === 'resume_promotion' && Boolean(restart)
   const actionLabel = ({
     update_promotion_budget: '修改推广单元日预算',
     update_promotion_schedule: '修改推广单元排期',
     update_promotion_materials: '更换或增减授权素材',
     pause_promotion: '紧急暂停推广单元',
+    resume_promotion: '受控重启推广单元',
   } as Record<string, string>)[run.authority.action] ?? '修改推广单元'
-  const rows = control
+  const rows = restart
+    ? [
+        { label: '投放状态', current: statusLabel(restart.current_platform_status), target: statusLabel(restart.target_platform_status) },
+        { label: '每日预算（重新核准）', current: `¥${formatMinor(restart.current_daily_budget_minor)}`, target: `¥${formatMinor(restart.approved_daily_budget_minor)}` },
+        { label: '当前有效排期', current: formatSchedule(restart.schedule), target: '校验通过后保持不变' },
+        { label: '授权素材可用性', current: `${restart.materials.length} 项`, target: '最终点击前再次核对' },
+        { label: '授权落地页可用性', current: '已绑定 1 个授权落地页', target: '最终点击前再次核对' },
+      ]
+    : control
     ? [
         { label: '投放状态', current: statusLabel(control.current_platform_status), target: statusLabel(control.target_platform_status) },
         { label: '每日预算（保持不变）', current: `¥${formatMinor(control.current_daily_budget_minor)}`, target: `¥${formatMinor(control.current_daily_budget_minor)}` },
       ]
     : mutationRows(run.authority.action, mutation!)
-  return <section className={`controlled-execution-mutation${emergencyPause ? ' emergency' : ''}`} aria-label="当前值与目标值">
-    <header><div><span className="section-label">{emergencyPause ? '高优先级止损动作' : '本次受控变更'}</span><h3>{actionLabel}</h3></div><small>{emergencyPause ? '这是平台推广单元的状态变更，不是暂停本页执行流程。只允许单击一次，随后必须回读“已暂停”。' : '提交前必须逐字段回读一致；任何差异都会阻止一次性确认。'}</small></header>
+  return <section className={`controlled-execution-mutation${emergencyPause ? ' emergency' : ''}${controlledRestart ? ' restart' : ''}`} aria-label="当前值与目标值">
+    <header><div><span className="section-label">{emergencyPause ? '高优先级止损动作' : controlledRestart ? '严格重检后的独立动作' : '本次受控变更'}</span><h3>{actionLabel}</h3></div><small>{emergencyPause ? '这是平台推广单元的状态变更，不是暂停本页执行流程。只允许单击一次，随后必须回读“已暂停”。' : controlledRestart ? '重启不是自动补偿。账户、父项目、对象、预算、有效排期、素材、落地页和 Kill Switch 任一不通过都会阻止最终确认。' : '提交前必须逐字段回读一致；任何差异都会阻止一次性确认。'}</small></header>
     <div className="controlled-execution-mutation-table" role="table" aria-label="变更差异">
       <div className="heading" role="row"><b role="columnheader">字段</b><b role="columnheader">当前值</b><b role="columnheader">目标值</b></div>
       {rows.map(row => <div key={row.label} role="row"><span role="cell">{row.label}</span><strong role="cell">{row.current}</strong><strong role="cell" className="target">{row.target}</strong></div>)}

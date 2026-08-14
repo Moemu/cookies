@@ -99,6 +99,7 @@ Control Plane 不理解抖音/快手业务字段；平台页面流程由 Deliver
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-change-sets`：从已确认 Mapping 创建一次预算、排期或授权素材变更。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}:confirm-mutation`：以同一 Run 的结果页和列表页证据递增 Mapping 版本。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/emergency-pause-change-sets`：只对状态为 `delivering` 的已确认推广单元创建独立紧急暂停 ChangeSet；目标状态由服务端固定为 `paused`。
+- `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-restart-change-sets`：只允许从本系统确认的紧急暂停修订创建全新重启 ChangeSet；预算、有效排期、授权素材和授权落地页必须重新核对。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}:confirm-change`：以结果页和列表页的同对象、同状态、同目标状态哈希证据推进暂停或其他既有对象变更后的 Mapping 版本。
 
 所有写接口使用幂等键；确认令牌只能消费一次，且只匹配完全一致的动作哈希。
@@ -109,6 +110,13 @@ ComputerUseRun 的 `pause/resume` 只控制执行流程，不改变广告平台�
 与点击操作人必须是该绑定操作人；写后恢复租约可以由其他操作人接管查询，
 但不能签发或执行第二次点击。当前 Skill 尚未完成真实暂停页面校准，生产能力
 保持关闭；fake Worker 和无写预演不得被描述为真实平台暂停成功。
+
+受控重启不是暂停的自动补偿，也不能复用暂停 Approval。Mapping 的最新权威动作必须
+是 `pause_promotion` 且平台状态仍为 `paused`；当前日预算必须等于暂停时冻结值。
+新的 `resume_promotion` ChangeSet/Approval 绑定有效排期、素材与落地页授权证据和
+唯一操作人。最终点击前必须重新读取账户、父项目、对象、状态、日预算、排期哈希、
+素材集合与落地页，并证明素材和落地页仍可用；排期过期、页面漂移或任一级 Kill
+Switch 激活都会阻断。当前 Skill 尚未校准真实重启控制，仍只开放 fake/no-write 路径。
 
 ## 11. MVP 验收
 
@@ -127,3 +135,4 @@ ComputerUseRun 的 `pause/resume` 只控制执行流程，不改变广告平台�
 | v0.1 | 2026-07-20 | 确定受控远程设备模式，定义会话隔离、接管、证据、恢复和发布门禁 |
 | v0.2 | 2026-08-14 | 增加指定推广单元的预算、排期、授权素材有限变更和 Mapping 修订链；真实最终点击仍需执行当轮单独授权 |
 | v0.3 | 2026-08-14 | 增加操作人绑定的独立紧急暂停权威链与 fake/no-write 路径；真实暂停仍需单独页面校准和当轮授权 |
+| v0.4 | 2026-08-14 | 增加从受控暂停出发、严格重检预算/排期/素材/落地页/身份/Kill Switch 的独立重启权威链；不作为自动补偿 |

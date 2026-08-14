@@ -98,6 +98,28 @@ func (s *Server) compileEmergencyPauseChangeSet(w http.ResponseWriter, r *http.R
 	writeJSON(w, status, value)
 }
 
+func (s *Server) compileControlledRestartChangeSet(w http.ResponseWriter, r *http.Request) {
+	app, err := s.controlledApp()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var body delivery.CompileControlledRestartChangeSetRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	value, replay, err := app.CompileControlledRestartChangeSet(r.Context(), mustActor(r), projectID(r), r.PathValue("mapping_id"), body)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	status := http.StatusCreated
+	if replay {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, value)
+}
+
 func (s *Server) getControlledChangeSet(w http.ResponseWriter, r *http.Request) {
 	app, err := s.controlledApp()
 	if err != nil {

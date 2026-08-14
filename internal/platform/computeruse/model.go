@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,6 +72,11 @@ type PromotionMaterialReference struct {
 	AuthorizationEvidenceID string `json:"authorization_evidence_id"`
 }
 
+type PromotionLandingPageReference struct {
+	ReferenceID             string `json:"reference_id"`
+	AuthorizationEvidenceID string `json:"authorization_evidence_id"`
+}
+
 type PromotionMutationBinding struct {
 	CurrentDailyBudgetMinor int64                        `json:"current_daily_budget_minor"`
 	TargetDailyBudgetMinor  int64                        `json:"target_daily_budget_minor"`
@@ -108,6 +114,65 @@ func (c PromotionControlBinding) Validate(action string) error {
 		return ErrInvalidContract
 	}
 	return nil
+}
+
+type PromotionRestartBinding struct {
+	CurrentDailyBudgetMinor  int64                         `json:"current_daily_budget_minor"`
+	ApprovedDailyBudgetMinor int64                         `json:"approved_daily_budget_minor"`
+	CurrentPlatformStatus    string                        `json:"current_platform_status"`
+	TargetPlatformStatus     string                        `json:"target_platform_status"`
+	Schedule                 PromotionScheduleWindow       `json:"schedule"`
+	Materials                []PromotionMaterialReference  `json:"materials"`
+	LandingPage              PromotionLandingPageReference `json:"landing_page"`
+	CurrentStateHash         string                        `json:"current_state_hash"`
+	TargetStateHash          string                        `json:"target_state_hash"`
+}
+
+func (r PromotionRestartBinding) statePayload(target bool) (any, error) {
+	status := r.CurrentPlatformStatus
+	if target {
+		status = r.TargetPlatformStatus
+	}
+	if r.CurrentDailyBudgetMinor < 30000 || r.CurrentDailyBudgetMinor != r.ApprovedDailyBudgetMinor || r.CurrentPlatformStatus != "paused" || r.TargetPlatformStatus != "delivering" || !validPromotionSchedule(r.Schedule) || r.Schedule.Timezone != "Asia/Shanghai" || len(r.Materials) == 0 || !validPromotionMaterials(r.Materials) || strings.TrimSpace(r.LandingPage.ReferenceID) == "" || strings.TrimSpace(r.LandingPage.AuthorizationEvidenceID) == "" {
+		return nil, ErrInvalidContract
+	}
+	return struct {
+		DailyBudgetMinor int64                         `json:"daily_budget_minor"`
+		PlatformStatus   string                        `json:"platform_status"`
+		Schedule         PromotionScheduleWindow       `json:"schedule"`
+		Materials        []PromotionMaterialReference  `json:"materials"`
+		LandingPage      PromotionLandingPageReference `json:"landing_page"`
+	}{r.CurrentDailyBudgetMinor, status, r.Schedule, r.Materials, r.LandingPage}, nil
+}
+
+func (r PromotionRestartBinding) Validate(action string) error {
+	if action != "resume_promotion" || !isSHA256(r.CurrentStateHash) || !isSHA256(r.TargetStateHash) || r.CurrentStateHash == r.TargetStateHash {
+		return ErrInvalidContract
+	}
+	current, currentErr := r.statePayload(false)
+	target, targetErr := r.statePayload(true)
+	currentHash, currentHashErr := contract.CanonicalJSONHash(current)
+	targetHash, targetHashErr := contract.CanonicalJSONHash(target)
+	if currentErr != nil || targetErr != nil || currentHashErr != nil || targetHashErr != nil || currentHash != r.CurrentStateHash || targetHash != r.TargetStateHash {
+		return ErrInvalidContract
+	}
+	return nil
+}
+
+func (r PromotionRestartBinding) ValidateAt(action string, now time.Time) error {
+	if err := r.Validate(action); err != nil || now.Before(r.Schedule.StartAt) || !now.Before(r.Schedule.EndAt) {
+		return ErrInvalidContract
+	}
+	return nil
+}
+
+func (r PromotionRestartBinding) readbackHashes() (string, string, error) {
+	scheduleHash, scheduleErr := contract.CanonicalJSONHash(r.Schedule)
+	materialsHash, materialsErr := contract.CanonicalJSONHash(r.Materials)
+	if scheduleErr != nil || materialsErr != nil {
+		return "", "", ErrInvalidContract
+	}
+	return scheduleHash, materialsHash, nil
 }
 
 func (m PromotionMutationBinding) Validate(action string) error {
@@ -191,6 +256,7 @@ type AuthorityBinding struct {
 	OperatorPrincipalID        string                    `json:"operator_principal_id,omitempty"`
 	PromotionMutation          *PromotionMutationBinding `json:"promotion_mutation,omitempty"`
 	PromotionControl           *PromotionControlBinding  `json:"promotion_control,omitempty"`
+	PromotionRestart           *PromotionRestartBinding  `json:"promotion_restart,omitempty"`
 	ObjectFingerprint          string                    `json:"object_fingerprint"`
 	Action                     string                    `json:"action"`
 	ProjectBudgetMode          string                    `json:"project_budget_mode,omitempty"`
@@ -221,14 +287,18 @@ func (b AuthorityBinding) Validate() error {
 		return ErrInvalidContract
 	}
 	if modifiesExistingPromotionAction(b.Action) {
-		if strings.TrimSpace(b.ParentPlatformProjectID) == "" || strings.TrimSpace(b.OperatorPrincipalID) == "" || b.TargetMappingID == "" || b.TargetMappingVersion < 2 || b.TargetPlatformObjectID == "" || b.TargetPlatformObjectKind != "promotion" || b.PromotionMutation == nil || b.PromotionControl != nil || b.PromotionBudgetLimitMinor < 30000 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor || b.PromotionBudgetLimitMinor != b.PromotionMutation.TargetDailyBudgetMinor || b.PromotionMutation.Validate(b.Action) != nil {
+		if strings.TrimSpace(b.ParentPlatformProjectID) == "" || strings.TrimSpace(b.OperatorPrincipalID) == "" || b.TargetMappingID == "" || b.TargetMappingVersion < 2 || b.TargetPlatformObjectID == "" || b.TargetPlatformObjectKind != "promotion" || b.PromotionMutation == nil || b.PromotionControl != nil || b.PromotionRestart != nil || b.PromotionBudgetLimitMinor < 30000 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor || b.PromotionBudgetLimitMinor != b.PromotionMutation.TargetDailyBudgetMinor || b.PromotionMutation.Validate(b.Action) != nil {
 			return ErrInvalidContract
 		}
 	} else if b.Action == "pause_promotion" {
-		if strings.TrimSpace(b.ParentPlatformProjectID) == "" || strings.TrimSpace(b.OperatorPrincipalID) == "" || b.TargetMappingID == "" || b.TargetMappingVersion < 2 || b.TargetPlatformObjectID == "" || b.TargetPlatformObjectKind != "promotion" || b.PromotionMutation != nil || b.PromotionControl == nil || b.PromotionBudgetLimitMinor < 30000 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor || b.PromotionBudgetLimitMinor != b.PromotionControl.CurrentDailyBudgetMinor || b.PromotionControl.Validate(b.Action) != nil {
+		if strings.TrimSpace(b.ParentPlatformProjectID) == "" || strings.TrimSpace(b.OperatorPrincipalID) == "" || b.TargetMappingID == "" || b.TargetMappingVersion < 2 || b.TargetPlatformObjectID == "" || b.TargetPlatformObjectKind != "promotion" || b.PromotionMutation != nil || b.PromotionControl == nil || b.PromotionRestart != nil || b.PromotionBudgetLimitMinor < 30000 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor || b.PromotionBudgetLimitMinor != b.PromotionControl.CurrentDailyBudgetMinor || b.PromotionControl.Validate(b.Action) != nil {
 			return ErrInvalidContract
 		}
-	} else if b.TargetMappingID != "" || b.TargetMappingVersion != 0 || b.TargetPlatformObjectID != "" || b.TargetPlatformObjectKind != "" || b.OperatorPrincipalID != "" || b.PromotionMutation != nil || b.PromotionControl != nil {
+	} else if b.Action == "resume_promotion" {
+		if strings.TrimSpace(b.ParentPlatformProjectID) == "" || strings.TrimSpace(b.OperatorPrincipalID) == "" || b.TargetMappingID == "" || b.TargetMappingVersion < 2 || b.TargetPlatformObjectID == "" || b.TargetPlatformObjectKind != "promotion" || b.PromotionMutation != nil || b.PromotionControl != nil || b.PromotionRestart == nil || b.PromotionBudgetLimitMinor < 30000 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor || b.PromotionBudgetLimitMinor != b.PromotionRestart.ApprovedDailyBudgetMinor || b.PromotionRestart.Validate(b.Action) != nil {
+			return ErrInvalidContract
+		}
+	} else if b.TargetMappingID != "" || b.TargetMappingVersion != 0 || b.TargetPlatformObjectID != "" || b.TargetPlatformObjectKind != "" || b.OperatorPrincipalID != "" || b.PromotionMutation != nil || b.PromotionControl != nil || b.PromotionRestart != nil {
 		return ErrInvalidContract
 	}
 	for _, hash := range []string{b.ApprovalActionHash, b.PlanCanonicalHash, b.IntentCanonicalHash, b.FeedbackCanonicalHash, b.DecisionCanonicalHash, b.ConfigurationCanonicalHash, b.WorkflowCanonicalHash} {
@@ -244,7 +314,7 @@ func modifiesExistingPromotionAction(action string) bool {
 }
 
 func changesExistingPromotionAction(action string) bool {
-	return modifiesExistingPromotionAction(action) || action == "pause_promotion"
+	return modifiesExistingPromotionAction(action) || action == "pause_promotion" || action == "resume_promotion"
 }
 
 func (b AuthorityBinding) existingPromotionStateHashes() (string, string, error) {
@@ -253,9 +323,42 @@ func (b AuthorityBinding) existingPromotionStateHashes() (string, string, error)
 		return b.PromotionMutation.CurrentStateHash, b.PromotionMutation.TargetStateHash, nil
 	case b.Action == "pause_promotion" && b.PromotionMutation == nil && b.PromotionControl != nil:
 		return b.PromotionControl.CurrentStateHash, b.PromotionControl.TargetStateHash, nil
+	case b.Action == "resume_promotion" && b.PromotionMutation == nil && b.PromotionControl == nil && b.PromotionRestart != nil:
+		return b.PromotionRestart.CurrentStateHash, b.PromotionRestart.TargetStateHash, nil
 	default:
 		return "", "", ErrInvalidContract
 	}
+}
+
+func (b AuthorityBinding) existingPromotionTargetStatus() string {
+	if b.PromotionControl != nil {
+		return b.PromotionControl.TargetPlatformStatus
+	}
+	if b.PromotionRestart != nil {
+		return b.PromotionRestart.TargetPlatformStatus
+	}
+	return ""
+}
+
+func (b AuthorityBinding) validatePreSubmitReadback(readback map[string]string, now time.Time) error {
+	if !changesExistingPromotionAction(b.Action) {
+		return nil
+	}
+	currentStateHash, targetStateHash, stateErr := b.existingPromotionStateHashes()
+	if stateErr != nil || readback["platform_object_id"] != b.TargetPlatformObjectID || readback["current_state_hash"] != currentStateHash || readback["target_state_hash"] != targetStateHash {
+		return ErrInvalidContract
+	}
+	if b.Action != "resume_promotion" {
+		return nil
+	}
+	if b.PromotionRestart == nil || b.PromotionRestart.ValidateAt(b.Action, now) != nil {
+		return ErrInvalidContract
+	}
+	scheduleHash, materialsHash, err := b.PromotionRestart.readbackHashes()
+	if err != nil || readback["account_id"] != b.AccountReferenceID || readback["platform_project_id"] != b.ParentPlatformProjectID || readback["platform_status"] != b.PromotionRestart.CurrentPlatformStatus || readback["daily_budget_minor"] != strconv.FormatInt(b.PromotionRestart.ApprovedDailyBudgetMinor, 10) || readback["schedule_hash"] != scheduleHash || readback["material_references_hash"] != materialsHash || readback["landing_page_reference_id"] != b.PromotionRestart.LandingPage.ReferenceID || readback["materials_available"] != "true" || readback["landing_page_available"] != "true" {
+		return ErrInvalidContract
+	}
+	return nil
 }
 
 func actionRequiresBoundPlatformProject(action string) bool {
