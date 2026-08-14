@@ -3455,6 +3455,7 @@ components:
         target_platform_object_id: {type: string}
         target_platform_object_kind: {type: string, enum: [promotion]}
         operator_principal_id: {type: string}
+        supersedes_controlled_change_set_id: {type: string}
         promotion_mutation: {$ref: '#/components/schemas/ComputerUsePromotionMutation'}
         promotion_control: {$ref: '#/components/schemas/ComputerUsePromotionControl'}
         promotion_restart: {$ref: '#/components/schemas/ComputerUsePromotionRestart'}

@@ -166,6 +166,80 @@ func (r MySQLRepository) AttachComputerUseRun(ctx context.Context, org contract.
 	return r.GetControlledExecution(ctx, org, project, id)
 }
 
+func (r MySQLRepository) InvalidateCalibratedControlledChangeSet(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion int64, now time.Time) (ControlledChangeSet, ControlledExecution, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	defer tx.Rollback()
+	var changeStatus string
+	var changeVersion int64
+	var execution ControlledExecution
+	err = tx.QueryRowContext(ctx, `SELECT c.status,c.version,e.id,e.organization_id,e.project_id,e.controlled_change_set_id,e.remote_write_approval_id,COALESCE(e.computer_use_run_id,''),e.status,e.version,e.created_by,e.created_at,e.updated_at FROM delivery_controlled_change_sets c JOIN delivery_controlled_executions e ON e.organization_id=c.organization_id AND e.project_id=c.project_id AND e.controlled_change_set_id=c.id JOIN delivery_remote_write_approvals a ON a.organization_id=e.organization_id AND a.project_id=e.project_id AND a.id=e.remote_write_approval_id WHERE c.organization_id=? AND c.project_id=? AND c.id=? FOR UPDATE`, org, project, id).Scan(&changeStatus, &changeVersion, &execution.ID, &execution.OrganizationID, &execution.ProjectID, &execution.ControlledChangeSetID, &execution.RemoteWriteApprovalID, &execution.ComputerUseRunID, &execution.Status, &execution.Version, &execution.CreatedBy, &execution.CreatedAt, &execution.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ControlledChangeSet{}, ControlledExecution{}, ErrNotFound
+	}
+	if err != nil {
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	if changeStatus != string(ControlledChangeSetExecuting) || changeVersion != expectedVersion || execution.Status != "running" || execution.ComputerUseRunID == "" {
+		return ControlledChangeSet{}, ControlledExecution{}, ErrInvalidState
+	}
+	var runState, leaseID string
+	var takeoverActive bool
+	if err := tx.QueryRowContext(ctx, `SELECT state,COALESCE(lease_id,''),takeover_active FROM computer_use_runs WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, org, project, execution.ComputerUseRunID).Scan(&runState, &leaseID, &takeoverActive); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ControlledChangeSet{}, ControlledExecution{}, ErrNotFound
+		}
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	if runState != "cancelled" || leaseID != "" || takeoverActive {
+		return ControlledChangeSet{}, ControlledExecution{}, ErrInvalidState
+	}
+	var attemptCount, consumedConfirmationCount int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM computer_use_controlled_action_attempts WHERE organization_id=? AND project_id=? AND run_id=?`, org, project, execution.ComputerUseRunID).Scan(&attemptCount); err != nil {
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM computer_use_final_confirmations WHERE organization_id=? AND project_id=? AND run_id=? AND consumed_at IS NOT NULL`, org, project, execution.ComputerUseRunID).Scan(&consumedConfirmationCount); err != nil {
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	if attemptCount != 0 || consumedConfirmationCount != 0 {
+		return ControlledChangeSet{}, ControlledExecution{}, ErrInvalidState
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE computer_use_final_confirmations SET invalidated_at=COALESCE(invalidated_at,?),version=version+1 WHERE organization_id=? AND project_id=? AND run_id=? AND consumed_at IS NULL AND rejected_at IS NULL AND invalidated_at IS NULL`, now, org, project, execution.ComputerUseRunID); err != nil {
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE delivery_controlled_executions SET status='cancelled',version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND status='running' AND version=?`, now, org, project, execution.ID, execution.Version)
+	if err != nil {
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr != nil || affected != 1 {
+		if affectedErr != nil {
+			return ControlledChangeSet{}, ControlledExecution{}, affectedErr
+		}
+		return ControlledChangeSet{}, ControlledExecution{}, ErrVersionConflict
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE delivery_controlled_change_sets SET status='invalidated',version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND status='executing' AND version=?`, now, org, project, id, expectedVersion)
+	if err != nil {
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr != nil || affected != 1 {
+		if affectedErr != nil {
+			return ControlledChangeSet{}, ControlledExecution{}, affectedErr
+		}
+		return ControlledChangeSet{}, ControlledExecution{}, ErrVersionConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	change, err := r.GetControlledChangeSet(ctx, org, project, id)
+	if err != nil {
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	execution, err = r.GetControlledExecution(ctx, org, project, execution.ID)
+	return change, execution, err
+}
+
 func (r MySQLRepository) CreatePlatformEntityMapping(ctx context.Context, value PlatformEntityMapping) (PlatformEntityMapping, error) {
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO delivery_platform_entity_mappings (id,organization_id,project_id,account_reference_id,plan_id,configuration_id,business_execution_id,computer_use_run_id,internal_object_kind,internal_object_id,platform_object_kind,platform_object_id,platform_status,current_state_action,current_state_hash,result_evidence_id,list_evidence_id,status,version,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, value.ID, value.OrganizationID, value.ProjectID, value.AccountReferenceID, value.PlanID, value.ConfigurationID, value.BusinessExecutionID, value.ComputerUseRunID, value.InternalObjectKind, value.InternalObjectID, value.PlatformObjectKind, nullableString(value.PlatformObjectID), nullableString(value.PlatformStatus), nullableString(string(value.CurrentStateAction)), nullableString(value.CurrentStateHash), nullableString(value.ResultEvidenceID), nullableString(value.ListEvidenceID), value.Status, value.Version, value.CreatedAt, value.UpdatedAt)
 	if err != nil {

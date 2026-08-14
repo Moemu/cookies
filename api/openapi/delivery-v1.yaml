@@ -301,6 +301,40 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/controlled-change-sets/{controlled_change_set_id}:invalidate-calibration:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: controlled_change_set_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: invalidateCalibratedControlledDeliveryChangeSet
+      summary: Invalidate a cancelled zero-attempt calibration authority while preserving its immutable approval history
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version]
+              properties:
+                expected_version: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Invalidated ChangeSet and cancelled controlled execution.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [change_set, execution]
+                properties:
+                  change_set: { $ref: '#/components/schemas/ControlledChangeSet' }
+                  execution: { $ref: '#/components/schemas/ControlledExecution' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/controlled-change-sets/{controlled_change_set_id}:execute:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -1490,6 +1524,7 @@ components:
         target_platform_object_id: { type: string }
         target_platform_object_kind: { type: string, enum: [promotion] }
         operator_principal_id: { type: string }
+        supersedes_controlled_change_set_id: { type: string, minLength: 1 }
         project_budget_mode: { type: string, enum: [daily, unlimited] }
         project_budget_limit_minor: { type: integer, minimum: 0 }
         promotion_budget_limit_minor: { type: integer, minimum: 0 }
@@ -1586,6 +1621,7 @@ components:
         target_materials:
           type: array
           items: { $ref: '#/components/schemas/ControlledMaterialReference' }
+        supersedes_controlled_change_set_id: { type: string, minLength: 1 }
     CreateEmergencyPauseChangeSetRequest:
       type: object
       additionalProperties: false
@@ -1594,6 +1630,7 @@ components:
         expected_mapping_version: { type: integer, minimum: 2 }
         current_daily_budget_minor: { type: integer, minimum: 30000 }
         current_platform_status: { type: string, const: delivering }
+        supersedes_controlled_change_set_id: { type: string, minLength: 1 }
     CreateControlledRestartChangeSetRequest:
       type: object
       additionalProperties: false
@@ -1609,6 +1646,7 @@ components:
           minItems: 1
           items: { $ref: '#/components/schemas/ControlledMaterialReference' }
         landing_page: { $ref: '#/components/schemas/ControlledLandingPageReference' }
+        supersedes_controlled_change_set_id: { type: string, minLength: 1 }
     ControlledChangeSet:
       type: object
       additionalProperties: false

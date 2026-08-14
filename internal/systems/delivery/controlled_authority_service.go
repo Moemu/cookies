@@ -23,6 +23,7 @@ type controlledAuthorityRepository interface {
 	ConfirmPlatformEntityMappingMutation(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, string, string) (PlatformEntityMapping, PlatformEntityMappingRevision, error)
 	ValidateControlledMaterialReferences(context.Context, contract.OrganizationID, contract.ProjectID, string, []ControlledMaterialReference) error
 	ValidateControlledRestartReferences(context.Context, contract.OrganizationID, contract.ProjectID, string, []ControlledMaterialReference, ControlledLandingPageReference) error
+	InvalidateCalibratedControlledChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, time.Time) (ControlledChangeSet, ControlledExecution, error)
 }
 
 type ConfirmPlatformEntityMappingRequest struct {
@@ -142,6 +143,34 @@ func (s Service) GetControlledExecution(ctx context.Context, actor contract.Acto
 	return repo.GetControlledExecution(ctx, actor.OrganizationID, projectID, id)
 }
 
+type InvalidateCalibratedControlledChangeSetRequest struct {
+	ExpectedVersion int64 `json:"expected_version"`
+}
+
+func (s Service) InvalidateCalibratedControlledChangeSet(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, id string, request InvalidateCalibratedControlledChangeSetRequest) (ControlledChangeSet, ControlledExecution, error) {
+	if err := s.ready(actor, projectID, ScopeApprove); err != nil {
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	if strings.TrimSpace(id) == "" || request.ExpectedVersion < 1 {
+		return ControlledChangeSet{}, ControlledExecution{}, ErrInvalidRequest
+	}
+	repo, ok := s.Repository.(controlledAuthorityRepository)
+	if !ok {
+		return ControlledChangeSet{}, ControlledExecution{}, ErrUnsupportedConfigurationWorkflow
+	}
+	change, err := repo.GetControlledChangeSet(ctx, actor.OrganizationID, projectID, id)
+	if err != nil {
+		return ControlledChangeSet{}, ControlledExecution{}, err
+	}
+	if change.Version != request.ExpectedVersion {
+		return ControlledChangeSet{}, ControlledExecution{}, ErrVersionConflict
+	}
+	if change.Status != ControlledChangeSetExecuting || !change.Action.ChangesExistingPromotion() || change.Binding.OperatorPrincipalID != actor.Principal.ID {
+		return ControlledChangeSet{}, ControlledExecution{}, ErrInvalidState
+	}
+	return repo.InvalidateCalibratedControlledChangeSet(ctx, actor.OrganizationID, projectID, id, request.ExpectedVersion, s.now())
+}
+
 type CompileControlledChangeSetRequest struct {
 	ObservatoryRunID        string           `json:"observatory_run_id"`
 	Action                  ControlledAction `json:"action,omitempty"`
@@ -149,28 +178,31 @@ type CompileControlledChangeSetRequest struct {
 }
 
 type CompileMappedControlledChangeSetRequest struct {
-	ExpectedMappingVersion  int64                         `json:"expected_mapping_version"`
-	Action                  ControlledAction              `json:"action"`
-	CurrentDailyBudgetMinor int64                         `json:"current_daily_budget_minor"`
-	TargetDailyBudgetMinor  int64                         `json:"target_daily_budget_minor"`
-	CurrentMaterials        []ControlledMaterialReference `json:"current_materials,omitempty"`
-	TargetMaterials         []ControlledMaterialReference `json:"target_materials,omitempty"`
+	ExpectedMappingVersion          int64                         `json:"expected_mapping_version"`
+	Action                          ControlledAction              `json:"action"`
+	CurrentDailyBudgetMinor         int64                         `json:"current_daily_budget_minor"`
+	TargetDailyBudgetMinor          int64                         `json:"target_daily_budget_minor"`
+	CurrentMaterials                []ControlledMaterialReference `json:"current_materials,omitempty"`
+	TargetMaterials                 []ControlledMaterialReference `json:"target_materials,omitempty"`
+	SupersedesControlledChangeSetID string                        `json:"supersedes_controlled_change_set_id,omitempty"`
 }
 
 type CompileEmergencyPauseChangeSetRequest struct {
-	ExpectedMappingVersion  int64  `json:"expected_mapping_version"`
-	CurrentDailyBudgetMinor int64  `json:"current_daily_budget_minor"`
-	CurrentPlatformStatus   string `json:"current_platform_status"`
+	ExpectedMappingVersion          int64  `json:"expected_mapping_version"`
+	CurrentDailyBudgetMinor         int64  `json:"current_daily_budget_minor"`
+	CurrentPlatformStatus           string `json:"current_platform_status"`
+	SupersedesControlledChangeSetID string `json:"supersedes_controlled_change_set_id,omitempty"`
 }
 
 type CompileControlledRestartChangeSetRequest struct {
-	ExpectedMappingVersion   int64                          `json:"expected_mapping_version"`
-	CurrentDailyBudgetMinor  int64                          `json:"current_daily_budget_minor"`
-	ApprovedDailyBudgetMinor int64                          `json:"approved_daily_budget_minor"`
-	CurrentPlatformStatus    string                         `json:"current_platform_status"`
-	Schedule                 ControlledScheduleWindow       `json:"schedule"`
-	Materials                []ControlledMaterialReference  `json:"materials"`
-	LandingPage              ControlledLandingPageReference `json:"landing_page"`
+	ExpectedMappingVersion          int64                          `json:"expected_mapping_version"`
+	CurrentDailyBudgetMinor         int64                          `json:"current_daily_budget_minor"`
+	ApprovedDailyBudgetMinor        int64                          `json:"approved_daily_budget_minor"`
+	CurrentPlatformStatus           string                         `json:"current_platform_status"`
+	Schedule                        ControlledScheduleWindow       `json:"schedule"`
+	Materials                       []ControlledMaterialReference  `json:"materials"`
+	LandingPage                     ControlledLandingPageReference `json:"landing_page"`
+	SupersedesControlledChangeSetID string                         `json:"supersedes_controlled_change_set_id,omitempty"`
 }
 
 func (r CompileMappedControlledChangeSetRequest) mutation() (ControlledPromotionMutation, error) {
@@ -200,6 +232,35 @@ func (r CompileMappedControlledChangeSetRequest) mutation() (ControlledPromotion
 		return ControlledPromotionMutation{}, err
 	}
 	return mutation, nil
+}
+
+func validateControlledChangeSetSupersession(ctx context.Context, repo controlledAuthorityRepository, actor contract.ActorContext, projectID contract.ProjectID, supersededID string, action ControlledAction, mapping PlatformEntityMapping, currentStateHash, targetStateHash string) error {
+	supersededID = strings.TrimSpace(supersededID)
+	if supersededID == "" {
+		return nil
+	}
+	previous, err := repo.GetControlledChangeSet(ctx, actor.OrganizationID, projectID, supersededID)
+	if err != nil {
+		return err
+	}
+	previousCurrentHash, previousTargetHash, err := previous.Binding.existingPromotionStateHashes(previous.Action)
+	if err != nil {
+		return ErrApprovalContentMismatch
+	}
+	if previous.Status != ControlledChangeSetInvalidated ||
+		previous.Action != action ||
+		previous.CreatedBy != actor.Principal.ID ||
+		previous.Binding.OperatorPrincipalID != actor.Principal.ID ||
+		previous.Binding.TargetMappingID != mapping.ID ||
+		previous.Binding.TargetMappingVersion != mapping.Version ||
+		previous.Binding.TargetPlatformObjectID != mapping.PlatformObjectID ||
+		previous.Binding.TargetPlatformObjectKind != mapping.PlatformObjectKind ||
+		previous.Binding.AccountReferenceID != mapping.AccountReferenceID ||
+		previousCurrentHash != currentStateHash ||
+		previousTargetHash != targetStateHash {
+		return ErrApprovalContentMismatch
+	}
+	return nil
 }
 
 func (s Service) CompileMappedControlledChangeSet(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, mappingID string, request CompileMappedControlledChangeSetRequest) (ControlledChangeSet, bool, error) {
@@ -248,16 +309,30 @@ func (s Service) CompileMappedControlledChangeSet(ctx context.Context, actor con
 			return ControlledChangeSet{}, false, err
 		}
 	}
+	if err := validateControlledChangeSetSupersession(ctx, repo, actor, projectID, request.SupersedesControlledChangeSetID, request.Action, mapping, mutation.CurrentStateHash, mutation.TargetStateHash); err != nil {
+		return ControlledChangeSet{}, false, err
+	}
 	fingerprint, err := contract.CanonicalJSONHash(struct {
-		AccountReferenceID string           `json:"account_reference_id"`
-		Action             ControlledAction `json:"action"`
-		MappingID          string           `json:"mapping_id"`
-		MappingVersion     int64            `json:"mapping_version"`
-		PlatformObjectID   string           `json:"platform_object_id"`
-		OperatorPrincipal  string           `json:"operator_principal_id"`
-		CurrentStateHash   string           `json:"current_state_hash"`
-		TargetStateHash    string           `json:"target_state_hash"`
-	}{mapping.AccountReferenceID, request.Action, mapping.ID, mapping.Version, mapping.PlatformObjectID, actor.Principal.ID, mutation.CurrentStateHash, mutation.TargetStateHash})
+		AccountReferenceID              string           `json:"account_reference_id"`
+		Action                          ControlledAction `json:"action"`
+		MappingID                       string           `json:"mapping_id"`
+		MappingVersion                  int64            `json:"mapping_version"`
+		PlatformObjectID                string           `json:"platform_object_id"`
+		OperatorPrincipal               string           `json:"operator_principal_id"`
+		CurrentStateHash                string           `json:"current_state_hash"`
+		TargetStateHash                 string           `json:"target_state_hash"`
+		SupersedesControlledChangeSetID string           `json:"supersedes_controlled_change_set_id,omitempty"`
+	}{
+		AccountReferenceID:              mapping.AccountReferenceID,
+		Action:                          request.Action,
+		MappingID:                       mapping.ID,
+		MappingVersion:                  mapping.Version,
+		PlatformObjectID:                mapping.PlatformObjectID,
+		OperatorPrincipal:               actor.Principal.ID,
+		CurrentStateHash:                mutation.CurrentStateHash,
+		TargetStateHash:                 mutation.TargetStateHash,
+		SupersedesControlledChangeSetID: strings.TrimSpace(request.SupersedesControlledChangeSetID),
+	})
 	if err != nil {
 		return ControlledChangeSet{}, false, err
 	}
@@ -267,6 +342,7 @@ func (s Service) CompileMappedControlledChangeSet(ctx context.Context, actor con
 	binding.TargetPlatformObjectID = mapping.PlatformObjectID
 	binding.TargetPlatformObjectKind = mapping.PlatformObjectKind
 	binding.OperatorPrincipalID = actor.Principal.ID
+	binding.SupersedesControlledChangeSetID = strings.TrimSpace(request.SupersedesControlledChangeSetID)
 	binding.PromotionBudgetLimitMinor = mutation.TargetDailyBudgetMinor
 	binding.ObjectFingerprint = fingerprint
 	binding.PromotionMutation = &mutation
@@ -350,16 +426,30 @@ func (s Service) CompileEmergencyPauseChangeSet(ctx context.Context, actor contr
 	if mapping.CurrentStateAction == ControlledActionPausePromotion && mapping.CurrentStateHash != control.CurrentStateHash {
 		return ControlledChangeSet{}, false, ErrApprovalContentMismatch
 	}
+	if err := validateControlledChangeSetSupersession(ctx, repo, actor, projectID, request.SupersedesControlledChangeSetID, ControlledActionPausePromotion, mapping, control.CurrentStateHash, control.TargetStateHash); err != nil {
+		return ControlledChangeSet{}, false, err
+	}
 	fingerprint, err := contract.CanonicalJSONHash(struct {
-		AccountReferenceID string           `json:"account_reference_id"`
-		Action             ControlledAction `json:"action"`
-		MappingID          string           `json:"mapping_id"`
-		MappingVersion     int64            `json:"mapping_version"`
-		PlatformObjectID   string           `json:"platform_object_id"`
-		OperatorPrincipal  string           `json:"operator_principal_id"`
-		CurrentStateHash   string           `json:"current_state_hash"`
-		TargetStateHash    string           `json:"target_state_hash"`
-	}{mapping.AccountReferenceID, ControlledActionPausePromotion, mapping.ID, mapping.Version, mapping.PlatformObjectID, actor.Principal.ID, control.CurrentStateHash, control.TargetStateHash})
+		AccountReferenceID              string           `json:"account_reference_id"`
+		Action                          ControlledAction `json:"action"`
+		MappingID                       string           `json:"mapping_id"`
+		MappingVersion                  int64            `json:"mapping_version"`
+		PlatformObjectID                string           `json:"platform_object_id"`
+		OperatorPrincipal               string           `json:"operator_principal_id"`
+		CurrentStateHash                string           `json:"current_state_hash"`
+		TargetStateHash                 string           `json:"target_state_hash"`
+		SupersedesControlledChangeSetID string           `json:"supersedes_controlled_change_set_id,omitempty"`
+	}{
+		AccountReferenceID:              mapping.AccountReferenceID,
+		Action:                          ControlledActionPausePromotion,
+		MappingID:                       mapping.ID,
+		MappingVersion:                  mapping.Version,
+		PlatformObjectID:                mapping.PlatformObjectID,
+		OperatorPrincipal:               actor.Principal.ID,
+		CurrentStateHash:                control.CurrentStateHash,
+		TargetStateHash:                 control.TargetStateHash,
+		SupersedesControlledChangeSetID: strings.TrimSpace(request.SupersedesControlledChangeSetID),
+	})
 	if err != nil {
 		return ControlledChangeSet{}, false, err
 	}
@@ -369,6 +459,7 @@ func (s Service) CompileEmergencyPauseChangeSet(ctx context.Context, actor contr
 	binding.TargetPlatformObjectID = mapping.PlatformObjectID
 	binding.TargetPlatformObjectKind = mapping.PlatformObjectKind
 	binding.OperatorPrincipalID = actor.Principal.ID
+	binding.SupersedesControlledChangeSetID = strings.TrimSpace(request.SupersedesControlledChangeSetID)
 	binding.PromotionBudgetLimitMinor = control.CurrentDailyBudgetMinor
 	binding.ObjectFingerprint = fingerprint
 	binding.PromotionMutation = nil
@@ -458,16 +549,30 @@ func (s Service) CompileControlledRestartChangeSet(ctx context.Context, actor co
 	if err := repo.ValidateControlledRestartReferences(ctx, actor.OrganizationID, projectID, mapping.AccountReferenceID, restart.Materials, restart.LandingPage); err != nil {
 		return ControlledChangeSet{}, false, err
 	}
+	if err := validateControlledChangeSetSupersession(ctx, repo, actor, projectID, request.SupersedesControlledChangeSetID, ControlledActionResumePromotion, mapping, restart.CurrentStateHash, restart.TargetStateHash); err != nil {
+		return ControlledChangeSet{}, false, err
+	}
 	fingerprint, err := contract.CanonicalJSONHash(struct {
-		AccountReferenceID string           `json:"account_reference_id"`
-		Action             ControlledAction `json:"action"`
-		MappingID          string           `json:"mapping_id"`
-		MappingVersion     int64            `json:"mapping_version"`
-		PlatformObjectID   string           `json:"platform_object_id"`
-		OperatorPrincipal  string           `json:"operator_principal_id"`
-		CurrentStateHash   string           `json:"current_state_hash"`
-		TargetStateHash    string           `json:"target_state_hash"`
-	}{mapping.AccountReferenceID, ControlledActionResumePromotion, mapping.ID, mapping.Version, mapping.PlatformObjectID, actor.Principal.ID, restart.CurrentStateHash, restart.TargetStateHash})
+		AccountReferenceID              string           `json:"account_reference_id"`
+		Action                          ControlledAction `json:"action"`
+		MappingID                       string           `json:"mapping_id"`
+		MappingVersion                  int64            `json:"mapping_version"`
+		PlatformObjectID                string           `json:"platform_object_id"`
+		OperatorPrincipal               string           `json:"operator_principal_id"`
+		CurrentStateHash                string           `json:"current_state_hash"`
+		TargetStateHash                 string           `json:"target_state_hash"`
+		SupersedesControlledChangeSetID string           `json:"supersedes_controlled_change_set_id,omitempty"`
+	}{
+		AccountReferenceID:              mapping.AccountReferenceID,
+		Action:                          ControlledActionResumePromotion,
+		MappingID:                       mapping.ID,
+		MappingVersion:                  mapping.Version,
+		PlatformObjectID:                mapping.PlatformObjectID,
+		OperatorPrincipal:               actor.Principal.ID,
+		CurrentStateHash:                restart.CurrentStateHash,
+		TargetStateHash:                 restart.TargetStateHash,
+		SupersedesControlledChangeSetID: strings.TrimSpace(request.SupersedesControlledChangeSetID),
+	})
 	if err != nil {
 		return ControlledChangeSet{}, false, err
 	}
@@ -477,6 +582,7 @@ func (s Service) CompileControlledRestartChangeSet(ctx context.Context, actor co
 	binding.TargetPlatformObjectID = mapping.PlatformObjectID
 	binding.TargetPlatformObjectKind = mapping.PlatformObjectKind
 	binding.OperatorPrincipalID = actor.Principal.ID
+	binding.SupersedesControlledChangeSetID = strings.TrimSpace(request.SupersedesControlledChangeSetID)
 	binding.PromotionBudgetLimitMinor = restart.ApprovedDailyBudgetMinor
 	binding.ObjectFingerprint = fingerprint
 	binding.PromotionMutation = nil

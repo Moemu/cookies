@@ -19,9 +19,29 @@ func (s *Server) controlledChangeSetAction(w http.ResponseWriter, r *http.Reques
 		s.approveControlledChangeSet(w, r)
 	case "execute":
 		s.createControlledExecution(w, r)
+	case "invalidate-calibration":
+		s.invalidateCalibratedControlledChangeSet(w, r)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *Server) invalidateCalibratedControlledChangeSet(w http.ResponseWriter, r *http.Request) {
+	app, err := s.controlledApp()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var body delivery.InvalidateCalibratedControlledChangeSetRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	change, execution, err := app.InvalidateCalibratedControlledChangeSet(r.Context(), mustActor(r), projectID(r), r.PathValue("change_set_id"), body)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"change_set": change, "execution": execution})
 }
 
 func (s *Server) controlledApp() (controlledAuthorityApplication, error) {

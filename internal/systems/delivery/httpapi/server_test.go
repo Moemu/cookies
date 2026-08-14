@@ -66,8 +66,8 @@ func TestPlatformEntityMappingHTTPKeepsPlatformValuesServerOwnedAndRequiresTwoRe
 		t.Fatalf("client-owned platform value status=%d body=%s", response.Code, response.Body.String())
 	}
 	response = httptest.NewRecorder()
-	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1/controlled-change-sets", `{"expected_mapping_version":2,"action":"update_promotion_budget","current_daily_budget_minor":30000,"target_daily_budget_minor":36000}`))
-	if response.Code != http.StatusCreated || app.mappedCompile.Action != delivery.ControlledActionUpdatePromotionBudget || app.mappedCompile.ExpectedMappingVersion != 2 || !strings.Contains(response.Body.String(), `"id":"change_mutation"`) {
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1/controlled-change-sets", `{"expected_mapping_version":2,"action":"update_promotion_budget","current_daily_budget_minor":30000,"target_daily_budget_minor":36000,"supersedes_controlled_change_set_id":"change_cancelled"}`))
+	if response.Code != http.StatusCreated || app.mappedCompile.Action != delivery.ControlledActionUpdatePromotionBudget || app.mappedCompile.ExpectedMappingVersion != 2 || app.mappedCompile.SupersedesControlledChangeSetID != "change_cancelled" || !strings.Contains(response.Body.String(), `"id":"change_mutation"`) {
 		t.Fatalf("compile mutation status=%d request=%#v body=%s", response.Code, app.mappedCompile, response.Body.String())
 	}
 	response = httptest.NewRecorder()
@@ -89,6 +89,11 @@ func TestPlatformEntityMappingHTTPKeepsPlatformValuesServerOwnedAndRequiresTwoRe
 	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1:confirm-change", `{"expected_version":3,"business_execution_id":"pause_execution","result_evidence_id":"pause_result","list_evidence_id":"pause_list"}`))
 	if response.Code != http.StatusOK || app.confirmChange.BusinessExecutionID != "pause_execution" || !strings.Contains(response.Body.String(), `"revision"`) {
 		t.Fatalf("confirm change status=%d request=%#v body=%s", response.Code, app.confirmChange, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/controlled-change-sets/change_mutation:invalidate-calibration", `{"expected_version":3}`))
+	if response.Code != http.StatusOK || app.invalidatedChangeSetID != "change_mutation" || app.invalidateCalibration.ExpectedVersion != 3 || !strings.Contains(response.Body.String(), `"status":"cancelled"`) {
+		t.Fatalf("invalidate calibration status=%d id=%q request=%#v body=%s", response.Code, app.invalidatedChangeSetID, app.invalidateCalibration, response.Body.String())
 	}
 }
 
@@ -324,15 +329,17 @@ type applicationStub struct {
 
 type mappingApplicationStub struct {
 	applicationStub
-	mapping          delivery.PlatformEntityMapping
-	created          delivery.PlatformEntityMapping
-	confirm          delivery.ConfirmPlatformEntityMappingRequest
-	confirmMutation  delivery.ConfirmPlatformEntityMappingMutationRequest
-	confirmChange    delivery.ConfirmPlatformEntityMappingChangeRequest
-	controlledChange delivery.ControlledChangeSet
-	mappedCompile    delivery.CompileMappedControlledChangeSetRequest
-	pauseCompile     delivery.CompileEmergencyPauseChangeSetRequest
-	restartCompile   delivery.CompileControlledRestartChangeSetRequest
+	mapping                delivery.PlatformEntityMapping
+	created                delivery.PlatformEntityMapping
+	confirm                delivery.ConfirmPlatformEntityMappingRequest
+	confirmMutation        delivery.ConfirmPlatformEntityMappingMutationRequest
+	confirmChange          delivery.ConfirmPlatformEntityMappingChangeRequest
+	controlledChange       delivery.ControlledChangeSet
+	mappedCompile          delivery.CompileMappedControlledChangeSetRequest
+	pauseCompile           delivery.CompileEmergencyPauseChangeSetRequest
+	restartCompile         delivery.CompileControlledRestartChangeSetRequest
+	invalidatedChangeSetID string
+	invalidateCalibration  delivery.InvalidateCalibratedControlledChangeSetRequest
 }
 
 func (s *mappingApplicationStub) CreatePendingPlatformEntityMapping(_ context.Context, _ contract.ActorContext, value delivery.PlatformEntityMapping) (delivery.PlatformEntityMapping, error) {
@@ -377,6 +384,11 @@ func (s *mappingApplicationStub) CompileControlledRestartChangeSet(_ context.Con
 }
 func (s *mappingApplicationStub) GetControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledChangeSet, error) {
 	return s.controlledChange, nil
+}
+func (s *mappingApplicationStub) InvalidateCalibratedControlledChangeSet(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, id string, request delivery.InvalidateCalibratedControlledChangeSetRequest) (delivery.ControlledChangeSet, delivery.ControlledExecution, error) {
+	s.invalidatedChangeSetID = id
+	s.invalidateCalibration = request
+	return s.controlledChange, delivery.ControlledExecution{Status: "cancelled"}, nil
 }
 func (s *mappingApplicationStub) ApproveControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ApproveControlledChangeSetRequest) (delivery.ControlledChangeSet, delivery.RemoteWriteApproval, error) {
 	return s.controlledChange, delivery.RemoteWriteApproval{}, nil

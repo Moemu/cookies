@@ -226,40 +226,41 @@ func validPromotionMaterials(values []PromotionMaterialReference) bool {
 }
 
 type AuthorityBinding struct {
-	SchemaVersion              string                    `json:"schema_version"`
-	OrganizationID             contract.OrganizationID   `json:"organization_id"`
-	ProjectID                  contract.ProjectID        `json:"project_id"`
-	BusinessExecutionID        string                    `json:"business_execution_id"`
-	ChangeSetID                string                    `json:"change_set_id"`
-	ApprovalID                 string                    `json:"approval_id"`
-	ApprovalActionHash         string                    `json:"approval_action_hash"`
-	AccountReferenceID         string                    `json:"account_reference_id"`
-	ParentPlatformProjectID    string                    `json:"parent_platform_project_id,omitempty"`
-	TargetMappingID            string                    `json:"target_mapping_id,omitempty"`
-	TargetMappingVersion       int64                     `json:"target_mapping_version,omitempty"`
-	TargetPlatformObjectID     string                    `json:"target_platform_object_id,omitempty"`
-	TargetPlatformObjectKind   string                    `json:"target_platform_object_kind,omitempty"`
-	OperatorPrincipalID        string                    `json:"operator_principal_id,omitempty"`
-	PromotionMutation          *PromotionMutationBinding `json:"promotion_mutation,omitempty"`
-	PromotionControl           *PromotionControlBinding  `json:"promotion_control,omitempty"`
-	PromotionRestart           *PromotionRestartBinding  `json:"promotion_restart,omitempty"`
-	ObjectFingerprint          string                    `json:"object_fingerprint"`
-	Action                     string                    `json:"action"`
-	ProjectBudgetMode          string                    `json:"project_budget_mode,omitempty"`
-	ProjectBudgetLimitMinor    int64                     `json:"project_budget_limit_minor"`
-	PromotionBudgetLimitMinor  int64                     `json:"promotion_budget_limit_minor"`
-	BudgetLimitMinor           int64                     `json:"budget_limit_minor"`
-	Currency                   string                    `json:"currency"`
-	PlanCanonicalHash          string                    `json:"plan_canonical_hash"`
-	IntentCanonicalHash        string                    `json:"intent_canonical_hash"`
-	FeedbackCanonicalHash      string                    `json:"feedback_canonical_hash"`
-	DecisionCanonicalHash      string                    `json:"decision_canonical_hash"`
-	ConfigurationCanonicalHash string                    `json:"configuration_canonical_hash"`
-	WorkflowID                 string                    `json:"workflow_id"`
-	WorkflowCanonicalHash      string                    `json:"workflow_canonical_hash"`
-	WorkflowStepID             string                    `json:"workflow_step_id"`
-	SkillID                    string                    `json:"skill_id,omitempty"`
-	SkillVersion               string                    `json:"skill_version,omitempty"`
+	SchemaVersion                   string                    `json:"schema_version"`
+	OrganizationID                  contract.OrganizationID   `json:"organization_id"`
+	ProjectID                       contract.ProjectID        `json:"project_id"`
+	BusinessExecutionID             string                    `json:"business_execution_id"`
+	ChangeSetID                     string                    `json:"change_set_id"`
+	ApprovalID                      string                    `json:"approval_id"`
+	ApprovalActionHash              string                    `json:"approval_action_hash"`
+	AccountReferenceID              string                    `json:"account_reference_id"`
+	ParentPlatformProjectID         string                    `json:"parent_platform_project_id,omitempty"`
+	TargetMappingID                 string                    `json:"target_mapping_id,omitempty"`
+	TargetMappingVersion            int64                     `json:"target_mapping_version,omitempty"`
+	TargetPlatformObjectID          string                    `json:"target_platform_object_id,omitempty"`
+	TargetPlatformObjectKind        string                    `json:"target_platform_object_kind,omitempty"`
+	OperatorPrincipalID             string                    `json:"operator_principal_id,omitempty"`
+	SupersedesControlledChangeSetID string                    `json:"supersedes_controlled_change_set_id,omitempty"`
+	PromotionMutation               *PromotionMutationBinding `json:"promotion_mutation,omitempty"`
+	PromotionControl                *PromotionControlBinding  `json:"promotion_control,omitempty"`
+	PromotionRestart                *PromotionRestartBinding  `json:"promotion_restart,omitempty"`
+	ObjectFingerprint               string                    `json:"object_fingerprint"`
+	Action                          string                    `json:"action"`
+	ProjectBudgetMode               string                    `json:"project_budget_mode,omitempty"`
+	ProjectBudgetLimitMinor         int64                     `json:"project_budget_limit_minor"`
+	PromotionBudgetLimitMinor       int64                     `json:"promotion_budget_limit_minor"`
+	BudgetLimitMinor                int64                     `json:"budget_limit_minor"`
+	Currency                        string                    `json:"currency"`
+	PlanCanonicalHash               string                    `json:"plan_canonical_hash"`
+	IntentCanonicalHash             string                    `json:"intent_canonical_hash"`
+	FeedbackCanonicalHash           string                    `json:"feedback_canonical_hash"`
+	DecisionCanonicalHash           string                    `json:"decision_canonical_hash"`
+	ConfigurationCanonicalHash      string                    `json:"configuration_canonical_hash"`
+	WorkflowID                      string                    `json:"workflow_id"`
+	WorkflowCanonicalHash           string                    `json:"workflow_canonical_hash"`
+	WorkflowStepID                  string                    `json:"workflow_step_id"`
+	SkillID                         string                    `json:"skill_id,omitempty"`
+	SkillVersion                    string                    `json:"skill_version,omitempty"`
 }
 
 func (b AuthorityBinding) Validate() error {
@@ -284,7 +285,10 @@ func (b AuthorityBinding) Validate() error {
 		if strings.TrimSpace(b.ParentPlatformProjectID) == "" || strings.TrimSpace(b.OperatorPrincipalID) == "" || b.TargetMappingID == "" || b.TargetMappingVersion < 2 || b.TargetPlatformObjectID == "" || b.TargetPlatformObjectKind != "promotion" || b.PromotionMutation != nil || b.PromotionControl != nil || b.PromotionRestart == nil || b.PromotionBudgetLimitMinor < 30000 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor || b.PromotionBudgetLimitMinor != b.PromotionRestart.ApprovedDailyBudgetMinor || b.PromotionRestart.Validate(b.Action) != nil {
 			return ErrInvalidContract
 		}
-	} else if b.TargetMappingID != "" || b.TargetMappingVersion != 0 || b.TargetPlatformObjectID != "" || b.TargetPlatformObjectKind != "" || b.OperatorPrincipalID != "" || b.PromotionMutation != nil || b.PromotionControl != nil || b.PromotionRestart != nil {
+	} else if b.TargetMappingID != "" || b.TargetMappingVersion != 0 || b.TargetPlatformObjectID != "" || b.TargetPlatformObjectKind != "" || b.OperatorPrincipalID != "" || b.SupersedesControlledChangeSetID != "" || b.PromotionMutation != nil || b.PromotionControl != nil || b.PromotionRestart != nil {
+		return ErrInvalidContract
+	}
+	if b.SupersedesControlledChangeSetID != "" && strings.TrimSpace(b.SupersedesControlledChangeSetID) != b.SupersedesControlledChangeSetID {
 		return ErrInvalidContract
 	}
 	for _, hash := range []string{b.ApprovalActionHash, b.PlanCanonicalHash, b.IntentCanonicalHash, b.FeedbackCanonicalHash, b.DecisionCanonicalHash, b.ConfigurationCanonicalHash, b.WorkflowCanonicalHash} {

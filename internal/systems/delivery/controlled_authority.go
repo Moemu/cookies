@@ -272,41 +272,42 @@ func (r ControlledPromotionRestart) ValidateAt(action ControlledAction, now time
 }
 
 type ControlledAuthorityBinding struct {
-	SelectionID                   string                         `json:"selection_id"`
-	ObservatoryRunID              string                         `json:"observatory_run_id"`
-	ObservatoryRunCanonicalHash   string                         `json:"observatory_run_canonical_hash"`
-	OperatorFeedbackID            string                         `json:"operator_feedback_id"`
-	OperatorFeedbackCanonicalHash string                         `json:"operator_feedback_canonical_hash"`
-	OperatorFeedbackDisposition   ObservatoryFeedbackDisposition `json:"operator_feedback_disposition"`
-	PlanID                        string                         `json:"plan_id"`
-	PlanVersion                   int                            `json:"plan_version"`
-	PlanCanonicalHash             string                         `json:"plan_canonical_hash"`
-	IntentID                      string                         `json:"intent_id"`
-	IntentVersion                 int                            `json:"intent_version"`
-	IntentCanonicalHash           string                         `json:"intent_canonical_hash"`
-	DecisionID                    string                         `json:"decision_id"`
-	DecisionCanonicalHash         string                         `json:"decision_canonical_hash"`
-	ConfigurationID               string                         `json:"configuration_id"`
-	ConfigurationVersion          int                            `json:"configuration_version"`
-	ConfigurationCanonicalHash    string                         `json:"configuration_canonical_hash"`
-	WorkflowID                    string                         `json:"workflow_id"`
-	WorkflowCanonicalHash         string                         `json:"workflow_canonical_hash"`
-	AccountReferenceID            string                         `json:"account_reference_id"`
-	OperatorPrincipalID           string                         `json:"operator_principal_id,omitempty"`
-	ParentPlatformProjectID       string                         `json:"parent_platform_project_id,omitempty"`
-	TargetMappingID               string                         `json:"target_mapping_id,omitempty"`
-	TargetMappingVersion          int64                          `json:"target_mapping_version,omitempty"`
-	TargetPlatformObjectID        string                         `json:"target_platform_object_id,omitempty"`
-	TargetPlatformObjectKind      string                         `json:"target_platform_object_kind,omitempty"`
-	ProjectBudgetMode             string                         `json:"project_budget_mode,omitempty"`
-	ProjectBudgetLimitMinor       int64                          `json:"project_budget_limit_minor"`
-	PromotionBudgetLimitMinor     int64                          `json:"promotion_budget_limit_minor"`
-	ObjectFingerprint             string                         `json:"object_fingerprint"`
-	SkillID                       string                         `json:"skill_id,omitempty"`
-	SkillVersion                  string                         `json:"skill_version,omitempty"`
-	PromotionMutation             *ControlledPromotionMutation   `json:"promotion_mutation,omitempty"`
-	PromotionControl              *ControlledPromotionControl    `json:"promotion_control,omitempty"`
-	PromotionRestart              *ControlledPromotionRestart    `json:"promotion_restart,omitempty"`
+	SelectionID                     string                         `json:"selection_id"`
+	ObservatoryRunID                string                         `json:"observatory_run_id"`
+	ObservatoryRunCanonicalHash     string                         `json:"observatory_run_canonical_hash"`
+	OperatorFeedbackID              string                         `json:"operator_feedback_id"`
+	OperatorFeedbackCanonicalHash   string                         `json:"operator_feedback_canonical_hash"`
+	OperatorFeedbackDisposition     ObservatoryFeedbackDisposition `json:"operator_feedback_disposition"`
+	PlanID                          string                         `json:"plan_id"`
+	PlanVersion                     int                            `json:"plan_version"`
+	PlanCanonicalHash               string                         `json:"plan_canonical_hash"`
+	IntentID                        string                         `json:"intent_id"`
+	IntentVersion                   int                            `json:"intent_version"`
+	IntentCanonicalHash             string                         `json:"intent_canonical_hash"`
+	DecisionID                      string                         `json:"decision_id"`
+	DecisionCanonicalHash           string                         `json:"decision_canonical_hash"`
+	ConfigurationID                 string                         `json:"configuration_id"`
+	ConfigurationVersion            int                            `json:"configuration_version"`
+	ConfigurationCanonicalHash      string                         `json:"configuration_canonical_hash"`
+	WorkflowID                      string                         `json:"workflow_id"`
+	WorkflowCanonicalHash           string                         `json:"workflow_canonical_hash"`
+	AccountReferenceID              string                         `json:"account_reference_id"`
+	OperatorPrincipalID             string                         `json:"operator_principal_id,omitempty"`
+	ParentPlatformProjectID         string                         `json:"parent_platform_project_id,omitempty"`
+	TargetMappingID                 string                         `json:"target_mapping_id,omitempty"`
+	TargetMappingVersion            int64                          `json:"target_mapping_version,omitempty"`
+	TargetPlatformObjectID          string                         `json:"target_platform_object_id,omitempty"`
+	TargetPlatformObjectKind        string                         `json:"target_platform_object_kind,omitempty"`
+	SupersedesControlledChangeSetID string                         `json:"supersedes_controlled_change_set_id,omitempty"`
+	ProjectBudgetMode               string                         `json:"project_budget_mode,omitempty"`
+	ProjectBudgetLimitMinor         int64                          `json:"project_budget_limit_minor"`
+	PromotionBudgetLimitMinor       int64                          `json:"promotion_budget_limit_minor"`
+	ObjectFingerprint               string                         `json:"object_fingerprint"`
+	SkillID                         string                         `json:"skill_id,omitempty"`
+	SkillVersion                    string                         `json:"skill_version,omitempty"`
+	PromotionMutation               *ControlledPromotionMutation   `json:"promotion_mutation,omitempty"`
+	PromotionControl                *ControlledPromotionControl    `json:"promotion_control,omitempty"`
+	PromotionRestart                *ControlledPromotionRestart    `json:"promotion_restart,omitempty"`
 }
 
 func (b ControlledAuthorityBinding) Validate() error {
@@ -325,6 +326,9 @@ func (b ControlledAuthorityBinding) Validate() error {
 		}
 	}
 	if (b.PromotionMutation != nil || b.PromotionControl != nil || b.PromotionRestart != nil) && !b.HasMutationTarget() {
+		return ErrInvalidRequest
+	}
+	if b.SupersedesControlledChangeSetID != "" && (!b.HasMutationTarget() || strings.TrimSpace(b.SupersedesControlledChangeSetID) != b.SupersedesControlledChangeSetID) {
 		return ErrInvalidRequest
 	}
 	return nil

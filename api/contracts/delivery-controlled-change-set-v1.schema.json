@@ -58,6 +58,7 @@
         "target_platform_object_id": { "type": "string", "minLength": 1 },
         "target_platform_object_kind": { "const": "promotion" },
         "operator_principal_id": { "type": "string", "minLength": 1 },
+        "supersedes_controlled_change_set_id": { "type": "string", "minLength": 1 },
         "project_budget_mode": { "enum": ["daily", "unlimited"] },
         "project_budget_limit_minor": { "type": "integer", "minimum": 0 },
         "promotion_budget_limit_minor": { "type": "integer", "minimum": 0 },

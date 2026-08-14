@@ -138,6 +138,70 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 		t.Fatalf("mapping confirmation replay=%+v err=%v", replayedMapping, replayErr)
 	}
 
+	calibrationMutation, err := (CompileMappedControlledChangeSetRequest{Action: ControlledActionUpdatePromotionBudget, CurrentDailyBudgetMinor: 30000, TargetDailyBudgetMinor: 31000}).mutation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	calibrationBinding := loadedChange.Binding
+	calibrationBinding.TargetMappingID = mapping.ID
+	calibrationBinding.TargetMappingVersion = mapping.Version
+	calibrationBinding.TargetPlatformObjectID = mapping.PlatformObjectID
+	calibrationBinding.TargetPlatformObjectKind = mapping.PlatformObjectKind
+	calibrationBinding.OperatorPrincipalID = "operator"
+	calibrationBinding.PromotionBudgetLimitMinor = calibrationMutation.TargetDailyBudgetMinor
+	calibrationBinding.PromotionMutation = &calibrationMutation
+	calibrationBinding.PromotionControl = nil
+	calibrationBinding.ObjectFingerprint, err = contract.CanonicalJSONHash(struct {
+		MappingID       string `json:"mapping_id"`
+		MappingVersion  int64  `json:"mapping_version"`
+		TargetStateHash string `json:"target_state_hash"`
+	}{mapping.ID, mapping.Version, calibrationMutation.TargetStateHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calibrationChange := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: "calibration_change_" + suffix, OrganizationID: org, ProjectID: project, Binding: calibrationBinding, Action: ControlledActionUpdatePromotionBudget, BudgetLimitMinor: calibrationMutation.TargetDailyBudgetMinor, Currency: "CNY", Status: ControlledChangeSetReady, Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	calibrationChange.CanonicalHash, _ = calibrationChange.ComputeCanonicalHash()
+	calibrationChange, _, err = deliveryRepo.CreateControlledChangeSet(ctx, calibrationChange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calibrationApproval := RemoteWriteApproval{SchemaVersion: RemoteWriteApprovalSchemaV1, ID: "calibration_approval_" + suffix, OrganizationID: org, ProjectID: project, ControlledChangeSetID: calibrationChange.ID, ControlledChangeSetHash: calibrationChange.CanonicalHash, Binding: calibrationBinding, Action: calibrationChange.Action, Scope: "controlled_remote_write", BudgetLimitMinor: calibrationChange.BudgetLimitMinor, Currency: calibrationChange.Currency, ApprovedBy: "approver", ApprovedAt: now, ExpiresAt: now.Add(RemoteWriteApprovalTTL)}
+	calibrationApproval.ActionHash, _ = calibrationApproval.ComputeActionHash()
+	calibrationChange, calibrationApproval, err = deliveryRepo.ApproveControlledChangeSet(ctx, calibrationChange, calibrationApproval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calibrationExecution := ControlledExecution{ID: "calibration_execution_" + suffix, OrganizationID: org, ProjectID: project, ControlledChangeSetID: calibrationChange.ID, RemoteWriteApprovalID: calibrationApproval.ID, Status: "pending", Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	calibrationExecution, err = deliveryRepo.CreateControlledExecution(ctx, calibrationExecution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calibrationIDCounter := 0
+	calibrationComputerUseService := computeruse.Service{Repository: computerUseRepo, AuthorityProvider: ComputerUseAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) {
+		calibrationIDCounter++
+		return fmt.Sprintf("%s_calibration_%d_%s", prefix, calibrationIDCounter, suffix), nil
+	}}
+	calibrationRun, replayed, err := calibrationComputerUseService.CreateBoundRun(ctx, computeruse.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: calibrationExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "calibration-run-key-" + suffix, CreatedBy: "operator"})
+	if err != nil || replayed {
+		t.Fatalf("calibration run=%+v replayed=%t err=%v", calibrationRun, replayed, err)
+	}
+	calibrationRun, err = calibrationComputerUseService.ControlRun(ctx, org, project, calibrationRun.ID, calibrationRun.Version, computeruse.ControlCancel)
+	if err != nil || calibrationRun.State != computeruse.RunCancelled || calibrationRun.LeaseID != "" {
+		t.Fatalf("cancelled calibration run=%+v err=%v", calibrationRun, err)
+	}
+	calibrationChange, err = deliveryRepo.GetControlledChangeSet(ctx, org, project, calibrationChange.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidatedCalibration, cancelledCalibrationExecution, err := deliveryRepo.InvalidateCalibratedControlledChangeSet(ctx, org, project, calibrationChange.ID, calibrationChange.Version, now.Add(time.Second))
+	if err != nil || invalidatedCalibration.Status != ControlledChangeSetInvalidated || cancelledCalibrationExecution.Status != "cancelled" {
+		t.Fatalf("invalidated calibration=%+v execution=%+v err=%v", invalidatedCalibration, cancelledCalibrationExecution, err)
+	}
+	preservedCalibrationApproval, err := deliveryRepo.GetRemoteWriteApproval(ctx, org, project, invalidatedCalibration.ID)
+	if err != nil || preservedCalibrationApproval.ID != calibrationApproval.ID || preservedCalibrationApproval.ActionHash != calibrationApproval.ActionHash {
+		t.Fatalf("preserved calibration approval=%+v err=%v", preservedCalibrationApproval, err)
+	}
+
 	mutation, err := (CompileMappedControlledChangeSetRequest{Action: ControlledActionUpdatePromotionBudget, CurrentDailyBudgetMinor: 30000, TargetDailyBudgetMinor: 36000}).mutation()
 	if err != nil {
 		t.Fatal(err)

@@ -87,6 +87,36 @@ func (r *controlledMemoryRepository) AttachComputerUseRun(_ context.Context, org
 	r.executions[key] = v
 	return v, nil
 }
+func (r *controlledMemoryRepository) InvalidateCalibratedControlledChangeSet(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion int64, now time.Time) (ControlledChangeSet, ControlledExecution, error) {
+	changeKey := repositoryKey(org, project, id)
+	change, ok := r.changes[changeKey]
+	if !ok {
+		return ControlledChangeSet{}, ControlledExecution{}, ErrNotFound
+	}
+	if change.Status != ControlledChangeSetExecuting || change.Version != expectedVersion {
+		return ControlledChangeSet{}, ControlledExecution{}, ErrInvalidState
+	}
+	var executionKey string
+	var execution ControlledExecution
+	for key, candidate := range r.executions {
+		if candidate.OrganizationID == org && candidate.ProjectID == project && candidate.ControlledChangeSetID == id {
+			executionKey, execution = key, candidate
+			break
+		}
+	}
+	if executionKey == "" || execution.Status != "running" {
+		return ControlledChangeSet{}, ControlledExecution{}, ErrInvalidState
+	}
+	change.Status = ControlledChangeSetInvalidated
+	change.Version++
+	change.UpdatedAt = now
+	execution.Status = "cancelled"
+	execution.Version++
+	execution.UpdatedAt = now
+	r.changes[changeKey] = change
+	r.executions[executionKey] = execution
+	return change, execution, nil
+}
 func (r *controlledMemoryRepository) CreatePlatformEntityMapping(_ context.Context, v PlatformEntityMapping) (PlatformEntityMapping, error) {
 	r.mappings[repositoryKey(v.OrganizationID, v.ProjectID, v.ID)] = v
 	return v, nil
@@ -292,6 +322,40 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	mapping, err = service.ConfirmPlatformEntityMapping(context.Background(), actor, "project_a", mapping.ID, ConfirmPlatformEntityMappingRequest{ExpectedVersion: mapping.Version, ResultEvidenceID: "evidence_result", ListEvidenceID: "evidence_list"})
 	if err != nil || mapping.Status != PlatformEntityMappingConfirmed || mapping.Version != 2 {
 		t.Fatalf("confirmed mapping=%#v err=%v", mapping, err)
+	}
+	calibrationRequest := CompileMappedControlledChangeSetRequest{ExpectedMappingVersion: mapping.Version, Action: ControlledActionUpdatePromotionBudget, CurrentDailyBudgetMinor: 30000, TargetDailyBudgetMinor: 31000}
+	calibrationChange, replay, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", mapping.ID, calibrationRequest)
+	if err != nil || replay {
+		t.Fatalf("compile calibration replay=%t err=%v", replay, err)
+	}
+	approvedCalibration, _, err := service.ApproveControlledChangeSet(context.Background(), actor, "project_a", calibrationChange.ID, ApproveControlledChangeSetRequest{ExpectedVersion: calibrationChange.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calibrationExecution, err := service.CreateControlledExecution(context.Background(), actor, "project_a", approvedCalibration.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calibrationExecution, err = service.AttachComputerUseRun(context.Background(), actor, "project_a", calibrationExecution.ID, calibrationExecution.Version, "run_calibration_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executingCalibration, err := repo.GetControlledChangeSet(context.Background(), actor.OrganizationID, "project_a", approvedCalibration.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidatedCalibration, cancelledCalibrationExecution, err := service.InvalidateCalibratedControlledChangeSet(context.Background(), actor, "project_a", approvedCalibration.ID, InvalidateCalibratedControlledChangeSetRequest{ExpectedVersion: executingCalibration.Version})
+	if err != nil || invalidatedCalibration.Status != ControlledChangeSetInvalidated || cancelledCalibrationExecution.Status != "cancelled" || cancelledCalibrationExecution.ID != calibrationExecution.ID {
+		t.Fatalf("invalidated calibration=%#v execution=%#v err=%v", invalidatedCalibration, cancelledCalibrationExecution, err)
+	}
+	replayedCalibration, replay, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", mapping.ID, calibrationRequest)
+	if err != nil || !replay || replayedCalibration.Status != ControlledChangeSetInvalidated {
+		t.Fatalf("immutable calibration replay=%#v replay=%t err=%v", replayedCalibration, replay, err)
+	}
+	calibrationRequest.SupersedesControlledChangeSetID = invalidatedCalibration.ID
+	supersedingCalibration, replay, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", mapping.ID, calibrationRequest)
+	if err != nil || replay || supersedingCalibration.ID == invalidatedCalibration.ID || supersedingCalibration.Binding.SupersedesControlledChangeSetID != invalidatedCalibration.ID {
+		t.Fatalf("superseding calibration=%#v replay=%t err=%v", supersedingCalibration, replay, err)
 	}
 
 	mutationChange, mutationReplay, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", mapping.ID, CompileMappedControlledChangeSetRequest{ExpectedMappingVersion: mapping.Version, Action: ControlledActionUpdatePromotionBudget, CurrentDailyBudgetMinor: 30000, TargetDailyBudgetMinor: 36000})

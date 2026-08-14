@@ -75,6 +75,7 @@ type controlledAuthorityApplication interface {
 	CompileEmergencyPauseChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CompileEmergencyPauseChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
 	CompileControlledRestartChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CompileControlledRestartChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
 	GetControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledChangeSet, error)
+	InvalidateCalibratedControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.InvalidateCalibratedControlledChangeSetRequest) (delivery.ControlledChangeSet, delivery.ControlledExecution, error)
 	ApproveControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ApproveControlledChangeSetRequest) (delivery.ControlledChangeSet, delivery.RemoteWriteApproval, error)
 	CreateControlledExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledExecution, error)
 	GetControlledExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledExecution, error)
