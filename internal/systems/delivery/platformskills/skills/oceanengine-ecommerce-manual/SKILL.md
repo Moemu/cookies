@@ -43,87 +43,49 @@ After the click:
 
 If the submission result is unclear, record `result_unknown`; permit only query, reidentification, or human reconciliation. If the original submission Lease expires after the click, release it and acquire a new fenced recovery Lease for readback. Keep the original Attempt binding immutable and never authorize or perform another submit.
 
-## Calibrate finite modifications separately
+## Calibrate finite actions as one ordered batch
 
-The shared control plane can now freeze and simulate exact promotion budget and
-authorized-material modifications. The 2026-08-14 read-only edit inventory
-confirmed that schedule is owned by the parent project and is inherited as a
-read-only summary on the promotion form. Reject `update_promotion_schedule` for
-a promotion Mapping. A future project-schedule action requires its own confirmed
-project Mapping and project-mutation authority contract. This implementation
-does not expand the Skill's live write capability: `modify_remote_object`
-remains forbidden until the specific edit path is calibrated in a visible
-browser.
+Use one visible-browser session, one shared promotion-form fixture, and one
+machine-readable batch evidence record for `update_promotion_budget`,
+`update_promotion_materials`, `pause_promotion`, and `resume_promotion`. Do not
+split these paths into separate calibration narratives. Resolve the exact object
+only from a server-loaded confirmed Mapping; page search results and operator
+text cannot substitute it.
 
-For a no-write calibration, require a confirmed promotion Mapping and a new
-ChangeSet/Approval. Reidentify the exact parent project and promotion, read the
-current field values, prepare only the approved target values, read every
-changed field back, and exit without saving. Record `PAGE_DRIFT` or the
-platform's own edit restriction instead of selecting a different object.
+During no-write calibration, reidentify the account, parent project, promotion,
+Mapping revision, live composite status, and current values. The only permitted
+form differences are the approved budget field or the approved material
+reference. Material selection is restricted to a server-authorized existing
+asset in the same test account. Read every field back, stop before the unique
+save or status boundary, discard the draft, and reopen or return to the list to
+prove the remote values are unchanged. Reject `update_promotion_schedule` for a
+promotion Mapping because schedule remains parent-project owned.
 
-The CNY 300 to CNY 310 budget path passed this no-write gate on 2026-08-14.
-The exact mapped promotion was opened in edit mode, only the daily-budget field
-changed, 23 other field groups retained the same digest, the draft was
-discarded, and the list still showed CNY 300. No final confirmation or
-ControlledActionAttempt existed. Treat `PlatformEntityMapping.platform_status`
-as the last result/list snapshot, not a live status feed. Ocean Engine can show
-delivery, pause and review dimensions together, and asynchronous review
-completion does not by itself prove a form write or page drift. Require the
-approved fields and remote-write proof to remain stable instead of requiring
-every independent platform status dimension to remain frozen.
+`PlatformEntityMapping.platform_status` is the last accepted result/list
+snapshot, not a live status feed. Ocean Engine can expose delivery, pause, and
+review dimensions simultaneously. Compare live dimensions explicitly without
+rewriting the Mapping merely because asynchronous review completed. If no
+authorized mapped object is already `delivering`, mark pause and restart
+`blocked_by_eligible_test_object`; never enable an object to manufacture a test.
 
-Use the existing-object locator baseline for read-only calibration. In
-particular, the former brand selector now matches both the visible field and a
-hidden search input; locate the visible field by the exact placeholder
-`选择或手动输入品牌`. Treat any loss of uniqueness as `PAGE_DRIFT` and stop.
+Each real action still requires its own ChangeSet, Approval,
+ControlledExecution, ComputerUseRun, one-time confirmation, Attempt, and exact
+Mapping revision. Execute budget before materials so the material authority can
+bind the post-budget revision. Execute restart only after a successful pause
+revision. Immediately before each remote-write click, require an unexpired
+fenced Lease and zero unexpected field differences. Click at most once. Any
+page drift, lease expiry, or `result_unknown` stops all dependent actions without
+retry.
 
-If the user separately authorizes the first real modification in that same
-execution turn, limit it to one budget change on the dedicated test promotion.
-Require an exact pre-click object/current-state/target-state readback, consume a
-new one-time confirmation, click the unique save boundary once, and reconcile
-the same object and target-state hash from the result and promotion list. Never
-reuse the creation Approval or the creation final confirmation.
-
-## Keep emergency pause distinct
-
-The shared control plane can freeze and simulate `pause_promotion`, but this
-Skill still forbids `pause_remote_object` until the live status-control surface
-is calibrated. Do not confuse it with pausing a ComputerUseRun.
-
-For no-write calibration, start from one confirmed promotion Mapping whose
-normalized server status is exactly `delivering`. Reidentify the account,
-parent project and exact promotion, read the unchanged daily budget, verify the
-unique pause control and stop before activating it. The ChangeSet must bind one
-operator and server-force the transition from `delivering` to `paused`.
-
-A real pause requires current-turn authorization naming that already-delivering
-dedicated test promotion and action. Consume a fresh confirmation and click the
-unique pause boundary once. Never enable a pending or inactive promotion merely
-to create a pause test. After the click, require both the result and an
-independent list readback to show the same object as `paused`; on uncertainty,
-query or take over without clicking again.
-
-## Treat restart as a new high-risk action
-
-The shared control plane can freeze and simulate `resume_promotion`, but this
-Skill still forbids live remote-object restart until the exact status-control
-surface has its own visible-browser calibration. Restart is not compensation
-for pause and never happens automatically.
-
-Start only from a confirmed Mapping whose latest controlled action is
-`pause_promotion` and whose normalized status remains `paused`. Create a fresh
-ChangeSet and Approval. Reidentify the exact account, parent project and
-promotion; require the daily budget to equal the paused authority; verify that
-the approved `Asia/Shanghai` schedule is active; and prove every authorized
-material plus the authorized landing page remains available. Stop on any drift,
-expired schedule, missing reference or active Kill Switch.
-
-A future real restart additionally requires current-turn authorization naming
-that exact paused test promotion and action. Bind one operator, consume one new
-confirmation and activate the unique restart control once. Require result and
-independent list readback to agree on `delivering`. Never use Connector output,
-mock/replay metrics or a recovery routine to initiate restart, and never retry
-an uncertain activation.
+The 2026-08-14 batch passed no-write calibration for the CNY 300 to CNY 310
+budget path and one same-account existing-material replacement. Both drafts were
+discarded and the fresh form returned to the shared baseline. Pause and restart
+were blocked because no eligible delivering mapped test object existed. The
+authorized real batch then stopped when its Lease expired before final
+confirmation: no confirmation, Attempt, save click, or remote write occurred,
+and the abandoned calibration authority was invalidated while its Approval
+history remained immutable. Read the batch evidence before claiming any live
+modification capability.
 
 ## Read the verified baseline
 
@@ -131,3 +93,4 @@ an uncertain activation.
 - Read the [gate-one runbook](../../../../../../docs/delivery/oceanengine-gate-one-replay-runbook.md) for no-write calibration.
 - Read the [gate-two baseline](../../../../../../docs/delivery/oceanengine-gate-two-preparation.md) for the one-click and recovery contract.
 - Read the [2026-08-14 gate-two evidence](../../../../../../docs/delivery/evidence/oceanengine-gate-two-promotion-submit-2026-08-14.json) before claiming real-submit calibration.
+- Read the [2026-08-14 controlled-action batch evidence](../../../../../../docs/delivery/evidence/oceanengine-controlled-actions-batch-2026-08-14.json) before calibrating or authorizing any existing-promotion change.

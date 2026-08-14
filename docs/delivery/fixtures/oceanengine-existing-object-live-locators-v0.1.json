@@ -3,7 +3,7 @@
   "observed_at": "2026-08-14",
   "skill_id": "oceanengine-ecommerce-manual",
   "skill_version": "v0.1-calibration",
-  "status": "readonly_edit_surfaces_observed",
+  "status": "readonly_edit_surfaces_observed_and_controlled_action_batch_calibrated",
   "coordinate_fallback_allowed": false,
   "project_edit": {
     "page_identity": {
@@ -90,31 +90,60 @@
       "classification": "PAGE_DRIFT"
     }
   ],
-  "promotion_budget_gate_one": {
+  "controlled_action_batch_calibration": {
     "observed_at": "2026-08-14",
-    "status": "passed_no_write",
+    "evidence_ref": "docs/delivery/evidence/oceanengine-controlled-actions-batch-2026-08-14.json",
     "mapping_revision": 2,
     "page_mode": "promotion_edit",
-    "budget_selector": "[data-e2e='createad_adBudget_input_component'] input",
-    "current_daily_budget_minor": 30000,
-    "target_daily_budget_minor": 31000,
-    "readback_daily_budget_minor": 31000,
-    "stable_field_group_count": 23,
-    "diff_keys": ["daily_budget_minor"],
-    "write_boundary": "role=button[name='保存并关闭'][exact=true]",
+    "shared_form_fixture": {
+      "budget_selector": "[data-e2e='createad_adBudget_input_component'] input",
+      "material_picker": "role=button[name='添加视频'][exact=true]",
+      "write_boundary": "role=button[name='保存并关闭'][exact=true]",
+      "safe_exit": "[data-e2e='createad_save_cancel']",
+      "stable_field_group_count": 18,
+      "baseline_sha256": "9ae8d147cfae760fec67ebc78169e35a74e4c75801e18acc40db5c2665fa90f5"
+    },
+    "paths": [
+      {
+        "action": "update_promotion_budget",
+        "calibration_status": "passed_no_write",
+        "allowed_form_diff_keys": ["daily_budget"],
+        "current_daily_budget_minor": 30000,
+        "target_daily_budget_minor": 31000,
+        "remote_value_unchanged": true
+      },
+      {
+        "action": "update_promotion_materials",
+        "calibration_status": "passed_no_write",
+        "allowed_form_diff_keys": ["material_name"],
+        "asset_source": "same_test_account_existing_authorized_asset",
+        "remote_value_unchanged": true
+      },
+      {
+        "action": "pause_promotion",
+        "calibration_status": "blocked_by_eligible_test_object",
+        "allowed_form_diff_keys": [],
+        "remote_value_unchanged": true
+      },
+      {
+        "action": "resume_promotion",
+        "calibration_status": "blocked_by_eligible_test_object",
+        "allowed_form_diff_keys": [],
+        "remote_value_unchanged": true
+      }
+    ],
     "write_boundary_clicks": 0,
-    "safe_exit": "[data-e2e='createad_save_cancel']",
-    "list_daily_budget_minor_after_discard": 30000,
     "controlled_action_attempt_count": 0,
-    "remote_write_detected": false,
-    "evidence_ref": "docs/delivery/evidence/oceanengine-promotion-budget-gate-one-2026-08-14.json"
+    "remote_write_detected": false
   },
   "calibration_limits": {
     "observed_promotion_status": "pending_review",
-    "fields_filled": 0,
+    "unsubmitted_draft_paths_filled": 2,
+    "remote_fields_written": 0,
     "write_boundary_clicks": 0,
     "pause_control_observed": false,
     "restart_control_observed": false,
+    "pause_and_restart_blocking_reason": "blocked_by_eligible_test_object",
     "live_remote_modification_allowed": false
   }
 }

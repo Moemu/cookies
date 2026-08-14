@@ -40,7 +40,7 @@
     "docs/delivery/evidence/oceanengine-gate-two-promotion-submit-2026-08-14.json",
     "docs/delivery/fixtures/oceanengine-existing-object-live-locators-v0.1.json",
     "docs/delivery/evidence/oceanengine-existing-object-edit-readonly-2026-08-14.json",
-    "docs/delivery/evidence/oceanengine-promotion-budget-gate-one-2026-08-14.json",
+    "docs/delivery/evidence/oceanengine-controlled-actions-batch-2026-08-14.json",
     "internal/systems/delivery/platformskills/skills/oceanengine-ecommerce-manual/SKILL.md"
   ],
   "page_types": [
@@ -69,7 +69,7 @@
     "promotion_form_live_calibrated": true,
     "existing_project_edit_surface_live_observed": true,
     "existing_promotion_edit_surface_live_observed": true,
-    "promotion_budget_gate_one_live_calibrated": true,
+    "controlled_action_batch_live_calibrated": true,
     "remote_modification_live_calibrated": false,
     "control_plane_evidence_recorded": true,
     "agent_final_submit_documentation": "available_in_skill_md_with_per_execution_authorization"
@@ -122,23 +122,26 @@
     "promotion_brand_locator_drift": "PAGE_DRIFT",
     "live_remote_modification_allowed": false
   },
-  "promotion_budget_gate_one": {
+  "controlled_action_batch_calibration": {
     "observed_at": "2026-08-14",
-    "evidence_ref": "docs/delivery/evidence/oceanengine-promotion-budget-gate-one-2026-08-14.json",
-    "result": "passed_no_write",
+    "evidence_ref": "docs/delivery/evidence/oceanengine-controlled-actions-batch-2026-08-14.json",
     "mapping_revision": 2,
     "mapping_status": "confirmed",
     "mapping_platform_status_snapshot": "pending_review",
-    "current_daily_budget_minor": 30000,
-    "target_daily_budget_minor": 31000,
-    "diff_keys": ["daily_budget_minor"],
-    "draft_discarded": true,
-    "list_daily_budget_minor": 30000,
+    "ordered_actions": ["update_promotion_budget", "update_promotion_materials", "pause_promotion", "resume_promotion"],
+    "capability_matrix": [
+      { "action": "update_promotion_budget", "calibration_status": "passed_no_write", "controlled_action_status": "blocked_by_lease_expiry" },
+      { "action": "update_promotion_materials", "calibration_status": "passed_no_write", "controlled_action_status": "blocked_by_dependency" },
+      { "action": "pause_promotion", "calibration_status": "blocked_by_eligible_test_object", "controlled_action_status": "not_started" },
+      { "action": "resume_promotion", "calibration_status": "blocked_by_eligible_test_object", "controlled_action_status": "not_started" }
+    ],
+    "maximum_remote_write_clicks_authorized": 2,
+    "actual_remote_write_clicks": 0,
     "controlled_action_attempt_count": 0,
     "final_confirmation_count": 0,
     "run_terminal_state": "cancelled",
+    "stop_reason": "lease_expired_before_final_confirmation",
     "remote_write_detected": false,
-    "operator_adjudication": "expected_async_review_completion",
     "live_remote_modification_allowed": false
   }
 }

@@ -36,6 +36,7 @@ This contract is additive. It does not reinterpret, rewrite, or migrate any hist
 | 20 | Mutation readback and Mapping revisions | Before the one permitted save click, takeover evidence must match the exact platform object ID plus current and target state hashes with zero diff keys. Result and independent list evidence must both match the same object ID, platform status and target state hash. Only then may one transaction increment the Mapping version, set its current-state hash, append an immutable `delivery_platform_entity_mapping_revisions` row, and close the new Execution and ChangeSet. The original creation revision and evidence remain queryable. |
 | 21 | Emergency pause | `pause_promotion` is an independent high-priority action, not a budget mutation and not the ComputerUseRun pause control. It starts only from a confirmed promotion Mapping whose normalized status is exactly `delivering`, binds the account, parent project, exact object, Mapping version, unchanged daily budget and one operator, and server-forces the target status to `paused`. A fresh ChangeSet, Approval, Execution, Run and one-time confirmation are mandatory. Result and list readbacks must both prove the same object is `paused`; uncertainty permits query or takeover only, never another click. |
 | 22 | Controlled restart | `resume_promotion` is a fresh action after, and only after, an authoritative `pause_promotion` Mapping revision. It is neither automatic compensation nor Approval reuse. The current budget must equal the paused authority; the new ChangeSet binds an active `Asia/Shanghai` schedule, authorized available materials, an authorized available landing page, the exact account/project/object/Mapping and one operator. Approval validation and the final click recheck schedule validity; pre-click evidence must also prove no account/project/object drift. Any active Kill Switch wins the authorization transaction. Result and list readbacks must both normalize to `delivering`. |
+| 23 | Cancelled calibration authority | A visible-browser calibration that reaches an executing ChangeSet but stops before a write can be explicitly invalidated only when its bound Run is `cancelled`, its Lease is detached, takeover is inactive, no `ControlledActionAttempt` exists, and no final confirmation was consumed. The transaction cancels the business Execution, invalidates the ChangeSet, invalidates any unconsumed confirmation, and preserves the immutable Approval and evidence history. A replacement with identical current/target state must name the invalidated ChangeSet in `supersedes_controlled_change_set_id`; the server verifies exact operator, action, Mapping revision, object, account, and state hashes before producing a distinct canonical authority. |
 
 ## Stable blocking reasons
 
@@ -110,12 +111,12 @@ not accept a platform object ID. Mapping advancement uses
 business Execution and two server-loaded Evidence IDs.
 
 This implementation does not itself authorize a real edit. The current Skill
-still marks remote-object modification as pending. The first live calibration,
-if separately authorized in that execution turn, is limited to one budget
-change on the previously created dedicated test promotion. If the platform
-disallows editing while the promotion is under review, the run records the
-platform blocker and stops; it must not evade the platform state or substitute
-another object.
+still marks remote-object modification as pending. One 2026-08-14 batch
+calibrated budget and same-account existing-material drafts without saving;
+pause and restart remained blocked because no eligible delivering mapped test
+object existed. The subsequently authorized real batch stopped when its fenced
+Lease expired before final confirmation, so no Attempt or remote click was
+created and every dependent action remained unstarted.
 
 ## Emergency pause readiness
 
@@ -128,13 +129,14 @@ requires `delivering`, binds the requesting operator and forces the target to
 `paused`. Successful result/list evidence advances the Mapping through
 `POST .../platform-entity-mappings/{mapping_id}:confirm-change`.
 
-This is not a live-page calibration claim. `pause_remote_object` remains
-forbidden by the current Skill. A real pause requires a separately authorized,
-already-delivering dedicated test object in that execution turn. The promotion
-created during the earlier one-click validation remains `pending_review` and
-must never be enabled merely to manufacture a pause test. If the page, status,
+The 2026-08-14 batch found no separately authorized, already-delivering mapped
+test object, so the path is `blocked_by_eligible_test_object` and
+`pause_remote_object` remains forbidden by the current Skill. The existing
+Mapping's `pending_review` value is a creation-time snapshot, while the live page
+showed separate not-delivering, paused, and review-completed dimensions; neither
+state may be rewritten merely to manufacture a pause test. If the page, status,
 account, object or operator is uncertain, record the blocker or `PAGE_DRIFT`
-and stop without a second click.
+and stop without clicking.
 
 ## Controlled restart readiness
 
@@ -155,7 +157,8 @@ authorization. Global, platform or organization Kill Switch state is checked
 transactionally and blocks the click. Successful result and list evidence must
 both show the same object as `delivering` before the Mapping advances.
 
-This remains a fake/no-write readiness claim. The current Skill forbids live
-remote-object restart until the specific status-control path is calibrated and
-the user grants current-turn authority for that exact object and action. No
-Connector, mock metric or recovery routine may trigger a restart.
+This remains a fake/no-write readiness claim. The batch marks restart
+`blocked_by_eligible_test_object` because no successful authoritative pause
+revision exists. The current Skill forbids live remote-object restart until that
+precondition and a current-turn exact authority both exist. No Connector, mock
+metric or recovery routine may trigger a restart.

@@ -19,14 +19,29 @@ func TestOceanEngineEcommerceManualAllowsOnlyControlledSubmitWithoutClaimingDriv
 	if definition.SafetyExit.Method != "discard_unsubmitted_local_form" || definition.SafetyExit.RequiredProof != "return_to_known_readonly_page_and_confirm_no_platform_write_or_approved_field_change" || len(definition.WriteValidationPending) < 6 {
 		t.Fatalf("stage B safe exit or pending write boundary was not preserved: %#v", definition)
 	}
-	if !definition.RuntimePolicy.ProjectFormLiveCalibrated || !definition.RuntimePolicy.PromotionFormLiveCalibrated || !definition.RuntimePolicy.ExistingProjectEditSurfaceLiveObserved || !definition.RuntimePolicy.ExistingPromotionEditSurfaceObserved || !definition.RuntimePolicy.PromotionBudgetGateOneLiveCalibrated || definition.RuntimePolicy.RemoteModificationLiveCalibrated || !definition.RuntimePolicy.ControlPlaneEvidenceRecorded || !definition.GateOne.Ready || definition.GateOne.Result != "passed" {
+	if !definition.RuntimePolicy.ProjectFormLiveCalibrated || !definition.RuntimePolicy.PromotionFormLiveCalibrated || !definition.RuntimePolicy.ExistingProjectEditSurfaceLiveObserved || !definition.RuntimePolicy.ExistingPromotionEditSurfaceObserved || !definition.RuntimePolicy.ControlledActionBatchLiveCalibrated || definition.RuntimePolicy.RemoteModificationLiveCalibrated || !definition.RuntimePolicy.ControlPlaneEvidenceRecorded || !definition.GateOne.Ready || definition.GateOne.Result != "passed" {
 		t.Fatalf("passed takeover calibration status was overstated or lost: %#v", definition)
 	}
 	if !definition.ExistingObjectEditCalibration.ParentProjectOwnsSchedule || !definition.ExistingObjectEditCalibration.ProjectMappingRequiredForSchedule || !definition.ExistingObjectEditCalibration.PromotionScheduleActionForbidden || definition.ExistingObjectEditCalibration.PromotionBrandLocatorDrift != "PAGE_DRIFT" || definition.ExistingObjectEditCalibration.LiveRemoteModificationAllowed {
 		t.Fatalf("existing-object edit ownership or no-write boundary was lost: %#v", definition)
 	}
-	if definition.PromotionBudgetGateOne.Result != "passed_no_write" || definition.PromotionBudgetGateOne.MappingRevision != 2 || definition.PromotionBudgetGateOne.CurrentDailyBudgetMinor != 30000 || definition.PromotionBudgetGateOne.TargetDailyBudgetMinor != 31000 || !definition.PromotionBudgetGateOne.DraftDiscarded || definition.PromotionBudgetGateOne.ListDailyBudgetMinor != 30000 || definition.PromotionBudgetGateOne.ControlledActionAttemptCount != 0 || definition.PromotionBudgetGateOne.FinalConfirmationCount != 0 || definition.PromotionBudgetGateOne.RunTerminalState != "cancelled" || definition.PromotionBudgetGateOne.RemoteWriteDetected || definition.PromotionBudgetGateOne.LiveRemoteModificationAllowed {
-		t.Fatalf("promotion budget gate one was not preserved: %#v", definition)
+	batch := definition.ControlledActionBatchCalibration
+	if batch.MappingRevision != 2 || batch.MaximumRemoteWriteClicksAuthorized != 2 || batch.ActualRemoteWriteClicks != 0 || batch.ControlledActionAttemptCount != 0 || batch.FinalConfirmationCount != 0 || batch.RunTerminalState != "cancelled" || batch.StopReason != "lease_expired_before_final_confirmation" || batch.RemoteWriteDetected || batch.LiveRemoteModificationAllowed {
+		t.Fatalf("controlled-action batch safety boundary was not preserved: %#v", definition)
+	}
+	expectedPaths := []ControlledActionCapability{
+		{Action: "update_promotion_budget", CalibrationStatus: "passed_no_write", ControlledActionStatus: "blocked_by_lease_expiry"},
+		{Action: "update_promotion_materials", CalibrationStatus: "passed_no_write", ControlledActionStatus: "blocked_by_dependency"},
+		{Action: "pause_promotion", CalibrationStatus: "blocked_by_eligible_test_object", ControlledActionStatus: "not_started"},
+		{Action: "resume_promotion", CalibrationStatus: "blocked_by_eligible_test_object", ControlledActionStatus: "not_started"},
+	}
+	if len(batch.CapabilityMatrix) != len(expectedPaths) {
+		t.Fatalf("controlled-action capability matrix has %d rows, want %d", len(batch.CapabilityMatrix), len(expectedPaths))
+	}
+	for index, expected := range expectedPaths {
+		if batch.CapabilityMatrix[index] != expected {
+			t.Errorf("capability row %d = %#v, want %#v", index, batch.CapabilityMatrix[index], expected)
+		}
 	}
 	if definition.RuntimePolicy.AgentFinalSubmitDocumentation != "available_in_skill_md_with_per_execution_authorization" {
 		t.Fatalf("agent final-submit documentation is not bound to per-execution authorization: %#v", definition)

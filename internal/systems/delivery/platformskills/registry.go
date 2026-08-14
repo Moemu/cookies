@@ -16,6 +16,19 @@ var ErrInvalidDefinition = errors.New("invalid delivery Platform Skill definitio
 
 var gateTwoRequiredRuntimeChecks = []string{"fresh_controlled_authority", "explicit_user_authorization_in_execution_turn", "responsible_user_online", "account_project_action_budget_exact_match", "current_page_values_match_approval", "unexpired_single_use_confirmation", "valid_fenced_lease", "kill_switch_inactive", "single_click_budget", "post_write_result_and_list_readback", "result_unknown_no_resubmit", "confirmed_mapping_requires_two_matching_readbacks"}
 var gateTwoImplementationGaps = []string{}
+var controlledActionBatchOrder = []string{"update_promotion_budget", "update_promotion_materials", "pause_promotion", "resume_promotion"}
+var controlledActionBatchExpected = []ControlledActionCapability{
+	{Action: "update_promotion_budget", CalibrationStatus: "passed_no_write", ControlledActionStatus: "blocked_by_lease_expiry"},
+	{Action: "update_promotion_materials", CalibrationStatus: "passed_no_write", ControlledActionStatus: "blocked_by_dependency"},
+	{Action: "pause_promotion", CalibrationStatus: "blocked_by_eligible_test_object", ControlledActionStatus: "not_started"},
+	{Action: "resume_promotion", CalibrationStatus: "blocked_by_eligible_test_object", ControlledActionStatus: "not_started"},
+}
+
+type ControlledActionCapability struct {
+	Action                 string `json:"action"`
+	CalibrationStatus      string `json:"calibration_status"`
+	ControlledActionStatus string `json:"controlled_action_status"`
+}
 
 //go:embed definitions/*.json
 var definitions embed.FS
@@ -62,7 +75,7 @@ type Definition struct {
 		PromotionFormLiveCalibrated            bool   `json:"promotion_form_live_calibrated"`
 		ExistingProjectEditSurfaceLiveObserved bool   `json:"existing_project_edit_surface_live_observed"`
 		ExistingPromotionEditSurfaceObserved   bool   `json:"existing_promotion_edit_surface_live_observed"`
-		PromotionBudgetGateOneLiveCalibrated   bool   `json:"promotion_budget_gate_one_live_calibrated"`
+		ControlledActionBatchLiveCalibrated    bool   `json:"controlled_action_batch_live_calibrated"`
 		RemoteModificationLiveCalibrated       bool   `json:"remote_modification_live_calibrated"`
 		ControlPlaneEvidenceRecorded           bool   `json:"control_plane_evidence_recorded"`
 		AgentFinalSubmitDocumentation          string `json:"agent_final_submit_documentation"`
@@ -115,25 +128,23 @@ type Definition struct {
 		PromotionBrandLocatorDrift        string `json:"promotion_brand_locator_drift"`
 		LiveRemoteModificationAllowed     bool   `json:"live_remote_modification_allowed"`
 	} `json:"existing_object_edit_calibration"`
-	PromotionBudgetGateOne struct {
-		ObservedAt                    string   `json:"observed_at"`
-		EvidenceRef                   string   `json:"evidence_ref"`
-		Result                        string   `json:"result"`
-		MappingRevision               int64    `json:"mapping_revision"`
-		MappingStatus                 string   `json:"mapping_status"`
-		MappingPlatformStatusSnapshot string   `json:"mapping_platform_status_snapshot"`
-		CurrentDailyBudgetMinor       int64    `json:"current_daily_budget_minor"`
-		TargetDailyBudgetMinor        int64    `json:"target_daily_budget_minor"`
-		DiffKeys                      []string `json:"diff_keys"`
-		DraftDiscarded                bool     `json:"draft_discarded"`
-		ListDailyBudgetMinor          int64    `json:"list_daily_budget_minor"`
-		ControlledActionAttemptCount  int      `json:"controlled_action_attempt_count"`
-		FinalConfirmationCount        int      `json:"final_confirmation_count"`
-		RunTerminalState              string   `json:"run_terminal_state"`
-		RemoteWriteDetected           bool     `json:"remote_write_detected"`
-		OperatorAdjudication          string   `json:"operator_adjudication"`
-		LiveRemoteModificationAllowed bool     `json:"live_remote_modification_allowed"`
-	} `json:"promotion_budget_gate_one"`
+	ControlledActionBatchCalibration struct {
+		ObservedAt                         string                       `json:"observed_at"`
+		EvidenceRef                        string                       `json:"evidence_ref"`
+		MappingRevision                    int64                        `json:"mapping_revision"`
+		MappingStatus                      string                       `json:"mapping_status"`
+		MappingPlatformStatusSnapshot      string                       `json:"mapping_platform_status_snapshot"`
+		OrderedActions                     []string                     `json:"ordered_actions"`
+		CapabilityMatrix                   []ControlledActionCapability `json:"capability_matrix"`
+		MaximumRemoteWriteClicksAuthorized int                          `json:"maximum_remote_write_clicks_authorized"`
+		ActualRemoteWriteClicks            int                          `json:"actual_remote_write_clicks"`
+		ControlledActionAttemptCount       int                          `json:"controlled_action_attempt_count"`
+		FinalConfirmationCount             int                          `json:"final_confirmation_count"`
+		RunTerminalState                   string                       `json:"run_terminal_state"`
+		StopReason                         string                       `json:"stop_reason"`
+		RemoteWriteDetected                bool                         `json:"remote_write_detected"`
+		LiveRemoteModificationAllowed      bool                         `json:"live_remote_modification_allowed"`
+	} `json:"controlled_action_batch_calibration"`
 }
 
 func Get(id, version string) (Definition, error) {
@@ -172,7 +183,7 @@ func (d Definition) Validate() error {
 		!d.RuntimePolicy.PromotionFormLiveCalibrated ||
 		!d.RuntimePolicy.ExistingProjectEditSurfaceLiveObserved ||
 		!d.RuntimePolicy.ExistingPromotionEditSurfaceObserved ||
-		!d.RuntimePolicy.PromotionBudgetGateOneLiveCalibrated ||
+		!d.RuntimePolicy.ControlledActionBatchLiveCalibrated ||
 		d.RuntimePolicy.RemoteModificationLiveCalibrated ||
 		!d.RuntimePolicy.ControlPlaneEvidenceRecorded ||
 		d.RuntimePolicy.AgentFinalSubmitDocumentation != "available_in_skill_md_with_per_execution_authorization" ||
@@ -210,23 +221,21 @@ func (d Definition) Validate() error {
 		!d.ExistingObjectEditCalibration.PromotionScheduleActionForbidden ||
 		d.ExistingObjectEditCalibration.PromotionBrandLocatorDrift != "PAGE_DRIFT" ||
 		d.ExistingObjectEditCalibration.LiveRemoteModificationAllowed ||
-		d.PromotionBudgetGateOne.ObservedAt != "2026-08-14" ||
-		d.PromotionBudgetGateOne.EvidenceRef != "docs/delivery/evidence/oceanengine-promotion-budget-gate-one-2026-08-14.json" ||
-		d.PromotionBudgetGateOne.Result != "passed_no_write" ||
-		d.PromotionBudgetGateOne.MappingRevision != 2 ||
-		d.PromotionBudgetGateOne.MappingStatus != "confirmed" ||
-		d.PromotionBudgetGateOne.MappingPlatformStatusSnapshot != "pending_review" ||
-		d.PromotionBudgetGateOne.CurrentDailyBudgetMinor != 30000 ||
-		d.PromotionBudgetGateOne.TargetDailyBudgetMinor != 31000 ||
-		!slices.Equal(d.PromotionBudgetGateOne.DiffKeys, []string{"daily_budget_minor"}) ||
-		!d.PromotionBudgetGateOne.DraftDiscarded ||
-		d.PromotionBudgetGateOne.ListDailyBudgetMinor != 30000 ||
-		d.PromotionBudgetGateOne.ControlledActionAttemptCount != 0 ||
-		d.PromotionBudgetGateOne.FinalConfirmationCount != 0 ||
-		d.PromotionBudgetGateOne.RunTerminalState != "cancelled" ||
-		d.PromotionBudgetGateOne.RemoteWriteDetected ||
-		d.PromotionBudgetGateOne.OperatorAdjudication != "expected_async_review_completion" ||
-		d.PromotionBudgetGateOne.LiveRemoteModificationAllowed ||
+		d.ControlledActionBatchCalibration.ObservedAt != "2026-08-14" ||
+		d.ControlledActionBatchCalibration.EvidenceRef != "docs/delivery/evidence/oceanengine-controlled-actions-batch-2026-08-14.json" ||
+		d.ControlledActionBatchCalibration.MappingRevision != 2 ||
+		d.ControlledActionBatchCalibration.MappingStatus != "confirmed" ||
+		d.ControlledActionBatchCalibration.MappingPlatformStatusSnapshot != "pending_review" ||
+		!slices.Equal(d.ControlledActionBatchCalibration.OrderedActions, controlledActionBatchOrder) ||
+		!slices.Equal(d.ControlledActionBatchCalibration.CapabilityMatrix, controlledActionBatchExpected) ||
+		d.ControlledActionBatchCalibration.MaximumRemoteWriteClicksAuthorized != 2 ||
+		d.ControlledActionBatchCalibration.ActualRemoteWriteClicks != 0 ||
+		d.ControlledActionBatchCalibration.ControlledActionAttemptCount != 0 ||
+		d.ControlledActionBatchCalibration.FinalConfirmationCount != 0 ||
+		d.ControlledActionBatchCalibration.RunTerminalState != "cancelled" ||
+		d.ControlledActionBatchCalibration.StopReason != "lease_expired_before_final_confirmation" ||
+		d.ControlledActionBatchCalibration.RemoteWriteDetected ||
+		d.ControlledActionBatchCalibration.LiveRemoteModificationAllowed ||
 		len(d.EvidenceRefs) < 11 ||
 		len(d.PageTypes) < 9 ||
 		len(d.Capabilities.Allowed) == 0 ||
