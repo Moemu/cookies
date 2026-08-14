@@ -27,8 +27,16 @@ export type HookDirection = {
 export type FirstFrameCandidate = {
   id: string
   label: string
-  imageUrl: string
+  imageUrl?: string
   composition: string
+  status?: 'queued' | 'running' | 'ready' | 'failed' | 'cancelled'
+  errorCode?: string
+  errorMessage?: string
+  recoverable?: boolean
+  recoveryState?: string
+  currentAttemptId?: string
+  attemptCount?: number
+  rewriteProfile?: string
   variantKey?: string
   visualMechanism?: string
   styleProfile?: string
@@ -61,6 +69,7 @@ export type ShortDramaPrerollState = {
   images: FirstFrameCandidate[]
   selectedImageId: string
   selectingImageId: string
+  retryingImageId: string
   videoStatus: AsyncStatus
   output: GeneratedPreroll | null
   error: string

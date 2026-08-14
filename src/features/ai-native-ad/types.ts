@@ -18,10 +18,10 @@ export type RequirementMedia = {
 export type AINativeProductPreview = {
   product_id: string
   product_name: string
-  source: 'douyin_mall' | 'taobao' | 'tmall' | 'xiaohongshu' | '1688'
+  source: 'douyin_mall' | 'taobao' | 'tmall' | '1688'
   source_url: string
   status: 'recognized' | 'partial' | 'manual_required'
-  resource_type: 'product' | 'note'
+  resource_type: 'product'
   missing_fields: string[]
 }
 

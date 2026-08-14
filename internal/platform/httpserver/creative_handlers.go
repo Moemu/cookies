@@ -1430,6 +1430,7 @@ type shortDramaV2CreativeCommands interface {
 	PrepareShortDramaV2OpeningFrame(context.Context, contract.RequestContext, contract.ProjectID, string, creative.PrepareShortDramaV2OpeningFrameRequest) (creative.TaskDetail, error)
 	GenerateShortDramaReferenceBoards(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateShortDramaReferenceBoardsRequest) (creative.TaskDetail, error)
 	ReconcileShortDramaReferenceBoard(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReconcileShortDramaReferenceBoardRequest) (creative.TaskDetail, error)
+	RetryShortDramaReferenceBoardCandidate(context.Context, contract.ActorContext, contract.ProjectID, string, creative.RetryShortDramaReferenceBoardCandidateRequest) (creative.TaskDetail, error)
 	SelectShortDramaReferenceBoard(context.Context, contract.ActorContext, contract.ProjectID, string, creative.SelectShortDramaReferenceBoardRequest) (creative.TaskDetail, error)
 	GenerateShortDramaV2FirstFrames(context.Context, contract.ActorContext, contract.ProjectID, string, creative.GenerateShortDramaV2FirstFramesRequest) (creative.TaskDetail, error)
 	ReconcileShortDramaV2FirstFrame(context.Context, contract.ActorContext, contract.ProjectID, string, creative.ReconcileShortDramaV2FirstFrameRequest) (creative.TaskDetail, error)
@@ -1524,6 +1525,13 @@ func (s *Server) shortDramaV2Command(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		value, err = manager.ReconcileShortDramaReferenceBoard(r.Context(), rc.Actor, projectID, taskID, creative.ReconcileShortDramaReferenceBoardRequest{ExpectedRevision: body.ExpectedRevision, CandidateID: body.CandidateID, Job: job})
+	case strings.HasSuffix(path, ":retry-reference-board-candidate"):
+		var body creative.RetryShortDramaReferenceBoardCandidateRequest
+		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {
+			s.badRequest(w, r, decodeErr)
+			return
+		}
+		value, err = manager.RetryShortDramaReferenceBoardCandidate(r.Context(), rc.Actor, projectID, taskID, body)
 	case strings.HasSuffix(path, ":select-reference-board"):
 		var body creative.SelectShortDramaReferenceBoardRequest
 		if decodeErr := decodeJSON(w, r, &body); decodeErr != nil {

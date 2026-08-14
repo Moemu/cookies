@@ -9,6 +9,8 @@ import (
 
 func isSupportedAINativeProductSource(source string) bool {
 	switch source {
+	// xiaohongshu is retained only so previously persisted workspaces remain
+	// readable. The product-source resolver and current UI no longer create it.
 	case "douyin_mall", "taobao", "tmall", "xiaohongshu", "1688":
 		return true
 	default:

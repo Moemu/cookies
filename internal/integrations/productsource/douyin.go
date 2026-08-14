@@ -16,12 +16,13 @@ import (
 )
 
 const (
-	douyinSource       = "douyin_mall"
-	maxRedirects       = 5
-	maxResponseBody    = 1 << 20
-	maxProductLinkSize = 64 << 10
-	resolverUserAgent  = "cookies-product-resolver/1.0"
-	defaultHTTPTimeout = 12 * time.Second
+	douyinSource          = "douyin_mall"
+	maxRedirects          = 5
+	maxResponseBody       = 1 << 20
+	maxProductLinkSize    = 64 << 10
+	maxGoodsDetailDecodes = 3
+	resolverUserAgent     = "cookies-product-resolver/1.0"
+	defaultHTTPTimeout    = 12 * time.Second
 )
 
 var (
@@ -132,16 +133,28 @@ func extractProductURL(input string) (*url.URL, error) {
 	if len(trimmed) == 0 || len(trimmed) > maxProductLinkSize {
 		return nil, fmt.Errorf("%w: product link is empty or too long", ErrUnsupportedLink)
 	}
-	match := httpsURLPattern.FindString(trimmed)
-	if match == "" {
+	matches := httpsURLPattern.FindAllString(trimmed, -1)
+	if len(matches) == 0 {
 		return nil, fmt.Errorf("%w: an https link is required", ErrUnsupportedLink)
 	}
-	match = strings.TrimRight(match, "，。！？；：,.!?;:)]}>'\"")
-	parsed, err := url.Parse(match)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnsupportedLink, err)
+	var firstParsed *url.URL
+	for _, match := range matches {
+		match = strings.TrimRight(match, "，。！？；：,.!?;:)]}>'\"")
+		parsed, err := url.Parse(match)
+		if err != nil {
+			continue
+		}
+		if firstParsed == nil {
+			firstParsed = parsed
+		}
+		if isSupportedProductHost(normalizedHost(parsed)) {
+			return parsed, nil
+		}
 	}
-	return parsed, nil
+	if firstParsed != nil {
+		return firstParsed, nil
+	}
+	return nil, fmt.Errorf("%w: product URL is invalid", ErrUnsupportedLink)
 }
 
 func validateDouyinURL(value *url.URL) error {
@@ -171,12 +184,9 @@ func snapshotFromResolvedURL(sourceURL, resolvedURL *url.URL) (ProductSnapshot, 
 	if payload == "" {
 		return ProductSnapshot{}, fmt.Errorf("%w: goods_detail is absent", ErrProductMissing)
 	}
-	var detail douyinGoodsDetail
-	if err := json.Unmarshal([]byte(payload), &detail); err != nil {
-		if errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(strings.ToLower(err.Error()), "unexpected end") {
-			return ProductSnapshot{}, fmt.Errorf("%w: goods_detail ended before the product data was complete", ErrIncompleteLink)
-		}
-		return ProductSnapshot{}, fmt.Errorf("%w: invalid goods_detail: %v", ErrProductMissing, err)
+	detail, err := parseDouyinGoodsDetail(payload)
+	if err != nil {
+		return ProductSnapshot{}, err
 	}
 	productID := firstNonEmpty(query.Get("id"), query.Get("product_id"), query.Get("promotion_id"), productIDFromDetailSchema(query.Get("detail_schema")))
 	if strings.TrimSpace(detail.Title) == "" || strings.TrimSpace(productID) == "" {
@@ -221,6 +231,33 @@ func snapshotFromResolvedURL(sourceURL, resolvedURL *url.URL) (ProductSnapshot, 
 			return []string{"description", "core_selling_points"}
 		}(),
 	}, nil
+}
+
+func parseDouyinGoodsDetail(payload string) (douyinGoodsDetail, error) {
+	value := strings.TrimSpace(payload)
+	var parseErr error
+	for decodePasses := 0; decodePasses <= maxGoodsDetailDecodes; decodePasses++ {
+		var detail douyinGoodsDetail
+		parseErr = json.Unmarshal([]byte(value), &detail)
+		if parseErr == nil {
+			return detail, nil
+		}
+		if errors.Is(parseErr, io.ErrUnexpectedEOF) || strings.Contains(strings.ToLower(parseErr.Error()), "unexpected end") {
+			return douyinGoodsDetail{}, fmt.Errorf("%w: goods_detail ended before the product data was complete", ErrIncompleteLink)
+		}
+		if decodePasses == maxGoodsDetailDecodes {
+			break
+		}
+		decoded, decodeErr := url.QueryUnescape(value)
+		if decodeErr != nil {
+			return douyinGoodsDetail{}, fmt.Errorf("%w: goods_detail contains an incomplete escape sequence", ErrIncompleteLink)
+		}
+		if decoded == value {
+			break
+		}
+		value = strings.TrimSpace(decoded)
+	}
+	return douyinGoodsDetail{}, fmt.Errorf("%w: invalid goods_detail: %v", ErrProductMissing, parseErr)
 }
 
 func productIDFromDetailSchema(raw string) string {

@@ -691,7 +691,7 @@ func main() {
 		agentDispatcher := agent.Dispatcher{DB: db, Jobs: runtimeStore}
 		startWorker(workerContext, "agent-dispatch", agentDispatcher.RunOnce)
 	}
-	if cfg.Environment == config.EnvironmentLocal || cfg.Provider.ImageAdapter == "adapter_gateway" {
+	if cfg.Environment == config.EnvironmentLocal || cfg.Provider.ImageAdapter == "adapter_gateway" || cfg.Provider.VideoAdapter == "adapter_gateway" {
 		adapter, outputHandles, err := buildImageAdapter(cfg, db, blobs)
 		if err != nil {
 			log.Fatalf("configure Provider image adapter: %v", err)
@@ -719,19 +719,23 @@ func main() {
 			}
 			providerService.Routes = provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP}
 		}
-		if cfg.Provider.VideoAdapter == "adapter_gateway" || cfg.Provider.VideoAdapter == "ark_video" {
+		if cfg.Provider.VideoAdapter == "adapter_gateway" {
 			cipher, cipherErr := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
 			if cipherErr != nil {
 				log.Fatalf("configure Provider video credential encryption: %v", cipherErr)
 			}
-			connectionType := "ark"
-			if cfg.Provider.VideoAdapter == "adapter_gateway" {
-				connectionType = "adapter_gateway"
-			}
-			providerService.VideoRoutes = provider.MySQLGatewayConfigStore{
+			videoRoutes := provider.MySQLGatewayConfigStore{
 				DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP,
-				VideoConnectionType: connectionType,
+				VideoConnectionType: "adapter_gateway",
 			}
+			resolved, resolveErr := videoRoutes.ResolveVideoRoute(context.Background(), "", "cookies.video.standard")
+			if resolveErr != nil {
+				log.Fatalf("resolve Adapter-only cookies.video.standard route: %v", resolveErr)
+			}
+			if resolved.ConnectionType != "adapter_gateway" {
+				log.Fatalf("cookies.video.standard resolved forbidden video connection type %q", resolved.ConnectionType)
+			}
+			providerService.VideoRoutes = videoRoutes
 		}
 		dependencies.ProviderJobs = providerService
 		productionCenter.Sources = append(productionCenter.Sources, creative.ProviderRunAdapter{Jobs: &providerService})
@@ -855,13 +859,6 @@ func buildVideoAdapter(cfg config.Config, db *sql.DB, handles provider.OutputHan
 		}
 		store := provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher, AllowInsecureHTTP: cfg.Provider.AllowInsecureHTTP, VideoConnectionType: "adapter_gateway"}
 		return provider.NewAdapterGatewayVideoAdapter(store, handles, cfg.Provider.AllowInsecureHTTP)
-	case "ark_video":
-		cipher, err := provider.NewAESGCMCredentialCipher(cfg.Provider.MasterKey, cfg.Provider.MasterKeyVersion)
-		if err != nil {
-			return nil, err
-		}
-		store := provider.MySQLGatewayConfigStore{DB: db, Cipher: cipher}
-		return provider.NewRoutedArkVideoAdapter(store, handles)
 	default:
 		return nil, fmt.Errorf("unsupported Provider video adapter %q", cfg.Provider.VideoAdapter)
 	}

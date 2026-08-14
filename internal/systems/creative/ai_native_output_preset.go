@@ -44,11 +44,6 @@ func NewOutputPresetRegistry(profiles ChannelCreativeProfileRegistry) OutputPres
 			AspectRatio: "9:16", Width: 720, Height: 1280, Resolution: "720p", ProfileID: "wechat_channels.performance.v1",
 			SafeZone: AINativeOutputSafeZone{Top: 96, Right: 48, Bottom: 240, Left: 48},
 		}),
-		newAvailableOutputPreset(profiles, AINativeOutputPresetSnapshot{
-			ID: "xiaohongshu_feed_9x16_v1", Label: "小红书视频信息流 · 9:16", Channel: "xiaohongshu", Placement: "feed",
-			AspectRatio: "9:16", Width: 720, Height: 1280, Resolution: "720p", ProfileID: "xiaohongshu.performance.v1",
-			SafeZone: AINativeOutputSafeZone{Top: 96, Right: 48, Bottom: 240, Left: 48},
-		}),
 	}
 	byID := make(map[string]AINativeOutputPreset, len(items))
 	for _, item := range items {

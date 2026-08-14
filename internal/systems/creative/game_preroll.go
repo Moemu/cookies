@@ -362,7 +362,8 @@ type GamePrerollDraft struct {
 
 func (d GamePrerollDraft) Validate() error {
 	if d.ContractVersion == GamePrerollV2ContractVersion && d.Stage == GamePrerollStageSourceReady {
-		if strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 || d.SelectedRouteID != ManualGamePrerollV2RouteID || d.InputSnapshot.SourceVideo.Validate() != nil || d.SourceVideoRights.Validate() != nil || d.Analysis.Status != GamePrerollResourceIdle || d.GenerationConfig.Validate() != nil || d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
+		analysisCanRemainAtSource := d.Analysis.Status == GamePrerollResourceIdle || d.Analysis.Status == GamePrerollResourceRunning || d.Analysis.Status == GamePrerollResourceFailed
+		if strings.TrimSpace(d.TaskID) == "" || d.Revision < 1 || d.SelectedRouteID != ManualGamePrerollV2RouteID || d.InputSnapshot.SourceVideo.Validate() != nil || d.SourceVideoRights.Validate() != nil || !analysisCanRemainAtSource || d.GenerationConfig.Validate() != nil || d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
 			return fmt.Errorf("game preroll V2 source workspace is incomplete")
 		}
 		return nil

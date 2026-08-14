@@ -1595,16 +1595,47 @@ export type ApiShortDramaV2Workspace = {
       status: string
       asset?: ApiShortDramaV2ProjectAssetRef
       model_reference_asset?: ApiShortDramaV2ProjectAssetRef
+      error_code?: string
       error_message?: string
+      current_attempt_id?: string
+      recovery_state?: string
+      failure_class?: string
+      recoverable?: boolean
+      attempts?: Array<{
+        id: string
+        ordinal: number
+        mode: 'initial' | 'transient_retry' | 'policy_rewrite' | 'style_fallback'
+        rewrite_policy_version?: string
+        source_prompt_hash?: string
+        prompt_hash: string
+        provider_job_id?: string
+        status: string
+        provider_error_code?: string
+        failure_class?: string
+        retryable?: boolean
+        created_at: string
+        completed_at?: string
+      }>
     }>
     selected_candidate_id?: string
     selected_asset?: ApiShortDramaV2ProjectAssetRef
+    desired_count?: number
+    ready_count?: number
+    running_count?: number
+    failed_count?: number
+    recoverable_failed_count?: number
   }
   source_opening_frame?: { status: string; asset?: ApiShortDramaV2ProjectAssetRef; timestamp_ms: number }
   trusted_materials?: {
     provider_code: 'ark-video'
     first_frame_asset_id: string
     last_frame_asset_id: string
+  }
+  generation_spec?: {
+    input_mode: 'text_only' | 'reference_image' | 'first_last_frame'
+    fallback_mode?: 'text_only_realistic'
+    fallback_reason?: string
+    spec_hash: string
   }
   latest_video_attempt_id?: string
   video_error?: { code: string; message: string; retryable: boolean }
@@ -4569,6 +4600,14 @@ const reconcileShortDramaReferenceBoard = (projectId: string, taskId: string, ex
     provider_job_id: providerJobId,
   })
 
+const retryShortDramaReferenceBoardCandidate = (projectId: string, taskId: string, expectedRevision: number, batchId: string, candidateId: string, failedAttemptId: string) =>
+  shortDramaV2Command(projectId, taskId, 'retry-reference-board-candidate', {
+    expected_revision: expectedRevision,
+    batch_id: batchId,
+    candidate_id: candidateId,
+    failed_attempt_id: failedAttemptId,
+  })
+
 const selectShortDramaReferenceBoard = (projectId: string, taskId: string, expectedRevision: number, batchId: string, candidateId: string) =>
   shortDramaV2Command(projectId, taskId, 'select-reference-board', {
     expected_revision: expectedRevision,
@@ -5998,6 +6037,7 @@ export const api = {
   prepareShortDramaV2OpeningFrame,
   generateShortDramaReferenceBoards,
   reconcileShortDramaReferenceBoard,
+  retryShortDramaReferenceBoardCandidate,
   selectShortDramaReferenceBoard,
   generateShortDramaV2FirstFrames,
   reconcileShortDramaV2FirstFrame,

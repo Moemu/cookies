@@ -81,7 +81,7 @@ test('新建需求请求同时携带固定投放预设和完整广告轨道契�
   )
 })
 
-test('需求分析把视频使用场景与比例作为一个后端预设下拉框', () => {
+test('需求分析把已开放的视频使用场景与比例作为一个后端预设下拉框', () => {
   const creationSurfaces: AINativeOutputPreset[] = [
     outputPreset,
     { ...outputPreset, id: 'kuaishou_feed_9x16_v1', label: '快手信息流 · 9:16', channel: 'kuaishou', profile_id: 'kuaishou.performance.v1' },
@@ -110,7 +110,7 @@ test('需求分析把视频使用场景与比例作为一个后端预设下拉�
   assert.match(markup, /抖音信息流 · 9:16/)
   assert.match(markup, /快手信息流 · 9:16/)
   assert.match(markup, /视频号信息流 · 9:16/)
-  assert.match(markup, /小红书视频信息流 · 9:16/)
+  assert.doesNotMatch(markup, /小红书视频信息流 · 9:16/)
   assert.match(markup, /不会自动投放或连接广告账户/)
   assert.doesNotMatch(markup, />视频比例</)
 })
