@@ -75,6 +75,16 @@ func TestPlatformEntityMappingHTTPKeepsPlatformValuesServerOwnedAndRequiresTwoRe
 	if response.Code != http.StatusOK || app.confirmMutation.BusinessExecutionID != "mutation_execution" || !strings.Contains(response.Body.String(), `"revision"`) {
 		t.Fatalf("confirm mutation status=%d request=%#v body=%s", response.Code, app.confirmMutation, response.Body.String())
 	}
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1/emergency-pause-change-sets", `{"expected_mapping_version":3,"current_daily_budget_minor":30000,"current_platform_status":"delivering"}`))
+	if response.Code != http.StatusCreated || app.pauseCompile.ExpectedMappingVersion != 3 || app.pauseCompile.CurrentPlatformStatus != "delivering" || !strings.Contains(response.Body.String(), `"id":"change_mutation"`) {
+		t.Fatalf("compile pause status=%d request=%#v body=%s", response.Code, app.pauseCompile, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings/mapping_1:confirm-change", `{"expected_version":3,"business_execution_id":"pause_execution","result_evidence_id":"pause_result","list_evidence_id":"pause_list"}`))
+	if response.Code != http.StatusOK || app.confirmChange.BusinessExecutionID != "pause_execution" || !strings.Contains(response.Body.String(), `"revision"`) {
+		t.Fatalf("confirm change status=%d request=%#v body=%s", response.Code, app.confirmChange, response.Body.String())
+	}
 }
 
 func TestDeliveryHTTPMapsProjectIsolationDenial(t *testing.T) {
@@ -313,8 +323,10 @@ type mappingApplicationStub struct {
 	created          delivery.PlatformEntityMapping
 	confirm          delivery.ConfirmPlatformEntityMappingRequest
 	confirmMutation  delivery.ConfirmPlatformEntityMappingMutationRequest
+	confirmChange    delivery.ConfirmPlatformEntityMappingChangeRequest
 	controlledChange delivery.ControlledChangeSet
 	mappedCompile    delivery.CompileMappedControlledChangeSetRequest
+	pauseCompile     delivery.CompileEmergencyPauseChangeSetRequest
 }
 
 func (s *mappingApplicationStub) CreatePendingPlatformEntityMapping(_ context.Context, _ contract.ActorContext, value delivery.PlatformEntityMapping) (delivery.PlatformEntityMapping, error) {
@@ -336,11 +348,21 @@ func (s *mappingApplicationStub) ConfirmPlatformEntityMappingMutation(_ context.
 	value.Version++
 	return value, delivery.PlatformEntityMappingRevision{MappingID: value.ID, Version: value.Version, BusinessExecutionID: request.BusinessExecutionID, ResultEvidenceID: request.ResultEvidenceID, ListEvidenceID: request.ListEvidenceID}, nil
 }
+func (s *mappingApplicationStub) ConfirmPlatformEntityMappingChange(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request delivery.ConfirmPlatformEntityMappingChangeRequest) (delivery.PlatformEntityMapping, delivery.PlatformEntityMappingRevision, error) {
+	s.confirmChange = request
+	value := s.mapping
+	value.Version++
+	return value, delivery.PlatformEntityMappingRevision{MappingID: value.ID, Version: value.Version, BusinessExecutionID: request.BusinessExecutionID, ResultEvidenceID: request.ResultEvidenceID, ListEvidenceID: request.ListEvidenceID}, nil
+}
 func (s *mappingApplicationStub) CompileControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, delivery.CompileControlledChangeSetRequest) (delivery.ControlledChangeSet, bool, error) {
 	return s.controlledChange, false, nil
 }
 func (s *mappingApplicationStub) CompileMappedControlledChangeSet(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request delivery.CompileMappedControlledChangeSetRequest) (delivery.ControlledChangeSet, bool, error) {
 	s.mappedCompile = request
+	return s.controlledChange, false, nil
+}
+func (s *mappingApplicationStub) CompileEmergencyPauseChangeSet(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request delivery.CompileEmergencyPauseChangeSetRequest) (delivery.ControlledChangeSet, bool, error) {
+	s.pauseCompile = request
 	return s.controlledChange, false, nil
 }
 func (s *mappingApplicationStub) GetControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledChangeSet, error) {

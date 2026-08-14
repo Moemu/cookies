@@ -82,6 +82,34 @@ type PromotionMutationBinding struct {
 	TargetStateHash         string                       `json:"target_state_hash"`
 }
 
+type PromotionControlBinding struct {
+	CurrentDailyBudgetMinor int64  `json:"current_daily_budget_minor"`
+	CurrentPlatformStatus   string `json:"current_platform_status"`
+	TargetPlatformStatus    string `json:"target_platform_status"`
+	CurrentStateHash        string `json:"current_state_hash"`
+	TargetStateHash         string `json:"target_state_hash"`
+}
+
+func (c PromotionControlBinding) Validate(action string) error {
+	if action != "pause_promotion" || c.CurrentDailyBudgetMinor < 30000 || c.CurrentPlatformStatus != "delivering" || c.TargetPlatformStatus != "paused" || !isSHA256(c.CurrentStateHash) || !isSHA256(c.TargetStateHash) || c.CurrentStateHash == c.TargetStateHash {
+		return ErrInvalidContract
+	}
+	current := struct {
+		DailyBudgetMinor int64  `json:"daily_budget_minor"`
+		PlatformStatus   string `json:"platform_status"`
+	}{c.CurrentDailyBudgetMinor, c.CurrentPlatformStatus}
+	target := struct {
+		DailyBudgetMinor int64  `json:"daily_budget_minor"`
+		PlatformStatus   string `json:"platform_status"`
+	}{c.CurrentDailyBudgetMinor, c.TargetPlatformStatus}
+	currentHash, currentErr := contract.CanonicalJSONHash(current)
+	targetHash, targetErr := contract.CanonicalJSONHash(target)
+	if currentErr != nil || targetErr != nil || currentHash != c.CurrentStateHash || targetHash != c.TargetStateHash {
+		return ErrInvalidContract
+	}
+	return nil
+}
+
 func (m PromotionMutationBinding) Validate(action string) error {
 	if !modifiesExistingPromotionAction(action) || m.CurrentDailyBudgetMinor < 30000 || m.TargetDailyBudgetMinor < 30000 || !isSHA256(m.CurrentStateHash) || !isSHA256(m.TargetStateHash) || m.CurrentStateHash == m.TargetStateHash {
 		return ErrInvalidContract
@@ -160,7 +188,9 @@ type AuthorityBinding struct {
 	TargetMappingVersion       int64                     `json:"target_mapping_version,omitempty"`
 	TargetPlatformObjectID     string                    `json:"target_platform_object_id,omitempty"`
 	TargetPlatformObjectKind   string                    `json:"target_platform_object_kind,omitempty"`
+	OperatorPrincipalID        string                    `json:"operator_principal_id,omitempty"`
 	PromotionMutation          *PromotionMutationBinding `json:"promotion_mutation,omitempty"`
+	PromotionControl           *PromotionControlBinding  `json:"promotion_control,omitempty"`
 	ObjectFingerprint          string                    `json:"object_fingerprint"`
 	Action                     string                    `json:"action"`
 	ProjectBudgetMode          string                    `json:"project_budget_mode,omitempty"`
@@ -191,10 +221,14 @@ func (b AuthorityBinding) Validate() error {
 		return ErrInvalidContract
 	}
 	if modifiesExistingPromotionAction(b.Action) {
-		if strings.TrimSpace(b.ParentPlatformProjectID) == "" || b.TargetMappingID == "" || b.TargetMappingVersion < 2 || b.TargetPlatformObjectID == "" || b.TargetPlatformObjectKind != "promotion" || b.PromotionMutation == nil || b.PromotionBudgetLimitMinor < 30000 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor || b.PromotionBudgetLimitMinor != b.PromotionMutation.TargetDailyBudgetMinor || b.PromotionMutation.Validate(b.Action) != nil {
+		if strings.TrimSpace(b.ParentPlatformProjectID) == "" || strings.TrimSpace(b.OperatorPrincipalID) == "" || b.TargetMappingID == "" || b.TargetMappingVersion < 2 || b.TargetPlatformObjectID == "" || b.TargetPlatformObjectKind != "promotion" || b.PromotionMutation == nil || b.PromotionControl != nil || b.PromotionBudgetLimitMinor < 30000 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor || b.PromotionBudgetLimitMinor != b.PromotionMutation.TargetDailyBudgetMinor || b.PromotionMutation.Validate(b.Action) != nil {
 			return ErrInvalidContract
 		}
-	} else if b.TargetMappingID != "" || b.TargetMappingVersion != 0 || b.TargetPlatformObjectID != "" || b.TargetPlatformObjectKind != "" || b.PromotionMutation != nil {
+	} else if b.Action == "pause_promotion" {
+		if strings.TrimSpace(b.ParentPlatformProjectID) == "" || strings.TrimSpace(b.OperatorPrincipalID) == "" || b.TargetMappingID == "" || b.TargetMappingVersion < 2 || b.TargetPlatformObjectID == "" || b.TargetPlatformObjectKind != "promotion" || b.PromotionMutation != nil || b.PromotionControl == nil || b.PromotionBudgetLimitMinor < 30000 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor || b.PromotionBudgetLimitMinor != b.PromotionControl.CurrentDailyBudgetMinor || b.PromotionControl.Validate(b.Action) != nil {
+			return ErrInvalidContract
+		}
+	} else if b.TargetMappingID != "" || b.TargetMappingVersion != 0 || b.TargetPlatformObjectID != "" || b.TargetPlatformObjectKind != "" || b.OperatorPrincipalID != "" || b.PromotionMutation != nil || b.PromotionControl != nil {
 		return ErrInvalidContract
 	}
 	for _, hash := range []string{b.ApprovalActionHash, b.PlanCanonicalHash, b.IntentCanonicalHash, b.FeedbackCanonicalHash, b.DecisionCanonicalHash, b.ConfigurationCanonicalHash, b.WorkflowCanonicalHash} {
@@ -209,8 +243,23 @@ func modifiesExistingPromotionAction(action string) bool {
 	return slices.Contains([]string{"update_promotion_budget", "update_promotion_schedule", "update_promotion_materials"}, action)
 }
 
+func changesExistingPromotionAction(action string) bool {
+	return modifiesExistingPromotionAction(action) || action == "pause_promotion"
+}
+
+func (b AuthorityBinding) existingPromotionStateHashes() (string, string, error) {
+	switch {
+	case modifiesExistingPromotionAction(b.Action) && b.PromotionMutation != nil && b.PromotionControl == nil:
+		return b.PromotionMutation.CurrentStateHash, b.PromotionMutation.TargetStateHash, nil
+	case b.Action == "pause_promotion" && b.PromotionMutation == nil && b.PromotionControl != nil:
+		return b.PromotionControl.CurrentStateHash, b.PromotionControl.TargetStateHash, nil
+	default:
+		return "", "", ErrInvalidContract
+	}
+}
+
 func actionRequiresBoundPlatformProject(action string) bool {
-	return action == "create_promotions_in_existing_project" || modifiesExistingPromotionAction(action)
+	return action == "create_promotions_in_existing_project" || changesExistingPromotionAction(action)
 }
 
 type ExecutionEnvironment struct {

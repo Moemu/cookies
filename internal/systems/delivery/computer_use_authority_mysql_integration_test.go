@@ -147,8 +147,10 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	mutationBinding.TargetMappingVersion = mapping.Version
 	mutationBinding.TargetPlatformObjectID = mapping.PlatformObjectID
 	mutationBinding.TargetPlatformObjectKind = mapping.PlatformObjectKind
+	mutationBinding.OperatorPrincipalID = "operator"
 	mutationBinding.PromotionBudgetLimitMinor = mutation.TargetDailyBudgetMinor
 	mutationBinding.PromotionMutation = &mutation
+	mutationBinding.PromotionControl = nil
 	mutationBinding.ObjectFingerprint, err = contract.CanonicalJSONHash(struct {
 		MappingID       string `json:"mapping_id"`
 		MappingVersion  int64  `json:"mapping_version"`
@@ -198,5 +200,94 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	updatedMapping, revision, err := deliveryRepo.ConfirmPlatformEntityMappingMutation(ctx, org, project, mapping.ID, mapping.Version, mutationExecution.ID, mutationResultEvidence.ID, mutationListEvidence.ID)
 	if err != nil || updatedMapping.Version != mapping.Version+1 || updatedMapping.CurrentStateHash != mutation.TargetStateHash || revision.Action != ControlledActionUpdatePromotionBudget || revision.CurrentStateHash != mutation.TargetStateHash {
 		t.Fatalf("updated mapping=%+v revision=%+v err=%v", updatedMapping, revision, err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE delivery_platform_entity_mappings SET platform_status='delivering' WHERE organization_id=? AND project_id=? AND id=? AND version=?`, org, project, updatedMapping.ID, updatedMapping.Version); err != nil {
+		t.Fatal(err)
+	}
+	updatedMapping.PlatformStatus = "delivering"
+	pauseControl := ControlledPromotionControl{CurrentDailyBudgetMinor: mutation.TargetDailyBudgetMinor, CurrentPlatformStatus: updatedMapping.PlatformStatus, TargetPlatformStatus: "paused"}
+	currentPauseState, err := pauseControl.statePayload(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetPauseState, err := pauseControl.statePayload(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseControl.CurrentStateHash, err = contract.CanonicalJSONHash(currentPauseState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseControl.TargetStateHash, err = contract.CanonicalJSONHash(targetPauseState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseBinding := mutationBinding
+	pauseBinding.TargetMappingVersion = updatedMapping.Version
+	pauseBinding.PromotionBudgetLimitMinor = pauseControl.CurrentDailyBudgetMinor
+	pauseBinding.PromotionMutation = nil
+	pauseBinding.PromotionControl = &pauseControl
+	pauseBinding.ObjectFingerprint, err = contract.CanonicalJSONHash(struct {
+		MappingID       string `json:"mapping_id"`
+		MappingVersion  int64  `json:"mapping_version"`
+		TargetStateHash string `json:"target_state_hash"`
+	}{updatedMapping.ID, updatedMapping.Version, pauseControl.TargetStateHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseChange := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: "pause_change_" + suffix, OrganizationID: org, ProjectID: project, Binding: pauseBinding, Action: ControlledActionPausePromotion, BudgetLimitMinor: pauseControl.CurrentDailyBudgetMinor, Currency: "CNY", Status: ControlledChangeSetReady, Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	pauseChange.CanonicalHash, err = pauseChange.ComputeCanonicalHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseChange, _, err = deliveryRepo.CreateControlledChangeSet(ctx, pauseChange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseApproval := RemoteWriteApproval{SchemaVersion: RemoteWriteApprovalSchemaV1, ID: "pause_approval_" + suffix, OrganizationID: org, ProjectID: project, ControlledChangeSetID: pauseChange.ID, ControlledChangeSetHash: pauseChange.CanonicalHash, Binding: pauseBinding, Action: pauseChange.Action, Scope: "controlled_remote_write", BudgetLimitMinor: pauseChange.BudgetLimitMinor, Currency: pauseChange.Currency, ApprovedBy: "approver", ApprovedAt: now, ExpiresAt: now.Add(RemoteWriteApprovalTTL)}
+	pauseApproval.ActionHash, err = pauseApproval.ComputeActionHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseChange, pauseApproval, err = deliveryRepo.ApproveControlledChangeSet(ctx, pauseChange, pauseApproval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseExecution := ControlledExecution{ID: "pause_execution_" + suffix, OrganizationID: org, ProjectID: project, ControlledChangeSetID: pauseChange.ID, RemoteWriteApprovalID: pauseApproval.ID, Status: "pending", Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	wrongPauseExecution := pauseExecution
+	wrongPauseExecution.ID = "wrong_pause_execution_" + suffix
+	wrongPauseExecution.CreatedBy = "other_operator"
+	if _, err := deliveryRepo.CreateControlledExecution(ctx, wrongPauseExecution); err != ErrApprovalContentMismatch {
+		t.Fatalf("wrong pause operator err=%v", err)
+	}
+	pauseExecution, err = deliveryRepo.CreateControlledExecution(ctx, pauseExecution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseComputerUseService := computeruse.Service{Repository: computerUseRepo, AuthorityProvider: ComputerUseAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_pause_" + suffix, nil }}
+	pauseRun, replayed, err := pauseComputerUseService.CreateBoundRun(ctx, computeruse.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: pauseExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "pause-run-key-" + suffix, CreatedBy: "operator"})
+	if err != nil || replayed || pauseRun.Authority.TargetMappingID != updatedMapping.ID || pauseRun.Authority.PromotionControl == nil || pauseRun.Authority.PromotionControl.TargetStateHash != pauseControl.TargetStateHash {
+		t.Fatalf("pause run=%+v replayed=%t err=%v", pauseRun, replayed, err)
+	}
+	pauseResultStep := computeruse.RunStep{ID: "pause_result_step_" + suffix, RunID: pauseRun.ID, Sequence: 1, WorkflowStepID: pauseRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverResultObserved), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
+	pauseListStep := computeruse.RunStep{ID: "pause_list_step_" + suffix, RunID: pauseRun.ID, Sequence: 2, WorkflowStepID: pauseRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverListConfirmed), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
+	if err := computerUseRepo.PutStep(ctx, org, project, pauseResultStep); err != nil {
+		t.Fatal(err)
+	}
+	if err := computerUseRepo.PutStep(ctx, org, project, pauseListStep); err != nil {
+		t.Fatal(err)
+	}
+	pauseResultEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "pause_result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseResultStep.ID, FieldReadback: map[string]string{"platform_object_id": updatedMapping.PlatformObjectID, "platform_status": "paused", "target_state_hash": pauseControl.TargetStateHash}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "pause-result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(4 * time.Second)}
+	pauseListEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "pause_list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseListStep.ID, FieldReadback: map[string]string{"platform_object_id": updatedMapping.PlatformObjectID, "platform_status": "paused", "target_state_hash": pauseControl.TargetStateHash}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "pause-list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(5 * time.Second)}
+	if err := computerUseRepo.AppendEvidence(ctx, pauseResultEvidence); err != nil {
+		t.Fatal(err)
+	}
+	if err := computerUseRepo.AppendEvidence(ctx, pauseListEvidence); err != nil {
+		t.Fatal(err)
+	}
+	pausedMapping, pauseRevision, err := deliveryRepo.ConfirmPlatformEntityMappingMutation(ctx, org, project, updatedMapping.ID, updatedMapping.Version, pauseExecution.ID, pauseResultEvidence.ID, pauseListEvidence.ID)
+	if err != nil || pausedMapping.Version != updatedMapping.Version+1 || pausedMapping.PlatformStatus != "paused" || pausedMapping.CurrentStateAction != ControlledActionPausePromotion || pausedMapping.CurrentStateHash != pauseControl.TargetStateHash || pauseRevision.Action != ControlledActionPausePromotion || pauseRevision.PreviousStateAction != ControlledActionUpdatePromotionBudget || pauseRevision.PreviousStateHash != mutation.TargetStateHash {
+		t.Fatalf("paused mapping=%+v revision=%+v err=%v", pausedMapping, pauseRevision, err)
 	}
 }

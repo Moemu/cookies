@@ -60,3 +60,29 @@ func TestControlledPromotionMutationMigrationVersionsMappingsAndKeepsMockAuthori
 		}
 	}
 }
+
+func TestEmergencyPauseMigrationExpandsOnlyControlledPostLaunchAuthority(t *testing.T) {
+	up, err := os.ReadFile("../../../migrations/delivery/20260814130000_delivery_emergency_pause.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	down, err := os.ReadFile("../../../migrations/delivery/20260814130000_delivery_emergency_pause.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	upSQL := strings.ToLower(string(up))
+	downSQL := strings.ToLower(string(down))
+	for _, required := range []string{"pause_promotion", "chk_delivery_controlled_change_set_action", "chk_delivery_remote_write_approval_authority", "chk_delivery_platform_mapping_state_hash", "chk_delivery_platform_mapping_revision_action", "chk_delivery_platform_mapping_revision_state_hash"} {
+		if !strings.Contains(upSQL, required) {
+			t.Errorf("emergency pause migration omitted %q", required)
+		}
+	}
+	for _, forbidden := range []string{"update delivery_approvals", "drop table delivery_approvals", "execute_mock", "remote_write_enabled = true"} {
+		if strings.Contains(upSQL, forbidden) {
+			t.Errorf("emergency pause migration widens historical authority with %q", forbidden)
+		}
+	}
+	if strings.Contains(downSQL, "pause_promotion") {
+		t.Fatal("emergency pause down migration did not restore the prior action set")
+	}
+}

@@ -72,6 +72,7 @@ type observatoryApplication interface {
 type controlledAuthorityApplication interface {
 	CompileControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, delivery.CompileControlledChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
 	CompileMappedControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CompileMappedControlledChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
+	CompileEmergencyPauseChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CompileEmergencyPauseChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
 	GetControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledChangeSet, error)
 	ApproveControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ApproveControlledChangeSetRequest) (delivery.ControlledChangeSet, delivery.RemoteWriteApproval, error)
 	CreateControlledExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledExecution, error)
@@ -83,6 +84,7 @@ type platformEntityMappingApplication interface {
 	GetPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PlatformEntityMapping, error)
 	ConfirmPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ConfirmPlatformEntityMappingRequest) (delivery.PlatformEntityMapping, error)
 	ConfirmPlatformEntityMappingMutation(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ConfirmPlatformEntityMappingMutationRequest) (delivery.PlatformEntityMapping, delivery.PlatformEntityMappingRevision, error)
+	ConfirmPlatformEntityMappingChange(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ConfirmPlatformEntityMappingChangeRequest) (delivery.PlatformEntityMapping, delivery.PlatformEntityMappingRevision, error)
 }
 
 type Server struct {
@@ -124,6 +126,7 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/feedback", server.submitObservatoryFeedback)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/controlled-change-sets", server.compileControlledChangeSet)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-change-sets", server.compileMappedControlledChangeSet)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/emergency-pause-change-sets", server.compileEmergencyPauseChangeSet)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/controlled-change-sets/{change_set_id}", server.getControlledChangeSet)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/controlled-change-sets/{controlled_change_set_action}", server.controlledChangeSetAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/controlled-executions/{execution_id}", server.getControlledExecution)

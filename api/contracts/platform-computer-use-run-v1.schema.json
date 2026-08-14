@@ -55,7 +55,9 @@
         "target_mapping_version": { "type": "integer", "minimum": 1 },
         "target_platform_object_id": { "type": "string", "minLength": 1 },
         "target_platform_object_kind": { "const": "promotion" },
+        "operator_principal_id": { "type": "string", "minLength": 1 },
         "promotion_mutation": { "$ref": "#/$defs/promotionMutation" },
+        "promotion_control": { "$ref": "#/$defs/promotionControl" },
         "object_fingerprint": { "type": "string", "minLength": 1 },
         "action": { "type": "string", "minLength": 1 },
         "project_budget_mode": { "enum": ["daily", "unlimited"] },
@@ -105,6 +107,18 @@
         "target_schedule": { "$ref": "#/$defs/scheduleWindow" },
         "current_materials": { "type": "array", "items": { "$ref": "#/$defs/materialReference" } },
         "target_materials": { "type": "array", "items": { "$ref": "#/$defs/materialReference" } },
+        "current_state_hash": { "$ref": "#/$defs/hash" },
+        "target_state_hash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "promotionControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["current_daily_budget_minor", "current_platform_status", "target_platform_status", "current_state_hash", "target_state_hash"],
+      "properties": {
+        "current_daily_budget_minor": { "type": "integer", "minimum": 30000 },
+        "current_platform_status": { "const": "delivering" },
+        "target_platform_status": { "const": "paused" },
         "current_state_hash": { "$ref": "#/$defs/hash" },
         "target_state_hash": { "$ref": "#/$defs/hash" }
       }

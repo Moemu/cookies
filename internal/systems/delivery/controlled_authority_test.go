@@ -70,6 +70,12 @@ func TestExistingProjectControlledActionRequiresBoundParentAndPromotionBudget(t 
 	if err := change.Validate(); err != ErrApprovalContentMismatch {
 		t.Fatalf("missing promotion budget err=%v", err)
 	}
+	change.Binding.PromotionBudgetLimitMinor = 30000
+	change.Binding.OperatorPrincipalID = "operator"
+	change.CanonicalHash, _ = change.ComputeCanonicalHash()
+	if err := change.Validate(); err != ErrApprovalContentMismatch {
+		t.Fatalf("create action accepted a post-launch operator binding: %v", err)
+	}
 }
 
 func TestFinitePromotionMutationContractsBindScheduleAndAuthorizedMaterials(t *testing.T) {

@@ -38,11 +38,11 @@ func (a DeterministicFakeAdapter) Prepare(_ context.Context, run ComputerUseRun)
 		return PreparedPage{}, fmt.Errorf("%s", BlockAccountMismatch)
 	}
 	readback := map[string]string{"account_id": run.AccountID, "object_fingerprint": run.Authority.ObjectFingerprint}
-	if modifiesExistingPromotionAction(run.Authority.Action) {
+	if changesExistingPromotionAction(run.Authority.Action) {
 		readback["platform_object_id"] = run.Authority.TargetPlatformObjectID
-		if run.Authority.PromotionMutation != nil {
-			readback["current_state_hash"] = run.Authority.PromotionMutation.CurrentStateHash
-			readback["target_state_hash"] = run.Authority.PromotionMutation.TargetStateHash
+		if currentStateHash, targetStateHash, err := run.Authority.existingPromotionStateHashes(); err == nil {
+			readback["current_state_hash"] = currentStateHash
+			readback["target_state_hash"] = targetStateHash
 		}
 	}
 	return PreparedPage{BeforeFacts: map[string]string{"account_id": run.AccountID, "page_kind": "review"}, Readback: readback, DiffKeys: []string{}, PageRef: "fake://oceanengine/review"}, nil
@@ -53,14 +53,18 @@ func (a DeterministicFakeAdapter) Submit(_ context.Context, run ComputerUseRun, 
 		outcome = WorkerSuccess
 	}
 	objectID := "fake-object-" + run.ID
-	if modifiesExistingPromotionAction(run.Authority.Action) {
+	if changesExistingPromotionAction(run.Authority.Action) {
 		objectID = run.Authority.TargetPlatformObjectID
 	}
 	targetStateHash := ""
-	if run.Authority.PromotionMutation != nil {
-		targetStateHash = run.Authority.PromotionMutation.TargetStateHash
+	if _, stateHash, err := run.Authority.existingPromotionStateHashes(); err == nil {
+		targetStateHash = stateHash
 	}
-	page := PreparedPage{BeforeFacts: map[string]string{"object_fingerprint": run.Authority.ObjectFingerprint}, Readback: map[string]string{"platform_object_id": objectID, "platform_status": string(outcome), "target_state_hash": targetStateHash}, DiffKeys: []string{}, PageRef: "fake://oceanengine/result"}
+	platformStatus := string(outcome)
+	if run.Authority.Action == "pause_promotion" && outcome == WorkerSuccess {
+		platformStatus = "paused"
+	}
+	page := PreparedPage{BeforeFacts: map[string]string{"object_fingerprint": run.Authority.ObjectFingerprint}, Readback: map[string]string{"platform_object_id": objectID, "platform_status": platformStatus, "target_state_hash": targetStateHash}, DiffKeys: []string{}, PageRef: "fake://oceanengine/result"}
 	return outcome, page, nil
 }
 

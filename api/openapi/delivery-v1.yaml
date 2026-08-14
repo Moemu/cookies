@@ -402,6 +402,39 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '412': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/emergency-pause-change-sets:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: mapping_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: createEmergencyPauseDeliveryChangeSet
+      summary: Freeze an operator-bound emergency pause for one delivering promotion
+      description: >-
+        Starts from a confirmed promotion mapping, requires the current normalized
+        platform status to be delivering, server-forces the target status to paused,
+        and creates a fresh ChangeSet that must receive its own Approval.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateEmergencyPauseChangeSetRequest' }
+      responses:
+        '201':
+          description: New emergency-pause ChangeSet ready for approval.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlledChangeSet' }
+        '200':
+          description: Idempotent replay of the same exact pause authority.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ControlledChangeSet' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}:confirm:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -443,6 +476,30 @@ paths:
       responses:
         '200':
           description: Versioned mapping mutation and immutable revision.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConfirmPlatformEntityMappingMutationResult' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}:confirm-change:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: mapping_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      operationId: confirmDeliveryPlatformEntityMappingChange
+      summary: Advance a mapping after any controlled existing-promotion change
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmPlatformEntityMappingMutationRequest' }
+      responses:
+        '200':
+          description: Versioned mapping change and immutable revision.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ConfirmPlatformEntityMappingMutationResult' }
@@ -1397,6 +1454,7 @@ components:
         target_mapping_version: { type: integer, minimum: 1 }
         target_platform_object_id: { type: string }
         target_platform_object_kind: { type: string, enum: [promotion] }
+        operator_principal_id: { type: string }
         project_budget_mode: { type: string, enum: [daily, unlimited] }
         project_budget_limit_minor: { type: integer, minimum: 0 }
         promotion_budget_limit_minor: { type: integer, minimum: 0 }
@@ -1404,6 +1462,7 @@ components:
         skill_id: { type: string }
         skill_version: { type: string }
         promotion_mutation: { $ref: '#/components/schemas/ControlledPromotionMutation' }
+        promotion_control: { $ref: '#/components/schemas/ControlledPromotionControl' }
     ControlledScheduleWindow:
       type: object
       additionalProperties: false
@@ -1436,6 +1495,16 @@ components:
           items: { $ref: '#/components/schemas/ControlledMaterialReference' }
         current_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
         target_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
+    ControlledPromotionControl:
+      type: object
+      additionalProperties: false
+      required: [current_daily_budget_minor, current_platform_status, target_platform_status, current_state_hash, target_state_hash]
+      properties:
+        current_daily_budget_minor: { type: integer, minimum: 30000 }
+        current_platform_status: { type: string, const: delivering }
+        target_platform_status: { type: string, const: paused }
+        current_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        target_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
     CreateControlledChangeSetRequest:
       type: object
       additionalProperties: false
@@ -1461,6 +1530,14 @@ components:
         target_materials:
           type: array
           items: { $ref: '#/components/schemas/ControlledMaterialReference' }
+    CreateEmergencyPauseChangeSetRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_mapping_version, current_daily_budget_minor, current_platform_status]
+      properties:
+        expected_mapping_version: { type: integer, minimum: 2 }
+        current_daily_budget_minor: { type: integer, minimum: 30000 }
+        current_platform_status: { type: string, const: delivering }
     ControlledChangeSet:
       type: object
       additionalProperties: false
@@ -1471,7 +1548,7 @@ components:
         organization_id: { type: string }
         project_id: { type: string }
         binding: { $ref: '#/components/schemas/ControlledAuthorityBinding' }
-        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion] }
         budget_limit_minor: { type: integer, minimum: 0 }
         currency: { type: string, const: CNY }
         status: { type: string, enum: [ready_for_approval, approved, rejected, executing, executed, invalidated] }
@@ -1493,7 +1570,7 @@ components:
         controlled_change_set_id: { type: string }
         controlled_change_set_hash: { $ref: '#/components/schemas/CanonicalHash' }
         binding: { $ref: '#/components/schemas/ControlledAuthorityBinding' }
-        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion] }
         scope: { type: string, const: controlled_remote_write }
         budget_limit_minor: { type: integer, minimum: 0 }
         currency: { type: string, const: CNY }
@@ -1550,7 +1627,7 @@ components:
         platform_object_kind: { type: string }
         platform_object_id: { type: string }
         platform_status: { type: string }
-        current_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        current_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion] }
         current_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
         result_evidence_id: { type: string }
         list_evidence_id: { type: string }
@@ -1567,14 +1644,14 @@ components:
         organization_id: { type: string }
         project_id: { type: string }
         version: { type: integer, minimum: 1 }
-        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion] }
         business_execution_id: { type: string }
         computer_use_run_id: { type: string }
         platform_object_id: { type: string }
         platform_status: { type: string }
-        previous_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        previous_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion] }
         previous_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
-        current_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials] }
+        current_state_action: { type: string, enum: [update_promotion_budget, update_promotion_schedule, update_promotion_materials, pause_promotion] }
         current_state_hash: { $ref: '#/components/schemas/CanonicalHash' }
         result_evidence_id: { type: string }
         list_evidence_id: { type: string }

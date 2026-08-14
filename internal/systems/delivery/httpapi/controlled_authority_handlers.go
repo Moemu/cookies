@@ -75,6 +75,29 @@ func (s *Server) compileMappedControlledChangeSet(w http.ResponseWriter, r *http
 	}
 	writeJSON(w, status, value)
 }
+
+func (s *Server) compileEmergencyPauseChangeSet(w http.ResponseWriter, r *http.Request) {
+	app, err := s.controlledApp()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	var body delivery.CompileEmergencyPauseChangeSetRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	value, replay, err := app.CompileEmergencyPauseChangeSet(r.Context(), mustActor(r), projectID(r), r.PathValue("mapping_id"), body)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	status := http.StatusCreated
+	if replay {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, value)
+}
+
 func (s *Server) getControlledChangeSet(w http.ResponseWriter, r *http.Request) {
 	app, err := s.controlledApp()
 	if err != nil {
@@ -180,7 +203,7 @@ func (s *Server) getPlatformEntityMapping(w http.ResponseWriter, r *http.Request
 
 func (s *Server) platformEntityMappingAction(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(r.PathValue("mapping_action"), ":", 2)
-	if len(parts) != 2 || (parts[1] != "confirm" && parts[1] != "confirm-mutation") {
+	if len(parts) != 2 || (parts[1] != "confirm" && parts[1] != "confirm-mutation" && parts[1] != "confirm-change") {
 		http.NotFound(w, r)
 		return
 	}
@@ -203,11 +226,17 @@ func (s *Server) platformEntityMappingAction(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusOK, value)
 		return
 	}
-	var body delivery.ConfirmPlatformEntityMappingMutationRequest
+	var body delivery.ConfirmPlatformEntityMappingChangeRequest
 	if !decode(w, r, &body) {
 		return
 	}
-	mapping, revision, err := app.ConfirmPlatformEntityMappingMutation(r.Context(), mustActor(r), projectID(r), r.PathValue("mapping_id"), body)
+	var mapping delivery.PlatformEntityMapping
+	var revision delivery.PlatformEntityMappingRevision
+	if parts[1] == "confirm-mutation" {
+		mapping, revision, err = app.ConfirmPlatformEntityMappingMutation(r.Context(), mustActor(r), projectID(r), r.PathValue("mapping_id"), body)
+	} else {
+		mapping, revision, err = app.ConfirmPlatformEntityMappingChange(r.Context(), mustActor(r), projectID(r), r.PathValue("mapping_id"), body)
+	}
 	if err != nil {
 		writeError(w, r, err)
 		return

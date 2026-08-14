@@ -23,13 +23,31 @@ test("controlled Computer Use fixtures satisfy the frozen contracts", () => {
   for (const [schemaName, fixtureName] of [
     ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-awaiting-confirmation.json"],
     ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-budget-mutation.json"],
+    ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-emergency-pause.json"],
     ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-ready.json"],
     ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-budget-mutation.json"],
+    ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-emergency-pause.json"],
   ] as const) {
     const schema = readJSON(join(contracts, schemaName));
     const validate = ajv.getSchema(String(schema.$id));
     assert.ok(validate, `missing validator for ${schemaName}`);
     assert.equal(validate(readJSON(join(fixtures, fixtureName))), true, ajv.errorsText(validate.errors));
+  }
+});
+
+test("emergency pause fixtures bind one operator and a delivering-to-paused state transition", () => {
+  for (const fixtureName of [
+    "delivery-controlled-change-set-v1-emergency-pause.json",
+    "platform-computer-use-run-v1-emergency-pause.json",
+  ]) {
+    const fixture = readJSON(join(fixtures, fixtureName));
+    const binding = (fixture.binding ?? fixture.authority) as Record<string, unknown>;
+    const control = binding.promotion_control as Record<string, unknown>;
+    assert.equal(binding.operator_principal_id, "operator_test");
+    assert.equal(control.current_platform_status, "delivering");
+    assert.equal(control.target_platform_status, "paused");
+    assert.equal("promotion_mutation" in binding, false);
+    assert.equal(fixture.action ?? binding.action, "pause_promotion");
   }
 });
 

@@ -63,6 +63,25 @@ new one-time confirmation, click the unique save boundary once, and reconcile
 the same object and target-state hash from the result and promotion list. Never
 reuse the creation Approval or the creation final confirmation.
 
+## Keep emergency pause distinct
+
+The shared control plane can freeze and simulate `pause_promotion`, but this
+Skill still forbids `pause_remote_object` until the live status-control surface
+is calibrated. Do not confuse it with pausing a ComputerUseRun.
+
+For no-write calibration, start from one confirmed promotion Mapping whose
+normalized server status is exactly `delivering`. Reidentify the account,
+parent project and exact promotion, read the unchanged daily budget, verify the
+unique pause control and stop before activating it. The ChangeSet must bind one
+operator and server-force the transition from `delivering` to `paused`.
+
+A real pause requires current-turn authorization naming that already-delivering
+dedicated test promotion and action. Consume a fresh confirmation and click the
+unique pause boundary once. Never enable a pending or inactive promotion merely
+to create a pause test. After the click, require both the result and an
+independent list readback to show the same object as `paused`; on uncertainty,
+query or take over without clicking again.
+
 ## Read the verified baseline
 
 - Read the [control contract](../../../../../../docs/delivery/controlled-computer-use-contract.md) for state and authority invariants.

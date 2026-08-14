@@ -34,6 +34,7 @@ This contract is additive. It does not reinterpret, rewrite, or migrate any hist
 | 18 | Production control-plane assembly | The API host mounts the persisted takeover-only Computer Use surface. Environment, BrowserProfile and SitePolicy registration, Run/Lease/Event/Evidence control, and Kill Switch administration therefore survive process restarts. A client creates a Run by naming a formal Delivery `ControlledExecution`; the server resolves and revalidates the immutable ChangeSet/Approval binding and attaches the resulting Run back to that Execution. Clients cannot supply authority JSON. The production mount has no deterministic fake adapter, no unattended page driver, and no `prepare` or `submit` worker command. |
 | 19 | Finite promotion modifications | Budget, schedule and authorized-material modifications always start from one confirmed promotion `PlatformEntityMapping`. The server, not the client, resolves the exact platform object ID and original creation provenance. Each modification freezes the current/target values and their canonical hashes in a new ChangeSet, receives a new Approval and Execution, and binds the target Mapping ID/version. Creation Approval reuse and in-place edits of an already confirmed Mapping are invalid. |
 | 20 | Mutation readback and Mapping revisions | Before the one permitted save click, takeover evidence must match the exact platform object ID plus current and target state hashes with zero diff keys. Result and independent list evidence must both match the same object ID, platform status and target state hash. Only then may one transaction increment the Mapping version, set its current-state hash, append an immutable `delivery_platform_entity_mapping_revisions` row, and close the new Execution and ChangeSet. The original creation revision and evidence remain queryable. |
+| 21 | Emergency pause | `pause_promotion` is an independent high-priority action, not a budget mutation and not the ComputerUseRun pause control. It starts only from a confirmed promotion Mapping whose normalized status is exactly `delivering`, binds the account, parent project, exact object, Mapping version, unchanged daily budget and one operator, and server-forces the target status to `paused`. A fresh ChangeSet, Approval, Execution, Run and one-time confirmation are mandatory. Result and list readbacks must both prove the same object is `paused`; uncertainty permits query or takeover only, never another click. |
 
 ## Stable blocking reasons
 
@@ -107,3 +108,22 @@ change on the previously created dedicated test promotion. If the platform
 disallows editing while the promotion is under review, the run records the
 platform blocker and stops; it must not evade the platform state or substitute
 another object.
+
+## Emergency pause readiness
+
+The control plane and deterministic fake path support `pause_promotion` without
+calling a Connector. The dedicated endpoint is
+`POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/emergency-pause-change-sets`.
+The request supplies only the expected Mapping version, current normalized
+status and current daily budget. The server resolves the platform object,
+requires `delivering`, binds the requesting operator and forces the target to
+`paused`. Successful result/list evidence advances the Mapping through
+`POST .../platform-entity-mappings/{mapping_id}:confirm-change`.
+
+This is not a live-page calibration claim. `pause_remote_object` remains
+forbidden by the current Skill. A real pause requires a separately authorized,
+already-delivering dedicated test object in that execution turn. The promotion
+created during the earlier one-click validation remains `pending_review` and
+must never be enabled merely to manufacture a pause test. If the page, status,
+account, object or operator is uncertain, record the blocker or `PAGE_DRIFT`
+and stop without a second click.

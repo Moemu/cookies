@@ -38,6 +38,7 @@ export type ComputerUseAuthorityBinding = {
   target_mapping_version?: number
   target_platform_object_id?: string
   target_platform_object_kind?: 'promotion'
+  operator_principal_id?: string
   promotion_mutation?: {
     current_daily_budget_minor: number
     target_daily_budget_minor: number
@@ -45,6 +46,13 @@ export type ComputerUseAuthorityBinding = {
     target_schedule?: { start_at: string; end_at: string; timezone: string }
     current_materials?: Array<{ reference_id: string; authorization_evidence_id: string }>
     target_materials?: Array<{ reference_id: string; authorization_evidence_id: string }>
+    current_state_hash: string
+    target_state_hash: string
+  }
+  promotion_control?: {
+    current_daily_budget_minor: number
+    current_platform_status: 'delivering'
+    target_platform_status: 'paused'
     current_state_hash: string
     target_state_hash: string
   }

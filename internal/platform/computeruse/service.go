@@ -138,6 +138,9 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 	if err := authority.Validate(); err != nil || authority.OrganizationID != request.OrganizationID || authority.ProjectID != request.ProjectID || authority.BusinessExecutionID != request.ExecutionID || authority.AccountReferenceID != request.AccountID {
 		return ComputerUseRun{}, false, ErrInvalidContract
 	}
+	if authority.OperatorPrincipalID != "" && request.CreatedBy != authority.OperatorPrincipalID {
+		return ComputerUseRun{}, false, ErrInvalidContract
+	}
 	environment, err := s.Repository.GetEnvironment(ctx, request.OrganizationID, request.ProjectID, request.EnvironmentID)
 	if err != nil {
 		return ComputerUseRun{}, false, err
@@ -370,7 +373,7 @@ func (s Service) IssueFinalConfirmation(ctx context.Context, organizationID cont
 	}
 	confirmationReady := run.State == RunAwaitingConfirmation && !run.Paused && !run.TakeoverActive
 	takeoverReady := run.State == RunAwaitingTakeover && run.Paused && run.TakeoverActive
-	if (!confirmationReady && !takeoverReady) || bindingHash != run.Authority.ApprovalActionHash || strings.TrimSpace(actor) == "" {
+	if (!confirmationReady && !takeoverReady) || bindingHash != run.Authority.ApprovalActionHash || strings.TrimSpace(actor) == "" || (run.Authority.OperatorPrincipalID != "" && actor != run.Authority.OperatorPrincipalID) {
 		return IssuedConfirmation{}, ErrConfirmationInvalid
 	}
 	if s.AuthorityProvider != nil {
@@ -442,8 +445,11 @@ func (s Service) AuthorizeTakeoverAction(ctx context.Context, request AuthorizeT
 	if run.Version != request.ExpectedVersion {
 		return TakeoverActionAuthorization{}, ErrVersionConflict
 	}
-	if modifiesExistingPromotionAction(run.Authority.Action) && (run.Authority.PromotionMutation == nil || request.FieldReadback["platform_object_id"] != run.Authority.TargetPlatformObjectID || request.FieldReadback["current_state_hash"] != run.Authority.PromotionMutation.CurrentStateHash || request.FieldReadback["target_state_hash"] != run.Authority.PromotionMutation.TargetStateHash) {
-		return TakeoverActionAuthorization{}, ErrInvalidContract
+	if changesExistingPromotionAction(run.Authority.Action) {
+		currentStateHash, targetStateHash, stateErr := run.Authority.existingPromotionStateHashes()
+		if stateErr != nil || request.Actor != run.Authority.OperatorPrincipalID || request.FieldReadback["platform_object_id"] != run.Authority.TargetPlatformObjectID || request.FieldReadback["current_state_hash"] != currentStateHash || request.FieldReadback["target_state_hash"] != targetStateHash {
+			return TakeoverActionAuthorization{}, ErrInvalidContract
+		}
 	}
 	if run.State != RunAwaitingTakeover || !run.Paused || !run.TakeoverActive || run.LeaseID != request.LeaseID {
 		return TakeoverActionAuthorization{}, ErrConfirmationInvalid
@@ -528,8 +534,11 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 		if run.State != RunSubmitting || request.FieldReadback["platform_object_id"] == "" || request.FieldReadback["platform_status"] == "" {
 			return TakeoverEvidenceResult{}, ErrInvalidTransition
 		}
-		if modifiesExistingPromotionAction(run.Authority.Action) && (run.Authority.PromotionMutation == nil || request.FieldReadback["platform_object_id"] != run.Authority.TargetPlatformObjectID || request.FieldReadback["target_state_hash"] != run.Authority.PromotionMutation.TargetStateHash) {
-			return TakeoverEvidenceResult{}, ErrInvalidContract
+		if changesExistingPromotionAction(run.Authority.Action) {
+			_, targetStateHash, stateErr := run.Authority.existingPromotionStateHashes()
+			if stateErr != nil || request.FieldReadback["platform_object_id"] != run.Authority.TargetPlatformObjectID || request.FieldReadback["target_state_hash"] != targetStateHash || (run.Authority.Action == "pause_promotion" && request.FieldReadback["platform_status"] != "paused") {
+				return TakeoverEvidenceResult{}, ErrInvalidContract
+			}
 		}
 		next, status, attemptStatus = RunVerifying, StepSucceeded, ControlledActionVerified
 	case TakeoverListConfirmed:
@@ -564,7 +573,7 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 		if resultStepID == "" || resultObjectID != request.FieldReadback["platform_object_id"] || resultStatus != request.FieldReadback["platform_status"] {
 			return TakeoverEvidenceResult{}, ErrInvalidContract
 		}
-		if modifiesExistingPromotionAction(run.Authority.Action) {
+		if changesExistingPromotionAction(run.Authority.Action) {
 			resultTargetHash := ""
 			for _, candidate := range evidence {
 				if candidate.StepID == resultStepID {
@@ -572,7 +581,8 @@ func (s Service) RecordTakeoverOutcome(ctx context.Context, request RecordTakeov
 					break
 				}
 			}
-			if run.Authority.PromotionMutation == nil || resultObjectID != run.Authority.TargetPlatformObjectID || resultTargetHash != run.Authority.PromotionMutation.TargetStateHash || request.FieldReadback["target_state_hash"] != run.Authority.PromotionMutation.TargetStateHash {
+			_, targetStateHash, stateErr := run.Authority.existingPromotionStateHashes()
+			if stateErr != nil || resultObjectID != run.Authority.TargetPlatformObjectID || resultTargetHash != targetStateHash || request.FieldReadback["target_state_hash"] != targetStateHash || (run.Authority.Action == "pause_promotion" && request.FieldReadback["platform_status"] != "paused") {
 				return TakeoverEvidenceResult{}, ErrInvalidContract
 			}
 		}

@@ -114,7 +114,7 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
 
     <AuthorityChain run={run} />
     <StatusBanner presentation={presentation} />
-    {run.authority.promotion_mutation ? <PromotionMutationDiff run={run} /> : null}
+    {run.authority.promotion_mutation || run.authority.promotion_control ? <PromotionChangeDiff run={run} /> : null}
 
     <div className="controlled-execution-layout">
       <section className="controlled-execution-main" aria-label="运行状态与步骤">
@@ -131,6 +131,7 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
           <div><dt>正式 Approval</dt><dd title={run.authority.approval_id}>{run.authority.approval_id}</dd></div>
           {run.authority.target_mapping_id ? <div><dt>目标映射版本</dt><dd title={run.authority.target_mapping_id}>{shortHash(run.authority.target_mapping_id)} · v{run.authority.target_mapping_version}</dd></div> : null}
           {run.authority.target_platform_object_id ? <div><dt>目标推广单元</dt><dd title={run.authority.target_platform_object_id}>{shortHash(run.authority.target_platform_object_id)}</dd></div> : null}
+          {run.authority.operator_principal_id ? <div><dt>绑定操作人</dt><dd title={run.authority.operator_principal_id}>{run.authority.operator_principal_id}</dd></div> : null}
           <div><dt>预算上限</dt><dd>¥{formatMinor(run.authority.budget_limit_minor)} {run.authority.currency}</dd></div>
           <div><dt>Workflow</dt><dd title={run.authority.workflow_canonical_hash}>{shortHash(run.authority.workflow_canonical_hash)}</dd></div>
           <div><dt>Platform Skill</dt><dd>{run.authority.skill_id && run.authority.skill_version ? <>{run.authority.skill_id} · {run.authority.skill_version}<small>仅代表已校准路径；执行当轮仍须复核页面和字段。</small></> : '未绑定；真实执行不可用'}</dd></div>
@@ -144,33 +145,46 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
 }
 
 function AuthorityChain({ run }: { run: ComputerUseRun }) {
-  const modifying = Boolean(run.authority.promotion_mutation)
+  const changing = Boolean(run.authority.promotion_mutation || run.authority.promotion_control)
+  const emergencyPause = run.authority.action === 'pause_promotion'
   const formalApproved = run.blocking_reason !== 'APPROVAL_INVALID'
   const confirmationReady = ['submitting', 'verifying', 'succeeded', 'failed', 'partial', 'result_unknown'].includes(run.state)
     && run.blocking_reason !== 'FINAL_CONFIRMATION_INVALID'
   return <ol className="controlled-execution-authority-chain" aria-label="受控写入授权链">
-    <li className="complete"><span>1</span><div><b>{modifying ? '读取当前值并创建新变更' : '接受优化方案'}</b><small>{modifying ? '当前值、目标值、对象和 Mapping 版本已经冻结；创建时的审批不可复用。' : '已接受/修改的反馈才可创建 ChangeSet；这不是写入批准。'}</small></div></li>
+    <li className="complete"><span>1</span><div><b>{emergencyPause ? '核对投放状态并创建紧急暂停' : changing ? '读取当前值并创建新变更' : '接受优化方案'}</b><small>{changing ? '当前值、目标值、对象、操作人和 Mapping 版本已经冻结；创建时的审批不可复用。' : '已接受/修改的反馈才可创建 ChangeSet；这不是写入批准。'}</small></div></li>
     <li className={formalApproved ? 'complete' : 'blocked'}><span>2</span><div><b>批准平台写入</b><small>正式 Approval 绑定账户、预算、配置、Workflow 与阶段 B Skill 校准版本；这不代表实时 DOM 已复核。</small></div></li>
     <li className={confirmationReady ? 'complete' : 'waiting'}><span>3</span><div><b>一次性最终确认</b><small>仅对当前 Run 有效；签发或过期都不等于已经提交。</small></div></li>
   </ol>
 }
 
-function PromotionMutationDiff({ run }: { run: ComputerUseRun }) {
+function PromotionChangeDiff({ run }: { run: ComputerUseRun }) {
   const mutation = run.authority.promotion_mutation
-  if (!mutation) return null
+  const control = run.authority.promotion_control
+  if (!mutation && !control) return null
+  const emergencyPause = run.authority.action === 'pause_promotion' && Boolean(control)
   const actionLabel = ({
     update_promotion_budget: '修改推广单元日预算',
     update_promotion_schedule: '修改推广单元排期',
     update_promotion_materials: '更换或增减授权素材',
+    pause_promotion: '紧急暂停推广单元',
   } as Record<string, string>)[run.authority.action] ?? '修改推广单元'
-  const rows = mutationRows(run.authority.action, mutation)
-  return <section className="controlled-execution-mutation" aria-label="当前值与目标值">
-    <header><div><span className="section-label">本次受控变更</span><h3>{actionLabel}</h3></div><small>提交前必须逐字段回读一致；任何差异都会阻止一次性确认。</small></header>
+  const rows = control
+    ? [
+        { label: '投放状态', current: statusLabel(control.current_platform_status), target: statusLabel(control.target_platform_status) },
+        { label: '每日预算（保持不变）', current: `¥${formatMinor(control.current_daily_budget_minor)}`, target: `¥${formatMinor(control.current_daily_budget_minor)}` },
+      ]
+    : mutationRows(run.authority.action, mutation!)
+  return <section className={`controlled-execution-mutation${emergencyPause ? ' emergency' : ''}`} aria-label="当前值与目标值">
+    <header><div><span className="section-label">{emergencyPause ? '高优先级止损动作' : '本次受控变更'}</span><h3>{actionLabel}</h3></div><small>{emergencyPause ? '这是平台推广单元的状态变更，不是暂停本页执行流程。只允许单击一次，随后必须回读“已暂停”。' : '提交前必须逐字段回读一致；任何差异都会阻止一次性确认。'}</small></header>
     <div className="controlled-execution-mutation-table" role="table" aria-label="变更差异">
       <div className="heading" role="row"><b role="columnheader">字段</b><b role="columnheader">当前值</b><b role="columnheader">目标值</b></div>
       {rows.map(row => <div key={row.label} role="row"><span role="cell">{row.label}</span><strong role="cell">{row.current}</strong><strong role="cell" className="target">{row.target}</strong></div>)}
     </div>
   </section>
+}
+
+function statusLabel(status: string) {
+  return ({ delivering: '投放中', paused: '已暂停' } as Record<string, string>)[status] ?? status
 }
 
 function mutationRows(action: string, mutation: NonNullable<ComputerUseRun['authority']['promotion_mutation']>) {
@@ -210,7 +224,7 @@ function RunTimeline({ run }: { run: ComputerUseRun }) {
   return <section className="controlled-execution-timeline" aria-label="执行阶段">
     <h3>执行阶段</h3>
     <ol>{steps.map((step, index) => <li key={step.state} className={index < activeIndex ? 'complete' : index === activeIndex ? 'active' : ''}><span>{index + 1}</span>{step.label}</li>)}</ol>
-    {run.paused ? <p><Pause size={14} />运行已暂停；恢复时必须重新识别页面与账户。</p> : null}
+    {run.paused ? <p><Pause size={14} />执行流程已暂停；这不代表平台推广单元已经暂停。恢复流程时必须重新识别页面与账户。</p> : null}
   </section>
 }
 
@@ -222,9 +236,9 @@ function ControlPanel({ run, busy, terminal, showTakeover, onControl }: {
   onControl: (action: 'pause' | 'resume' | 'cancel' | 'takeover' | 'release_takeover') => void
 }) {
   return <section className="controlled-execution-controls" aria-label="运行控制">
-    <div><span className="section-label">运行控制</span><h3>暂停、接管和取消由控制面授权</h3><p>这些控制不会绕过服务端的租约、版本、组织隔离或 Kill Switch 判断。</p></div>
+    <div><span className="section-label">运行控制</span><h3>执行流程的暂停、接管和取消</h3><p>这里仅控制 Computer Use 执行流程，不会暂停广告平台上的推广单元；平台紧急暂停必须使用独立 ChangeSet 和 Approval。</p></div>
     <div className="controlled-execution-control-actions">
-      {run.paused ? <button className="secondary-button" onClick={() => onControl('resume')} disabled={busy || terminal}>恢复并重新识别</button> : <button className="secondary-button" onClick={() => onControl('pause')} disabled={busy || terminal}>暂停运行</button>}
+      {run.paused ? <button className="secondary-button" onClick={() => onControl('resume')} disabled={busy || terminal}>恢复并重新识别</button> : <button className="secondary-button" onClick={() => onControl('pause')} disabled={busy || terminal}>暂停执行流程</button>}
       {showTakeover ? <button className="secondary-button" onClick={() => onControl(run.takeover_active ? 'release_takeover' : 'takeover')} disabled={busy || terminal}><Hand size={15} />{run.takeover_active ? '释放接管' : '人工接管'}</button> : null}
       <button className="danger-button" onClick={() => onControl('cancel')} disabled={busy || terminal}><XCircle size={15} />取消运行</button>
     </div>
@@ -260,7 +274,7 @@ function WorkspaceState({ kind, message, onRetry }: { kind: 'loading' | 'empty' 
 }
 
 function controlNotice(action: 'pause' | 'resume' | 'cancel' | 'takeover' | 'release_takeover') {
-  return ({ pause: '已请求暂停；服务端会在下一个安全边界生效。', resume: '已请求恢复；服务端将先重新识别页面与账户。', cancel: '已请求取消；证据与审计记录保持可读。', takeover: '已请求人工接管；请等待服务端确认租约状态。', release_takeover: '已请求释放人工接管。' })[action]
+  return ({ pause: '已请求暂停执行流程；这不会改变平台推广单元状态。', resume: '已请求恢复执行流程；服务端将先重新识别页面与账户。', cancel: '已请求取消；证据与审计记录保持可读。', takeover: '已请求人工接管；请等待服务端确认租约状态。', release_takeover: '已请求释放人工接管。' })[action]
 }
 
 function formatMinor(value: number) {

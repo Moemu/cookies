@@ -109,8 +109,9 @@ func (r MySQLRepository) CreateControlledExecution(ctx context.Context, value Co
 	}
 	defer tx.Rollback()
 	var status, approvalID string
+	var bindingJSON []byte
 	var expiresAt sql.NullTime
-	err = tx.QueryRowContext(ctx, `SELECT c.status,a.id,a.expires_at FROM delivery_controlled_change_sets c JOIN delivery_remote_write_approvals a ON a.organization_id=c.organization_id AND a.project_id=c.project_id AND a.controlled_change_set_id=c.id WHERE c.organization_id=? AND c.project_id=? AND c.id=? FOR UPDATE`, value.OrganizationID, value.ProjectID, value.ControlledChangeSetID).Scan(&status, &approvalID, &expiresAt)
+	err = tx.QueryRowContext(ctx, `SELECT c.status,c.binding_json,a.id,a.expires_at FROM delivery_controlled_change_sets c JOIN delivery_remote_write_approvals a ON a.organization_id=c.organization_id AND a.project_id=c.project_id AND a.controlled_change_set_id=c.id WHERE c.organization_id=? AND c.project_id=? AND c.id=? FOR UPDATE`, value.OrganizationID, value.ProjectID, value.ControlledChangeSetID).Scan(&status, &bindingJSON, &approvalID, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ControlledExecution{}, ErrNotFound
 	}
@@ -119,6 +120,13 @@ func (r MySQLRepository) CreateControlledExecution(ctx context.Context, value Co
 	}
 	if status != string(ControlledChangeSetApproved) || approvalID != value.RemoteWriteApprovalID || !expiresAt.Valid || !value.CreatedAt.Before(expiresAt.Time) {
 		return ControlledExecution{}, ErrApprovalExpired
+	}
+	var binding ControlledAuthorityBinding
+	if err := json.Unmarshal(bindingJSON, &binding); err != nil {
+		return ControlledExecution{}, fmt.Errorf("decode controlled execution binding: %w", err)
+	}
+	if binding.OperatorPrincipalID != "" && binding.OperatorPrincipalID != value.CreatedBy {
+		return ControlledExecution{}, ErrApprovalContentMismatch
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_controlled_executions (id,organization_id,project_id,controlled_change_set_id,remote_write_approval_id,computer_use_run_id,status,version,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, value.ID, value.OrganizationID, value.ProjectID, value.ControlledChangeSetID, value.RemoteWriteApprovalID, nullableString(value.ComputerUseRunID), value.Status, value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
 	if err != nil {
@@ -334,8 +342,8 @@ func (r MySQLRepository) ConfirmPlatformEntityMappingMutation(ctx context.Contex
 	if err != nil {
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, err
 	}
-	mutation := change.Binding.PromotionMutation
-	if change.Status != ControlledChangeSetExecuting || !change.Action.ModifiesExistingPromotion() || mutation == nil || change.Binding.TargetMappingID != mapping.ID || change.Binding.TargetMappingVersion != expectedVersion || change.Binding.TargetPlatformObjectID != mapping.PlatformObjectID || change.Binding.TargetPlatformObjectKind != mapping.PlatformObjectKind || change.Binding.AccountReferenceID != mapping.AccountReferenceID || (mapping.CurrentStateAction == change.Action && mapping.CurrentStateHash != mutation.CurrentStateHash) {
+	currentStateHash, targetStateHash, stateErr := change.Binding.existingPromotionStateHashes(change.Action)
+	if change.Status != ControlledChangeSetExecuting || !change.Action.ChangesExistingPromotion() || stateErr != nil || change.Binding.TargetMappingID != mapping.ID || change.Binding.TargetMappingVersion != expectedVersion || change.Binding.TargetPlatformObjectID != mapping.PlatformObjectID || change.Binding.TargetPlatformObjectKind != mapping.PlatformObjectKind || change.Binding.AccountReferenceID != mapping.AccountReferenceID || (mapping.CurrentStateAction == change.Action && mapping.CurrentStateHash != currentStateHash) {
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrApprovalContentMismatch
 	}
 	var approvalChangeSetID, approvalActionHash string
@@ -363,11 +371,11 @@ func (r MySQLRepository) ConfirmPlatformEntityMappingMutation(ctx context.Contex
 	if err != nil {
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, err
 	}
-	if platformObjectID != mapping.PlatformObjectID || resultEvidence.Evidence.FieldReadback["target_state_hash"] != mutation.TargetStateHash || listEvidence.Evidence.FieldReadback["target_state_hash"] != mutation.TargetStateHash {
+	if platformObjectID != mapping.PlatformObjectID || resultEvidence.Evidence.FieldReadback["target_state_hash"] != targetStateHash || listEvidence.Evidence.FieldReadback["target_state_hash"] != targetStateHash || (change.Action == ControlledActionPausePromotion && platformStatus != change.Binding.PromotionControl.TargetPlatformStatus) {
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrApprovalContentMismatch
 	}
 	completedAt := listEvidence.Evidence.CreatedAt
-	result, err := tx.ExecContext(ctx, `UPDATE delivery_platform_entity_mappings SET business_execution_id=?,computer_use_run_id=?,platform_status=?,current_state_action=?,current_state_hash=?,result_evidence_id=?,list_evidence_id=?,version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND status='confirmed' AND version=?`, execution.ID, execution.ComputerUseRunID, platformStatus, change.Action, mutation.TargetStateHash, resultEvidenceID, listEvidenceID, completedAt, org, project, id, expectedVersion)
+	result, err := tx.ExecContext(ctx, `UPDATE delivery_platform_entity_mappings SET business_execution_id=?,computer_use_run_id=?,platform_status=?,current_state_action=?,current_state_hash=?,result_evidence_id=?,list_evidence_id=?,version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND status='confirmed' AND version=?`, execution.ID, execution.ComputerUseRunID, platformStatus, change.Action, targetStateHash, resultEvidenceID, listEvidenceID, completedAt, org, project, id, expectedVersion)
 	if err != nil {
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, err
 	}
@@ -377,7 +385,7 @@ func (r MySQLRepository) ConfirmPlatformEntityMappingMutation(ctx context.Contex
 		}
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrVersionConflict
 	}
-	revision := PlatformEntityMappingRevision{MappingID: mapping.ID, OrganizationID: org, ProjectID: project, Version: expectedVersion + 1, Action: change.Action, BusinessExecutionID: execution.ID, ComputerUseRunID: execution.ComputerUseRunID, PlatformObjectID: platformObjectID, PlatformStatus: platformStatus, PreviousStateAction: mapping.CurrentStateAction, PreviousStateHash: mapping.CurrentStateHash, CurrentStateAction: change.Action, CurrentStateHash: mutation.TargetStateHash, ResultEvidenceID: resultEvidenceID, ListEvidenceID: listEvidenceID, CreatedAt: completedAt}
+	revision := PlatformEntityMappingRevision{MappingID: mapping.ID, OrganizationID: org, ProjectID: project, Version: expectedVersion + 1, Action: change.Action, BusinessExecutionID: execution.ID, ComputerUseRunID: execution.ComputerUseRunID, PlatformObjectID: platformObjectID, PlatformStatus: platformStatus, PreviousStateAction: mapping.CurrentStateAction, PreviousStateHash: mapping.CurrentStateHash, CurrentStateAction: change.Action, CurrentStateHash: targetStateHash, ResultEvidenceID: resultEvidenceID, ListEvidenceID: listEvidenceID, CreatedAt: completedAt}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO delivery_platform_entity_mapping_revisions (organization_id,project_id,mapping_id,mapping_version,action,business_execution_id,computer_use_run_id,platform_object_id,platform_status,previous_state_action,previous_state_hash,current_state_action,current_state_hash,result_evidence_id,list_evidence_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, revision.OrganizationID, revision.ProjectID, revision.MappingID, revision.Version, revision.Action, revision.BusinessExecutionID, revision.ComputerUseRunID, revision.PlatformObjectID, revision.PlatformStatus, nullableString(string(revision.PreviousStateAction)), nullableString(revision.PreviousStateHash), revision.CurrentStateAction, revision.CurrentStateHash, revision.ResultEvidenceID, revision.ListEvidenceID, revision.CreatedAt); err != nil {
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, err
 	}

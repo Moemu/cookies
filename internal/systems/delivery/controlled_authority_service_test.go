@@ -159,8 +159,8 @@ func (r *controlledMemoryRepository) ConfirmPlatformEntityMappingMutation(_ cont
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrInvalidState
 	}
 	change := r.changes[repositoryKey(org, project, execution.ControlledChangeSetID)]
-	mutation := change.Binding.PromotionMutation
-	if mutation == nil || change.Binding.TargetMappingID != mapping.ID || change.Binding.TargetMappingVersion != mapping.Version || change.Binding.TargetPlatformObjectID != mapping.PlatformObjectID {
+	currentStateHash, targetStateHash, stateErr := change.Binding.existingPromotionStateHashes(change.Action)
+	if stateErr != nil || !change.Action.ChangesExistingPromotion() || change.Binding.TargetMappingID != mapping.ID || change.Binding.TargetMappingVersion != mapping.Version || change.Binding.TargetPlatformObjectID != mapping.PlatformObjectID || (mapping.CurrentStateAction == change.Action && mapping.CurrentStateHash != currentStateHash) {
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrApprovalContentMismatch
 	}
 	result, resultOK := r.evidence[resultEvidenceID]
@@ -172,15 +172,15 @@ func (r *controlledMemoryRepository) ConfirmPlatformEntityMappingMutation(_ cont
 	evidenceScope.ComputerUseRunID = execution.ComputerUseRunID
 	evidenceScope.InternalObjectID = change.Binding.ObjectFingerprint
 	objectID, status, err := validatePlatformMappingEvidence(evidenceScope, result, list)
-	if err != nil || objectID != mapping.PlatformObjectID || result.Evidence.FieldReadback["target_state_hash"] != mutation.TargetStateHash || list.Evidence.FieldReadback["target_state_hash"] != mutation.TargetStateHash {
+	if err != nil || objectID != mapping.PlatformObjectID || result.Evidence.FieldReadback["target_state_hash"] != targetStateHash || list.Evidence.FieldReadback["target_state_hash"] != targetStateHash || (change.Action == ControlledActionPausePromotion && status != change.Binding.PromotionControl.TargetPlatformStatus) {
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrApprovalContentMismatch
 	}
-	revision := PlatformEntityMappingRevision{MappingID: mapping.ID, OrganizationID: org, ProjectID: project, Version: mapping.Version + 1, Action: change.Action, BusinessExecutionID: execution.ID, ComputerUseRunID: execution.ComputerUseRunID, PlatformObjectID: objectID, PlatformStatus: status, PreviousStateAction: mapping.CurrentStateAction, PreviousStateHash: mapping.CurrentStateHash, CurrentStateAction: change.Action, CurrentStateHash: mutation.TargetStateHash, ResultEvidenceID: resultEvidenceID, ListEvidenceID: listEvidenceID, CreatedAt: list.Evidence.CreatedAt}
+	revision := PlatformEntityMappingRevision{MappingID: mapping.ID, OrganizationID: org, ProjectID: project, Version: mapping.Version + 1, Action: change.Action, BusinessExecutionID: execution.ID, ComputerUseRunID: execution.ComputerUseRunID, PlatformObjectID: objectID, PlatformStatus: status, PreviousStateAction: mapping.CurrentStateAction, PreviousStateHash: mapping.CurrentStateHash, CurrentStateAction: change.Action, CurrentStateHash: targetStateHash, ResultEvidenceID: resultEvidenceID, ListEvidenceID: listEvidenceID, CreatedAt: list.Evidence.CreatedAt}
 	mapping.PlatformStatus = status
 	mapping.BusinessExecutionID = execution.ID
 	mapping.ComputerUseRunID = execution.ComputerUseRunID
 	mapping.CurrentStateAction = change.Action
-	mapping.CurrentStateHash = mutation.TargetStateHash
+	mapping.CurrentStateHash = targetStateHash
 	mapping.ResultEvidenceID = resultEvidenceID
 	mapping.ListEvidenceID = listEvidenceID
 	mapping.Version++
@@ -321,6 +321,45 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	materialChange, _, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", updatedMapping.ID, CompileMappedControlledChangeSetRequest{ExpectedMappingVersion: updatedMapping.Version, Action: ControlledActionUpdatePromotionMaterials, CurrentDailyBudgetMinor: 36000, TargetDailyBudgetMinor: 36000, CurrentMaterials: []ControlledMaterialReference{{ReferenceID: "asset_a", AuthorizationEvidenceID: "material_evidence_a"}}, TargetMaterials: []ControlledMaterialReference{{ReferenceID: "asset_a", AuthorizationEvidenceID: "material_evidence_a"}, {ReferenceID: "asset_b", AuthorizationEvidenceID: "material_evidence_b"}}})
 	if err != nil || materialChange.Binding.PromotionMutation == nil || len(materialChange.Binding.PromotionMutation.TargetMaterials) != 2 {
 		t.Fatalf("material change=%#v err=%v", materialChange, err)
+	}
+	if _, _, err := service.CompileEmergencyPauseChangeSet(context.Background(), actor, "project_a", updatedMapping.ID, CompileEmergencyPauseChangeSetRequest{ExpectedMappingVersion: updatedMapping.Version, CurrentDailyBudgetMinor: 36000, CurrentPlatformStatus: "delivering"}); err != ErrInvalidState {
+		t.Fatalf("non-delivering promotion pause err=%v", err)
+	}
+	updatedMapping.PlatformStatus = "delivering"
+	repo.mappings[repositoryKey(actor.OrganizationID, "project_a", updatedMapping.ID)] = updatedMapping
+	pauseChange, pauseReplay, err := service.CompileEmergencyPauseChangeSet(context.Background(), actor, "project_a", updatedMapping.ID, CompileEmergencyPauseChangeSetRequest{ExpectedMappingVersion: updatedMapping.Version, CurrentDailyBudgetMinor: 36000, CurrentPlatformStatus: "delivering"})
+	if err != nil || pauseReplay || pauseChange.Action != ControlledActionPausePromotion || pauseChange.Binding.PromotionControl == nil || pauseChange.Binding.PromotionMutation != nil || pauseChange.Binding.OperatorPrincipalID != actor.Principal.ID || pauseChange.BudgetLimitMinor != 36000 {
+		t.Fatalf("pause change=%#v replay=%t err=%v", pauseChange, pauseReplay, err)
+	}
+	approvedPause, pauseApproval, err := service.ApproveControlledChangeSet(context.Background(), actor, "project_a", pauseChange.ID, ApproveControlledChangeSetRequest{ExpectedVersion: pauseChange.Version})
+	if err != nil || pauseApproval.ID == mutationApproval.ID || pauseApproval.ControlledChangeSetID != pauseChange.ID {
+		t.Fatalf("pause approval=%#v err=%v", pauseApproval, err)
+	}
+	otherOperator := actor
+	otherOperator.Principal.ID = "operator_2"
+	if _, err := service.CreateControlledExecution(context.Background(), otherOperator, "project_a", approvedPause.ID); err != ErrApprovalContentMismatch {
+		t.Fatalf("different pause operator execution err=%v", err)
+	}
+	pauseExecution, err := service.CreateControlledExecution(context.Background(), actor, "project_a", approvedPause.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseExecution, err = service.AttachComputerUseRun(context.Background(), actor, "project_a", pauseExecution.ID, pauseExecution.Version, "run_pause_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseEvidenceScope := updatedMapping
+	pauseEvidenceScope.ComputerUseRunID = pauseExecution.ComputerUseRunID
+	pauseEvidenceScope.InternalObjectID = pauseChange.Binding.ObjectFingerprint
+	pauseResult := validMappingEvidence(pauseEvidenceScope, "evidence_pause_result", "step_pause_result", 2, computeruse.TakeoverResultObserved, updatedMapping.PlatformObjectID, "paused")
+	pauseResult.Evidence.FieldReadback["target_state_hash"] = pauseChange.Binding.PromotionControl.TargetStateHash
+	pauseList := validMappingEvidence(pauseEvidenceScope, "evidence_pause_list", "step_pause_list", 3, computeruse.TakeoverListConfirmed, updatedMapping.PlatformObjectID, "paused")
+	pauseList.Evidence.FieldReadback["target_state_hash"] = pauseChange.Binding.PromotionControl.TargetStateHash
+	repo.evidence[pauseResult.Evidence.ID] = pauseResult
+	repo.evidence[pauseList.Evidence.ID] = pauseList
+	pausedMapping, pauseRevision, err := service.ConfirmPlatformEntityMappingChange(context.Background(), actor, "project_a", updatedMapping.ID, ConfirmPlatformEntityMappingChangeRequest{ExpectedVersion: updatedMapping.Version, BusinessExecutionID: pauseExecution.ID, ResultEvidenceID: pauseResult.Evidence.ID, ListEvidenceID: pauseList.Evidence.ID})
+	if err != nil || pausedMapping.PlatformStatus != "paused" || pausedMapping.Version != updatedMapping.Version+1 || pausedMapping.CurrentStateAction != ControlledActionPausePromotion || pausedMapping.CurrentStateHash != pauseChange.Binding.PromotionControl.TargetStateHash || pauseRevision.PreviousStateAction != ControlledActionUpdatePromotionBudget || pauseRevision.PreviousStateHash != mutation.TargetStateHash || pauseRevision.CurrentStateAction != ControlledActionPausePromotion {
+		t.Fatalf("paused mapping=%#v revision=%#v err=%v", pausedMapping, pauseRevision, err)
 	}
 }
 

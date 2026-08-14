@@ -1,6 +1,6 @@
 {
   "schema_version": "delivery-controlled-change-set/v1",
-  "id": "controlled_change_budget_test",
+  "id": "controlled_change_pause_test",
   "organization_id": "org_test",
   "project_id": "project_test",
   "binding": {
@@ -26,30 +26,31 @@
     "account_reference_id": "account_test",
     "parent_platform_project_id": "platform_project_test",
     "target_mapping_id": "mapping_test",
-    "target_mapping_version": 2,
+    "target_mapping_version": 3,
     "target_platform_object_id": "promotion_test",
     "target_platform_object_kind": "promotion",
     "operator_principal_id": "operator_test",
     "project_budget_mode": "unlimited",
     "project_budget_limit_minor": 0,
-    "promotion_budget_limit_minor": 36000,
+    "promotion_budget_limit_minor": 30000,
     "object_fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
     "skill_id": "oceanengine-ecommerce-manual",
     "skill_version": "v0.1-calibration",
-    "promotion_mutation": {
+    "promotion_control": {
       "current_daily_budget_minor": 30000,
-      "target_daily_budget_minor": 36000,
+      "current_platform_status": "delivering",
+      "target_platform_status": "paused",
       "current_state_hash": "3333333333333333333333333333333333333333333333333333333333333333",
       "target_state_hash": "4444444444444444444444444444444444444444444444444444444444444444"
     }
   },
-  "action": "update_promotion_budget",
-  "budget_limit_minor": 36000,
+  "action": "pause_promotion",
+  "budget_limit_minor": 30000,
   "currency": "CNY",
   "status": "ready_for_approval",
   "canonical_hash": "5555555555555555555555555555555555555555555555555555555555555555",
   "version": 1,
   "created_by": "operator_test",
-  "created_at": "2026-08-14T10:00:00Z",
-  "updated_at": "2026-08-14T10:00:00Z"
+  "created_at": "2026-08-14T11:00:00Z",
+  "updated_at": "2026-08-14T11:00:00Z"
 }

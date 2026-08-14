@@ -98,6 +98,7 @@ func TestDeterministicFakeAdapterProjectsExactPromotionMutationReadback(t *testi
 	run.Authority.TargetMappingVersion = 2
 	run.Authority.TargetPlatformObjectID = "promotion_test"
 	run.Authority.TargetPlatformObjectKind = "promotion"
+	run.Authority.OperatorPrincipalID = "operator_1"
 	run.Authority.PromotionBudgetLimitMinor = 36000
 	run.Authority.BudgetLimitMinor = 36000
 	run.Authority.PromotionMutation = &PromotionMutationBinding{CurrentDailyBudgetMinor: 30000, TargetDailyBudgetMinor: 36000, CurrentStateHash: currentHash, TargetStateHash: targetHash}
@@ -108,6 +109,38 @@ func TestDeterministicFakeAdapterProjectsExactPromotionMutationReadback(t *testi
 	}
 	_, outcome, err := adapter.Submit(context.Background(), run, ControlledActionAttempt{})
 	if err != nil || outcome.Readback["platform_object_id"] != "promotion_test" || outcome.Readback["target_state_hash"] != targetHash {
+		t.Fatalf("outcome=%#v err=%v", outcome, err)
+	}
+}
+
+func TestDeterministicFakeAdapterProjectsEmergencyPauseReadback(t *testing.T) {
+	now := time.Date(2026, 8, 14, 6, 30, 0, 0, time.UTC)
+	run := validRun(now)
+	currentHash, _ := contract.CanonicalJSONHash(struct {
+		DailyBudgetMinor int64  `json:"daily_budget_minor"`
+		PlatformStatus   string `json:"platform_status"`
+	}{30000, "delivering"})
+	targetHash, _ := contract.CanonicalJSONHash(struct {
+		DailyBudgetMinor int64  `json:"daily_budget_minor"`
+		PlatformStatus   string `json:"platform_status"`
+	}{30000, "paused"})
+	run.Authority.Action = "pause_promotion"
+	run.Authority.ParentPlatformProjectID = "project_test"
+	run.Authority.TargetMappingID = "mapping_test"
+	run.Authority.TargetMappingVersion = 2
+	run.Authority.TargetPlatformObjectID = "promotion_test"
+	run.Authority.TargetPlatformObjectKind = "promotion"
+	run.Authority.OperatorPrincipalID = "operator_1"
+	run.Authority.PromotionBudgetLimitMinor = 30000
+	run.Authority.BudgetLimitMinor = 30000
+	run.Authority.PromotionControl = &PromotionControlBinding{CurrentDailyBudgetMinor: 30000, CurrentPlatformStatus: "delivering", TargetPlatformStatus: "paused", CurrentStateHash: currentHash, TargetStateHash: targetHash}
+	adapter := DeterministicFakeAdapter{Outcome: WorkerSuccess, AccountID: run.AccountID}
+	prepared, err := adapter.Prepare(context.Background(), run)
+	if err != nil || prepared.Readback["platform_object_id"] != "promotion_test" || prepared.Readback["current_state_hash"] != currentHash || prepared.Readback["target_state_hash"] != targetHash {
+		t.Fatalf("prepared=%#v err=%v", prepared, err)
+	}
+	_, outcome, err := adapter.Submit(context.Background(), run, ControlledActionAttempt{})
+	if err != nil || outcome.Readback["platform_object_id"] != "promotion_test" || outcome.Readback["platform_status"] != "paused" || outcome.Readback["target_state_hash"] != targetHash {
 		t.Fatalf("outcome=%#v err=%v", outcome, err)
 	}
 }
