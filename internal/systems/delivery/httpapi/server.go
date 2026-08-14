@@ -69,6 +69,26 @@ type observatoryApplication interface {
 	ListObservatoryFeedback(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]delivery.DeliveryObservatoryFeedback, error)
 }
 
+type controlledAuthorityApplication interface {
+	CompileControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, delivery.CompileControlledChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
+	CompileMappedControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CompileMappedControlledChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
+	CompileEmergencyPauseChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CompileEmergencyPauseChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
+	CompileControlledRestartChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CompileControlledRestartChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
+	GetControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledChangeSet, error)
+	InvalidateCalibratedControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.InvalidateCalibratedControlledChangeSetRequest) (delivery.ControlledChangeSet, delivery.ControlledExecution, error)
+	ApproveControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ApproveControlledChangeSetRequest) (delivery.ControlledChangeSet, delivery.RemoteWriteApproval, error)
+	CreateControlledExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledExecution, error)
+	GetControlledExecution(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ControlledExecution, error)
+}
+
+type platformEntityMappingApplication interface {
+	CreatePendingPlatformEntityMapping(context.Context, contract.ActorContext, delivery.PlatformEntityMapping) (delivery.PlatformEntityMapping, error)
+	GetPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PlatformEntityMapping, error)
+	ConfirmPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ConfirmPlatformEntityMappingRequest) (delivery.PlatformEntityMapping, error)
+	ConfirmPlatformEntityMappingMutation(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ConfirmPlatformEntityMappingMutationRequest) (delivery.PlatformEntityMapping, delivery.PlatformEntityMappingRevision, error)
+	ConfirmPlatformEntityMappingChange(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ConfirmPlatformEntityMappingChangeRequest) (delivery.PlatformEntityMapping, delivery.PlatformEntityMappingRevision, error)
+}
+
 type Server struct {
 	app Application
 	mux *http.ServeMux
@@ -106,6 +126,16 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}", server.getObservatoryRun)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/feedback", server.listObservatoryFeedback)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/feedback", server.submitObservatoryFeedback)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/observatory-runs/{run_id}/controlled-change-sets", server.compileControlledChangeSet)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-change-sets", server.compileMappedControlledChangeSet)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/emergency-pause-change-sets", server.compileEmergencyPauseChangeSet)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-restart-change-sets", server.compileControlledRestartChangeSet)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/controlled-change-sets/{change_set_id}", server.getControlledChangeSet)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/controlled-change-sets/{controlled_change_set_action}", server.controlledChangeSetAction)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/controlled-executions/{execution_id}", server.getControlledExecution)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings", server.createPlatformEntityMapping)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}", server.getPlatformEntityMapping)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_action}", server.platformEntityMappingAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions", server.listExecutions)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}", server.getExecution)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/executions/{execution_id}/simulation-runs", server.createOutcomeSimulation)

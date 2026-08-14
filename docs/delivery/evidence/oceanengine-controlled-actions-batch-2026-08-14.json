@@ -1,0 +1,183 @@
+{
+  "schema_version": "oceanengine-controlled-actions-batch-evidence/v1",
+  "observed_at": "2026-08-14",
+  "platform": "ocean_engine",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "batch_result": "stopped_safely_before_remote_write",
+  "scope": {
+    "account_reference_sha256": "a8c499f7e22dc70d392d8de9b7bd093a4e7371cb17ba3e53c4bf8e0eea15667c",
+    "parent_project_reference_sha256": "07f55315c832782799372a190c3a7c263717634543e81d253919cfa180317f89",
+    "promotion_reference_sha256": "199672dd7e6d506b8ef3da3b3011c2b192ba5339d743a0c57f6fc3a5f444aab2",
+    "mapping_reference_sha256": "d29985878c8bf13632bc04ed7acde9ed892a1b5261c19563dbed5cea54289438",
+    "object_identity_method": "server_loaded_confirmed_mapping_then_exact_account_parent_promotion_sha256_match"
+  },
+  "mapping_snapshot": {
+    "status": "confirmed",
+    "revision": 2,
+    "platform_status": "pending_review",
+    "platform_status_semantics": "last_dual_readback_snapshot_from_creation_not_live_platform_state",
+    "live_composite_status_dimensions": ["not_delivering", "paused", "review_completed"],
+    "mapping_changed": false
+  },
+  "shared_form_fixture": {
+    "page_mode": "promotion_edit",
+    "pathname": "/superior/ads",
+    "account_matches": true,
+    "parent_project_matches": true,
+    "promotion_matches": true,
+    "mapping_match_count": 1,
+    "stable_field_group_count": 18,
+    "baseline_sha256": "9ae8d147cfae760fec67ebc78169e35a74e4c75801e18acc40db5c2665fa90f5",
+    "save_boundary": "save_and_close",
+    "save_boundary_unique": true,
+    "safe_exit": "cancel",
+    "coordinate_fallback_allowed": false
+  },
+  "capability_matrix": [
+    {
+      "action": "update_promotion_budget",
+      "calibration_status": "passed_no_write",
+      "controlled_action_status": "blocked_by_lease_expiry",
+      "current_value": { "daily_budget_minor": 30000, "currency": "CNY" },
+      "target_value": { "daily_budget_minor": 31000, "currency": "CNY" },
+      "readback_value": { "daily_budget_minor": 31000, "currency": "CNY" },
+      "form_diff_keys": ["daily_budget"],
+      "business_diff_keys": ["daily_budget_minor"],
+      "unchanged_field_group_count": 17,
+      "draft_sha256": "aeccad7d4e445d1733a341b6045b102ed63c30cafeba0468006abbc082780f51",
+      "draft_discarded": true,
+      "remote_value_after_discard": { "daily_budget_minor": 30000, "currency": "CNY" },
+      "remote_value_unchanged": true,
+      "requires_independent_change_set_and_approval": true,
+      "maximum_remote_write_clicks": 1
+    },
+    {
+      "action": "update_promotion_materials",
+      "calibration_status": "passed_no_write",
+      "controlled_action_status": "blocked_by_dependency",
+      "current_value": { "material_reference_sha256": "8bda3f8a47952f843bcbbd674c23e52394aa1d7d384f50b2918c12576eebd27a" },
+      "target_value": { "material_reference_sha256": "f639153db97c95dfcce7898b38c0e581c3d56b6be997e9b9aedacfbef157d0e5", "authorization_scope": "same_test_account_existing_asset" },
+      "readback_value": { "material_reference_sha256": "f639153db97c95dfcce7898b38c0e581c3d56b6be997e9b9aedacfbef157d0e5" },
+      "form_diff_keys": ["material_name"],
+      "business_diff_keys": ["material_reference"],
+      "unchanged_field_group_count": 17,
+      "draft_discarded": true,
+      "fresh_form_sha256_after_discard": "9ae8d147cfae760fec67ebc78169e35a74e4c75801e18acc40db5c2665fa90f5",
+      "remote_value_unchanged": true,
+      "requires_independent_change_set_and_approval": true,
+      "maximum_remote_write_clicks": 1
+    },
+    {
+      "action": "pause_promotion",
+      "calibration_status": "blocked_by_eligible_test_object",
+      "controlled_action_status": "not_started",
+      "current_value": { "live_composite_status_dimensions": ["not_delivering", "paused", "review_completed"] },
+      "target_value": { "normalized_platform_status": "paused" },
+      "form_diff_keys": [],
+      "business_diff_keys": [],
+      "remote_value_unchanged": true,
+      "requires_independent_change_set_and_approval": true,
+      "maximum_remote_write_clicks": 0,
+      "blocking_reason": "no_confirmed_mapping_for_an_already_delivering_authorized_test_object"
+    },
+    {
+      "action": "resume_promotion",
+      "calibration_status": "blocked_by_eligible_test_object",
+      "controlled_action_status": "not_started",
+      "current_value": { "authoritative_pause_mapping_revision_available": false },
+      "target_value": { "normalized_platform_status": "delivering" },
+      "form_diff_keys": [],
+      "business_diff_keys": [],
+      "remote_value_unchanged": true,
+      "requires_independent_change_set_and_approval": true,
+      "maximum_remote_write_clicks": 0,
+      "blocking_reason": "no_successful_pause_revision_and_no_eligible_delivering_test_object"
+    }
+  ],
+  "per_action_authority_contract": {
+    "required_components": ["controlled_change_set", "remote_write_approval", "controlled_execution", "computer_use_run", "single_use_final_confirmation", "controlled_action_attempt", "exact_mapping_revision"],
+    "actions": [
+      { "action": "update_promotion_budget", "required_mapping_revision": 2, "authority_created": true },
+      { "action": "update_promotion_materials", "required_mapping_revision": "successful_budget_result_revision", "authority_created": false },
+      { "action": "pause_promotion", "required_mapping_revision": "eligible_delivering_object_revision", "authority_created": false },
+      { "action": "resume_promotion", "required_mapping_revision": "successful_pause_result_revision", "authority_created": false }
+    ]
+  },
+  "ordered_real_action_batch": {
+    "planned_actions": ["update_promotion_budget", "update_promotion_materials", "pause_promotion", "resume_promotion"],
+    "initially_executable_actions": ["update_promotion_budget", "update_promotion_materials"],
+    "dependency_edges": [
+      { "before": "update_promotion_budget", "after": "update_promotion_materials", "reason": "material_authority_must_bind_the_post_budget_mapping_revision" },
+      { "before": "pause_promotion", "after": "resume_promotion", "reason": "restart_requires_a_successful_authoritative_pause_revision" }
+    ],
+    "maximum_remote_write_clicks_authorized": 2,
+    "actual_remote_write_clicks": 0,
+    "stop_policy": "page_drift_lease_expiry_or_result_unknown_stops_all_dependent_actions_without_retry",
+    "stop_reason": "lease_expired_before_final_confirmation"
+  },
+  "control_plane_authority": {
+    "budget": {
+      "change_set_id": "controlledchangeset_1be7662c14ee69bf00f4a26926223645",
+      "approval_id": "remotewriteapproval_9f3097549796548eb839ab61df3f9b3d",
+      "controlled_execution_id": "controlledexecution_c10e0d6f789f743ea729de4ec09994f8",
+      "computer_use_run_id": "curun_010ac26c7c777940b9c3980e52a6ee85c26eedb2b776527a78e3f139356b9d15",
+      "mapping_revision": 2,
+      "change_set_terminal_status": "invalidated",
+      "execution_terminal_status": "cancelled",
+      "run_terminal_status": "cancelled",
+      "run_terminal_version": 12,
+      "lease_terminal_status": "released_after_expiry",
+      "final_confirmation_count": 0,
+      "controlled_action_attempt_count": 0
+    },
+    "materials": {
+      "authority_created": false,
+      "reason": "stopped_after_budget_lease_expiry_before_dependent_mapping_revision"
+    },
+    "pause": {
+      "authority_created": false,
+      "reason": "blocked_by_eligible_test_object"
+    },
+    "restart": {
+      "authority_created": false,
+      "reason": "blocked_by_eligible_test_object"
+    }
+  },
+  "control_plane_evidence": {
+    "observe_page_evidence_id": "cuevidence_3da1c52335275f64b2fc5934100ef4e0",
+    "begin_budget_fill_evidence_id": "cuevidence_04c891a8c5751f9863138afe792e0f37",
+    "budget_readback_evidence_id": "cuevidence_abf0ae2eb43b642efab07f669d26e417",
+    "current_material_authorization_evidence_id": "cuevidence_40bccfebfbbf42b2544cb3f37672c4bc",
+    "target_material_authorization_evidence_id": "cuevidence_844b51d0f12675f5ff42c31371dd557f",
+    "discard_draft_evidence_id": "cuevidence_6b06347d3d06fb8f2fada34b9ae4e288",
+    "verify_no_write_evidence_id": "cuevidence_b4247b6f7585f79e79f6896f49b61e3b",
+    "recorded_action_count": 7,
+    "final_confirmation_count": 0,
+    "controlled_action_attempt_count": 0,
+    "lease_reacquired_or_renewed_after_failure": false,
+    "remote_write_detected": false
+  },
+  "safety_boundary": {
+    "no_eligible_object_was_enabled_to_manufacture_a_pause_test": true,
+    "final_confirmation_issued": false,
+    "controlled_action_attempt_created": false,
+    "save_clicked": false,
+    "submit_clicked": false,
+    "enable_clicked": false,
+    "pause_clicked": false,
+    "restart_clicked": false,
+    "upload_clicked": false,
+    "delete_clicked": false,
+    "remote_write_detected": false
+  },
+  "redaction_policy": {
+    "platform_ids": "sha256_only",
+    "mapping_id": "sha256_only",
+    "business_names": "omitted",
+    "account_name": "omitted",
+    "material_names": "sha256_only",
+    "landing_page_urls": "omitted",
+    "direct_links": "omitted"
+  }
+}

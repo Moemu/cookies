@@ -1,0 +1,92 @@
+{
+  "schema_version": "oceanengine-gate-two-submit-evidence/v1",
+  "observed_at": "2026-08-14",
+  "platform": "ocean_engine",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "account_reference_sha256": "a8c499f7e22dc70d392d8de9b7bd093a4e7371cb17ba3e53c4bf8e0eea15667c",
+  "superseded_parent_project": {
+    "reference_sha256": "37c6c67221a660573cfd41d6a0bf1449987da28e2f71bcb9f7e12d8b1cfdcda2",
+    "status": "deleted_before_gate_two",
+    "used_by_final_authority": false
+  },
+  "active_parent_project": {
+    "reference_sha256": "07f55315c832782799372a190c3a7c263717634543e81d253919cfa180317f89",
+    "name_reference_sha256": "76620ff5fea60e211d97f87afa806274fde64d346b0eeb5d084ba3dd0a56c36b"
+  },
+  "authority": {
+    "change_set_id": "controlledchangeset_d70a289ff690f5082c5d0f740da16e5c",
+    "change_set_hash": "e4022fc1dee84a0475d7f1d62b60ab9639c6628edd1e2288dc3b5ae4326a7100",
+    "approval_id": "remotewriteapproval_d117a3ee2621ad5a5ddfed4bdf7feea0",
+    "approval_action_hash": "9f976d9f0d969b751e3fa01dd6cf7959107c57effdc74105a5178bf83364508d",
+    "controlled_execution_id": "controlledexecution_a0c7823d15b7fc095d19c356134d27df",
+    "computer_use_run_id": "curun_a9cd6c639d95a1b0ec1083ec264f2a0fdd28131f7ffa4dafb597680f9b7a0466",
+    "configuration_id": "gate-two-oceanengine-config-20260814",
+    "configuration_version": 3,
+    "configuration_hash": "97f028dd7cc92f02b37489ff06153304a44bd618d0f60bf32c93ffef8759c45a",
+    "action": "create_promotions_in_existing_project",
+    "promotion_count": 1,
+    "promotion_budget_limit_minor": 30000,
+    "currency": "CNY"
+  },
+  "pre_click_readback": {
+    "evidence_id": "cuevidence_f2246ffb1a283b89fc4853b15074b36b",
+    "diff_keys": [],
+    "account_matches": true,
+    "parent_project_matches": true,
+    "action_matches": true,
+    "daily_budget": "300.00",
+    "bid": "0.01",
+    "unit_name_reference_sha256": "88658e2063143dd7907909628134b68cfc272362d208742840e17daa65f8e5f7",
+    "save_control_unique_and_enabled": true,
+    "kill_switch_inactive": true
+  },
+  "single_submit": {
+    "confirmation_id": "cuc_bfcb2238e093e29c9d88f9ce81cdb255",
+    "attempt_id": "cua_9a99073ab2c837c765418efe3475bba4",
+    "idempotency_key": "gate-two-submit-20260814-once",
+    "control": "保存并关闭",
+    "click_count": 1,
+    "resubmit_attempted": false,
+    "attempt_status": "verified"
+  },
+  "platform_result": {
+    "promotion_reference_sha256": "199672dd7e6d506b8ef3da3b3011c2b192ba5339d743a0c57f6fc3a5f444aab2",
+    "promotion_name_reference_sha256": "88658e2063143dd7907909628134b68cfc272362d208742840e17daa65f8e5f7",
+    "platform_status": "pending_review",
+    "delivery_enabled": false,
+    "daily_budget": "300.00",
+    "bid": "0.01",
+    "parent_project_reference_sha256": "07f55315c832782799372a190c3a7c263717634543e81d253919cfa180317f89",
+    "result_evidence_id": "cuevidence_dd4e1a46f52677da75858c53faec4b52",
+    "list_evidence_id": "cuevidence_f6a485c5f4fa5235f0c10299d247161e",
+    "independent_list_match_count": 1
+  },
+  "mapping": {
+    "reference_sha256": "199672dd7e6d506b8ef3da3b3011c2b192ba5339d743a0c57f6fc3a5f444aab2",
+    "status": "confirmed",
+    "version": 2,
+    "platform_object_kind": "promotion",
+    "platform_object_reference_sha256": "199672dd7e6d506b8ef3da3b3011c2b192ba5339d743a0c57f6fc3a5f444aab2",
+    "platform_status": "pending_review",
+    "values_loaded_from_server_evidence": true
+  },
+  "terminal_control_plane": {
+    "computer_use_run_status": "succeeded",
+    "computer_use_run_version_after_lease_release": 13,
+    "controlled_execution_status": "succeeded",
+    "controlled_change_set_status": "executed",
+    "lease_released": true
+  },
+  "recovery_observation": {
+    "original_submission_lease_heartbeat_expired_during_post_write_readback": true,
+    "submit_retried": false,
+    "recovery_lease_used_for_query_only": true,
+    "original_attempt_binding_preserved": true
+  },
+  "asset_handling": {
+    "existing_test_account_assets_authorized": true,
+    "operator_provided_product_image_used": true,
+    "operator_provided_product_image_checked_into_git": false
+  }
+}

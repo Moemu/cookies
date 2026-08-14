@@ -71,3 +71,16 @@ versions. No legacy metric or alert data is deleted or rewritten destructively.
 `20260812120000_delivery_observatory_runs.up.sql` adds immutable observatory runs and append-only operator feedback. Runs reference an existing DecisionSelection and freeze the exact Decision, Configuration, and Workflow hashes. CHECK constraints admit only `mock`/`replay`, `observe_existing`/`prepare_new_local_form`, and `remote_write_enabled = FALSE`; the canonical input hash is unique per project for deterministic replay. Feedback references the immutable run, supports `accepted`/`modified`/`rejected`, and uses a project-scoped idempotency key. The migration does not rewrite any earlier payload or hash.
 
 `20260812121000_delivery_observatory_feedback_outcome.up.sql` freezes the reviewed run outcome directly on each feedback row. It is a forward-only compatibility migration because the initial observatory migration may already have been applied; no existing immutable JSON or canonical hash is rewritten.
+
+# Controlled Computer Use authority
+
+`20260812131000_delivery_controlled_execution_authority.up.sql` adds formal,
+write-capable authority records without reusing the legacy `execute_mock`
+approval. A controlled ChangeSet binds the latest accepted or modified
+Observatory feedback and every upstream canonical hash; the immutable approval
+uses the distinct `controlled_remote_write` scope and a 30-minute expiry. A
+separate business execution aggregate references the Platform-owned
+ComputerUseRun by stable ID. The legacy execution table receives only a
+nullable reference column: its mock source, adapter, scenario, approval hashes,
+and CHECK constraints remain unchanged. PlatformEntityMapping is confirmed
+only when both result-page and list-page evidence references are present.

@@ -14,3 +14,7 @@ ee5650e8ea7096c1d53fac097dba4d9d89538b13:server/provider.test.ts:generic-api-key
 # demo sessions remain readable across launcher restarts. Production requires
 # a deployment-managed key; only this historical example fingerprint is allowed.
 45b92f31b732906055fe4d570a10aab7944d8293:.env.example:generic-api-key:131
+
+# Controlled execution presentation uses a deterministic local idempotency
+# label; this exact historical fixture is not a credential.
+09a5fa2bd2dbc4fd316014132abae212738df434:test/controlled-execution-presentation.test.ts:generic-api-key:36

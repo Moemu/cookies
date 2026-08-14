@@ -1,0 +1,63 @@
+{
+  "schema_version": "oceanengine-live-locators/v0.1",
+  "skill_id": "oceanengine-ecommerce-manual",
+  "skill_version": "v0.1-calibration",
+  "observed_at": "2026-08-12",
+  "platform_build": "unknown",
+  "status": "project_form_calibrated_promotion_form_pending",
+  "engine": "playwright_semantic",
+  "coordinate_fallback_allowed": false,
+  "page_identities": {
+    "project_list": {
+      "https_host": "ad.oceanengine.com",
+      "pathname": "/promotion/promote-manage/project",
+      "required_query": ["aadvid"],
+      "required_visible_facts": ["account_id", "new_project", "project_total"]
+    },
+    "project_create": {
+      "https_host": "ad.oceanengine.com",
+      "pathname": "/superior/create-project",
+      "required_query": ["aadvid", "is_create"],
+      "required_visible_facts": ["account_id", "new_project", "save_and_new_promotion", "save_and_close", "cancel"]
+    }
+  },
+  "locators": {
+    "account_identity": { "kind": "role", "role": "button", "name_pattern": "ID：{account_id}" },
+    "new_project": { "kind": "text", "text": "新建项目", "exact": true },
+    "marketing_product_open": { "kind": "text", "text": "点击选择商品", "exact": true },
+    "marketing_product_card": { "kind": "css_filter", "selector": "[data-auto-id=\"create-product-card\"]", "has_text_pattern": "ID: {product_id}" },
+    "marketing_product_confirm": { "kind": "role", "role": "button", "name": "确定", "exact": true, "scope": "product_dialog" },
+    "optimization_target_open": { "kind": "placeholder", "placeholder": "请选择", "exact": true, "scope": "optimization_target" },
+    "optimization_target_option": { "kind": "text", "text_pattern": "{optimization_target}", "exact": true, "scope": "optimization_target_popup" },
+    "deep_optimization_group": { "kind": "css", "selector": "[data-e2e=\"createproject_deepbidtype\"]" },
+    "deep_optimization_disabled": { "kind": "scoped_text", "parent": "deep_optimization_group", "text": "不启用", "exact": true },
+    "manual_delivery": { "kind": "text", "text": "手动投放", "exact": true },
+    "daily_budget_toggle": { "kind": "text", "text": "设置预算", "exact": true, "scope": "daily_budget" },
+    "daily_budget_input": { "kind": "role", "role": "spinbutton", "scope": "daily_budget", "precondition": "deep_optimization_disabled" },
+    "project_name": { "kind": "placeholder", "placeholder": "请输入项目名称", "exact": true },
+    "save_and_new_promotion_boundary": { "kind": "role", "role": "button", "name": "保存并新建单元", "exact": true, "action_allowed": false },
+    "save_and_close_boundary": { "kind": "role", "role": "button", "name": "保存并关闭", "exact": true, "action_allowed": false },
+    "discard_project_draft": { "kind": "role", "role": "button", "name": "取消", "exact": true }
+  },
+  "dynamic_order": [
+    "select_marketing_product",
+    "select_optimization_target",
+    "select_deep_optimization_mode",
+    "select_manual_delivery",
+    "select_daily_budget_mode",
+    "fill_daily_budget",
+    "fill_project_name"
+  ],
+  "observed_dynamic_behavior": [
+    "selecting_app_order_optimization_target_reset_delivery_mode_to_automatic",
+    "manual_delivery_must_be_reselected_after_optimization_target",
+    "daily_budget_spinbutton_appears_only_after_setting_budget"
+  ],
+  "known_gaps": [
+    "promotion_create_live_locators_not_revalidated",
+    "no_existing_manual_project_was_identified_without_crossing_project_save_boundary",
+    "platform_build_identifier_not_exposed",
+    "project_name_dom_did_not_expose_the_stage_b_50_character_limit",
+    "write_actions_not_exercised"
+  ]
+}
