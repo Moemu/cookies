@@ -100,6 +100,17 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "营销目的" },
+      "computer_use": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "营销目的" },
+        "target": {
+          "kind": "visible_text",
+          "value": "提升线上商品或店铺的营销效果"
+        },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "营销场景" },
+        "observed_options": ["应用", "销售线索", "电商", "商品", "内容营销"]
+      },
       "evidence_state": "observed",
       "consumers": [
         "OceanEngineConfiguration",
@@ -118,6 +129,14 @@
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "营销场景" },
+      "computer_use": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "营销场景" },
+        "target": { "kind": "visible_text", "value": "短视频+图文" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "营销产品" },
+        "observed_options": ["短视频+图文", "直播"]
+      },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -131,6 +150,17 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "visible_text", "value": "营销产品" },
+      "computer_use": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "营销产品" },
+        "target": { "kind": "visible_text", "value": "点击选择商品" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "优化目标" },
+        "input_constraints": {
+          "reference_kind": "existing_product",
+          "persistence": "unsubmitted_local_only"
+        }
+      },
       "evidence_state": "observed",
       "consumers": [
         "DeliveryIntent",
@@ -423,6 +453,15 @@
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "受众倾向与过滤" },
+      "computer_use": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "受众倾向与过滤" },
+        "target": { "kind": "visible_text", "value": "新建定向" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "地域" },
+        "observed_options": ["地域", "性别", "年龄", "自定义人群", "网络"],
+        "input_constraints": { "persistence": "unsubmitted_local_only" }
+      },
       "evidence_state": "observed",
       "consumers": [
         "DeliveryIntent",
@@ -440,6 +479,23 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "投放时间" },
+      "computer_use": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "投放时间" },
+        "target": { "kind": "visible_text", "value": "从今天起长期投放" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "投放时段" },
+        "observed_options": [
+          "从今天起长期投放",
+          "设置开始和结束日期",
+          "不限",
+          "指定时间段"
+        ],
+        "input_constraints": {
+          "timezone": "Asia/Shanghai",
+          "persistence": "unsubmitted_local_only"
+        }
+      },
       "evidence_state": "observed",
       "consumers": [
         "DeliveryIntent",
@@ -659,6 +715,23 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "label", "value": "商品目录" },
+      "computer_use": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "商品目录" },
+        "target": {
+          "kind": "role_name",
+          "value": "textbox:请选择或输入搜索商品目录"
+        },
+        "expected_target_count": 1,
+        "readback": {
+          "kind": "role_name",
+          "value": "textbox:请选择或输入搜索商品目录"
+        },
+        "input_constraints": {
+          "reference_kind": "existing_product_catalog",
+          "persistence": "unsubmitted_local_only"
+        }
+      },
       "evidence_state": "observed",
       "consumers": [
         "DeliveryIntent",
@@ -676,6 +749,14 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "版位" },
+      "computer_use": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "投放版位" },
+        "target": { "kind": "visible_text", "value": "通投智选" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "投放位置" },
+        "observed_options": ["通投智选", "首选媒体"]
+      },
       "evidence_state": "observed",
       "consumers": [
         "OceanEngineConfiguration",
@@ -693,6 +774,15 @@
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "商品定向" },
+      "computer_use": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "商品定向" },
+        "target": { "kind": "visible_text", "value": "RTA重定向" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "商品投放条件" },
+        "observed_options": ["RTA重定向", "地域匹配", "商品投放条件"],
+        "input_constraints": { "persistence": "unsubmitted_local_only" }
+      },
       "evidence_state": "observed",
       "consumers": [
         "DeliveryIntent",

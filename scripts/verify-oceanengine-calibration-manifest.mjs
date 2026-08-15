@@ -107,6 +107,32 @@ for (const field of manifest.fields) {
         `unconsumed manifest field destination: ${field.key}:${destination}`,
       );
   }
+  if (!field.computer_use)
+    throw new Error(`manifest field has no Computer Use control: ${field.key}`);
+  const control = field.computer_use;
+  for (const locator of [control.scope, control.target, control.readback]) {
+    if (locator.kind === "css" || /nth-child|\[\d+\]/.test(locator.value))
+      throw new Error(
+        `Computer Use control has an unstable locator: ${field.key}`,
+      );
+  }
+  if (
+    control.operation === "choose_exact_visible_option" &&
+    (!control.observed_options || control.observed_options.length === 0)
+  )
+    throw new Error(`choice control has no observed options: ${field.key}`);
+  if (field.value_type === "money_minor") {
+    const constraints = control.input_constraints || {};
+    if (
+      control.operation !== "fill_money" ||
+      constraints.input_unit !== "CNY_yuan" ||
+      constraints.model_unit !== "CNY_fen" ||
+      constraints.minor_per_input_unit !== 100
+    )
+      throw new Error(
+        `money control lacks exact CNY unit conversion: ${field.key}`,
+      );
+  }
 }
 for (const mapping of manifest.consumer_mappings) {
   const field = manifest.fields.find(

@@ -68,9 +68,10 @@ test("OceanEngine calibration manifest drives consumer and coverage checks", () 
   const computerUseFields = manifest.fields.filter(
     (field) => field.computer_use,
   );
-  assert.ok(
-    computerUseFields.length > 0,
-    "no Manifest fields are Computer Use-ready",
+  assert.equal(
+    computerUseFields.length,
+    manifest.fields.length,
+    "every Manifest field must be Computer Use-ready",
   );
   for (const field of computerUseFields) {
     assert.equal(

@@ -166,6 +166,7 @@
         "editable_state",
         "enum_state",
         "locator",
+        "computer_use",
         "evidence_state",
         "consumers"
       ],
