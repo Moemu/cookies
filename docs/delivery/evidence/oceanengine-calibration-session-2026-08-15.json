@@ -30,6 +30,10 @@
       "case_id": "OE-PROJECT-APP-DOWNLOAD-ANDROID",
       "outcome": "blocked_by_event_asset"
     },
+    {
+      "case_id": "OE-PROJECT-APP-DOWNLOAD-IOS-HARMONY-INITIAL",
+      "outcome": "covered"
+    },
     { "case_id": "OE-PROJECT-CATALOG-DEFAULT", "outcome": "covered" },
     { "case_id": "OE-PROJECT-CONTENT-MARKETING", "outcome": "covered" },
     { "case_id": "OE-PROJECT-CONTENT-MARKETING-LIVE", "outcome": "covered" },

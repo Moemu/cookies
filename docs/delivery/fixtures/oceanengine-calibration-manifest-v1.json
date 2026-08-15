@@ -961,6 +961,27 @@
       "reason": "current chain returned no available optimization target after an existing application was selected"
     },
     {
+      "id": "OE-PROJECT-APP-DOWNLOAD-IOS-HARMONY-INITIAL",
+      "path": [
+        "project_create",
+        "application",
+        "app_download",
+        "ios|harmony",
+        "application_reference_picker"
+      ],
+      "field_keys": [
+        "project.application_scenario",
+        "project.application_platform",
+        "project.application_reference",
+        "project.application_download_mode",
+        "project.optimization_target_reference"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "each platform exposed one semantic platform control, one application-reference picker and one optimization-target readback; no account-specific application identity was persisted"
+    },
+    {
       "id": "OE-PROJECT-CATALOG-DEFAULT",
       "path": [
         "project_create",
