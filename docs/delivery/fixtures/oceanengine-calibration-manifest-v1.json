@@ -826,6 +826,19 @@
         "short_video_image_text",
         "ubmax"
       ],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.marketing_scenario",
+        "project.marketing_product_reference",
+        "project.carrier",
+        "project.optimization_target_reference",
+        "project.delivery_mode",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true
@@ -833,6 +846,18 @@
     {
       "id": "OE-PROJECT-E-COMMERCE-LIVE",
       "path": ["project_create", "ecommerce", "live", "ubmax"],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.marketing_scenario",
+        "project.carrier",
+        "project.optimization_target_reference",
+        "project.delivery_mode",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true
@@ -844,6 +869,14 @@
         "ecommerce",
         "short_video_image_text",
         "manual"
+      ],
+      "field_keys": [
+        "project.deep_optimization_mode",
+        "project.delivery_mode",
+        "project.bidding_strategy",
+        "project.charging_mode",
+        "project.bid_minor",
+        "project.search_boost"
       ],
       "status": "covered",
       "evidence_state": "observed",
@@ -857,6 +890,21 @@
         "smart_lead",
         "orange_landing_page_and_im"
       ],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.marketing_scenario",
+        "project.product_selection_mode",
+        "project.lead_capture_mode",
+        "project.carrier",
+        "project.optimization_target_reference",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.bid_minor",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true
@@ -868,6 +916,11 @@
         "lead_generation",
         "custom_lead",
         "orange_landing_page|owned_landing_page|im|byte_miniapp"
+      ],
+      "field_keys": [
+        "project.lead_capture_mode",
+        "project.carrier",
+        "project.optimization_target_reference"
       ],
       "status": "covered",
       "evidence_state": "observed",
@@ -882,6 +935,21 @@
         "android",
         "existing_application"
       ],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.application_scenario",
+        "project.application_platform",
+        "project.application_reference",
+        "project.application_download_mode",
+        "project.optimization_target_reference",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.charging_mode",
+        "project.bid_minor",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
       "status": "blocked_by_event_asset",
       "evidence_state": "blocked_by_event_asset",
       "exit_verified": true,
@@ -895,6 +963,19 @@
         "landing_page",
         "auto_delivery"
       ],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.product_catalog_reference",
+        "project.placement_strategy",
+        "project.product_targeting",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.charging_mode",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true
@@ -906,6 +987,19 @@
         "content_marketing",
         "short_video_image_text",
         "account_or_landing_page"
+      ],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.marketing_scenario",
+        "project.carrier",
+        "project.optimization_target_reference",
+        "project.delivery_mode",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.monitoring_references",
+        "project.project_name"
       ],
       "status": "covered",
       "evidence_state": "observed",
@@ -919,6 +1013,18 @@
         "live",
         "account_or_landing_page"
       ],
+      "field_keys": [
+        "project.marketing_scenario",
+        "project.carrier",
+        "project.optimization_target_reference",
+        "project.delivery_mode",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true
@@ -930,6 +1036,13 @@
         "application",
         "app_launch",
         "android|ios|harmony"
+      ],
+      "field_keys": [
+        "project.application_scenario",
+        "project.application_platform",
+        "project.application_reference",
+        "project.application_launch_mode",
+        "project.optimization_target_reference"
       ],
       "status": "covered",
       "evidence_state": "observed",
@@ -943,6 +1056,12 @@
         "app_appointment_download",
         "android|ios|harmony"
       ],
+      "field_keys": [
+        "project.application_scenario",
+        "project.application_platform",
+        "project.application_reference",
+        "project.optimization_target_reference"
+      ],
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true
@@ -950,6 +1069,7 @@
     {
       "id": "OE-PROJECT-OTHER-MARKETING-PURPOSES",
       "path": ["project_create", "other_marketing_purposes"],
+      "field_keys": ["project.marketing_purpose"],
       "status": "blocked_by_account_capability",
       "evidence_state": "platform_pending",
       "exit_verified": true,
@@ -958,6 +1078,7 @@
     {
       "id": "OE-PROMOTION-CREATE",
       "path": ["promotion_create"],
+      "field_keys": [],
       "status": "not_in_scope",
       "evidence_state": "platform_pending",
       "exit_verified": true,
@@ -966,6 +1087,7 @@
     {
       "id": "OE-PROMOTION-EDIT",
       "path": ["promotion_edit"],
+      "field_keys": [],
       "status": "not_in_scope",
       "evidence_state": "platform_pending",
       "exit_verified": true,

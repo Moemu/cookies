@@ -270,7 +270,14 @@
     "coverageCase": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "path", "status", "evidence_state", "exit_verified"],
+      "required": [
+        "id",
+        "path",
+        "field_keys",
+        "status",
+        "evidence_state",
+        "exit_verified"
+      ],
       "properties": {
         "id": { "type": "string" },
         "path": {
@@ -278,6 +285,7 @@
           "minItems": 1,
           "items": { "type": "string" }
         },
+        "field_keys": { "type": "array", "items": { "type": "string" } },
         "status": {
           "enum": [
             "covered",

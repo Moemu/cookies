@@ -74,6 +74,24 @@ unique(
   manifest.coverage_cases.map((item) => item.id),
   "coverage-case IDs",
 );
+const manifestFieldKeys = new Set(manifest.fields.map((field) => field.key));
+const caseObservedFieldKeys = new Set();
+for (const item of manifest.coverage_cases) {
+  unique(item.field_keys, `field keys for ${item.id}`);
+  for (const fieldKey of item.field_keys) {
+    if (!manifestFieldKeys.has(fieldKey))
+      throw new Error(
+        `coverage case references an unknown field: ${item.id}:${fieldKey}`,
+      );
+    if (item.status !== "not_in_scope") caseObservedFieldKeys.add(fieldKey);
+  }
+}
+for (const field of manifest.fields) {
+  if (!caseObservedFieldKeys.has(field.key))
+    throw new Error(
+      `manifest field has no covered or blocked case: ${field.key}`,
+    );
+}
 for (const page of manifest.page_families) {
   for (const locator of [page.entry_locator, ...page.page_fingerprint]) {
     if (locator.kind === "css" || /nth-child|\[\d+\]/.test(locator.value))

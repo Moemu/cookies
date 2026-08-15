@@ -24,7 +24,12 @@ const manifest = JSON.parse(
       observed_options?: string[];
     };
   }>;
-  coverage_cases: Array<{ id: string; path: string[]; status: string }>;
+  coverage_cases: Array<{
+    id: string;
+    path: string[];
+    field_keys: string[];
+    status: string;
+  }>;
   consumer_mappings: Array<{
     field_key: string;
     destination: string;
@@ -116,6 +121,17 @@ test("OceanEngine calibration manifest drives consumer and coverage checks", () 
         paths.includes(value),
         `uncovered path dimension: ${dimension.key}:${value}`,
       );
+  }
+  const caseFieldKeys = new Set(
+    manifest.coverage_cases
+      .filter((item) => item.status !== "not_in_scope")
+      .flatMap((item) => item.field_keys),
+  );
+  for (const key of fieldKeys) {
+    assert.ok(
+      caseFieldKeys.has(key),
+      `field has no covered or blocked case: ${key}`,
+    );
   }
   const evidence = JSON.parse(
     readFileSync(join(root, manifest.session_evidence_ref), "utf8"),
