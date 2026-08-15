@@ -34,7 +34,11 @@
     { "case_id": "OE-PROJECT-CONTENT-MARKETING", "outcome": "covered" },
     { "case_id": "OE-PROJECT-CONTENT-MARKETING-LIVE", "outcome": "covered" },
     { "case_id": "OE-PROJECT-APP-LAUNCH", "outcome": "covered" },
-    { "case_id": "OE-PROJECT-APP-APPOINTMENT", "outcome": "covered" }
+    { "case_id": "OE-PROJECT-APP-APPOINTMENT", "outcome": "covered" },
+    {
+      "case_id": "OE-PROJECT-OTHER-MARKETING-PURPOSES",
+      "outcome": "blocked_by_account_capability"
+    }
   ],
   "safe_exit": {
     "action": "return_to_readonly_list_without_submit",

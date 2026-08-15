@@ -564,6 +564,14 @@
       "exit_verified": true
     },
     {
+      "id": "OE-PROJECT-OTHER-MARKETING-PURPOSES",
+      "path": ["project_create", "other_marketing_purposes"],
+      "status": "blocked_by_account_capability",
+      "evidence_state": "platform_pending",
+      "exit_verified": true,
+      "reason": "the current form explicitly marks these purposes as gradually opening"
+    },
+    {
       "id": "OE-PROMOTION-CREATE",
       "path": ["promotion_create"],
       "status": "not_in_scope",
