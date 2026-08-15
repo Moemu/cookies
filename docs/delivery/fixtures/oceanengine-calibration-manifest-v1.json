@@ -1049,6 +1049,48 @@
       "exit_verified": true
     },
     {
+      "id": "OE-PROJECT-APP-LAUNCH-ANDROID",
+      "path": ["project_create", "application", "app_launch", "android"],
+      "field_keys": [
+        "project.application_scenario",
+        "project.application_platform",
+        "project.application_reference",
+        "project.application_launch_mode",
+        "project.optimization_target_reference"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-APP-LAUNCH-IOS",
+      "path": ["project_create", "application", "app_launch", "ios"],
+      "field_keys": [
+        "project.application_scenario",
+        "project.application_platform",
+        "project.application_reference",
+        "project.application_launch_mode",
+        "project.optimization_target_reference"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-APP-LAUNCH-HARMONY",
+      "path": ["project_create", "application", "app_launch", "harmony"],
+      "field_keys": [
+        "project.application_scenario",
+        "project.application_platform",
+        "project.application_reference",
+        "project.application_launch_mode",
+        "project.optimization_target_reference"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
       "id": "OE-PROJECT-APP-APPOINTMENT",
       "path": [
         "project_create",
@@ -1062,9 +1104,10 @@
         "project.application_reference",
         "project.optimization_target_reference"
       ],
-      "status": "covered",
-      "evidence_state": "observed",
-      "exit_verified": true
+      "status": "page_drift",
+      "evidence_state": "page_drift",
+      "exit_verified": true,
+      "reason": "application-platform text had two visible matches; no unscoped fallback was permitted"
     },
     {
       "id": "OE-PROJECT-OTHER-MARKETING-PURPOSES",

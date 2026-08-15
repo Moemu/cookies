@@ -225,7 +225,8 @@
             "observed",
             "sample_only",
             "blocked_by_event_asset",
-            "platform_pending"
+            "platform_pending",
+            "page_drift"
           ]
         },
         "consumers": {
@@ -302,7 +303,8 @@
             "observed",
             "sample_only",
             "blocked_by_event_asset",
-            "platform_pending"
+            "platform_pending",
+            "page_drift"
           ]
         },
         "exit_verified": { "type": "boolean" },
