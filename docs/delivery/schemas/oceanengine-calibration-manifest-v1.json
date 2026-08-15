@@ -5,15 +5,39 @@
   "description": "Versioned, redacted observation facts. This manifest is never remote-write authority.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "manifest_id", "platform", "session_evidence_ref", "observation_boundary", "page_families", "fields", "coverage_cases", "consumer_mappings"],
+  "required": [
+    "schema_version",
+    "manifest_id",
+    "platform",
+    "session_evidence_ref",
+    "observation_boundary",
+    "compatibility_policy",
+    "path_dimensions",
+    "page_families",
+    "fields",
+    "coverage_cases",
+    "consumer_mappings"
+  ],
   "properties": {
     "schema_version": { "const": "oceanengine-calibration-manifest/v1" },
-    "manifest_id": { "type": "string", "pattern": "^oceanengine-calibration-[a-z0-9-]+$" },
+    "manifest_id": {
+      "type": "string",
+      "pattern": "^oceanengine-calibration-[a-z0-9-]+$"
+    },
     "platform": { "const": "ocean_engine" },
-    "session_evidence_ref": { "const": "docs/delivery/evidence/oceanengine-calibration-session-2026-08-15.json" },
+    "session_evidence_ref": {
+      "const": "docs/delivery/evidence/oceanengine-calibration-session-2026-08-15.json"
+    },
     "observation_boundary": {
-      "type": "object", "additionalProperties": false,
-      "required": ["account_scope", "platform_build", "complete_coverage_definition", "local_calibration_allowed", "remote_write_authorized"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "account_scope",
+        "platform_build",
+        "complete_coverage_definition",
+        "local_calibration_allowed",
+        "remote_write_authorized"
+      ],
       "properties": {
         "account_scope": { "const": "redacted_current_test_account" },
         "platform_build": { "type": "string" },
@@ -22,16 +46,247 @@
         "remote_write_authorized": { "const": false }
       }
     },
-    "page_families": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/pageFamily" } },
-    "fields": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/field" } },
-    "coverage_cases": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/coverageCase" } },
-    "consumer_mappings": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/consumer" } }
+    "compatibility_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_is_observation_only",
+        "unknown_platform_values",
+        "page_drift",
+        "future_account_or_rollout"
+      ],
+      "properties": {
+        "manifest_is_observation_only": { "const": true },
+        "unknown_platform_values": {
+          "enum": ["retain_as_open_set", "record_blocked_case"]
+        },
+        "page_drift": { "enum": ["stop_case_and_record_page_drift"] },
+        "future_account_or_rollout": { "enum": ["not_covered"] }
+      }
+    },
+    "path_dimensions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/pathDimension" }
+    },
+    "page_families": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/pageFamily" }
+    },
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/field" }
+    },
+    "coverage_cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/coverageCase" }
+    },
+    "consumer_mappings": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/consumer" }
+    }
   },
   "$defs": {
-    "locator": { "type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": { "kind": { "enum": ["role_name", "label", "visible_text", "domain_key"] }, "value": { "type": "string", "minLength": 1 } } },
-    "pageFamily": { "type": "object", "additionalProperties": false, "required": ["id", "page_kind", "entry_locator", "safety_exit", "final_write_boundary", "evidence_state"], "properties": { "id": { "type": "string" }, "page_kind": { "enum": ["project_list", "project_create", "promotion_create", "promotion_edit"] }, "entry_locator": { "$ref": "#/$defs/locator" }, "safety_exit": { "enum": ["cancel_local_draft", "return_to_readonly_list", "not_in_scope"] }, "final_write_boundary": { "type": "string" }, "evidence_state": { "enum": ["observed", "not_in_scope", "page_drift"] } } },
-    "field": { "type": "object", "additionalProperties": false, "required": ["key", "owner", "page_family", "value_type", "required_state", "editable_state", "enum_state", "locator", "evidence_state", "consumers"], "properties": { "key": { "type": "string" }, "owner": { "enum": ["delivery_intent", "oceanengine_configuration", "promotion_draft", "platform_dynamic_reference", "runtime_only"] }, "page_family": { "type": "string" }, "value_type": { "enum": ["dynamic_enum", "dynamic_reference", "boolean", "schedule", "money_minor", "text", "object"] }, "unit": { "type": "string" }, "condition": { "type": "string" }, "required_state": { "enum": ["unknown", "observed_optional", "observed_required", "conditional"] }, "editable_state": { "enum": ["observed_editable", "observed_readonly", "conditional"] }, "enum_state": { "enum": ["sample_only", "observed_current_set", "observed_open_set", "dynamic_reference"] }, "locator": { "$ref": "#/$defs/locator" }, "evidence_state": { "enum": ["observed", "sample_only", "blocked_by_event_asset", "platform_pending"] }, "consumers": { "type": "array", "minItems": 1, "items": { "type": "string" } } } },
-    "coverageCase": { "type": "object", "additionalProperties": false, "required": ["id", "path", "status", "evidence_state", "exit_verified"], "properties": { "id": { "type": "string" }, "path": { "type": "array", "minItems": 1, "items": { "type": "string" } }, "status": { "enum": ["covered", "blocked_by_event_asset", "blocked_by_missing_parent_project", "blocked_by_account_capability", "blocked_by_object_state", "page_drift", "not_in_scope"] }, "evidence_state": { "enum": ["observed", "sample_only", "blocked_by_event_asset", "platform_pending"] }, "exit_verified": { "type": "boolean" }, "reason": { "type": "string" } } },
-    "consumer": { "type": "object", "additionalProperties": false, "required": ["field_key", "destination", "treatment"], "properties": { "field_key": { "type": "string" }, "destination": { "enum": ["DeliveryIntent", "OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"] }, "treatment": { "enum": ["modelled", "dynamic_reference", "evidence_only", "blocked"] } } }
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {
+          "enum": ["role_name", "label", "visible_text", "domain_key"]
+        },
+        "value": { "type": "string", "minLength": 1 }
+      }
+    },
+    "pathDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "observed_values"],
+      "properties": {
+        "key": { "type": "string" },
+        "observed_values": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "pageFamily": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "page_kind",
+        "entry_locator",
+        "page_fingerprint",
+        "safety_exit",
+        "final_write_boundary",
+        "evidence_state"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "page_kind": {
+          "enum": [
+            "project_list",
+            "project_create",
+            "promotion_create",
+            "promotion_edit"
+          ]
+        },
+        "entry_locator": { "$ref": "#/$defs/locator" },
+        "page_fingerprint": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/locator" }
+        },
+        "safety_exit": {
+          "enum": [
+            "cancel_local_draft",
+            "return_to_readonly_list",
+            "not_in_scope"
+          ]
+        },
+        "final_write_boundary": { "type": "string" },
+        "evidence_state": { "enum": ["observed", "not_in_scope", "page_drift"] }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "owner",
+        "page_family",
+        "value_type",
+        "required_state",
+        "editable_state",
+        "enum_state",
+        "locator",
+        "evidence_state",
+        "consumers"
+      ],
+      "properties": {
+        "key": { "type": "string" },
+        "owner": {
+          "enum": [
+            "delivery_intent",
+            "oceanengine_configuration",
+            "promotion_draft",
+            "platform_dynamic_reference",
+            "runtime_only"
+          ]
+        },
+        "page_family": { "type": "string" },
+        "value_type": {
+          "enum": [
+            "dynamic_enum",
+            "dynamic_reference",
+            "boolean",
+            "schedule",
+            "money_minor",
+            "text",
+            "object"
+          ]
+        },
+        "unit": { "type": "string" },
+        "condition": { "type": "string" },
+        "condition_dimensions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "required_state": {
+          "enum": [
+            "unknown",
+            "observed_optional",
+            "observed_required",
+            "conditional"
+          ]
+        },
+        "editable_state": {
+          "enum": ["observed_editable", "observed_readonly", "conditional"]
+        },
+        "enum_state": {
+          "enum": [
+            "sample_only",
+            "observed_current_set",
+            "observed_open_set",
+            "dynamic_reference"
+          ]
+        },
+        "locator": { "$ref": "#/$defs/locator" },
+        "evidence_state": {
+          "enum": [
+            "observed",
+            "sample_only",
+            "blocked_by_event_asset",
+            "platform_pending"
+          ]
+        },
+        "consumers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "coverageCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "status", "evidence_state", "exit_verified"],
+      "properties": {
+        "id": { "type": "string" },
+        "path": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "status": {
+          "enum": [
+            "covered",
+            "blocked_by_event_asset",
+            "blocked_by_missing_parent_project",
+            "blocked_by_account_capability",
+            "blocked_by_object_state",
+            "page_drift",
+            "not_in_scope"
+          ]
+        },
+        "evidence_state": {
+          "enum": [
+            "observed",
+            "sample_only",
+            "blocked_by_event_asset",
+            "platform_pending"
+          ]
+        },
+        "exit_verified": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    },
+    "consumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field_key", "destination", "treatment", "contract_path"],
+      "properties": {
+        "field_key": { "type": "string" },
+        "destination": {
+          "enum": [
+            "DeliveryIntent",
+            "OceanEngineConfiguration",
+            "DeliveryDecisionCandidate",
+            "CompiledDeliveryWorkflow",
+            "PlatformSkill"
+          ]
+        },
+        "treatment": {
+          "enum": ["modelled", "dynamic_reference", "evidence_only", "blocked"]
+        },
+        "contract_path": { "type": "string", "minLength": 1 }
+      }
+    }
   }
 }
