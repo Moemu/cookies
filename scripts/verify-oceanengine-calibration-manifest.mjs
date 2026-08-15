@@ -5,6 +5,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 const root = resolve(import.meta.dirname, "..");
 const readJSON = (relative) =>
   JSON.parse(readFileSync(resolve(root, relative), "utf8"));
+const readText = (relative) => readFileSync(resolve(root, relative), "utf8");
 const schema = readJSON(
   "docs/delivery/schemas/oceanengine-calibration-manifest-v1.json",
 );
@@ -12,6 +13,15 @@ const manifest = readJSON(
   "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json",
 );
 const evidence = readJSON(manifest.session_evidence_ref);
+const contractSource = [
+  "internal/systems/delivery/platform_configuration_contracts.go",
+  "internal/systems/delivery/decision_workflow.go",
+  "internal/systems/delivery/platformskills/registry.go",
+  "api/openapi/delivery-v1.yaml",
+  "internal/systems/delivery/platformskills/definitions/oceanengine-ecommerce-manual-v0.1.json",
+]
+  .map(readText)
+  .join("\n");
 const validate = new Ajv2020({ allErrors: true, strict: false }).compile(
   schema,
 );
@@ -97,6 +107,21 @@ for (const mapping of manifest.consumer_mappings) {
     throw new Error(
       `consumer mapping is not declared by field: ${mapping.field_key}:${mapping.destination}`,
     );
+  const leaf = mapping.contract_path.split(".").at(-1);
+  if (mapping.treatment === "evidence_only") {
+    if (
+      !/(?:CalibrationManifest|FieldEvidence|calibration_manifest)$/.test(
+        mapping.contract_path,
+      )
+    )
+      throw new Error(
+        `evidence-only mapping has an executable-looking path: ${mapping.field_key}:${mapping.destination}`,
+      );
+  } else if (!contractSource.includes(leaf)) {
+    throw new Error(
+      `manifest contract path is not represented in the checked-in contracts: ${mapping.contract_path}`,
+    );
+  }
 }
 const observedPath = manifest.coverage_cases
   .flatMap((item) => item.path)

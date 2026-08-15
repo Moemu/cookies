@@ -647,13 +647,13 @@
       "field_key": "project.application_reference",
       "destination": "DeliveryIntent",
       "treatment": "evidence_only",
-      "contract_path": "DeliveryIntent.Payload.ProductReferences"
+      "contract_path": "DeliveryIntent.Payload.CalibrationManifest"
     },
     {
       "field_key": "project.application_reference",
       "destination": "OceanEngineConfiguration",
       "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.Project.MarketingProductReference"
+      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
     },
     {
       "field_key": "project.application_reference",
@@ -917,13 +917,13 @@
       "field_key": "project.product_catalog_reference",
       "destination": "DeliveryIntent",
       "treatment": "evidence_only",
-      "contract_path": "DeliveryIntent.Payload.ProductReferences"
+      "contract_path": "DeliveryIntent.Payload.CalibrationManifest"
     },
     {
       "field_key": "project.product_catalog_reference",
       "destination": "OceanEngineConfiguration",
       "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.Project.MarketingProductReference"
+      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
     },
     {
       "field_key": "project.product_catalog_reference",
@@ -953,7 +953,7 @@
       "field_key": "project.product_targeting",
       "destination": "DeliveryIntent",
       "treatment": "evidence_only",
-      "contract_path": "DeliveryIntent.Payload.AudienceConstraints"
+      "contract_path": "DeliveryIntent.Payload.CalibrationManifest"
     },
     {
       "field_key": "project.product_targeting",

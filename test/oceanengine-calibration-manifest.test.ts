@@ -39,6 +39,13 @@ test("OceanEngine calibration manifest drives consumer and coverage checks", () 
       mapping.contract_path.length > 0,
       `missing contract path: ${mapping.field_key}:${mapping.destination}`,
     );
+    if (mapping.treatment === "evidence_only") {
+      assert.match(
+        mapping.contract_path,
+        /(?:CalibrationManifest|FieldEvidence|calibration_manifest)$/,
+        `evidence-only mapping must not masquerade as an executable field: ${mapping.field_key}:${mapping.destination}`,
+      );
+    }
     consumers.add(mapping.destination);
     mappedPairs.add(`${mapping.field_key}:${mapping.destination}`);
   }
