@@ -1,0 +1,49 @@
+{
+  "schema_version": "oceanengine-calibration-manifest/v1",
+  "manifest_id": "oceanengine-calibration-current-test-account-2026-08-15",
+  "platform": "ocean_engine",
+  "observation_boundary": {
+    "account_scope": "redacted_current_test_account",
+    "platform_build": "unknown",
+    "complete_coverage_definition": "All currently accessible project-create entries and dynamic branches are represented; inaccessible branches retain a stable blocking case. This does not claim other accounts, future rollouts, or promotion surfaces.",
+    "local_calibration_allowed": true,
+    "remote_write_authorized": false
+  },
+  "page_families": [
+    { "id": "project_list", "page_kind": "project_list", "entry_locator": { "kind": "visible_text", "value": "项目" }, "safety_exit": "return_to_readonly_list", "final_write_boundary": "new_project", "evidence_state": "observed" },
+    { "id": "project_create", "page_kind": "project_create", "entry_locator": { "kind": "visible_text", "value": "新建项目" }, "safety_exit": "cancel_local_draft", "final_write_boundary": "save_project", "evidence_state": "observed" },
+    { "id": "promotion_create", "page_kind": "promotion_create", "entry_locator": { "kind": "domain_key", "value": "promotion_create" }, "safety_exit": "not_in_scope", "final_write_boundary": "save_promotion", "evidence_state": "not_in_scope" },
+    { "id": "promotion_edit", "page_kind": "promotion_edit", "entry_locator": { "kind": "domain_key", "value": "promotion_edit" }, "safety_exit": "not_in_scope", "final_write_boundary": "save_promotion", "evidence_state": "not_in_scope" }
+  ],
+  "fields": [
+    { "key": "project.marketing_purpose", "owner": "oceanengine_configuration", "page_family": "project_create", "value_type": "dynamic_enum", "required_state": "unknown", "editable_state": "observed_editable", "enum_state": "observed_current_set", "locator": { "kind": "visible_text", "value": "营销目的" }, "evidence_state": "observed", "consumers": ["OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"] },
+    { "key": "project.marketing_scenario", "owner": "oceanengine_configuration", "page_family": "project_create", "value_type": "dynamic_enum", "condition": "marketing_purpose", "required_state": "unknown", "editable_state": "conditional", "enum_state": "observed_current_set", "locator": { "kind": "visible_text", "value": "营销场景" }, "evidence_state": "observed", "consumers": ["OceanEngineConfiguration", "PlatformSkill"] },
+    { "key": "project.marketing_product_reference", "owner": "platform_dynamic_reference", "page_family": "project_create", "value_type": "dynamic_reference", "condition": "marketing_purpose in [ecommerce,lead_generation]", "required_state": "conditional", "editable_state": "observed_editable", "enum_state": "dynamic_reference", "locator": { "kind": "visible_text", "value": "营销产品" }, "evidence_state": "observed", "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "PlatformSkill"] },
+    { "key": "project.application_reference", "owner": "platform_dynamic_reference", "page_family": "project_create", "value_type": "dynamic_reference", "condition": "marketing_purpose == application", "required_state": "conditional", "editable_state": "observed_editable", "enum_state": "dynamic_reference", "locator": { "kind": "role_name", "value": "button:选择" }, "evidence_state": "observed", "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "PlatformSkill"] },
+    { "key": "project.optimization_target_reference", "owner": "platform_dynamic_reference", "page_family": "project_create", "value_type": "dynamic_reference", "condition": "marketing_purpose+carrier+product_or_application", "required_state": "observed_required", "editable_state": "conditional", "enum_state": "dynamic_reference", "locator": { "kind": "label", "value": "优化目标" }, "evidence_state": "blocked_by_event_asset", "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"] },
+    { "key": "project.delivery_mode", "owner": "oceanengine_configuration", "page_family": "project_create", "value_type": "dynamic_enum", "required_state": "unknown", "editable_state": "observed_editable", "enum_state": "observed_current_set", "locator": { "kind": "visible_text", "value": "投放模式" }, "evidence_state": "observed", "consumers": ["OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"] },
+    { "key": "project.targeting", "owner": "delivery_intent", "page_family": "project_create", "value_type": "object", "condition": "delivery_mode", "required_state": "unknown", "editable_state": "conditional", "enum_state": "observed_open_set", "locator": { "kind": "visible_text", "value": "受众倾向与过滤" }, "evidence_state": "observed", "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "PlatformSkill"] },
+    { "key": "project.schedule", "owner": "delivery_intent", "page_family": "project_create", "value_type": "schedule", "unit": "Asia/Shanghai", "required_state": "unknown", "editable_state": "observed_editable", "enum_state": "observed_current_set", "locator": { "kind": "visible_text", "value": "投放时间" }, "evidence_state": "observed", "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"] },
+    { "key": "project.daily_budget_minor", "owner": "delivery_intent", "page_family": "project_create", "value_type": "money_minor", "unit": "CNY_fen", "required_state": "conditional", "editable_state": "observed_editable", "enum_state": "observed_open_set", "locator": { "kind": "visible_text", "value": "日预算" }, "evidence_state": "observed", "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"] },
+    { "key": "project.monitoring_references", "owner": "platform_dynamic_reference", "page_family": "project_create", "value_type": "dynamic_reference", "condition": "optimization_target_reference", "required_state": "conditional", "editable_state": "conditional", "enum_state": "dynamic_reference", "locator": { "kind": "visible_text", "value": "第三方监测链接" }, "evidence_state": "observed", "consumers": ["OceanEngineConfiguration", "PlatformSkill"] },
+    { "key": "project.project_name", "owner": "oceanengine_configuration", "page_family": "project_create", "value_type": "text", "required_state": "observed_required", "editable_state": "observed_editable", "enum_state": "observed_open_set", "locator": { "kind": "label", "value": "项目名称" }, "evidence_state": "observed", "consumers": ["OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"] }
+  ],
+  "coverage_cases": [
+    { "id": "OE-PROJECT-E-COMMERCE-DEFAULT", "path": ["project_create", "ecommerce", "short_video_image_text", "ubmax"], "status": "covered", "evidence_state": "observed", "exit_verified": true },
+    { "id": "OE-PROJECT-LEADS-SMART", "path": ["project_create", "lead_generation", "smart_lead", "orange_landing_page_and_im"], "status": "covered", "evidence_state": "observed", "exit_verified": true },
+    { "id": "OE-PROJECT-LEADS-CUSTOM", "path": ["project_create", "lead_generation", "custom_lead", "orange_landing_page|owned_landing_page|im|byte_miniapp"], "status": "covered", "evidence_state": "observed", "exit_verified": true },
+    { "id": "OE-PROJECT-APP-DOWNLOAD-ANDROID", "path": ["project_create", "application", "app_download", "android", "existing_application"], "status": "blocked_by_event_asset", "evidence_state": "blocked_by_event_asset", "exit_verified": true, "reason": "current chain returned no available optimization target after an existing application was selected" },
+    { "id": "OE-PROMOTION-CREATE", "path": ["promotion_create"], "status": "not_in_scope", "evidence_state": "platform_pending", "exit_verified": true, "reason": "deferred by current session scope" },
+    { "id": "OE-PROMOTION-EDIT", "path": ["promotion_edit"], "status": "not_in_scope", "evidence_state": "platform_pending", "exit_verified": true, "reason": "deferred by current session scope" }
+  ],
+  "consumer_mappings": [
+    { "field_key": "project.targeting", "destination": "DeliveryIntent", "treatment": "modelled" },
+    { "field_key": "project.schedule", "destination": "DeliveryIntent", "treatment": "modelled" },
+    { "field_key": "project.daily_budget_minor", "destination": "DeliveryIntent", "treatment": "modelled" },
+    { "field_key": "project.marketing_purpose", "destination": "OceanEngineConfiguration", "treatment": "modelled" },
+    { "field_key": "project.optimization_target_reference", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference" },
+    { "field_key": "project.daily_budget_minor", "destination": "DeliveryDecisionCandidate", "treatment": "modelled" },
+    { "field_key": "project.project_name", "destination": "CompiledDeliveryWorkflow", "treatment": "modelled" },
+    { "field_key": "project.monitoring_references", "destination": "PlatformSkill", "treatment": "dynamic_reference" }
+  ]
+}
