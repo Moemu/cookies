@@ -156,6 +156,88 @@
       ]
     },
     {
+      "key": "project.product_selection_mode",
+      "owner": "platform_dynamic_reference",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose == lead_generation",
+      "condition_dimensions": ["marketing_purpose"],
+      "required_state": "unknown",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "营销产品" },
+      "computer_use": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "营销产品" },
+        "target": { "kind": "visible_text", "value": "手动选择" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "添加商品" },
+        "observed_options": ["手动选择", "智能识别"]
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "project.lead_capture_mode",
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose == lead_generation",
+      "condition_dimensions": ["marketing_purpose"],
+      "required_state": "unknown",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "获取线索方式" },
+      "computer_use": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "获取线索方式" },
+        "target": { "kind": "visible_text", "value": "智能优选" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "投放载体" },
+        "observed_options": ["智能优选", "自定义"]
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "project.carrier",
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose+marketing_scenario+lead_capture_mode",
+      "condition_dimensions": [
+        "marketing_purpose",
+        "marketing_scenario",
+        "lead_capture_mode"
+      ],
+      "required_state": "conditional",
+      "editable_state": "conditional",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "投放载体" },
+      "computer_use": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "投放载体" },
+        "target": { "kind": "visible_text", "value": "橙子落地页" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "优化目标" },
+        "observed_options": [
+          "橙子落地页+抖音私信页",
+          "橙子落地页",
+          "自研落地页",
+          "抖音私信页",
+          "字节小程序",
+          "微信小程序"
+        ]
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
       "key": "project.optimization_target_reference",
       "owner": "platform_dynamic_reference",
       "page_family": "project_create",
@@ -290,6 +372,19 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "日预算" },
+      "computer_use": {
+        "operation": "fill_money",
+        "scope": { "kind": "visible_text", "value": "日预算" },
+        "target": { "kind": "role_name", "value": "spinbutton" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "spinbutton" },
+        "input_constraints": {
+          "input_unit": "CNY_yuan",
+          "model_unit": "CNY_fen",
+          "minor_per_input_unit": 100,
+          "persistence": "unsubmitted_local_only"
+        }
+      },
       "evidence_state": "observed",
       "consumers": [
         "DeliveryIntent",
@@ -373,6 +468,19 @@
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "出价" },
+      "computer_use": {
+        "operation": "fill_money",
+        "scope": { "kind": "visible_text", "value": "出价" },
+        "target": { "kind": "role_name", "value": "spinbutton" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "spinbutton" },
+        "input_constraints": {
+          "input_unit": "CNY_yuan",
+          "model_unit": "CNY_fen",
+          "minor_per_input_unit": 100,
+          "persistence": "unsubmitted_local_only"
+        }
+      },
       "evidence_state": "observed",
       "consumers": [
         "OceanEngineConfiguration",
@@ -749,6 +857,54 @@
     },
     {
       "field_key": "project.application_reference",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.product_selection_mode",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "evidence_only",
+      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+    },
+    {
+      "field_key": "project.product_selection_mode",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.lead_capture_mode",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "evidence_only",
+      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+    },
+    {
+      "field_key": "project.lead_capture_mode",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.carrier",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.Carrier"
+    },
+    {
+      "field_key": "project.carrier",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.Carrier"
+    },
+    {
+      "field_key": "project.carrier",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.carrier",
       "destination": "PlatformSkill",
       "treatment": "evidence_only",
       "contract_path": "SkillDefinition.calibration_manifest"
