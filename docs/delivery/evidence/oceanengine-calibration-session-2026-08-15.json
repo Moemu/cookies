@@ -37,7 +37,14 @@
     { "case_id": "OE-PROJECT-APP-LAUNCH-ANDROID", "outcome": "covered" },
     { "case_id": "OE-PROJECT-APP-LAUNCH-IOS", "outcome": "covered" },
     { "case_id": "OE-PROJECT-APP-LAUNCH-HARMONY", "outcome": "covered" },
-    { "case_id": "OE-PROJECT-APP-APPOINTMENT", "outcome": "page_drift" },
+    {
+      "case_id": "OE-PROJECT-APP-APPOINTMENT-ANDROID-IOS",
+      "outcome": "covered"
+    },
+    {
+      "case_id": "OE-PROJECT-APP-APPOINTMENT-HARMONY",
+      "outcome": "blocked_by_platform_capability"
+    },
     {
       "case_id": "OE-PROJECT-OTHER-MARKETING-PURPOSES",
       "outcome": "blocked_by_account_capability"

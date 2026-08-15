@@ -113,6 +113,11 @@ test("OceanEngine calibration manifest drives consumer and coverage checks", () 
       (item) => item.status === "blocked_by_event_asset",
     ),
   );
+  assert.ok(
+    manifest.coverage_cases.some(
+      (item) => item.status === "blocked_by_platform_capability",
+    ),
+  );
   assert.ok(manifest.coverage_cases.every((item) => item.id.startsWith("OE-")));
   const paths = manifest.coverage_cases.flatMap((item) => item.path).join("|");
   for (const dimension of manifest.path_dimensions) {

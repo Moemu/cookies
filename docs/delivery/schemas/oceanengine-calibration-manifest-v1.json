@@ -225,6 +225,7 @@
             "observed",
             "sample_only",
             "blocked_by_event_asset",
+            "blocked_by_platform_capability",
             "platform_pending",
             "page_drift"
           ]
@@ -293,6 +294,7 @@
             "blocked_by_event_asset",
             "blocked_by_missing_parent_project",
             "blocked_by_account_capability",
+            "blocked_by_platform_capability",
             "blocked_by_object_state",
             "page_drift",
             "not_in_scope"
@@ -303,6 +305,7 @@
             "observed",
             "sample_only",
             "blocked_by_event_asset",
+            "blocked_by_platform_capability",
             "platform_pending",
             "page_drift"
           ]

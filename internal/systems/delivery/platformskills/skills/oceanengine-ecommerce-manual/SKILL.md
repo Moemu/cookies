@@ -25,9 +25,13 @@ page fingerprint first, then apply this sequence:
    only according to `input_constraints` (for example CNY yuan in the page to
    CNY fen in the domain model), and never type a business value outside the
    current no-write calibration case.
-4. Read the value back through the declared `readback`. If any locator is
-   missing, non-unique, disabled unexpectedly, or the readback differs, stop
-   the case as `page_drift`; do not use a fallback selector.
+4. Read the value back through the declared `readback`. Do not use a fallback
+   selector if a locator is missing, non-unique, disabled unexpectedly, or the
+   readback differs. Record an explicit current-page restriction as its stable
+   blocked reason (for example `blocked_by_platform_capability` for a page that
+   states an application platform is unsupported). Use `page_drift` only when
+   the current page contradicts the frozen Manifest record; otherwise stop the
+   case as incomplete calibration.
 
 A field without `computer_use` remains observation-only. It must not be
 presented as an executable form action until a later calibration adds a unique

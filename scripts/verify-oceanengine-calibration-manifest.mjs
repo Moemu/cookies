@@ -38,6 +38,7 @@ if (manifest.observation_boundary.remote_write_authorized)
 for (const requiredSkillTerm of [
   "computer_use",
   "expected_target_count",
+  "blocked_by_platform_capability",
   "page_drift",
 ]) {
   if (!skillInstructions.includes(requiredSkillTerm))
@@ -85,6 +86,13 @@ for (const item of manifest.coverage_cases) {
       );
     if (item.status !== "not_in_scope") caseObservedFieldKeys.add(fieldKey);
   }
+  if (
+    item.status === "page_drift" &&
+    !/contradict|conflict/i.test(item.reason || "")
+  )
+    throw new Error(
+      `page drift must record a conflict with the frozen Manifest: ${item.id}`,
+    );
 }
 for (const field of manifest.fields) {
   if (!caseObservedFieldKeys.has(field.key))

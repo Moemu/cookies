@@ -244,7 +244,12 @@
           "kind": "role_name",
           "value": "textbox:请输入应用下载链接或选择已有应用"
         },
-        "observed_options": ["安卓", "iOS", "鸿蒙"]
+        "observed_options": ["安卓", "iOS", "鸿蒙"],
+        "input_constraints": {
+          "app_download_and_launch_options": "安卓,iOS,鸿蒙",
+          "app_appointment_download_options": "安卓,iOS",
+          "app_appointment_download_harmony": "blocked_by_platform_capability"
+        }
       },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
@@ -1091,12 +1096,12 @@
       "exit_verified": true
     },
     {
-      "id": "OE-PROJECT-APP-APPOINTMENT",
+      "id": "OE-PROJECT-APP-APPOINTMENT-ANDROID-IOS",
       "path": [
         "project_create",
         "application",
         "app_appointment_download",
-        "android|ios|harmony"
+        "android|ios"
       ],
       "field_keys": [
         "project.application_scenario",
@@ -1104,10 +1109,24 @@
         "project.application_reference",
         "project.optimization_target_reference"
       ],
-      "status": "page_drift",
-      "evidence_state": "page_drift",
+      "status": "covered",
+      "evidence_state": "observed",
       "exit_verified": true,
-      "reason": "application-platform text had two visible matches; no unscoped fallback was permitted"
+      "reason": "安卓 and iOS each exposed one semantic platform control and retained one application-reference readback"
+    },
+    {
+      "id": "OE-PROJECT-APP-APPOINTMENT-HARMONY",
+      "path": [
+        "project_create",
+        "application",
+        "app_appointment_download",
+        "harmony"
+      ],
+      "field_keys": ["project.application_scenario", "project.application_platform"],
+      "status": "blocked_by_platform_capability",
+      "evidence_state": "blocked_by_platform_capability",
+      "exit_verified": true,
+      "reason": "the current appointment-download page explicitly makes Harmony unavailable"
     },
     {
       "id": "OE-PROJECT-OTHER-MARKETING-PURPOSES",
