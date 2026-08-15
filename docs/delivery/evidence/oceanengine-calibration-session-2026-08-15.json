@@ -10,10 +10,14 @@
     { "case_id": "OE-PROJECT-E-COMMERCE-DEFAULT", "outcome": "covered" },
     { "case_id": "OE-PROJECT-LEADS-SMART", "outcome": "covered" },
     { "case_id": "OE-PROJECT-LEADS-CUSTOM", "outcome": "covered" },
-    { "case_id": "OE-PROJECT-APP-DOWNLOAD-ANDROID", "outcome": "blocked_by_event_asset" }
+    { "case_id": "OE-PROJECT-APP-DOWNLOAD-ANDROID", "outcome": "blocked_by_event_asset" },
+    { "case_id": "OE-PROJECT-CATALOG-DEFAULT", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-CONTENT-MARKETING", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-APP-LAUNCH", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-APP-APPOINTMENT", "outcome": "covered" }
   ],
   "safe_exit": {
-    "action": "cancel_local_draft",
+    "action": "return_to_readonly_list_without_submit",
     "returned_to": "project_list",
     "remote_write_detected": false,
     "final_confirmation_count": 0,

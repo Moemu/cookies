@@ -28,6 +28,9 @@ func TestBuildDeliveryDecisionIsDeterministicAndExplainable(t *testing.T) {
 		if candidate.TargetConfiguration.ConfigurationProvenance.Kind != ConfigurationGeneratedByDecisionEngine || candidate.TargetConfiguration.CanonicalHash == "" {
 			t.Fatalf("candidate is not an immutable decision-engine configuration: %#v", candidate)
 		}
+		if candidate.CalibrationManifest != candidate.TargetConfiguration.Payload.OceanEngine.CalibrationManifest {
+			t.Fatalf("candidate must retain the configuration calibration manifest: %#v", candidate)
+		}
 		for _, constraint := range candidate.Constraints {
 			if !constraint.Passed {
 				t.Fatalf("candidate %s violates %s", candidate.ID, constraint.Code)
@@ -74,6 +77,9 @@ func TestCompileDeliveryWorkflowHardStopsRemoteWrite(t *testing.T) {
 	}
 	if workflow.CanonicalHash == "" || workflow.ConfigurationCanonicalHash != candidate.TargetConfiguration.CanonicalHash {
 		t.Fatal("workflow must bind the selected immutable configuration")
+	}
+	if workflow.CalibrationManifest != candidate.CalibrationManifest {
+		t.Fatalf("workflow must retain the selected candidate calibration manifest: %#v", workflow)
 	}
 	duplicate, err := CompileDeliveryWorkflow("workflow-1", decision, candidate, "operator-1", now)
 	if err != nil {

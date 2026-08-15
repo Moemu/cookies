@@ -7,6 +7,10 @@ baseline. It does not claim an executable Browser Driver.
 
 The canonical machine-readable definition is
 `internal/systems/delivery/platformskills/definitions/oceanengine-ecommerce-manual-v0.1.json`.
+Its `calibration_manifest` binding identifies the frozen current-account
+project-create observation source at
+`docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json`; that
+Manifest is evidence only and never grants an action or write authorization.
 It binds:
 
 - the frozen `oceanengine-bidding-schema/v0.1` business schema;

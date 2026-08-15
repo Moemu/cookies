@@ -1,5 +1,16 @@
 # 巨量引擎业务 Schema 校准
 
+## 冻结的机器可读 Manifest（v1）
+
+当前测试账户的项目新建页观察事实以
+[`oceanengine-calibration-manifest-v1.json`](./fixtures/oceanengine-calibration-manifest-v1.json)
+为唯一机器可读来源；其结构由
+[`oceanengine-calibration-manifest-v1.json` Schema](./schemas/oceanengine-calibration-manifest-v1.json)
+验证，脱敏会话摘要保存在
+[`oceanengine-calibration-session-2026-08-15.json`](./evidence/oceanengine-calibration-session-2026-08-15.json)。
+
+Manifest 仅记录当前账户、当前页面版本下可见的表单事实、稳定阻塞原因和安全退出；它不授予远端写入权限。字段的领域归属、单位、动态条件和消费端映射均从该文件生成或统一校验。本文件后续的历史表格用于背景和差异分析，不得取代 Manifest 或被解释为其他账户、未来灰度或单元页面的覆盖声明。
+
 > 2026-08-11 运行时说明：本文件保留页面观察与历史差异分析。早期操作包步骤不属于当前活动运行时；当前实现止于第二次人工审批，不包含行为工作流编译或平台写入。
 
 | 属性 | 内容 |
