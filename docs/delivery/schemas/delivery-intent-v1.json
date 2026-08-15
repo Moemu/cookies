@@ -146,6 +146,7 @@
         "material_references",
         "audience_constraints",
         "strategy_reference"
+        ,"calibration_manifest"
       ],
       "properties": {
         "payload_schema_version": { "const": "delivery-intent/v1" },
@@ -171,6 +172,16 @@
         },
         "audience_constraints": { "$ref": "#/$defs/AudienceConstraints" },
         "strategy_reference": { "$ref": "#/$defs/StableReference" }
+        ,"calibration_manifest": { "$ref": "#/$defs/CalibrationManifestBinding" }
+      }
+    },
+    "CalibrationManifestBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "manifest_id"],
+      "properties": {
+        "schema_version": { "const": "oceanengine-calibration-manifest/v1" },
+        "manifest_id": { "type": "string", "minLength": 1 }
       }
     },
     "DeliveryIntent": {

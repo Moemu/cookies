@@ -252,14 +252,24 @@
     "OceanEngineConfiguration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["profile", "project", "promotions"],
+      "required": ["profile", "calibration_manifest", "project", "promotions"],
       "properties": {
         "profile": { "const": "ocean_engine" },
+        "calibration_manifest": { "$ref": "#/$defs/CalibrationManifestBinding" },
         "project": { "$ref": "#/$defs/OceanEngineProjectDraft" },
         "promotions": {
           "type": "array",
           "items": { "$ref": "#/$defs/OceanEnginePromotionDraft" }
         }
+      }
+    },
+    "CalibrationManifestBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "manifest_id"],
+      "properties": {
+        "schema_version": { "const": "oceanengine-calibration-manifest/v1" },
+        "manifest_id": { "type": "string", "minLength": 1 }
       }
     },
     "OceanEnginePayload": {

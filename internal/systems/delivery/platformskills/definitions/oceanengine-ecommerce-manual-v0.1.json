@@ -20,7 +20,13 @@
     "drift_check": "existing_object_edit_surfaces_revalidated_with_brand_locator_drift"
   },
   "schema_ref": "docs/delivery/schemas/oceanengine-bidding-schema-v0.1.json",
+  "calibration_manifest": {
+    "schema_version": "oceanengine-calibration-manifest/v1",
+    "manifest_id": "oceanengine-calibration-current-test-account-2026-08-15",
+    "fixture_ref": "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json"
+  },
   "evidence_refs": [
+    "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json",
     "docs/delivery/oceanengine-readonly-calibration.md",
     "docs/delivery/read-only-calibration-closeout.md",
     "docs/delivery/oceanengine-schema-calibration.md",

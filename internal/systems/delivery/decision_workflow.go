@@ -54,14 +54,15 @@ type DecisionConstraint struct {
 }
 
 type DeliveryDecisionCandidate struct {
-	ID                  string                `json:"id"`
-	Kind                DecisionCandidateKind `json:"kind"`
-	TargetConfiguration PlatformConfiguration `json:"target_configuration"`
-	BudgetChangePercent int64                 `json:"budget_change_percent"`
-	Rationale           []string              `json:"rationale"`
-	Constraints         []DecisionConstraint  `json:"constraints"`
-	Risks               []string              `json:"risks"`
-	Uncertainty         string                `json:"uncertainty"`
+	ID                  string                     `json:"id"`
+	Kind                DecisionCandidateKind      `json:"kind"`
+	TargetConfiguration PlatformConfiguration      `json:"target_configuration"`
+	BudgetChangePercent int64                      `json:"budget_change_percent"`
+	Rationale           []string                   `json:"rationale"`
+	Constraints         []DecisionConstraint       `json:"constraints"`
+	Risks               []string                   `json:"risks"`
+	Uncertainty         string                     `json:"uncertainty"`
+	CalibrationManifest CalibrationManifestBinding `json:"calibration_manifest"`
 }
 
 type DecisionDiagnostic struct {
@@ -97,14 +98,15 @@ func (d DeliveryDecision) canonicalPayload() any {
 		CanonicalHash   string           `json:"canonical_hash"`
 	}
 	type canonicalCandidate struct {
-		ID                  string                   `json:"id"`
-		Kind                DecisionCandidateKind    `json:"kind"`
-		Target              canonicalCandidateTarget `json:"target_configuration"`
-		BudgetChangePercent int64                    `json:"budget_change_percent"`
-		Rationale           []string                 `json:"rationale"`
-		Constraints         []DecisionConstraint     `json:"constraints"`
-		Risks               []string                 `json:"risks"`
-		Uncertainty         string                   `json:"uncertainty"`
+		ID                  string                     `json:"id"`
+		Kind                DecisionCandidateKind      `json:"kind"`
+		Target              canonicalCandidateTarget   `json:"target_configuration"`
+		BudgetChangePercent int64                      `json:"budget_change_percent"`
+		Rationale           []string                   `json:"rationale"`
+		Constraints         []DecisionConstraint       `json:"constraints"`
+		Risks               []string                   `json:"risks"`
+		Uncertainty         string                     `json:"uncertainty"`
+		CalibrationManifest CalibrationManifestBinding `json:"calibration_manifest"`
 	}
 	candidates := make([]canonicalCandidate, len(d.Candidates))
 	for index, candidate := range d.Candidates {
@@ -112,7 +114,7 @@ func (d DeliveryDecision) canonicalPayload() any {
 		candidates[index] = canonicalCandidate{
 			ID: candidate.ID, Kind: candidate.Kind,
 			Target:              canonicalCandidateTarget{target.SchemaVersion, target.ConfigurationID, target.VersionNumber, target.Platform, target.ProfileVersion, target.Intent, target.CanonicalHash},
-			BudgetChangePercent: candidate.BudgetChangePercent, Rationale: candidate.Rationale, Constraints: candidate.Constraints, Risks: candidate.Risks, Uncertainty: candidate.Uncertainty,
+			BudgetChangePercent: candidate.BudgetChangePercent, Rationale: candidate.Rationale, Constraints: candidate.Constraints, Risks: candidate.Risks, Uncertainty: candidate.Uncertainty, CalibrationManifest: candidate.CalibrationManifest,
 		}
 	}
 	return struct {
@@ -171,6 +173,9 @@ func (d DeliveryDecision) Validate() error {
 		}
 		targetHash, targetErr := candidate.TargetConfiguration.ComputeCanonicalHash()
 		if targetErr != nil || targetHash != candidate.TargetConfiguration.CanonicalHash || candidate.TargetConfiguration.validateStructure() != nil {
+			return ErrApprovalContentMismatch
+		}
+		if candidate.TargetConfiguration.Payload.OceanEngine == nil || candidate.CalibrationManifest != candidate.TargetConfiguration.Payload.OceanEngine.CalibrationManifest || candidate.CalibrationManifest.validate("candidate.calibration_manifest") != nil {
 			return ErrApprovalContentMismatch
 		}
 		if candidate.TargetConfiguration.ConfigurationID != d.Inputs.ConfigurationID || candidate.TargetConfiguration.VersionNumber != d.Inputs.ConfigurationVersion+1 || candidate.TargetConfiguration.Intent.IntentID != d.Inputs.IntentID || candidate.TargetConfiguration.Intent.VersionNumber != d.Inputs.IntentVersion || candidate.TargetConfiguration.Intent.CanonicalHash != d.Inputs.IntentCanonicalHash {
@@ -275,8 +280,9 @@ func BuildDeliveryDecision(input DecisionEngineInput) (DeliveryDecision, error) 
 				{Code: "INTENT_BUDGET_CEILING", Passed: candidateWithinIntentBudget(finalized.Payload.OceanEngine.Project.BudgetAndBidding.DailyBudgetMinor, intent.Payload.BudgetBoundary), Explanation: "candidate daily budget must not exceed the immutable intent budget ceiling"},
 				{Code: "REMOTE_WRITE_PROHIBITED_IN_PHASE_C", Passed: true, Explanation: "selection only prepares a local immutable configuration and workflow"},
 			},
-			Risks:       []string{"conversion volume may fall after budget reduction", "platform readback remains unverified until a later authorized phase"},
-			Uncertainty: option.uncertain,
+			Risks:               []string{"conversion volume may fall after budget reduction", "platform readback remains unverified until a later authorized phase"},
+			Uncertainty:         option.uncertain,
+			CalibrationManifest: finalized.Payload.OceanEngine.CalibrationManifest,
 		})
 	}
 	for _, candidate := range candidates {
@@ -401,51 +407,53 @@ type CompiledWorkflowStep struct {
 }
 
 type CompiledDeliveryWorkflow struct {
-	SchemaVersion              string                  `json:"schema_version"`
-	ID                         string                  `json:"id"`
-	OrganizationID             contract.OrganizationID `json:"organization_id"`
-	ProjectID                  contract.ProjectID      `json:"project_id"`
-	DecisionID                 string                  `json:"decision_id"`
-	DecisionCanonicalHash      string                  `json:"decision_canonical_hash"`
-	SelectedCandidateID        string                  `json:"selected_candidate_id"`
-	ConfigurationCanonicalHash string                  `json:"configuration_canonical_hash"`
-	ConfigurationID            string                  `json:"configuration_id"`
-	ConfigurationVersion       int                     `json:"configuration_version"`
-	Platform                   DeliveryPlatform        `json:"platform"`
-	ProfileVersion             string                  `json:"profile_version"`
-	AccountReference           StableReference         `json:"account_reference"`
-	CapabilityContractVersion  string                  `json:"capability_contract_version"`
-	SelectorContractVersion    string                  `json:"selector_contract_version"`
-	ActionContractVersion      string                  `json:"action_contract_version"`
-	CompilerVersion            string                  `json:"compiler_version"`
-	Status                     string                  `json:"status"`
-	RemoteWriteEnabled         bool                    `json:"remote_write_enabled"`
-	Steps                      []CompiledWorkflowStep  `json:"steps"`
-	CanonicalHash              string                  `json:"canonical_hash"`
-	CreatedBy                  string                  `json:"created_by"`
-	CreatedAt                  time.Time               `json:"created_at"`
+	SchemaVersion              string                     `json:"schema_version"`
+	ID                         string                     `json:"id"`
+	OrganizationID             contract.OrganizationID    `json:"organization_id"`
+	ProjectID                  contract.ProjectID         `json:"project_id"`
+	DecisionID                 string                     `json:"decision_id"`
+	DecisionCanonicalHash      string                     `json:"decision_canonical_hash"`
+	SelectedCandidateID        string                     `json:"selected_candidate_id"`
+	ConfigurationCanonicalHash string                     `json:"configuration_canonical_hash"`
+	ConfigurationID            string                     `json:"configuration_id"`
+	ConfigurationVersion       int                        `json:"configuration_version"`
+	Platform                   DeliveryPlatform           `json:"platform"`
+	ProfileVersion             string                     `json:"profile_version"`
+	AccountReference           StableReference            `json:"account_reference"`
+	CapabilityContractVersion  string                     `json:"capability_contract_version"`
+	SelectorContractVersion    string                     `json:"selector_contract_version"`
+	ActionContractVersion      string                     `json:"action_contract_version"`
+	CalibrationManifest        CalibrationManifestBinding `json:"calibration_manifest"`
+	CompilerVersion            string                     `json:"compiler_version"`
+	Status                     string                     `json:"status"`
+	RemoteWriteEnabled         bool                       `json:"remote_write_enabled"`
+	Steps                      []CompiledWorkflowStep     `json:"steps"`
+	CanonicalHash              string                     `json:"canonical_hash"`
+	CreatedBy                  string                     `json:"created_by"`
+	CreatedAt                  time.Time                  `json:"created_at"`
 }
 
 func (w CompiledDeliveryWorkflow) canonicalPayload() any {
 	return struct {
-		SchemaVersion              string                   `json:"schema_version"`
-		DecisionID                 string                   `json:"decision_id"`
-		DecisionCanonicalHash      string                   `json:"decision_canonical_hash"`
-		SelectedCandidateID        string                   `json:"selected_candidate_id"`
-		ConfigurationCanonicalHash string                   `json:"configuration_canonical_hash"`
-		ConfigurationID            string                   `json:"configuration_id"`
-		ConfigurationVersion       int                      `json:"configuration_version"`
-		Platform                   DeliveryPlatform         `json:"platform"`
-		ProfileVersion             string                   `json:"profile_version"`
-		AccountReference           canonicalStableReference `json:"account_reference"`
-		CapabilityContractVersion  string                   `json:"capability_contract_version"`
-		SelectorContractVersion    string                   `json:"selector_contract_version"`
-		ActionContractVersion      string                   `json:"action_contract_version"`
-		CompilerVersion            string                   `json:"compiler_version"`
-		Status                     string                   `json:"status"`
-		RemoteWriteEnabled         bool                     `json:"remote_write_enabled"`
-		Steps                      []CompiledWorkflowStep   `json:"steps"`
-	}{w.SchemaVersion, w.DecisionID, w.DecisionCanonicalHash, w.SelectedCandidateID, w.ConfigurationCanonicalHash, w.ConfigurationID, w.ConfigurationVersion, w.Platform, w.ProfileVersion, w.AccountReference.canonical(), w.CapabilityContractVersion, w.SelectorContractVersion, w.ActionContractVersion, w.CompilerVersion, w.Status, w.RemoteWriteEnabled, w.Steps}
+		SchemaVersion              string                     `json:"schema_version"`
+		DecisionID                 string                     `json:"decision_id"`
+		DecisionCanonicalHash      string                     `json:"decision_canonical_hash"`
+		SelectedCandidateID        string                     `json:"selected_candidate_id"`
+		ConfigurationCanonicalHash string                     `json:"configuration_canonical_hash"`
+		ConfigurationID            string                     `json:"configuration_id"`
+		ConfigurationVersion       int                        `json:"configuration_version"`
+		Platform                   DeliveryPlatform           `json:"platform"`
+		ProfileVersion             string                     `json:"profile_version"`
+		AccountReference           canonicalStableReference   `json:"account_reference"`
+		CapabilityContractVersion  string                     `json:"capability_contract_version"`
+		SelectorContractVersion    string                     `json:"selector_contract_version"`
+		ActionContractVersion      string                     `json:"action_contract_version"`
+		CalibrationManifest        CalibrationManifestBinding `json:"calibration_manifest"`
+		CompilerVersion            string                     `json:"compiler_version"`
+		Status                     string                     `json:"status"`
+		RemoteWriteEnabled         bool                       `json:"remote_write_enabled"`
+		Steps                      []CompiledWorkflowStep     `json:"steps"`
+	}{w.SchemaVersion, w.DecisionID, w.DecisionCanonicalHash, w.SelectedCandidateID, w.ConfigurationCanonicalHash, w.ConfigurationID, w.ConfigurationVersion, w.Platform, w.ProfileVersion, w.AccountReference.canonical(), w.CapabilityContractVersion, w.SelectorContractVersion, w.ActionContractVersion, w.CalibrationManifest, w.CompilerVersion, w.Status, w.RemoteWriteEnabled, w.Steps}
 }
 
 func (w CompiledDeliveryWorkflow) ComputeCanonicalHash() (string, error) {
@@ -455,6 +463,9 @@ func (w CompiledDeliveryWorkflow) ComputeCanonicalHash() (string, error) {
 func (w CompiledDeliveryWorkflow) Validate() error {
 	if w.SchemaVersion != CompiledDeliveryWorkflowSchemaV1 || strings.TrimSpace(w.ID) == "" || w.OrganizationID == "" || w.ProjectID == "" || strings.TrimSpace(w.DecisionID) == "" || strings.TrimSpace(w.SelectedCandidateID) == "" || w.CompilerVersion != DeliveryWorkflowCompilerV1 || w.Status != "ready_for_final_approval" || w.RemoteWriteEnabled ||
 		w.Platform != DeliveryPlatformOceanEngine || w.ProfileVersion != OceanEngineConfigurationProfileV1 || w.CapabilityContractVersion != OceanEngineCapabilityContractV01 || w.SelectorContractVersion != OceanEngineSelectorContractV01 || w.ActionContractVersion != OceanEngineActionContractV01 {
+		return ErrInvalidState
+	}
+	if w.CalibrationManifest.validate("calibration_manifest") != nil {
 		return ErrInvalidState
 	}
 	if strings.TrimSpace(w.ConfigurationID) == "" || w.ConfigurationVersion < 1 || !isLowercaseSHA256(w.DecisionCanonicalHash) || !isLowercaseSHA256(w.ConfigurationCanonicalHash) || w.AccountReference.State != ReferenceResolved || w.AccountReference.validate("account_reference") != nil {
@@ -534,7 +545,7 @@ func CompileDeliveryWorkflow(workflowID string, decision DeliveryDecision, candi
 		DecisionID: decision.ID, DecisionCanonicalHash: decision.CanonicalHash, SelectedCandidateID: candidate.ID, ConfigurationCanonicalHash: configuration.CanonicalHash,
 		ConfigurationID: configuration.ConfigurationID, ConfigurationVersion: configuration.VersionNumber, Platform: configuration.Platform, ProfileVersion: configuration.ProfileVersion,
 		AccountReference: project.AccountReference, CapabilityContractVersion: OceanEngineCapabilityContractV01, SelectorContractVersion: OceanEngineSelectorContractV01, ActionContractVersion: OceanEngineActionContractV01,
-		CompilerVersion: DeliveryWorkflowCompilerV1, Status: "ready_for_final_approval", RemoteWriteEnabled: false, Steps: steps, CreatedBy: actor, CreatedAt: now,
+		CalibrationManifest: configuration.Payload.OceanEngine.CalibrationManifest, CompilerVersion: DeliveryWorkflowCompilerV1, Status: "ready_for_final_approval", RemoteWriteEnabled: false, Steps: steps, CreatedBy: actor, CreatedAt: now,
 	}
 	hash, err := workflow.ComputeCanonicalHash()
 	if err != nil {

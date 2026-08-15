@@ -7,6 +7,8 @@ description: Prepare, calibrate, or perform a controlled Ocean Engine ecommerce 
 
 Treat the machine-readable [SkillDefinition](../../definitions/oceanengine-ecommerce-manual-v0.1.json) as the capability boundary. Read the relevant evidence and locator references it names before interacting with a page. Never infer a selector or permission from business semantics alone.
 
+The frozen `OceanEngineCalibrationManifest` is the observation source for project-create path dimensions, field ownership, units, dynamic conditions and semantic locators. It is never a ChangeSet, Approval, Confirmation or execution authorization. For the current calibration session, promotion create/edit and every remote-write boundary remain out of scope unless separately authorized.
+
 ## Choose the gate
 
 - Use gate one for page identification, form fill, field readback, and draft discard. Do not save or create an object.

@@ -5,13 +5,13 @@
       "name": "platform-neutral ecommerce intent",
       "kind": "intent",
       "fixture": "delivery-intent-v1-valid.json",
-      "expected_canonical_hash": "706500a701bdb01065dff277c269b048b2071df6da53ea5602c174c79655b0c5"
+      "expected_canonical_hash": "4c0c20cfab7bdbd2aeda6c5c0065e3190e303b6611d43a73c94420d8ff47befa"
     },
     {
       "name": "OceanEngine one-project two-promotions profile",
       "kind": "platform",
       "fixture": "delivery-platform-configuration-v2-oceanengine-valid.json",
-      "expected_canonical_hash": "bba8f42fe0668070d208b7816b5f00f0dd43cefdbc31b582cfba367cd46adf2a"
+      "expected_canonical_hash": "1f2864f8f31a92a19b215597e40ed9e0792e52a9d3f739476095d2c016aaa67f"
     },
     {
       "name": "Magnetic Engine capability-pending profile",

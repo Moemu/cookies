@@ -4,7 +4,7 @@
   "title": "Delivery Platform Skill Definition v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "id", "version", "display_name", "platform", "capability", "status", "owner", "executable", "real_browser_driver", "submit_allowed", "evidence_observed_at", "last_reviewed_at", "ui_baseline", "schema_ref", "evidence_refs", "page_types", "capabilities", "dynamic_condition_keys", "safety_exit", "write_validation_pending", "runtime_policy", "rollback", "gate_one", "gate_two_preparation", "gate_two_validation", "existing_object_edit_calibration", "controlled_action_batch_calibration"],
+  "required": ["schema_version", "id", "version", "display_name", "platform", "capability", "status", "owner", "executable", "real_browser_driver", "submit_allowed", "evidence_observed_at", "last_reviewed_at", "ui_baseline", "schema_ref", "calibration_manifest", "evidence_refs", "page_types", "capabilities", "dynamic_condition_keys", "safety_exit", "write_validation_pending", "runtime_policy", "rollback", "gate_one", "gate_two_preparation", "gate_two_validation", "existing_object_edit_calibration", "controlled_action_batch_calibration"],
   "properties": {
     "schema_version": { "const": "delivery-platform-skill-definition/v1" },
     "id": { "const": "oceanengine-ecommerce-manual" },
@@ -32,6 +32,7 @@
       }
     },
     "schema_ref": { "const": "docs/delivery/schemas/oceanengine-bidding-schema-v0.1.json" },
+    "calibration_manifest": { "type": "object", "additionalProperties": false, "required": ["schema_version", "manifest_id", "fixture_ref"], "properties": { "schema_version": { "const": "oceanengine-calibration-manifest/v1" }, "manifest_id": { "type": "string", "minLength": 1 }, "fixture_ref": { "const": "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json" } } },
     "evidence_refs": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 11, "uniqueItems": true },
     "page_types": {
       "type": "array",

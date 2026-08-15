@@ -34,22 +34,27 @@ type ControlledActionCapability struct {
 var definitions embed.FS
 
 type Definition struct {
-	SchemaVersion     string   `json:"schema_version"`
-	ID                string   `json:"id"`
-	Version           string   `json:"version"`
-	DisplayName       string   `json:"display_name"`
-	Platform          string   `json:"platform"`
-	Capability        string   `json:"capability"`
-	Status            string   `json:"status"`
-	Owner             string   `json:"owner"`
-	Executable        bool     `json:"executable"`
-	RealBrowserDriver bool     `json:"real_browser_driver"`
-	SubmitAllowed     bool     `json:"submit_allowed"`
-	EvidenceObserved  string   `json:"evidence_observed_at"`
-	LastReviewedAt    string   `json:"last_reviewed_at"`
-	SchemaRef         string   `json:"schema_ref"`
-	EvidenceRefs      []string `json:"evidence_refs"`
-	PageTypes         []struct {
+	SchemaVersion       string `json:"schema_version"`
+	ID                  string `json:"id"`
+	Version             string `json:"version"`
+	DisplayName         string `json:"display_name"`
+	Platform            string `json:"platform"`
+	Capability          string `json:"capability"`
+	Status              string `json:"status"`
+	Owner               string `json:"owner"`
+	Executable          bool   `json:"executable"`
+	RealBrowserDriver   bool   `json:"real_browser_driver"`
+	SubmitAllowed       bool   `json:"submit_allowed"`
+	EvidenceObserved    string `json:"evidence_observed_at"`
+	LastReviewedAt      string `json:"last_reviewed_at"`
+	SchemaRef           string `json:"schema_ref"`
+	CalibrationManifest struct {
+		SchemaVersion string `json:"schema_version"`
+		ManifestID    string `json:"manifest_id"`
+		FixtureRef    string `json:"fixture_ref"`
+	} `json:"calibration_manifest"`
+	EvidenceRefs []string `json:"evidence_refs"`
+	PageTypes    []struct {
 		Kind          string `json:"kind"`
 		EvidenceState string `json:"evidence_state"`
 	} `json:"page_types"`
@@ -177,6 +182,9 @@ func (d Definition) Validate() error {
 		d.Executable || d.RealBrowserDriver || !d.SubmitAllowed ||
 		d.EvidenceObserved != "2026-08-06" ||
 		d.UIBaseline.RevalidatedAt != "2026-08-14" ||
+		d.CalibrationManifest.SchemaVersion != "oceanengine-calibration-manifest/v1" ||
+		d.CalibrationManifest.ManifestID != "oceanengine-calibration-current-test-account-2026-08-15" ||
+		d.CalibrationManifest.FixtureRef != "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json" ||
 		d.UIBaseline.LocatorContract != "project_and_promotion_forms_live_dom" ||
 		d.UIBaseline.DriftCheck != "existing_object_edit_surfaces_revalidated_with_brand_locator_drift" ||
 		!d.RuntimePolicy.ProjectFormLiveCalibrated ||

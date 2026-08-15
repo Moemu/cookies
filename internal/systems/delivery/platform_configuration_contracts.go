@@ -14,6 +14,7 @@ const (
 	DeliveryIntentSchemaV1               = "delivery-intent/v1"
 	PlatformConfigurationSchemaV2        = "delivery-platform-configuration/v2"
 	OceanEngineConfigurationProfileV1    = "oceanengine-configuration/v1"
+	OceanEngineCalibrationManifestV1     = "oceanengine-calibration-manifest/v1"
 	MagneticEngineConfigurationProfileV1 = "magnetic-engine-configuration/v1"
 	CanonicalPayloadHashAlgorithm        = "RFC8785-JCS-SHA256(canonical_payload)"
 )
@@ -224,6 +225,20 @@ type CompilationMetadata struct {
 	EvidenceRefs  []string                `json:"evidence_refs,omitempty"`
 }
 
+// CalibrationManifestBinding is a frozen reference to redacted page-observation
+// facts. It is not a ChangeSet, Approval, confirmation, or execution authority.
+type CalibrationManifestBinding struct {
+	SchemaVersion string `json:"schema_version"`
+	ManifestID    string `json:"manifest_id"`
+}
+
+func (b CalibrationManifestBinding) validate(field string) error {
+	if b.SchemaVersion != OceanEngineCalibrationManifestV1 || strings.TrimSpace(b.ManifestID) == "" {
+		return contractFailure(ContractErrorInvalidConfiguration, field, "a versioned OceanEngine calibration manifest binding is required")
+	}
+	return nil
+}
+
 type IntentBudgetBoundary struct {
 	Currency          string `json:"currency"`
 	MinimumTotalMinor int64  `json:"minimum_total_minor"`
@@ -259,16 +274,17 @@ type IntentAudienceConstraints struct {
 }
 
 type DeliveryIntentPayload struct {
-	PayloadSchemaVersion    string                    `json:"payload_schema_version"`
-	MarketingObjective      string                    `json:"marketing_objective"`
-	BudgetBoundary          IntentBudgetBoundary      `json:"budget_boundary"`
-	ScheduleBoundary        IntentScheduleBoundary    `json:"schedule_boundary"`
-	OptimizationPreferences []OptimizationPreference  `json:"optimization_preferences"`
-	ProductReferences       []StableReference         `json:"product_references,omitempty"`
-	LandingPageReferences   []StableReference         `json:"landing_page_references,omitempty"`
-	MaterialReferences      []StableReference         `json:"material_references"`
-	AudienceConstraints     IntentAudienceConstraints `json:"audience_constraints"`
-	StrategyReference       StableReference           `json:"strategy_reference"`
+	PayloadSchemaVersion    string                     `json:"payload_schema_version"`
+	MarketingObjective      string                     `json:"marketing_objective"`
+	BudgetBoundary          IntentBudgetBoundary       `json:"budget_boundary"`
+	ScheduleBoundary        IntentScheduleBoundary     `json:"schedule_boundary"`
+	OptimizationPreferences []OptimizationPreference   `json:"optimization_preferences"`
+	ProductReferences       []StableReference          `json:"product_references,omitempty"`
+	LandingPageReferences   []StableReference          `json:"landing_page_references,omitempty"`
+	MaterialReferences      []StableReference          `json:"material_references"`
+	AudienceConstraints     IntentAudienceConstraints  `json:"audience_constraints"`
+	StrategyReference       StableReference            `json:"strategy_reference"`
+	CalibrationManifest     CalibrationManifestBinding `json:"calibration_manifest"`
 }
 
 type DeliveryIntent struct {
@@ -294,6 +310,7 @@ type canonicalDeliveryIntentPayload struct {
 	MaterialReferences      []canonicalStableReference   `json:"material_references"`
 	AudienceConstraints     canonicalAudienceConstraints `json:"audience_constraints"`
 	StrategyReference       canonicalStableReference     `json:"strategy_reference"`
+	CalibrationManifest     CalibrationManifestBinding   `json:"calibration_manifest"`
 }
 
 type canonicalAudienceConstraints struct {
@@ -328,7 +345,8 @@ func (i DeliveryIntent) CanonicalPayload() any {
 			ExcludeReferences: canonicalReferences(i.Payload.AudienceConstraints.ExcludeReferences),
 			Constraints:       append([]string(nil), i.Payload.AudienceConstraints.Constraints...),
 		},
-		StrategyReference: i.Payload.StrategyReference.canonical(),
+		StrategyReference:   i.Payload.StrategyReference.canonical(),
+		CalibrationManifest: i.Payload.CalibrationManifest,
 	}
 }
 
@@ -402,6 +420,9 @@ func (i DeliveryIntent) Validate() error {
 		return err
 	}
 	if err := i.Payload.StrategyReference.validate("payload.strategy_reference"); err != nil {
+		return err
+	}
+	if err := i.Payload.CalibrationManifest.validate("payload.calibration_manifest"); err != nil {
 		return err
 	}
 	hash, err := i.ComputeCanonicalHash()
@@ -515,9 +536,10 @@ type OceanEnginePromotionDraft struct {
 }
 
 type OceanEngineConfiguration struct {
-	Profile    DeliveryPlatform            `json:"profile"`
-	Project    *OceanEngineProjectDraft    `json:"project"`
-	Promotions []OceanEnginePromotionDraft `json:"promotions"`
+	Profile             DeliveryPlatform            `json:"profile"`
+	CalibrationManifest CalibrationManifestBinding  `json:"calibration_manifest"`
+	Project             *OceanEngineProjectDraft    `json:"project"`
+	Promotions          []OceanEnginePromotionDraft `json:"promotions"`
 }
 
 type MagneticEngineConfiguration struct {
@@ -605,9 +627,10 @@ type canonicalOceanEngineDeliveryIdentity struct {
 }
 
 type canonicalOceanEngineConfiguration struct {
-	Profile    DeliveryPlatform                `json:"profile"`
-	Project    *canonicalOceanEngineProject    `json:"project"`
-	Promotions []canonicalOceanEnginePromotion `json:"promotions"`
+	Profile             DeliveryPlatform                `json:"profile"`
+	CalibrationManifest CalibrationManifestBinding      `json:"calibration_manifest"`
+	Project             *canonicalOceanEngineProject    `json:"project"`
+	Promotions          []canonicalOceanEnginePromotion `json:"promotions"`
 }
 
 type canonicalPlatformConfigurationPayload struct {
@@ -632,7 +655,7 @@ func canonicalOceanConfiguration(value *OceanEngineConfiguration) *canonicalOcea
 	if value == nil {
 		return nil
 	}
-	out := &canonicalOceanEngineConfiguration{Profile: value.Profile, Promotions: make([]canonicalOceanEnginePromotion, len(value.Promotions))}
+	out := &canonicalOceanEngineConfiguration{Profile: value.Profile, CalibrationManifest: value.CalibrationManifest, Promotions: make([]canonicalOceanEnginePromotion, len(value.Promotions))}
 	if value.Project != nil {
 		project := value.Project
 		out.Project = &canonicalOceanEngineProject{
@@ -762,6 +785,9 @@ func (c PlatformConfiguration) Validate() error {
 }
 
 func validateOceanEngineConfiguration(configuration OceanEngineConfiguration) error {
+	if err := configuration.CalibrationManifest.validate("payload.ocean_engine.calibration_manifest"); err != nil {
+		return err
+	}
 	if configuration.Project == nil {
 		return contractFailure(ContractErrorProjectRequired, "payload.ocean_engine.project", "one OceanEngine project is required")
 	}

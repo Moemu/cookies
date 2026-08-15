@@ -3,7 +3,7 @@
   "intent_id": "intent-ecommerce-1",
   "version_number": 1,
   "hash_algorithm": "RFC8785-JCS-SHA256(canonical_payload)",
-  "canonical_hash": "706500a701bdb01065dff277c269b048b2071df6da53ea5602c174c79655b0c5",
+  "canonical_hash": "4c0c20cfab7bdbd2aeda6c5c0065e3190e303b6611d43a73c94420d8ff47befa",
   "payload": {
     "payload_schema_version": "delivery-intent/v1",
     "marketing_objective": "increase qualified ecommerce conversions",
@@ -80,6 +80,10 @@
       "version": "v3",
       "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "state": "resolved"
+    },
+    "calibration_manifest": {
+      "schema_version": "oceanengine-calibration-manifest/v1",
+      "manifest_id": "oceanengine-calibration-current-test-account-2026-08-15"
     }
   },
   "configuration_provenance": {
