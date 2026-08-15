@@ -148,12 +148,98 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "role_name", "value": "button:选择" },
+      "computer_use": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "投放载体" },
+        "target": {
+          "kind": "role_name",
+          "value": "textbox:请输入应用下载链接或选择已有应用"
+        },
+        "expected_target_count": 1,
+        "readback": {
+          "kind": "role_name",
+          "value": "textbox:请输入应用下载链接或选择已有应用"
+        },
+        "input_constraints": {
+          "reference_kind": "existing_application",
+          "persistence": "unsubmitted_local_only"
+        }
+      },
       "evidence_state": "observed",
       "consumers": [
         "DeliveryIntent",
         "OceanEngineConfiguration",
         "PlatformSkill"
       ]
+    },
+    {
+      "key": "project.application_scenario",
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose == application",
+      "condition_dimensions": ["marketing_purpose"],
+      "required_state": "unknown",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "应用下载" },
+      "computer_use": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "营销目的" },
+        "target": { "kind": "visible_text", "value": "应用下载" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "投放载体" },
+        "observed_options": ["应用下载", "应用调起", "预约下载"]
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "project.application_platform",
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose == application",
+      "condition_dimensions": ["marketing_purpose", "application_scenario"],
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "安卓" },
+      "computer_use": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "投放载体" },
+        "target": { "kind": "visible_text", "value": "安卓" },
+        "expected_target_count": 1,
+        "readback": {
+          "kind": "role_name",
+          "value": "textbox:请输入应用下载链接或选择已有应用"
+        },
+        "observed_options": ["安卓", "iOS", "鸿蒙"]
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "project.application_download_mode",
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose == application and application_scenario == app_download",
+      "condition_dimensions": ["marketing_purpose", "application_scenario"],
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "下载方式" },
+      "computer_use": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "下载方式" },
+        "target": { "kind": "visible_text", "value": "直接下载" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "优化目标" },
+        "observed_options": ["直接下载", "落地页下载"]
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
     {
       "key": "project.product_selection_mode",
@@ -624,6 +710,14 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "拉起方式" },
+      "computer_use": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "调起方式" },
+        "target": { "kind": "visible_text", "value": "直接调起" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "优化目标" },
+        "observed_options": ["直接调起", "落地页调起"]
+      },
       "evidence_state": "observed",
       "consumers": [
         "OceanEngineConfiguration",
@@ -857,6 +951,42 @@
     },
     {
       "field_key": "project.application_reference",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.application_scenario",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "evidence_only",
+      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+    },
+    {
+      "field_key": "project.application_scenario",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.application_platform",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "evidence_only",
+      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+    },
+    {
+      "field_key": "project.application_platform",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.application_download_mode",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "evidence_only",
+      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+    },
+    {
+      "field_key": "project.application_download_mode",
       "destination": "PlatformSkill",
       "treatment": "evidence_only",
       "contract_path": "SkillDefinition.calibration_manifest"
