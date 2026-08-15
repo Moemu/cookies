@@ -2,6 +2,7 @@
   "schema_version": "oceanengine-calibration-manifest/v1",
   "manifest_id": "oceanengine-calibration-current-test-account-2026-08-15",
   "platform": "ocean_engine",
+  "session_evidence_ref": "docs/delivery/evidence/oceanengine-calibration-session-2026-08-15.json",
   "observation_boundary": {
     "account_scope": "redacted_current_test_account",
     "platform_build": "unknown",

@@ -5,11 +5,12 @@
   "description": "Versioned, redacted observation facts. This manifest is never remote-write authority.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "manifest_id", "platform", "observation_boundary", "page_families", "fields", "coverage_cases", "consumer_mappings"],
+  "required": ["schema_version", "manifest_id", "platform", "session_evidence_ref", "observation_boundary", "page_families", "fields", "coverage_cases", "consumer_mappings"],
   "properties": {
     "schema_version": { "const": "oceanengine-calibration-manifest/v1" },
     "manifest_id": { "type": "string", "pattern": "^oceanengine-calibration-[a-z0-9-]+$" },
     "platform": { "const": "ocean_engine" },
+    "session_evidence_ref": { "const": "docs/delivery/evidence/oceanengine-calibration-session-2026-08-15.json" },
     "observation_boundary": {
       "type": "object", "additionalProperties": false,
       "required": ["account_scope", "platform_build", "complete_coverage_definition", "local_calibration_allowed", "remote_write_authorized"],

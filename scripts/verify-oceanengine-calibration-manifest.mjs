@@ -6,6 +6,7 @@ const root = resolve(import.meta.dirname, '..')
 const readJSON = relative => JSON.parse(readFileSync(resolve(root, relative), 'utf8'))
 const schema = readJSON('docs/delivery/schemas/oceanengine-calibration-manifest-v1.json')
 const manifest = readJSON('docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json')
+const evidence = readJSON(manifest.session_evidence_ref)
 const validate = new Ajv2020({ allErrors: true, strict: false }).compile(schema)
 
 if (!validate(manifest)) throw new Error(`invalid calibration manifest: ${JSON.stringify(validate.errors)}`)
@@ -15,6 +16,7 @@ if (!manifest.coverage_cases.some(item => item.status === 'blocked_by_event_asse
 if (manifest.fields.some(field => field.locator.kind === 'css' || /nth-child|\[\d+\]/.test(field.locator.value))) throw new Error('manifest contains an unstable locator')
 const serialized = JSON.stringify(manifest)
 if (/(?:aadvid=|https?:\/\/|cookie|token|余额|[0-9]{10,})/i.test(serialized)) throw new Error('manifest redaction scan failed')
+if (evidence.manifest_ref !== 'docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json' || evidence.safe_exit?.remote_write_detected || evidence.safe_exit?.final_confirmation_count !== 0 || evidence.safe_exit?.controlled_action_attempt_count !== 0 || evidence.safe_exit?.object_budget_and_status_changed) throw new Error('calibration evidence does not prove the no-write boundary')
 const destinations = new Set(manifest.consumer_mappings.map(mapping => mapping.destination))
 for (const destination of ['DeliveryIntent', 'OceanEngineConfiguration', 'DeliveryDecisionCandidate', 'CompiledDeliveryWorkflow', 'PlatformSkill']) {
   if (!destinations.has(destination)) throw new Error(`manifest has no consumer mapping for ${destination}`)
