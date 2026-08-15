@@ -9,6 +9,32 @@ Treat the machine-readable [SkillDefinition](../../definitions/oceanengine-ecomm
 
 The frozen `OceanEngineCalibrationManifest` is the observation source for project-create path dimensions, field ownership, units, dynamic conditions and semantic locators. It is never a ChangeSet, Approval, Confirmation or execution authorization. For the current calibration session, promotion create/edit and every remote-write boundary remain out of scope unless separately authorized.
 
+## Fill a project-create field from the Manifest
+
+For a no-write project-create calibration, use only a field carrying a
+`computer_use` specification in the frozen Manifest. Reidentify the matching
+page fingerprint first, then apply this sequence:
+
+1. Resolve the `scope`, then resolve the `target` inside that scope; require the
+   declared `expected_target_count` before interacting.
+2. Use the declared operation only (`choose_exact_visible_option`,
+   `open_reference_picker`, `fill_text`, `fill_money`, `toggle`, or
+   `configure_object`). Do not substitute a coordinate, DOM index, or a
+   same-labelled control from elsewhere on the page.
+3. For a choice, accept only an `observed_options` value. For money, convert
+   only according to `input_constraints` (for example CNY yuan in the page to
+   CNY fen in the domain model), and never type a business value outside the
+   current no-write calibration case.
+4. Read the value back through the declared `readback`. If any locator is
+   missing, non-unique, disabled unexpectedly, or the readback differs, stop
+   the case as `page_drift`; do not use a fallback selector.
+
+A field without `computer_use` remains observation-only. It must not be
+presented as an executable form action until a later calibration adds a unique
+scope, target and readback. This rule applies equally to fields marked
+`evidence_only`: the Manifest may document them without granting a modelled
+platform write.
+
 ## Choose the gate
 
 - Use gate one for page identification, form fill, field readback, and draft discard. Do not save or create an object.

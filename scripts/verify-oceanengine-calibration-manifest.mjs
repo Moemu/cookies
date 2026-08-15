@@ -13,6 +13,9 @@ const manifest = readJSON(
   "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json",
 );
 const evidence = readJSON(manifest.session_evidence_ref);
+const skillInstructions = readText(
+  "internal/systems/delivery/platformskills/skills/oceanengine-ecommerce-manual/SKILL.md",
+);
 const contractSource = [
   "internal/systems/delivery/platform_configuration_contracts.go",
   "internal/systems/delivery/decision_workflow.go",
@@ -32,6 +35,16 @@ if (!validate(manifest))
   );
 if (manifest.observation_boundary.remote_write_authorized)
   throw new Error("calibration manifest must never authorize remote writes");
+for (const requiredSkillTerm of [
+  "computer_use",
+  "expected_target_count",
+  "page_drift",
+]) {
+  if (!skillInstructions.includes(requiredSkillTerm))
+    throw new Error(
+      `OceanEngine Skill does not consume Manifest form controls: ${requiredSkillTerm}`,
+    );
+}
 if (
   !manifest.page_families.some(
     (page) =>

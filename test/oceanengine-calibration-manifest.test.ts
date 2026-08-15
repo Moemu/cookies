@@ -15,7 +15,15 @@ const manifest = JSON.parse(
 ) as {
   session_evidence_ref: string;
   path_dimensions: Array<{ key: string; observed_values: string[] }>;
-  fields: Array<{ key: string; consumers: string[] }>;
+  fields: Array<{
+    key: string;
+    consumers: string[];
+    computer_use?: {
+      operation: string;
+      expected_target_count: number;
+      observed_options?: string[];
+    };
+  }>;
   coverage_cases: Array<{ id: string; path: string[]; status: string }>;
   consumer_mappings: Array<{
     field_key: string;
@@ -54,6 +62,31 @@ test("OceanEngine calibration manifest drives consumer and coverage checks", () 
       assert.ok(
         mappedPairs.has(`${field.key}:${consumer}`),
         `unconsumed manifest field: ${field.key}:${consumer}`,
+      );
+    }
+  }
+  const computerUseFields = manifest.fields.filter(
+    (field) => field.computer_use,
+  );
+  assert.ok(
+    computerUseFields.length > 0,
+    "no Manifest fields are Computer Use-ready",
+  );
+  for (const field of computerUseFields) {
+    assert.equal(
+      field.computer_use?.expected_target_count,
+      1,
+      `non-unique Computer Use target: ${field.key}`,
+    );
+    assert.ok(
+      field.computer_use?.operation.length,
+      `missing Computer Use operation: ${field.key}`,
+    );
+    if (field.computer_use?.observed_options) {
+      assert.equal(
+        new Set(field.computer_use.observed_options).size,
+        field.computer_use.observed_options.length,
+        `duplicate Computer Use options: ${field.key}`,
       );
     }
   }
