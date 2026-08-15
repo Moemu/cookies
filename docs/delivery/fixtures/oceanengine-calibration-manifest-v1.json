@@ -596,8 +596,8 @@
     {
       "field_key": "project.marketing_purpose",
       "destination": "CompiledDeliveryWorkflow",
-      "treatment": "modelled",
-      "contract_path": "CompiledDeliveryWorkflow.SelectedConfiguration.Project.MarketingPurpose"
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
     },
     {
       "field_key": "project.marketing_purpose",
@@ -674,8 +674,8 @@
     {
       "field_key": "project.optimization_target_reference",
       "destination": "CompiledDeliveryWorkflow",
-      "treatment": "dynamic_reference",
-      "contract_path": "CompiledDeliveryWorkflow.SelectedConfiguration.Project.OptimizationTargetReference"
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
     },
     {
       "field_key": "project.optimization_target_reference",
@@ -698,8 +698,8 @@
     {
       "field_key": "project.delivery_mode",
       "destination": "CompiledDeliveryWorkflow",
-      "treatment": "modelled",
-      "contract_path": "CompiledDeliveryWorkflow.SelectedConfiguration.Project.DeliveryMode"
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
     },
     {
       "field_key": "project.delivery_mode",
@@ -764,8 +764,8 @@
     {
       "field_key": "project.schedule",
       "destination": "CompiledDeliveryWorkflow",
-      "treatment": "modelled",
-      "contract_path": "CompiledDeliveryWorkflow.SelectedConfiguration.Project.Schedule"
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
     },
     {
       "field_key": "project.schedule",
@@ -794,8 +794,8 @@
     {
       "field_key": "project.daily_budget_minor",
       "destination": "CompiledDeliveryWorkflow",
-      "treatment": "modelled",
-      "contract_path": "CompiledDeliveryWorkflow.SelectedConfiguration.Project.BudgetAndBidding.DailyBudgetMinor"
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
     },
     {
       "field_key": "project.daily_budget_minor",
@@ -818,8 +818,8 @@
     {
       "field_key": "project.bidding_strategy",
       "destination": "CompiledDeliveryWorkflow",
-      "treatment": "modelled",
-      "contract_path": "CompiledDeliveryWorkflow.SelectedConfiguration.Project.BudgetAndBidding.BiddingStrategy"
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
     },
     {
       "field_key": "project.bidding_strategy",
@@ -842,8 +842,8 @@
     {
       "field_key": "project.charging_mode",
       "destination": "CompiledDeliveryWorkflow",
-      "treatment": "modelled",
-      "contract_path": "CompiledDeliveryWorkflow.SelectedConfiguration.Project.BudgetAndBidding.ChargingMode"
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
     },
     {
       "field_key": "project.charging_mode",
@@ -866,8 +866,8 @@
     {
       "field_key": "project.bid_minor",
       "destination": "CompiledDeliveryWorkflow",
-      "treatment": "modelled",
-      "contract_path": "CompiledDeliveryWorkflow.SelectedConfiguration.Project.BudgetAndBidding.BidMinor"
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
     },
     {
       "field_key": "project.bid_minor",
@@ -896,8 +896,8 @@
     {
       "field_key": "project.project_name",
       "destination": "CompiledDeliveryWorkflow",
-      "treatment": "modelled",
-      "contract_path": "CompiledDeliveryWorkflow.SelectedConfiguration.Project.ProjectName"
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
     },
     {
       "field_key": "project.project_name",
