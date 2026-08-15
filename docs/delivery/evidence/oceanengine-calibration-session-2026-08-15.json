@@ -31,7 +31,7 @@
       "outcome": "blocked_by_event_asset"
     },
     {
-      "case_id": "OE-PROJECT-APP-DOWNLOAD-IOS-HARMONY-INITIAL",
+      "case_id": "OE-PROJECT-APP-DOWNLOAD-IOS-HARMONY-PACKAGE",
       "outcome": "covered"
     },
     { "case_id": "OE-PROJECT-CATALOG-DEFAULT", "outcome": "covered" },
