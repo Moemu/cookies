@@ -133,6 +133,19 @@ loading completed, the unit's replacement pickers exposed 3255 videos, 1722
 images, and 284 image-text assets. No asset was selected and no upload, save, or
 other remote write was performed.
 
+The subsequent 2026-08-16 Phase D field-calibration pass had explicit,
+session-scoped authority for reversible writes on one test project and unit.
+Field calibration does not create production `ChangeSet`, `Approval`,
+`Confirmation`, or `ControlledActionAttempt` records; those objects govern
+post-launch Computer Use execution. The batch budget editor rejected CNY 299
+with `预算不小于300元`; because both the baseline and the authorized maximum were
+CNY 300, the budget mutation was `blocked_by_input_constraint`. A different
+existing video was saved and read back, then the original audit-rejected video
+was restored by enabling the `审核不通过` picker filter and saved again. Project
+enable/pause and unit pause/enable were each saved and read back. Final
+verification showed project paused, unit switch enabled, unit budget CNY 300,
+and the original video restored.
+
 ## Read the verified baseline
 
 - Read the [control contract](../../../../../../docs/delivery/controlled-computer-use-contract.md) for state and authority invariants.

@@ -1066,8 +1066,8 @@
         "scope": { "kind": "visible_text", "value": "单元预算" },
         "target": { "kind": "role_name", "value": "spinbutton:单元日预算" },
         "expected_target_count": 1,
-        "readback": { "kind": "role_name", "value": "spinbutton:299" },
-        "input_constraints": { "input_unit": "CNY_yuan", "model_unit": "CNY_fen", "minor_per_input_unit": 100, "baseline_cny": 300, "calibration_value_cny": 299, "final_write_boundary": "button:保存", "persistence": "unsubmitted_local_only" }
+        "readback": { "kind": "visible_text", "value": "预算不小于300元" },
+        "input_constraints": { "input_unit": "CNY_yuan", "model_unit": "CNY_fen", "minor_per_input_unit": 100, "baseline_cny": 300, "platform_minimum_cny": 300, "calibration_authority_maximum_cny": 300, "distinct_authorized_target_exists": false, "final_write_boundary": "button:确定修改" }
       },
       "evidence_state": "observed",
       "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
@@ -1510,12 +1510,12 @@
     },
     {
       "id": "OE-D3-PROMOTION-BUDGET-EDIT",
-      "path": ["promotion_list", "daily_budget_edit", "300_to_299", "cancel"],
+      "path": ["promotion_list", "daily_budget_edit", "300_to_299_rejected", "cancel"],
       "field_keys": ["promotion.daily_budget_edit"],
-      "status": "covered",
+      "status": "blocked_by_input_constraint",
       "evidence_state": "observed",
       "exit_verified": true,
-      "reason": "the inline unit-budget editor read back CNY 299, exposed a unique save boundary, and returned to CNY 300 after cancel"
+      "reason": "the platform rejected CNY 299 because unit budget must be at least CNY 300; the baseline and calibration authority maximum were both CNY 300, so no distinct authorized write target existed"
     },
     {
       "id": "OE-D3-PROMOTION-MATERIAL-REPLACEMENT",
@@ -1524,7 +1524,7 @@
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true,
-      "reason": "after asynchronous loading completed, the existing-asset pickers exposed 3255 videos, 1722 images and 284 image-text assets; no item was selected and no upload or save occurred"
+      "reason": "after asynchronous loading completed, a different existing video was selected and saved, then the original video was found by enabling the audit-rejected-material filter, restored, saved and verified"
     },
     {
       "id": "OE-D3-PROJECT-ENABLE",
@@ -1533,16 +1533,16 @@
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true,
-      "reason": "the authorized project was paused and exposed one semantic project on-off switch; the switch was not clicked"
+      "reason": "the authorized project was enabled, verified, then paused again and verified at its original state"
     },
     {
       "id": "OE-D3-PROJECT-PAUSE",
       "path": ["project_list", "operational_state", "enabled_to_paused_boundary"],
       "field_keys": ["project.operational_state"],
-      "status": "blocked_by_object_state",
+      "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true,
-      "reason": "the authorized project was already paused"
+      "reason": "after the project enable calibration, the project was paused and verified at its original state"
     },
     {
       "id": "OE-D3-PROMOTION-PAUSE",
@@ -1551,16 +1551,16 @@
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true,
-      "reason": "the authorized unit switch was enabled and exposed one semantic unit on-off switch; the switch was not clicked"
+      "reason": "the authorized unit was paused and verified, then enabled again and verified at its original state"
     },
     {
       "id": "OE-D3-PROMOTION-ENABLE",
       "path": ["promotion_list", "operational_state", "paused_to_enabled_boundary"],
       "field_keys": ["promotion.operational_state"],
-      "status": "blocked_by_object_state",
+      "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true,
-      "reason": "the unit-level switch was already enabled although effective delivery remained blocked by its paused parent project"
+      "reason": "after the unit pause calibration, the unit was enabled and verified before the parent project was restored to paused"
     }
   ],
   "consumer_mappings": [

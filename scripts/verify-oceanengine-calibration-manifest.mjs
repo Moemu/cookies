@@ -13,6 +13,9 @@ const manifest = readJSON(
   "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json",
 );
 const evidence = readJSON(manifest.session_evidence_ref);
+const writeCalibrationEvidence = readJSON(
+  "docs/delivery/evidence/oceanengine-d3-write-calibration-2026-08-16.json",
+);
 const skillInstructions = readText(
   "internal/systems/delivery/platformskills/skills/oceanengine-ecommerce-manual/SKILL.md",
 );
@@ -204,6 +207,12 @@ const serialized = JSON.stringify(manifest);
 if (/(?:aadvid=|https?:\/\/|cookie|token|余额|[0-9]{10,})/i.test(serialized))
   throw new Error("manifest redaction scan failed");
 if (
+  /(?:aadvid=|https?:\/\/|cookie|token|余额|[0-9]{10,})/i.test(
+    JSON.stringify(writeCalibrationEvidence),
+  )
+)
+  throw new Error("Phase D write-calibration redaction scan failed");
+if (
   evidence.manifest_ref !==
     "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json" ||
   evidence.safe_exit?.remote_write_detected ||
@@ -215,6 +224,19 @@ if (
 const evidenceCases = new Map(
   evidence.cases.map((item) => [item.case_id, item.outcome]),
 );
+if (
+  writeCalibrationEvidence.scope?.production_authority_objects_created !==
+    false ||
+  writeCalibrationEvidence.final_state?.project_switch !== false ||
+  writeCalibrationEvidence.final_state?.promotion_switch !== true ||
+  writeCalibrationEvidence.final_state?.promotion_budget_minor !== 30000 ||
+  writeCalibrationEvidence.final_state?.original_material_restored !== true
+)
+  throw new Error(
+    "Phase D write calibration does not prove restored original state",
+  );
+for (const operation of writeCalibrationEvidence.operations)
+  evidenceCases.set(operation.case_id, operation.outcome);
 for (const item of manifest.coverage_cases.filter(
   (item) => item.status !== "not_in_scope",
 )) {

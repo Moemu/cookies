@@ -28,6 +28,7 @@
   "evidence_refs": [
     "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json",
     "docs/delivery/evidence/oceanengine-calibration-session-2026-08-16.json",
+    "docs/delivery/evidence/oceanengine-d3-write-calibration-2026-08-16.json",
     "docs/delivery/oceanengine-readonly-calibration.md",
     "docs/delivery/read-only-calibration-closeout.md",
     "docs/delivery/oceanengine-schema-calibration.md",
