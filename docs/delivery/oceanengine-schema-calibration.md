@@ -7,7 +7,7 @@
 为唯一机器可读来源；其结构由
 [`oceanengine-calibration-manifest-v1.json` Schema](./schemas/oceanengine-calibration-manifest-v1.json)
 验证，脱敏会话摘要保存在
-[`oceanengine-calibration-session-2026-08-15.json`](./evidence/oceanengine-calibration-session-2026-08-15.json)。
+[`oceanengine-calibration-session-2026-08-16.json`](./evidence/oceanengine-calibration-session-2026-08-16.json)。
 
 Manifest 仅记录当前账户、当前页面版本下可见的表单事实、稳定阻塞原因和安全退出；它不授予远端写入权限。字段的领域归属、单位、动态条件和消费端映射均从该文件生成或统一校验。本文件后续的历史表格用于背景和差异分析，不得取代 Manifest 或被解释为其他账户、未来灰度或单元页面的覆盖声明。
 

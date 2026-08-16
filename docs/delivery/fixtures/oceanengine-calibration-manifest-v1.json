@@ -2,7 +2,7 @@
   "schema_version": "oceanengine-calibration-manifest/v1",
   "manifest_id": "oceanengine-calibration-current-test-account-2026-08-16",
   "platform": "ocean_engine",
-  "session_evidence_ref": "docs/delivery/evidence/oceanengine-calibration-session-2026-08-15.json",
+  "session_evidence_ref": "docs/delivery/evidence/oceanengine-calibration-session-2026-08-16.json",
   "observation_boundary": {
     "account_scope": "redacted_current_test_account",
     "platform_build": "unknown",
@@ -79,6 +79,18 @@
       ],
       "safety_exit": "discard_unsaved_edit",
       "final_write_boundary": "save_project",
+      "evidence_state": "observed"
+    },
+    {
+      "id": "promotion_list",
+      "page_kind": "promotion_list",
+      "entry_locator": { "kind": "visible_text", "value": "单元" },
+      "page_fingerprint": [
+        { "kind": "visible_text", "value": "新建单元" },
+        { "kind": "visible_text", "value": "单元预算" }
+      ],
+      "safety_exit": "return_to_readonly_list",
+      "final_write_boundary": "inline_save_or_operational_switch",
       "evidence_state": "observed"
     },
     {
@@ -1038,6 +1050,90 @@
       },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.daily_budget_edit",
+      "owner": "promotion_draft",
+      "page_family": "promotion_list",
+      "value_type": "money_minor",
+      "unit": "CNY_fen",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "visible_text", "value": "单元预算" },
+      "computer_use": {
+        "operation": "fill_money",
+        "scope": { "kind": "visible_text", "value": "单元预算" },
+        "target": { "kind": "role_name", "value": "spinbutton:单元日预算" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "spinbutton:299" },
+        "input_constraints": { "input_unit": "CNY_yuan", "model_unit": "CNY_fen", "minor_per_input_unit": 100, "baseline_cny": 300, "calibration_value_cny": 299, "final_write_boundary": "button:保存", "persistence": "unsubmitted_local_only" }
+      },
+      "evidence_state": "observed",
+      "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.material_replacement_edit",
+      "owner": "promotion_draft",
+      "page_family": "promotion_edit",
+      "value_type": "dynamic_reference",
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "role_name", "value": "button:换视频" },
+      "computer_use": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "基础素材" },
+        "target": { "kind": "role_name", "value": "button:换视频" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "共0个视频" },
+        "observed_options": ["换视频", "添加图片", "添加图文"],
+        "input_constraints": { "video_library_items": 0, "image_library_items": 0, "image_text_library_items": 0, "upload_forbidden_in_calibration": true, "final_write_boundary": "button:保存并关闭" }
+      },
+      "evidence_state": "blocked_by_missing_material",
+      "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "project.operational_state",
+      "owner": "runtime_only",
+      "page_family": "project_list",
+      "value_type": "boolean",
+      "required_state": "observed_required",
+      "editable_state": "conditional",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "attribute", "value": "data-e2e=promotion_project_on-off" },
+      "computer_use": {
+        "operation": "toggle",
+        "scope": { "kind": "visible_text", "value": "项目" },
+        "target": { "kind": "attribute", "value": "data-e2e=promotion_project_on-off" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "已暂停" },
+        "observed_options": ["启用", "暂停"],
+        "input_constraints": { "observed_model_value": false, "calibration_mode": "observe_boundary_only", "click_forbidden_without_action_authority": true }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.operational_state",
+      "owner": "runtime_only",
+      "page_family": "promotion_list",
+      "value_type": "boolean",
+      "required_state": "observed_required",
+      "editable_state": "conditional",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "attribute", "value": "data-e2e=promotion_promotion_on-off" },
+      "computer_use": {
+        "operation": "toggle",
+        "scope": { "kind": "visible_text", "value": "单元" },
+        "target": { "kind": "attribute", "value": "data-e2e=promotion_promotion_on-off" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "项目已暂停" },
+        "observed_options": ["启用", "暂停"],
+        "input_constraints": { "observed_model_value": true, "effective_delivery_blocked_by_parent_project": true, "calibration_mode": "observe_boundary_only", "click_forbidden_without_action_authority": true }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
     }
   ],
   "coverage_cases": [
@@ -1411,6 +1507,60 @@
       "evidence_state": "observed",
       "exit_verified": true,
       "reason": "an existing unit exposed identity, materials, copy, native anchor, landing page, deep links, product information, creative components, settings and name without crossing save"
+    },
+    {
+      "id": "OE-D3-PROMOTION-BUDGET-EDIT",
+      "path": ["promotion_list", "daily_budget_edit", "300_to_299", "cancel"],
+      "field_keys": ["promotion.daily_budget_edit"],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "the inline unit-budget editor read back CNY 299, exposed a unique save boundary, and returned to CNY 300 after cancel"
+    },
+    {
+      "id": "OE-D3-PROMOTION-MATERIAL-REPLACEMENT",
+      "path": ["promotion_edit", "material_replacement", "existing_asset_picker"],
+      "field_keys": ["promotion.material_replacement_edit"],
+      "status": "blocked_by_missing_material",
+      "evidence_state": "blocked_by_missing_material",
+      "exit_verified": true,
+      "reason": "video, image and image-text replacement libraries each returned zero selectable existing assets; uploads were not used"
+    },
+    {
+      "id": "OE-D3-PROJECT-ENABLE",
+      "path": ["project_list", "operational_state", "paused_to_enabled_boundary"],
+      "field_keys": ["project.operational_state"],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "the authorized project was paused and exposed one semantic project on-off switch; the switch was not clicked"
+    },
+    {
+      "id": "OE-D3-PROJECT-PAUSE",
+      "path": ["project_list", "operational_state", "enabled_to_paused_boundary"],
+      "field_keys": ["project.operational_state"],
+      "status": "blocked_by_object_state",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "the authorized project was already paused"
+    },
+    {
+      "id": "OE-D3-PROMOTION-PAUSE",
+      "path": ["promotion_list", "operational_state", "enabled_to_paused_boundary"],
+      "field_keys": ["promotion.operational_state"],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "the authorized unit switch was enabled and exposed one semantic unit on-off switch; the switch was not clicked"
+    },
+    {
+      "id": "OE-D3-PROMOTION-ENABLE",
+      "path": ["promotion_list", "operational_state", "paused_to_enabled_boundary"],
+      "field_keys": ["promotion.operational_state"],
+      "status": "blocked_by_object_state",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "the unit-level switch was already enabled although effective delivery remained blocked by its paused parent project"
     }
   ],
   "consumer_mappings": [
@@ -1950,6 +2100,23 @@
     { "field_key": "promotion.editable_surface", "destination": "OceanEngineConfiguration", "treatment": "evidence_only", "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence" },
     { "field_key": "promotion.editable_surface", "destination": "DeliveryDecisionCandidate", "treatment": "evidence_only", "contract_path": "DeliveryDecisionCandidate.CalibrationManifest" },
     { "field_key": "promotion.editable_surface", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
-    { "field_key": "promotion.editable_surface", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" }
+    { "field_key": "promotion.editable_surface", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.daily_budget_edit", "destination": "DeliveryIntent", "treatment": "modelled", "contract_path": "DeliveryIntent.Payload.BudgetBoundary" },
+    { "field_key": "promotion.daily_budget_edit", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].BudgetAndBidding" },
+    { "field_key": "promotion.daily_budget_edit", "destination": "DeliveryDecisionCandidate", "treatment": "evidence_only", "contract_path": "DeliveryDecisionCandidate.CalibrationManifest" },
+    { "field_key": "promotion.daily_budget_edit", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.daily_budget_edit", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.material_replacement_edit", "destination": "DeliveryIntent", "treatment": "dynamic_reference", "contract_path": "DeliveryIntent.Payload.MaterialReferences" },
+    { "field_key": "promotion.material_replacement_edit", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].BaseMaterialReferences" },
+    { "field_key": "promotion.material_replacement_edit", "destination": "CompiledDeliveryWorkflow", "treatment": "blocked", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.material_replacement_edit", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "project.operational_state", "destination": "OceanEngineConfiguration", "treatment": "evidence_only", "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence" },
+    { "field_key": "project.operational_state", "destination": "DeliveryDecisionCandidate", "treatment": "evidence_only", "contract_path": "DeliveryDecisionCandidate.CalibrationManifest" },
+    { "field_key": "project.operational_state", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "project.operational_state", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.operational_state", "destination": "OceanEngineConfiguration", "treatment": "evidence_only", "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence" },
+    { "field_key": "promotion.operational_state", "destination": "DeliveryDecisionCandidate", "treatment": "evidence_only", "contract_path": "DeliveryDecisionCandidate.CalibrationManifest" },
+    { "field_key": "promotion.operational_state", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.operational_state", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" }
   ]
 }

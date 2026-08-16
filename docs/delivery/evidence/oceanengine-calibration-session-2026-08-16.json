@@ -1,0 +1,85 @@
+{
+  "schema_version": "oceanengine-calibration-session-evidence/v1",
+  "manifest_ref": "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json",
+  "observed_at": "2026-08-16",
+  "account_scope": "redacted_current_test_account",
+  "browser_surface": "external_authenticated_browser",
+  "authorized_operations": [
+    "observe_page",
+    "fill_unsubmitted_form",
+    "readback_field",
+    "discard_local_draft",
+    "observe_operational_switch_boundary"
+  ],
+  "forbidden_operations": [
+    "save",
+    "create",
+    "modify_remote_object",
+    "click_operational_switch",
+    "upload",
+    "final_confirmation",
+    "controlled_action_attempt"
+  ],
+  "cases": [
+    { "case_id": "OE-PROJECT-E-COMMERCE-DEFAULT", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-E-COMMERCE-LIVE", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-E-COMMERCE-MANUAL", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-LEADS-SMART", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-LEADS-CUSTOM", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-APP-DOWNLOAD-ANDROID", "outcome": "blocked_by_event_asset" },
+    { "case_id": "OE-PROJECT-APP-DOWNLOAD-IOS-HARMONY-PACKAGE", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-CATALOG-DEFAULT", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-CONTENT-MARKETING", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-CONTENT-MARKETING-LIVE", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-APP-LAUNCH", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-APP-LAUNCH-ANDROID", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-APP-LAUNCH-IOS", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-APP-LAUNCH-HARMONY", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-APP-APPOINTMENT-ANDROID-IOS", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-APP-APPOINTMENT-HARMONY", "outcome": "blocked_by_platform_capability" },
+    { "case_id": "OE-PROJECT-OTHER-MARKETING-PURPOSES", "outcome": "blocked_by_account_capability" },
+    { "case_id": "OE-PROJECT-EDIT", "outcome": "covered" },
+    { "case_id": "OE-PROMOTION-CREATE", "outcome": "blocked_by_input_constraint" },
+    { "case_id": "OE-PROMOTION-EDIT", "outcome": "covered" },
+    { "case_id": "OE-D3-PROMOTION-BUDGET-EDIT", "outcome": "covered" },
+    { "case_id": "OE-D3-PROMOTION-MATERIAL-REPLACEMENT", "outcome": "blocked_by_missing_material" },
+    { "case_id": "OE-D3-PROJECT-ENABLE", "outcome": "covered" },
+    { "case_id": "OE-D3-PROJECT-PAUSE", "outcome": "blocked_by_object_state" },
+    { "case_id": "OE-D3-PROMOTION-PAUSE", "outcome": "covered" },
+    { "case_id": "OE-D3-PROMOTION-ENABLE", "outcome": "blocked_by_object_state" }
+  ],
+  "d3_operation_summary": {
+    "unit_budget": {
+      "baseline_minor": 30000,
+      "draft_minor": 29900,
+      "draft_readback": true,
+      "draft_discarded": true,
+      "remote_value_unchanged": true
+    },
+    "material_replacement": {
+      "video_library_items": 0,
+      "image_library_items": 0,
+      "image_text_library_items": 0,
+      "blocking_reason": "blocked_by_missing_material"
+    },
+    "project_operational_state": {
+      "observed_switch_value": false,
+      "available_no_write_boundary": "enable",
+      "blocked_inverse_action": "pause"
+    },
+    "promotion_operational_state": {
+      "observed_switch_value": true,
+      "effective_delivery_blocked_by_parent_project": true,
+      "available_no_write_boundary": "pause",
+      "blocked_inverse_action": "enable"
+    }
+  },
+  "safe_exit": {
+    "action": "discard_all_local_drafts_and_return_to_readonly_list",
+    "returned_to": "promotion_list",
+    "remote_write_detected": false,
+    "final_confirmation_count": 0,
+    "controlled_action_attempt_count": 0,
+    "object_budget_and_status_changed": false
+  }
+}

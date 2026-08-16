@@ -123,6 +123,16 @@ and the abandoned calibration authority was invalidated while its Approval
 history remained immutable. Read the batch evidence before claiming any live
 modification capability.
 
+The 2026-08-16 action-surface pass additionally calibrated the unit-list budget
+editor from CNY 300 to an unsubmitted CNY 299 readback, then cancelled and
+confirmed the list remained CNY 300. The authorized project switch was paused,
+so only its enable boundary was reachable; the authorized unit switch was
+enabled while effective delivery was blocked by the paused parent, so only its
+pause boundary was reachable. Neither switch was clicked. The unit's video,
+image, and image-text replacement libraries each returned zero selectable
+existing assets, which is `blocked_by_missing_material`, not page drift and not
+permission to upload or create an asset.
+
 ## Read the verified baseline
 
 - Read the [control contract](../../../../../../docs/delivery/controlled-computer-use-contract.md) for state and authority invariants.

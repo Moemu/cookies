@@ -26,7 +26,7 @@
     },
     "platform": { "const": "ocean_engine" },
     "session_evidence_ref": {
-      "const": "docs/delivery/evidence/oceanengine-calibration-session-2026-08-15.json"
+      "const": "docs/delivery/evidence/oceanengine-calibration-session-2026-08-16.json"
     },
     "observation_boundary": {
       "type": "object",
@@ -134,6 +134,7 @@
             "project_list",
             "project_create",
             "project_edit",
+            "promotion_list",
             "promotion_create",
             "promotion_edit"
           ]
