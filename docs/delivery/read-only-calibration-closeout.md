@@ -4,6 +4,8 @@
 
 > 2026-08-16 Phase D 补充：本文“全部写入未验证”的历史结论已被 `OceanEngineCalibrationManifest` 和 [`oceanengine-d3-write-calibration-2026-08-16.json`](./evidence/oceanengine-d3-write-calibration-2026-08-16.json) 部分取代。素材替换、项目启用/暂停和单元暂停/启用已完成可逆写后回读；创建/提交、项目排期和受输入上限阻塞的预算修改仍未验证。
 
+> 生产 Authority 验收边界：上述 Phase D 结果是会话级页面字段校准，且证据明确未创建生产 Authority 对象。当前没有真实 Computer Use Agent 和独立审批主体；Codex 自行创建、批准并执行只能验证状态机与页面接缝，不能验证职责分离或生产授权有效性。生产端到端 Authority 验收延期到真实 Agent、独立审批身份、受控 Lease 和会话证据回传上线后执行。
+
 ## 运行时执行状态（2026-08-10）
 
 此前冻结的切换规则现已在代码中执行。新的公共 Plan 写请求必须同时提交完整 DeliveryIntent 与 tagged PlatformConfiguration；旧 flat-plan 与 ThreeTier 写请求返回 `LEGACY_CONFIGURATION_UNSUPPORTED`。持久化旧版本在读取后标记为 `legacy_unsupported`/只读，保留原 canonical hash，不能进入新预检、提交、审批或执行链。
@@ -84,7 +86,7 @@ Delivery 可以继续实现新的配置模型和行为流程编译器，但真�
 | 投后优化 | 素材/定向/预算/出价/组合调整的业务意图已评审 | mock/模拟 `implemented`；真实数据 `platform_pending` | Connector 质量合格后才可运行真实影子分析 |
 | 消费事实 usable | 账户/项目/单元或 promotion/素材对象和四项基础指标齐全 | `implemented`（mock/replay/simulation） | Connector 发布同等契约后再切换来源 |
 | 消费事实 empty/stale/incomplete/schema mismatch/unavailable | 数据不可用于确定性结论 | `implemented` | 只展示原因/evidence，不生成告警、建议或写入 |
-| 素材替换、项目启用/暂停、单元暂停/启用 | 已在授权测试对象完成写后回读并恢复原始状态 | `validated_for_field_calibration` | 上线执行仍需正式权限控制 |
+| 素材替换、项目启用/暂停、单元暂停/启用 | 已在授权测试对象完成会话级写后回读并恢复原始状态；未创建生产 Authority 对象 | `validated_for_field_calibration` | 上线执行等待真实 Computer Use Agent、独立审批主体和可审计会话完成端到端 Authority 验收 |
 | 创建/提交、项目排期、预算修改 | 创建和排期未执行；预算因平台最低值等于授权上限而无不同目标值 | `write_validation_pending` / `blocked_by_input_constraint` | 新的明确授权、合格测试对象和可用目标值 |
 
 ## 6. 剩余未知项
@@ -126,6 +128,7 @@ Delivery 可以继续实现新的配置模型和行为流程编译器，但真�
 | 真实 Connector 数据影子告警/建议 | **No-Go** | 缺正式对象/指标/质量契约和 Consumer Contract 测试 |
 | 授权测试对象的 Phase D 字段校准 | **有限 Go，已完成** | 素材替换及项目/单元状态往返均已写后回读并恢复 |
 | 巨量平台创建/提交、项目排期、受阻预算修改或生产写入 | **No-Go** | 尚无对应写入证据或正式上线权限链 |
+| 生产 Authority 端到端验收 | **延期 / No-Go** | 缺真实 Computer Use Agent、独立审批主体、受控 Lease 与真实会话证据；同一 Codex 主体自建、自批、自执行不构成有效验收 |
 
 ## 9. 历史 v1 目标配置模型冻结
 

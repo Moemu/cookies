@@ -162,3 +162,13 @@ This remains a fake/no-write readiness claim. The batch marks enable
 revision exists. The current Skill forbids live remote-object enable until that
 precondition and a current-turn exact authority both exist. No Connector, mock
 metric or recovery routine may trigger a restart.
+
+Production-authority acceptance is explicitly deferred until a real Computer
+Use agent and auditable session identity exist. A single Codex identity creating
+the ChangeSet, approving it, and performing the click is useful only as a state-
+machine or page-integration check; it does not prove separation of duties,
+approval authenticity, session ownership, or executor trust. End-to-end
+acceptance requires an approver distinct from the execution agent, a real leased
+session, account/site attestation, and evidence emitted by that session. Until
+then, the contract may claim control-plane readiness and field calibration, but
+must not claim validated production authority.
