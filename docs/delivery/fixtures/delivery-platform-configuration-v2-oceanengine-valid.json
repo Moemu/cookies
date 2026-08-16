@@ -8,17 +8,17 @@
     "schema_version": "delivery-intent/v1",
     "intent_id": "intent-ecommerce-1",
     "version_number": 1,
-    "canonical_hash": "4c0c20cfab7bdbd2aeda6c5c0065e3190e303b6611d43a73c94420d8ff47befa"
+    "canonical_hash": "bd742c37db3ecbd0a670ce08059792a8842a79afe86cc8455c69d83a759f9364"
   },
   "hash_algorithm": "RFC8785-JCS-SHA256(canonical_payload)",
-  "canonical_hash": "1f2864f8f31a92a19b215597e40ed9e0792e52a9d3f739476095d2c016aaa67f",
+  "canonical_hash": "f4bdd42f6f493eda746290e4ed5f2cf0b2ad2517e4cbe36c263176f1046d86e1",
   "payload": {
     "profile": "ocean_engine",
     "ocean_engine": {
       "profile": "ocean_engine",
       "calibration_manifest": {
         "schema_version": "oceanengine-calibration-manifest/v1",
-        "manifest_id": "oceanengine-calibration-current-test-account-2026-08-15"
+        "manifest_id": "oceanengine-calibration-current-test-account-2026-08-16"
       },
       "project": {
         "draft_schema_version": "oceanengine-configuration/v1",

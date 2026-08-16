@@ -183,7 +183,7 @@ func (d Definition) Validate() error {
 		d.EvidenceObserved != "2026-08-06" ||
 		d.UIBaseline.RevalidatedAt != "2026-08-14" ||
 		d.CalibrationManifest.SchemaVersion != "oceanengine-calibration-manifest/v1" ||
-		d.CalibrationManifest.ManifestID != "oceanengine-calibration-current-test-account-2026-08-15" ||
+		d.CalibrationManifest.ManifestID != "oceanengine-calibration-current-test-account-2026-08-16" ||
 		d.CalibrationManifest.FixtureRef != "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json" ||
 		d.UIBaseline.LocatorContract != "project_and_promotion_forms_live_dom" ||
 		d.UIBaseline.DriftCheck != "existing_object_edit_surfaces_revalidated_with_brand_locator_drift" ||

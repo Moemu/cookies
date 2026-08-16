@@ -1533,7 +1533,7 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
       optimization_preferences: [], material_references: materialReferences,
       landing_page_references: [{ namespace: 'cookies', object_kind: 'landing_page', scope, id: draft.tracking.landingPage, state: 'resolved' }],
       audience_constraints: { constraints: [] }, strategy_reference: strategyReference,
-      calibration_manifest: { schema_version: 'oceanengine-calibration-manifest/v1', manifest_id: 'oceanengine-calibration-current-test-account-2026-08-15' },
+      calibration_manifest: { schema_version: 'oceanengine-calibration-manifest/v1', manifest_id: 'oceanengine-calibration-current-test-account-2026-08-16' },
     },
     configuration_provenance: { kind: 'manual', generator_ref: 'delivery-plan-editor' },
     fact_provenance: { source: 'mock', snapshot_ref: `mock://delivery-intent/${identity}/${versionNumber}` },
@@ -1545,7 +1545,7 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
     payload: {
       profile: 'ocean_engine',
       ocean_engine: {
-        profile: 'ocean_engine', calibration_manifest: { schema_version: 'oceanengine-calibration-manifest/v1', manifest_id: 'oceanengine-calibration-current-test-account-2026-08-15' },
+        profile: 'ocean_engine', calibration_manifest: { schema_version: 'oceanengine-calibration-manifest/v1', manifest_id: 'oceanengine-calibration-current-test-account-2026-08-16' },
         project: {
           draft_schema_version: 'oceanengine-configuration/v1', project_draft_id: `project-${identity}-${versionNumber}`,
           account_reference: { namespace: 'oceanengine', object_kind: 'advertiser_account', scope, id: draft.advertiser.id, state: 'resolved', display_name_snapshot: draft.advertiser.name },

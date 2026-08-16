@@ -11,6 +11,12 @@
 
 Manifest 仅记录当前账户、当前页面版本下可见的表单事实、稳定阻塞原因和安全退出；它不授予远端写入权限。字段的领域归属、单位、动态条件和消费端映射均从该文件生成或统一校验。本文件后续的历史表格用于背景和差异分析，不得取代 Manifest 或被解释为其他账户、未来灰度或单元页面的覆盖声明。
 
+当前冻结绑定为 `oceanengine-calibration-current-test-account-2026-08-16`。`DeliveryIntent`、`OceanEngineConfiguration`、Platform Skill 定义、运行时示例和契约 fixture 必须引用同一个 Manifest ID；旧的 `2026-08-15` 绑定不得继续作为当前能力基线。
+
+日常运营状态动作统一称为“暂停”和“启用”。机器契约继续使用稳定 action key `pause_promotion` 与 `resume_promotion`，但产品文档不得把它们描述成“紧急暂停”或“受控重启”；Authority 链表达远端写入的安全要求，不改变动作本身的日常运营属性。
+
+排期属于 `PlatformProject`。单元编辑页只展示继承的排期摘要，`PlatformPromotion` Mapping 不得授权 `update_promotion_schedule`。需要修改排期时，必须使用单独确认的项目 Mapping 和项目修改契约；在该契约落地前，排期修改保持 capability-pending，不得列入单元有限修改能力。
+
 v1 的 `path_dimensions`、`page_fingerprint` 与 `coverage_cases` 共同构成当前账户的覆盖矩阵：每个已观察维度值都必须由一个结构化 case 支持，每个非 `not_in_scope` case 都必须在同一会话摘要中有相同结果。`consumer_mappings.contract_path` 明确字段在产品契约中的落点；`evidence_only` 表示当前模型不承载该平台字段值而只绑定其观察事实，禁止把它伪造成可执行配置。
 
 > 2026-08-11 运行时说明：本文件保留页面观察与历史差异分析。早期操作包步骤不属于当前活动运行时；当前实现止于第二次人工审批，不包含行为工作流编译或平台写入。

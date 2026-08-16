@@ -101,13 +101,13 @@ promotion Mapping because schedule remains parent-project owned.
 snapshot, not a live status feed. Ocean Engine can expose delivery, pause, and
 review dimensions simultaneously. Compare live dimensions explicitly without
 rewriting the Mapping merely because asynchronous review completed. If no
-authorized mapped object is already `delivering`, mark pause and restart
+authorized mapped object is already `delivering`, mark pause and enable
 `blocked_by_eligible_test_object`; never enable an object to manufacture a test.
 
 Each real action still requires its own ChangeSet, Approval,
 ControlledExecution, ComputerUseRun, one-time confirmation, Attempt, and exact
 Mapping revision. Execute budget before materials so the material authority can
-bind the post-budget revision. Execute restart only after a successful pause
+bind the post-budget revision. Execute enable only after a successful pause
 revision. Immediately before each remote-write click, require an unexpired
 fenced Lease and zero unexpected field differences. Click at most once. Any
 page drift, lease expiry, or `result_unknown` stops all dependent actions without
@@ -115,7 +115,7 @@ retry.
 
 The 2026-08-14 batch passed no-write calibration for the CNY 300 to CNY 310
 budget path and one same-account existing-material replacement. Both drafts were
-discarded and the fresh form returned to the shared baseline. Pause and restart
+discarded and the fresh form returned to the shared baseline. Pause and enable
 were blocked because no eligible delivering mapped test object existed. The
 authorized real batch then stopped when its Lease expired before final
 confirmation: no confirmation, Attempt, save click, or remote write occurred,

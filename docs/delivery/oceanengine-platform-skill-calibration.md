@@ -183,8 +183,8 @@ container selector now matches two inputs; the exact visible placeholder
 `选择或手动输入品牌` is the unique replacement. The Mapping retained its
 creation-time `pending_review` snapshot; a later live read showed independent
 not-delivering, paused, and review-completed dimensions. No eligible mapped
-object was already delivering, so no pause or restart control was calibrated.
-No field was filled and no save, pause or restart control was clicked. The
+object was already delivering, so no pause or enable control was calibrated.
+No field was filled and no save, pause or enable control was clicked. The
 redacted evidence and locator baseline are respectively
 `evidence/oceanengine-existing-object-edit-readonly-2026-08-14.json` and
 `fixtures/oceanengine-existing-object-live-locators-v0.1.json`.
@@ -199,13 +199,13 @@ account and only the material field differed. Both drafts were read back,
 discarded, and reopened at the same 18-field shared baseline; the remote budget
 remained CNY 300 and the original material remained selected.
 
-Pause and restart were recorded as `blocked_by_eligible_test_object`. The live
-object was not delivering, and restart additionally lacked a successful
+Pause and enable were recorded as `blocked_by_eligible_test_object`. The live
+object was not delivering, and enable additionally lacked a successful
 authoritative pause revision. No object was enabled or otherwise changed to
 manufacture those preconditions.
 
 The user authorized an ordered real batch with independent authority for every
-action. Budget was first, followed by materials; pause and restart remained
+action. Budget was first, followed by materials; pause and enable remained
 ineligible. Before final confirmation for the budget action, the fenced Lease
 expired. The stop policy therefore cancelled the Run, invalidated the abandoned
 zero-attempt ChangeSet, and stopped every dependent action without reacquiring

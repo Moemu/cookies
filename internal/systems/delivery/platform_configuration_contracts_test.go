@@ -408,7 +408,7 @@ func validDeliveryIntent(t *testing.T) DeliveryIntent {
 			MaterialReferences:      []StableReference{resolvedReference("cookies", "asset_version", "project:project-1", "asset-1:v1")},
 			AudienceConstraints:     IntentAudienceConstraints{IncludeReferences: []StableReference{{Namespace: "oceanengine", ObjectKind: "audience_package", Scope: "account:6391", State: ReferenceUnresolved, Reason: "audience package is optional"}}, Constraints: []string{"exclude existing purchasers"}},
 			StrategyReference:       resolvedReference("cookies", "strategy_version", "project:project-1", "strategy-task-1:v3"),
-			CalibrationManifest:     CalibrationManifestBinding{SchemaVersion: OceanEngineCalibrationManifestV1, ManifestID: "oceanengine-calibration-current-test-account-2026-08-15"},
+			CalibrationManifest:     CalibrationManifestBinding{SchemaVersion: OceanEngineCalibrationManifestV1, ManifestID: "oceanengine-calibration-current-test-account-2026-08-16"},
 		},
 		ConfigurationProvenance: ConfigurationProvenance{Kind: ConfigurationGeneratedManually, GeneratorRef: "operator-brief"},
 		FactProvenance:          FactProvenance{Source: FactSourceReplay, SnapshotRef: "replay://intent-1", EvidenceRefs: []string{"evidence://intent-1"}},
@@ -447,7 +447,7 @@ func validOceanEnginePlatformConfiguration(t *testing.T, intent DeliveryIntent, 
 		Payload: PlatformConfigurationPayload{
 			Profile: DeliveryPlatformOceanEngine,
 			OceanEngine: &OceanEngineConfiguration{
-				Profile: DeliveryPlatformOceanEngine, CalibrationManifest: CalibrationManifestBinding{SchemaVersion: OceanEngineCalibrationManifestV1, ManifestID: "oceanengine-calibration-current-test-account-2026-08-15"},
+				Profile: DeliveryPlatformOceanEngine, CalibrationManifest: CalibrationManifestBinding{SchemaVersion: OceanEngineCalibrationManifestV1, ManifestID: "oceanengine-calibration-current-test-account-2026-08-16"},
 				Project: &OceanEngineProjectDraft{
 					DraftSchemaVersion: OceanEngineConfigurationProfileV1, ProjectDraftID: "project-draft-1",
 					AccountReference: resolvedReference("oceanengine", "account", "account:6391", "account-6391"),

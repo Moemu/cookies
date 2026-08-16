@@ -53,7 +53,7 @@ test("promotion mutation contracts reject project-owned schedule changes", () =>
   assert.equal(validateRun(runFixture), false);
 });
 
-test("emergency pause fixtures bind one operator and a delivering-to-paused state transition", () => {
+test("promotion pause fixtures bind one operator and a delivering-to-paused state transition", () => {
   for (const fixtureName of [
     "delivery-controlled-change-set-v1-emergency-pause.json",
     "platform-computer-use-run-v1-emergency-pause.json",
@@ -69,7 +69,7 @@ test("emergency pause fixtures bind one operator and a delivering-to-paused stat
   }
 });
 
-test("controlled restart fixtures bind strict paused-object rechecks without reusing pause authority", () => {
+test("promotion enable fixtures bind strict paused-object rechecks without reusing pause authority", () => {
   for (const fixtureName of [
     "delivery-controlled-change-set-v1-restart.json",
     "platform-computer-use-run-v1-restart.json",
