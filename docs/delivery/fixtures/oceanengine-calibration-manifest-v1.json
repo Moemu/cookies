@@ -941,10 +941,10 @@
         "scope": { "kind": "visible_text", "value": "产品主图" },
         "target": { "kind": "attribute", "value": "data-auto-id=oc-create-product-img-add-button" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "已添加：0/10" },
-        "input_constraints": { "max_items": 10, "current_library_items": 0, "upload_forbidden_in_calibration": true }
+        "readback": { "kind": "visible_text", "value": "已添加：1/10" },
+        "input_constraints": { "max_items": 10, "selection_precedence": "selected_product_main_image>first_available_my_image>local_upload_when_authorized", "current_my_image_items": 1, "wait_for_loaded_total_before_decision": true, "upload_forbidden_without_explicit_upload_authority": true }
       },
-      "evidence_state": "blocked_by_missing_material",
+      "evidence_state": "observed",
       "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
     },
     {
@@ -1024,10 +1024,10 @@
         "scope": { "kind": "visible_text", "value": "单元出价" },
         "target": { "kind": "role_name", "value": "spinbutton:单元出价" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "请输入单元出价，不少于4元，不超过100元" },
-        "input_constraints": { "input_unit": "CNY_yuan", "model_unit": "CNY_fen", "minor_per_input_unit": 100, "platform_min_cny": 4, "platform_max_cny": 100, "authorized_cap_cny": 0.01 }
+        "readback": { "kind": "visible_text", "value": "current_page_bid_validation" },
+        "input_constraints": { "input_unit": "CNY_yuan", "model_unit": "CNY_fen", "minor_per_input_unit": 100, "minimum_source": "current_page_validation", "observed_minimums_cny": "0.01,4", "observed_cpm_path_minimum_cny": 4, "observed_cpm_path_maximum_cny": 100, "calibration_value_rule": "use_current_page_minimum_without_exceeding_authorized_cap", "authorized_cap_cny": 0.01 }
       },
-      "evidence_state": "blocked_by_input_constraint",
+      "evidence_state": "observed",
       "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
     },
     {
@@ -1497,7 +1497,7 @@
       "status": "blocked_by_input_constraint",
       "evidence_state": "blocked_by_input_constraint",
       "exit_verified": true,
-      "reason": "all accessible local branches were traversed; creation is stably blocked because the platform requires a CPM bid of at least CNY 4 while the authorized cap is CNY 0.01, and the current product-image library contains no selectable item"
+      "reason": "all accessible local branches were traversed; the sampled CPM branch is stably blocked because its current page requires at least CNY 4 while the authorized cap is CNY 0.01; other branches may expose CNY 0.01 and must use their own live page constraint"
     },
     {
       "id": "OE-PROMOTION-EDIT",
@@ -2079,7 +2079,7 @@
     { "field_key": "promotion.landing_page_reference", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
     { "field_key": "promotion.product_image_references", "destination": "DeliveryIntent", "treatment": "dynamic_reference", "contract_path": "DeliveryIntent.Payload.MaterialReferences" },
     { "field_key": "promotion.product_image_references", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].BaseMaterialReferences" },
-    { "field_key": "promotion.product_image_references", "destination": "CompiledDeliveryWorkflow", "treatment": "blocked", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.product_image_references", "destination": "CompiledDeliveryWorkflow", "treatment": "dynamic_reference", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
     { "field_key": "promotion.product_image_references", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
     { "field_key": "promotion.product_selling_points", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].CopyItems" },
     { "field_key": "promotion.product_selling_points", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },

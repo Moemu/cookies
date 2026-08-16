@@ -77,6 +77,18 @@
       "blocked_inverse_action": "enable"
     }
   },
+  "operator_review_corrections": {
+    "promotion_product_image": {
+      "current_my_image_items": 1,
+      "default_when_product_has_main_image": "selected_product_main_image",
+      "fallbacks": ["first_available_my_image", "local_upload_when_authorized"]
+    },
+    "promotion_bid": {
+      "constraint_scope": "current_page_path",
+      "observed_minimums_cny": [0.01, 4],
+      "rule": "use_current_page_minimum"
+    }
+  },
   "safe_exit": {
     "action": "discard_all_local_drafts_and_return_to_readonly_list",
     "returned_to": "promotion_list",
