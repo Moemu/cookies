@@ -42,7 +42,7 @@
     { "case_id": "OE-PROMOTION-CREATE", "outcome": "blocked_by_input_constraint" },
     { "case_id": "OE-PROMOTION-EDIT", "outcome": "covered" },
     { "case_id": "OE-D3-PROMOTION-BUDGET-EDIT", "outcome": "covered" },
-    { "case_id": "OE-D3-PROMOTION-MATERIAL-REPLACEMENT", "outcome": "blocked_by_missing_material" },
+    { "case_id": "OE-D3-PROMOTION-MATERIAL-REPLACEMENT", "outcome": "covered" },
     { "case_id": "OE-D3-PROJECT-ENABLE", "outcome": "covered" },
     { "case_id": "OE-D3-PROJECT-PAUSE", "outcome": "blocked_by_object_state" },
     { "case_id": "OE-D3-PROMOTION-PAUSE", "outcome": "covered" },
@@ -57,10 +57,13 @@
       "remote_value_unchanged": true
     },
     "material_replacement": {
-      "video_library_items": 0,
-      "image_library_items": 0,
-      "image_text_library_items": 0,
-      "blocking_reason": "blocked_by_missing_material"
+      "loading_rule": "wait_for_loaded_total_before_decision",
+      "video_library_items": 3255,
+      "image_library_items": 1722,
+      "image_text_library_items": 284,
+      "picker_paths_observed": ["replace_video", "add_image", "add_image_text"],
+      "selection_performed": false,
+      "remote_write_performed": false
     },
     "project_operational_state": {
       "observed_switch_value": false,

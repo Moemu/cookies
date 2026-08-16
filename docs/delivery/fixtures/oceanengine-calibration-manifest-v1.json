@@ -1086,11 +1086,11 @@
         "scope": { "kind": "visible_text", "value": "基础素材" },
         "target": { "kind": "role_name", "value": "button:换视频" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "共0个视频" },
+        "readback": { "kind": "visible_text", "value": "共3255个视频" },
         "observed_options": ["换视频", "添加图片", "添加图文"],
-        "input_constraints": { "video_library_items": 0, "image_library_items": 0, "image_text_library_items": 0, "upload_forbidden_in_calibration": true, "final_write_boundary": "button:保存并关闭" }
+        "input_constraints": { "wait_for_loaded_total_before_decision": true, "video_library_items": 3255, "image_library_items": 1722, "image_text_library_items": 284, "selection_policy": "first_available_semantic_item", "upload_forbidden_in_calibration": true, "final_write_boundary": "button:保存并关闭" }
       },
-      "evidence_state": "blocked_by_missing_material",
+      "evidence_state": "observed",
       "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
     },
     {
@@ -1521,10 +1521,10 @@
       "id": "OE-D3-PROMOTION-MATERIAL-REPLACEMENT",
       "path": ["promotion_edit", "material_replacement", "existing_asset_picker"],
       "field_keys": ["promotion.material_replacement_edit"],
-      "status": "blocked_by_missing_material",
-      "evidence_state": "blocked_by_missing_material",
+      "status": "covered",
+      "evidence_state": "observed",
       "exit_verified": true,
-      "reason": "video, image and image-text replacement libraries each returned zero selectable existing assets; uploads were not used"
+      "reason": "after asynchronous loading completed, the existing-asset pickers exposed 3255 videos, 1722 images and 284 image-text assets; no item was selected and no upload or save occurred"
     },
     {
       "id": "OE-D3-PROJECT-ENABLE",
@@ -2108,7 +2108,7 @@
     { "field_key": "promotion.daily_budget_edit", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
     { "field_key": "promotion.material_replacement_edit", "destination": "DeliveryIntent", "treatment": "dynamic_reference", "contract_path": "DeliveryIntent.Payload.MaterialReferences" },
     { "field_key": "promotion.material_replacement_edit", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].BaseMaterialReferences" },
-    { "field_key": "promotion.material_replacement_edit", "destination": "CompiledDeliveryWorkflow", "treatment": "blocked", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.material_replacement_edit", "destination": "CompiledDeliveryWorkflow", "treatment": "dynamic_reference", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
     { "field_key": "promotion.material_replacement_edit", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
     { "field_key": "project.operational_state", "destination": "OceanEngineConfiguration", "treatment": "evidence_only", "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence" },
     { "field_key": "project.operational_state", "destination": "DeliveryDecisionCandidate", "treatment": "evidence_only", "contract_path": "DeliveryDecisionCandidate.CalibrationManifest" },

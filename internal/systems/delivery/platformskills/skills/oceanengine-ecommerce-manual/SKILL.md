@@ -9,7 +9,7 @@ Treat the machine-readable [SkillDefinition](../../definitions/oceanengine-ecomm
 
 The frozen `OceanEngineCalibrationManifest` is the observation source for project-create/edit and promotion-create/edit path dimensions, field ownership, units, dynamic conditions and semantic locators. It is never a ChangeSet, Approval, Confirmation or execution authorization. Page observation and unsubmitted form calibration never authorize a save; every remote-write boundary still requires the Stage D authority chain and action-time confirmation.
 
-For promotion forms, scope every action to its section before resolving the target. Prefer placeholders, role/name pairs, and stable platform attributes such as `data-auto-id=oc-create-product-img-add-button` or `data-e2e=createad_yuntuCategory`; never persist coordinates or DOM order. Reference pickers select the first currently available semantic item only when policy permits. Product selling points are committed with Enter and must contain 6–9 Chinese characters per item, at most 10 items. A product-image picker returning zero items is `blocked_by_missing_material`, not page drift.
+For promotion forms, scope every action to its section before resolving the target. Prefer placeholders, role/name pairs, and stable platform attributes such as `data-auto-id=oc-create-product-img-add-button` or `data-e2e=createad_yuntuCategory`; never persist coordinates or DOM order. Reference pickers select the first currently available semantic item only when policy permits. Wait for the picker's loaded total and selectable results before interpreting its inventory; a transient zero during asynchronous loading is neither `blocked_by_missing_material` nor page drift. Product selling points are committed with Enter and must contain 6–9 Chinese characters per item, at most 10 items.
 
 The observed 展示量/CPM promotion path accepts bids from CNY 4 through CNY 100. If an intent or calibration authority caps the bid below CNY 4 (including CNY 0.01), stop before save and record `blocked_by_input_constraint`; never silently raise the bid. Promotion edit exposes identity, materials, copy, native anchor, landing page/deep-link, product information, creative components, settings, and name, while the save button remains the final write boundary.
 
@@ -128,10 +128,10 @@ editor from CNY 300 to an unsubmitted CNY 299 readback, then cancelled and
 confirmed the list remained CNY 300. The authorized project switch was paused,
 so only its enable boundary was reachable; the authorized unit switch was
 enabled while effective delivery was blocked by the paused parent, so only its
-pause boundary was reachable. Neither switch was clicked. The unit's video,
-image, and image-text replacement libraries each returned zero selectable
-existing assets, which is `blocked_by_missing_material`, not page drift and not
-permission to upload or create an asset.
+pause boundary was reachable. Neither switch was clicked. After asynchronous
+loading completed, the unit's replacement pickers exposed 3255 videos, 1722
+images, and 284 image-text assets. No asset was selected and no upload, save, or
+other remote write was performed.
 
 ## Read the verified baseline
 
