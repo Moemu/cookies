@@ -97,7 +97,7 @@
       "required": ["kind", "value"],
       "properties": {
         "kind": {
-          "enum": ["role_name", "label", "visible_text", "domain_key"]
+          "enum": ["role_name", "label", "visible_text", "placeholder", "attribute", "domain_key"]
         },
         "value": { "type": "string", "minLength": 1 }
       }
@@ -133,6 +133,7 @@
           "enum": [
             "project_list",
             "project_create",
+            "project_edit",
             "promotion_create",
             "promotion_edit"
           ]
@@ -147,6 +148,7 @@
           "enum": [
             "cancel_local_draft",
             "return_to_readonly_list",
+            "discard_unsaved_edit",
             "not_in_scope"
           ]
         },
@@ -225,6 +227,8 @@
             "observed",
             "sample_only",
             "blocked_by_event_asset",
+            "blocked_by_missing_material",
+            "blocked_by_input_constraint",
             "blocked_by_platform_capability",
             "platform_pending",
             "page_drift"
@@ -296,6 +300,8 @@
             "blocked_by_account_capability",
             "blocked_by_platform_capability",
             "blocked_by_object_state",
+            "blocked_by_missing_material",
+            "blocked_by_input_constraint",
             "page_drift",
             "not_in_scope"
           ]
@@ -306,6 +312,8 @@
             "sample_only",
             "blocked_by_event_asset",
             "blocked_by_platform_capability",
+            "blocked_by_missing_material",
+            "blocked_by_input_constraint",
             "platform_pending",
             "page_drift"
           ]

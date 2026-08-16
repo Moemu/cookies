@@ -52,7 +52,10 @@
     {
       "case_id": "OE-PROJECT-OTHER-MARKETING-PURPOSES",
       "outcome": "blocked_by_account_capability"
-    }
+    },
+    { "case_id": "OE-PROJECT-EDIT", "outcome": "covered" },
+    { "case_id": "OE-PROMOTION-CREATE", "outcome": "blocked_by_input_constraint" },
+    { "case_id": "OE-PROMOTION-EDIT", "outcome": "covered" }
   ],
   "safe_exit": {
     "action": "return_to_readonly_list_without_submit",

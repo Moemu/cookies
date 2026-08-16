@@ -1,12 +1,12 @@
 {
   "schema_version": "oceanengine-calibration-manifest/v1",
-  "manifest_id": "oceanengine-calibration-current-test-account-2026-08-15",
+  "manifest_id": "oceanengine-calibration-current-test-account-2026-08-16",
   "platform": "ocean_engine",
   "session_evidence_ref": "docs/delivery/evidence/oceanengine-calibration-session-2026-08-15.json",
   "observation_boundary": {
     "account_scope": "redacted_current_test_account",
     "platform_build": "unknown",
-    "complete_coverage_definition": "All currently accessible project-create entries and dynamic branches are represented; inaccessible branches retain a stable blocking case. This does not claim other accounts, future rollouts, or promotion surfaces.",
+    "complete_coverage_definition": "All currently accessible project-create, project-edit, promotion-create and promotion-edit entries and dynamic branches are represented; inaccessible branches retain a stable blocking case. This does not claim other accounts or future rollouts.",
     "local_calibration_allowed": true,
     "remote_write_authorized": false
   },
@@ -70,24 +70,36 @@
       "evidence_state": "observed"
     },
     {
+      "id": "project_edit",
+      "page_kind": "project_edit",
+      "entry_locator": { "kind": "visible_text", "value": "编辑" },
+      "page_fingerprint": [
+        { "kind": "visible_text", "value": "编辑项目" },
+        { "kind": "role_name", "value": "button:保存并关闭" }
+      ],
+      "safety_exit": "discard_unsaved_edit",
+      "final_write_boundary": "save_project",
+      "evidence_state": "observed"
+    },
+    {
       "id": "promotion_create",
       "page_kind": "promotion_create",
       "entry_locator": { "kind": "domain_key", "value": "promotion_create" },
       "page_fingerprint": [
         { "kind": "domain_key", "value": "promotion_create" }
       ],
-      "safety_exit": "not_in_scope",
+      "safety_exit": "cancel_local_draft",
       "final_write_boundary": "save_promotion",
-      "evidence_state": "not_in_scope"
+      "evidence_state": "observed"
     },
     {
       "id": "promotion_edit",
       "page_kind": "promotion_edit",
       "entry_locator": { "kind": "domain_key", "value": "promotion_edit" },
       "page_fingerprint": [{ "kind": "domain_key", "value": "promotion_edit" }],
-      "safety_exit": "not_in_scope",
+      "safety_exit": "discard_unsaved_edit",
       "final_write_boundary": "save_promotion",
-      "evidence_state": "not_in_scope"
+      "evidence_state": "observed"
     }
   ],
   "fields": [
@@ -820,6 +832,212 @@
         "CompiledDeliveryWorkflow",
         "PlatformSkill"
       ]
+    },
+    {
+      "key": "project.editable_surface",
+      "owner": "oceanengine_configuration",
+      "page_family": "project_edit",
+      "value_type": "object",
+      "required_state": "unknown",
+      "editable_state": "conditional",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "visible_text", "value": "编辑项目" },
+      "computer_use": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "编辑项目" },
+        "target": { "kind": "visible_text", "value": "排期与预算" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "button:保存并关闭" },
+        "observed_options": ["营销产品与目标", "投放模式", "投放版位", "用户定向", "排期与预算", "搜索快投", "监测链接", "项目名称"],
+        "input_constraints": { "marketing_product": "readonly", "optimization_target": "readonly", "start_date": "readonly_after_creation", "end_date": "editable" }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.delivery_identity",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "投放身份" },
+      "computer_use": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "投放身份" },
+        "target": { "kind": "placeholder", "value": "请选择投放抖音号" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "抖音号授权" },
+        "input_constraints": { "selection": "first_available_semantic_option" }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.base_materials",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "基础素材" },
+      "computer_use": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "基础素材" },
+        "target": { "kind": "role_name", "value": "button:添加视频" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "视频(1/10)" },
+        "observed_options": ["添加视频", "添加图片", "添加图文"],
+        "input_constraints": { "video_max": 10, "image_max": 10, "image_library_observed_count": 0 }
+      },
+      "evidence_state": "observed",
+      "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.landing_page_reference",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "placeholder", "value": "请选择橙子落地页链接" },
+      "computer_use": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "落地页" },
+        "target": { "kind": "placeholder", "value": "请选择橙子落地页链接" },
+        "expected_target_count": 1,
+        "readback": { "kind": "placeholder", "value": "请选择橙子落地页链接" },
+        "input_constraints": { "selection": "first_available_semantic_card" }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.product_image_references",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "attribute", "value": "data-auto-id=oc-create-product-img-add-button" },
+      "computer_use": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "产品主图" },
+        "target": { "kind": "attribute", "value": "data-auto-id=oc-create-product-img-add-button" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "已添加：0/10" },
+        "input_constraints": { "max_items": 10, "current_library_items": 0, "upload_forbidden_in_calibration": true }
+      },
+      "evidence_state": "blocked_by_missing_material",
+      "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.product_selling_points",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "text",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "placeholder", "value": "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交" },
+      "computer_use": {
+        "operation": "fill_text",
+        "scope": { "kind": "visible_text", "value": "产品卖点" },
+        "target": { "kind": "placeholder", "value": "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "1/10" },
+        "input_constraints": { "min_chinese_characters": 6, "max_chinese_characters": 9, "max_items": 10, "commit_key": "Enter" }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.category",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_enum",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_yuntuCategory" },
+      "computer_use": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "所属类别" },
+        "target": { "kind": "attribute", "value": "data-e2e=createad_yuntuCategory" },
+        "expected_target_count": 1,
+        "readback": { "kind": "placeholder", "value": "请选择" },
+        "observed_options": ["其他", "零售"],
+        "input_constraints": { "selection": "first_available_cascader_path" }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.daily_budget",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "money_minor",
+      "unit": "CNY_fen",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "sample_only",
+      "locator": { "kind": "visible_text", "value": "单元预算" },
+      "computer_use": {
+        "operation": "fill_money",
+        "scope": { "kind": "visible_text", "value": "单元预算" },
+        "target": { "kind": "role_name", "value": "spinbutton:单元预算" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "spinbutton:300" },
+        "input_constraints": { "input_unit": "CNY_yuan", "model_unit": "CNY_fen", "minor_per_input_unit": 100, "calibration_cap_cny": 300 }
+      },
+      "evidence_state": "observed",
+      "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.bid",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "money_minor",
+      "unit": "CNY_fen",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "sample_only",
+      "locator": { "kind": "visible_text", "value": "单元出价" },
+      "computer_use": {
+        "operation": "fill_money",
+        "scope": { "kind": "visible_text", "value": "单元出价" },
+        "target": { "kind": "role_name", "value": "spinbutton:单元出价" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "请输入单元出价，不少于4元，不超过100元" },
+        "input_constraints": { "input_unit": "CNY_yuan", "model_unit": "CNY_fen", "minor_per_input_unit": 100, "platform_min_cny": 4, "platform_max_cny": 100, "authorized_cap_cny": 0.01 }
+      },
+      "evidence_state": "blocked_by_input_constraint",
+      "consumers": ["DeliveryIntent", "OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.editable_surface",
+      "owner": "promotion_draft",
+      "page_family": "promotion_edit",
+      "value_type": "object",
+      "required_state": "unknown",
+      "editable_state": "conditional",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "visible_text", "value": "编辑单元" },
+      "computer_use": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "编辑单元" },
+        "target": { "kind": "visible_text", "value": "单元素材" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "button:保存并关闭" },
+        "observed_options": ["投放身份", "基础素材", "文案素材", "原生锚点", "落地页", "产品信息", "创意组件", "单元设置", "单元名称"],
+        "input_constraints": { "material_capacity_depends_on_dynamic_creative": true, "save_requires_remote_write_authority": true }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
     }
   ],
   "coverage_cases": [
@@ -1168,22 +1386,31 @@
       "reason": "the current form explicitly marks these purposes as gradually opening"
     },
     {
+      "id": "OE-PROJECT-EDIT",
+      "path": ["project_edit", "existing_project"],
+      "field_keys": ["project.editable_surface"],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "existing project edit exposed readonly product/optimization/start-date state and editable targeting, budget, end-date, monitoring and name controls"
+    },
+    {
       "id": "OE-PROMOTION-CREATE",
       "path": ["promotion_create"],
-      "field_keys": [],
-      "status": "not_in_scope",
-      "evidence_state": "platform_pending",
+      "field_keys": ["promotion.delivery_identity", "promotion.base_materials", "promotion.landing_page_reference", "promotion.product_image_references", "promotion.product_selling_points", "promotion.category", "promotion.daily_budget", "promotion.bid"],
+      "status": "blocked_by_input_constraint",
+      "evidence_state": "blocked_by_input_constraint",
       "exit_verified": true,
-      "reason": "deferred by current session scope"
+      "reason": "all accessible local branches were traversed; creation is stably blocked because the platform requires a CPM bid of at least CNY 4 while the authorized cap is CNY 0.01, and the current product-image library contains no selectable item"
     },
     {
       "id": "OE-PROMOTION-EDIT",
       "path": ["promotion_edit"],
-      "field_keys": [],
-      "status": "not_in_scope",
-      "evidence_state": "platform_pending",
+      "field_keys": ["promotion.editable_surface"],
+      "status": "covered",
+      "evidence_state": "observed",
       "exit_verified": true,
-      "reason": "deferred by current session scope"
+      "reason": "an existing unit exposed identity, materials, copy, native anchor, landing page, deep links, product information, creative components, settings and name without crossing save"
     }
   ],
   "consumer_mappings": [
@@ -1684,6 +1911,45 @@
       "destination": "PlatformSkill",
       "treatment": "evidence_only",
       "contract_path": "SkillDefinition.calibration_manifest"
-    }
+    },
+    { "field_key": "project.editable_surface", "destination": "OceanEngineConfiguration", "treatment": "evidence_only", "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence" },
+    { "field_key": "project.editable_surface", "destination": "DeliveryDecisionCandidate", "treatment": "evidence_only", "contract_path": "DeliveryDecisionCandidate.CalibrationManifest" },
+    { "field_key": "project.editable_surface", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "project.editable_surface", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.delivery_identity", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].DeliveryIdentity" },
+    { "field_key": "promotion.delivery_identity", "destination": "DeliveryDecisionCandidate", "treatment": "evidence_only", "contract_path": "DeliveryDecisionCandidate.CalibrationManifest" },
+    { "field_key": "promotion.delivery_identity", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.delivery_identity", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.base_materials", "destination": "DeliveryIntent", "treatment": "modelled", "contract_path": "DeliveryIntent.Payload.MaterialReferences" },
+    { "field_key": "promotion.base_materials", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].BaseMaterialReferences" },
+    { "field_key": "promotion.base_materials", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.base_materials", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.landing_page_reference", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].LandingPageReference" },
+    { "field_key": "promotion.landing_page_reference", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.landing_page_reference", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.product_image_references", "destination": "DeliveryIntent", "treatment": "dynamic_reference", "contract_path": "DeliveryIntent.Payload.MaterialReferences" },
+    { "field_key": "promotion.product_image_references", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].BaseMaterialReferences" },
+    { "field_key": "promotion.product_image_references", "destination": "CompiledDeliveryWorkflow", "treatment": "blocked", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.product_image_references", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.product_selling_points", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].CopyItems" },
+    { "field_key": "promotion.product_selling_points", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.product_selling_points", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.category", "destination": "OceanEngineConfiguration", "treatment": "evidence_only", "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence" },
+    { "field_key": "promotion.category", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.category", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.daily_budget", "destination": "DeliveryIntent", "treatment": "modelled", "contract_path": "DeliveryIntent.Payload.BudgetBoundary" },
+    { "field_key": "promotion.daily_budget", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].BudgetAndBidding" },
+    { "field_key": "promotion.daily_budget", "destination": "DeliveryDecisionCandidate", "treatment": "evidence_only", "contract_path": "DeliveryDecisionCandidate.CalibrationManifest" },
+    { "field_key": "promotion.daily_budget", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.daily_budget", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.bid", "destination": "DeliveryIntent", "treatment": "blocked", "contract_path": "DeliveryIntent.Payload.BudgetBoundary" },
+    { "field_key": "promotion.bid", "destination": "OceanEngineConfiguration", "treatment": "blocked", "contract_path": "OceanEngineConfiguration.Promotions[].BudgetAndBidding" },
+    { "field_key": "promotion.bid", "destination": "DeliveryDecisionCandidate", "treatment": "blocked", "contract_path": "DeliveryDecisionCandidate.CalibrationManifest" },
+    { "field_key": "promotion.bid", "destination": "CompiledDeliveryWorkflow", "treatment": "blocked", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.bid", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.editable_surface", "destination": "OceanEngineConfiguration", "treatment": "evidence_only", "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence" },
+    { "field_key": "promotion.editable_surface", "destination": "DeliveryDecisionCandidate", "treatment": "evidence_only", "contract_path": "DeliveryDecisionCandidate.CalibrationManifest" },
+    { "field_key": "promotion.editable_surface", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.editable_surface", "destination": "PlatformSkill", "treatment": "evidence_only", "contract_path": "SkillDefinition.calibration_manifest" }
   ]
 }

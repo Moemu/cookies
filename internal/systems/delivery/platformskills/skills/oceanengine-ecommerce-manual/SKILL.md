@@ -7,7 +7,11 @@ description: Prepare, calibrate, or perform a controlled Ocean Engine ecommerce 
 
 Treat the machine-readable [SkillDefinition](../../definitions/oceanengine-ecommerce-manual-v0.1.json) as the capability boundary. Read the relevant evidence and locator references it names before interacting with a page. Never infer a selector or permission from business semantics alone.
 
-The frozen `OceanEngineCalibrationManifest` is the observation source for project-create path dimensions, field ownership, units, dynamic conditions and semantic locators. It is never a ChangeSet, Approval, Confirmation or execution authorization. For the current calibration session, promotion create/edit and every remote-write boundary remain out of scope unless separately authorized.
+The frozen `OceanEngineCalibrationManifest` is the observation source for project-create/edit and promotion-create/edit path dimensions, field ownership, units, dynamic conditions and semantic locators. It is never a ChangeSet, Approval, Confirmation or execution authorization. Page observation and unsubmitted form calibration never authorize a save; every remote-write boundary still requires the Stage D authority chain and action-time confirmation.
+
+For promotion forms, scope every action to its section before resolving the target. Prefer placeholders, role/name pairs, and stable platform attributes such as `data-auto-id=oc-create-product-img-add-button` or `data-e2e=createad_yuntuCategory`; never persist coordinates or DOM order. Reference pickers select the first currently available semantic item only when policy permits. Product selling points are committed with Enter and must contain 6–9 Chinese characters per item, at most 10 items. A product-image picker returning zero items is `blocked_by_missing_material`, not page drift.
+
+The observed 展示量/CPM promotion path accepts bids from CNY 4 through CNY 100. If an intent or calibration authority caps the bid below CNY 4 (including CNY 0.01), stop before save and record `blocked_by_input_constraint`; never silently raise the bid. Promotion edit exposes identity, materials, copy, native anchor, landing page/deep-link, product information, creative components, settings, and name, while the save button remains the final write boundary.
 
 ## Fill a project-create field from the Manifest
 
