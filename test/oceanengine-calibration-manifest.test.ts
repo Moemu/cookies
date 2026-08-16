@@ -144,6 +144,16 @@ test("OceanEngine calibration manifest drives consumer and coverage checks", () 
   const evidenceByCase = new Map(
     evidence.cases.map((item) => [item.case_id, item.outcome]),
   );
+  const writeCalibrationEvidencePath = join(
+    root,
+    "docs/delivery/evidence/oceanengine-d3-write-calibration-2026-08-16.json",
+  );
+  assert.ok(existsSync(writeCalibrationEvidencePath));
+  const writeCalibrationEvidence = JSON.parse(
+    readFileSync(writeCalibrationEvidencePath, "utf8"),
+  ) as { operations: Array<{ case_id: string; outcome: string }> };
+  for (const operation of writeCalibrationEvidence.operations)
+    evidenceByCase.set(operation.case_id, operation.outcome);
   for (const item of manifest.coverage_cases.filter(
     (item) => item.status !== "not_in_scope",
   )) {

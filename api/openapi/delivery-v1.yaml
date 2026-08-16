@@ -445,7 +445,7 @@ paths:
         schema: { type: string, minLength: 1 }
     post:
       operationId: createEmergencyPauseDeliveryChangeSet
-      summary: Freeze an operator-bound emergency pause for one delivering promotion
+      summary: Freeze an operator-bound pause for one delivering promotion
       description: >-
         Starts from a confirmed promotion mapping, requires the current normalized
         platform status to be delivering, server-forces the target status to paused,
@@ -478,7 +478,7 @@ paths:
         schema: { type: string, minLength: 1 }
     post:
       operationId: createControlledRestartDeliveryChangeSet
-      summary: Freeze a fresh operator-bound restart after a controlled emergency pause
+      summary: Freeze a fresh operator-bound enable after a verified pause
       description: >-
         Requires a confirmed promotion Mapping whose latest controlled state is
         paused, rebinds the exact approved daily budget, active schedule,

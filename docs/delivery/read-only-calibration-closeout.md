@@ -2,6 +2,8 @@
 
 > 2026-08-11 运行时说明：本文件中的页面校准、历史字段归属和哈希结论继续有效；早期“操作包”与旧配置运行时描述仅作为历史决策记录。当前活动运行时、八步 Tour 和能力边界以 [`architecture-and-implementation.md`](./architecture-and-implementation.md) 为准，新配置不再生成操作包。
 
+> 2026-08-16 Phase D 补充：本文“全部写入未验证”的历史结论已被 `OceanEngineCalibrationManifest` 和 [`oceanengine-d3-write-calibration-2026-08-16.json`](./evidence/oceanengine-d3-write-calibration-2026-08-16.json) 部分取代。素材替换、项目启用/暂停和单元暂停/启用已完成可逆写后回读；创建/提交、项目排期和受输入上限阻塞的预算修改仍未验证。
+
 ## 运行时执行状态（2026-08-10）
 
 此前冻结的切换规则现已在代码中执行。新的公共 Plan 写请求必须同时提交完整 DeliveryIntent 与 tagged PlatformConfiguration；旧 flat-plan 与 ThreeTier 写请求返回 `LEGACY_CONFIGURATION_UNSUPPORTED`。持久化旧版本在读取后标记为 `legacy_unsupported`/只读，保留原 canonical hash，不能进入新预检、提交、审批或执行链。
@@ -65,7 +67,7 @@ Delivery 可以继续实现新的配置模型和行为流程编译器，但真�
 → 读取数据，按素材、定向、预算、出价和项目组合持续优化
 ```
 
-当前实现只允许走到只读定位、mock/replay 编译和操作包；最后两步保持 `write_validation_pending`，不得点击平台。
+只读阶段当时只允许走到定位、mock/replay 编译和操作包。后续 Phase D 字段校准已在授权测试对象跨越有限写边界并恢复原始状态；上线后的 Computer Use 仍必须服从正式权限控制。
 
 ## 5. 完整场景覆盖矩阵
 
@@ -82,7 +84,8 @@ Delivery 可以继续实现新的配置模型和行为流程编译器，但真�
 | 投后优化 | 素材/定向/预算/出价/组合调整的业务意图已评审 | mock/模拟 `implemented`；真实数据 `platform_pending` | Connector 质量合格后才可运行真实影子分析 |
 | 消费事实 usable | 账户/项目/单元或 promotion/素材对象和四项基础指标齐全 | `implemented`（mock/replay/simulation） | Connector 发布同等契约后再切换来源 |
 | 消费事实 empty/stale/incomplete/schema mismatch/unavailable | 数据不可用于确定性结论 | `implemented` | 只展示原因/evidence，不生成告警、建议或写入 |
-| 保存、创建、开启、暂停、重启 | 动作位置已定位，服务端校验和写后回读未验证 | `write_validation_pending` | 明确授权、测试项目、硬上限、Kill Switch 和人工责任人 |
+| 素材替换、项目启用/暂停、单元暂停/启用 | 已在授权测试对象完成写后回读并恢复原始状态 | `validated_for_field_calibration` | 上线执行仍需正式权限控制 |
+| 创建/提交、项目排期、预算修改 | 创建和排期未执行；预算因平台最低值等于授权上限而无不同目标值 | `write_validation_pending` / `blocked_by_input_constraint` | 新的明确授权、合格测试对象和可用目标值 |
 
 ## 6. 剩余未知项
 
@@ -90,7 +93,7 @@ Delivery 可以继续实现新的配置模型和行为流程编译器，但真�
 | --- | --- | --- |
 | 其他营销目的、载体、目标、版位、定向和竞价的完整枚举 | `platform_pending` | 不把单账户样本写成封闭枚举 |
 | 目标平台代码、深度优化和计费兼容关系 | `platform_pending` / `blocked_by_event_asset` | 不凭显示名或其他账户经验生成目标 |
-| 保存/提交后的客户端与服务端错误、幂等和写后对象关系 | `write_validation_pending` | 不执行平台写入，不宣称校验已通过 |
+| 创建/提交后的客户端与服务端错误、幂等和写后对象关系 | `write_validation_pending` | 有限编辑/状态写入证据不得外推为创建/提交已验证 |
 | 真实报表数值、归因窗口、延迟、重复导入和对账 | Connector `owner_pending` | 不把空表或 mock 指标当真实数据 |
 | 平台素材审核、质量、使用历史和疲劳的真实引用 | 外部资产/Connector 依赖 | 不在 Delivery 建立第二素材中心 |
 | 项目/单元容量、字段继承、不同路径的只读字段 | `platform_pending` | 不用一个编辑样例外推全量规则 |
@@ -121,7 +124,8 @@ Delivery 可以继续实现新的配置模型和行为流程编译器，但真�
 | 行为流程编译器（只读定位、条件、确认、恢复分支） | **Go** | 可用现有页面 evidence、SelectorContract、ActionBoundary 和 mock/replay fixture 验证 |
 | mock/replay 告警和建议回归 | **Go** | PR #38 已提供消费端口、质量门和可重放输入 |
 | 真实 Connector 数据影子告警/建议 | **No-Go** | 缺正式对象/指标/质量契约和 Consumer Contract 测试 |
-| 巨量平台创建、开启、暂停或优化写入 | **No-Go** | 本 Goal 不含授权、Computer Use 写入、写后回读和 Kill Switch |
+| 授权测试对象的 Phase D 字段校准 | **有限 Go，已完成** | 素材替换及项目/单元状态往返均已写后回读并恢复 |
+| 巨量平台创建/提交、项目排期、受阻预算修改或生产写入 | **No-Go** | 尚无对应写入证据或正式上线权限链 |
 
 ## 9. 历史 v1 目标配置模型冻结
 
