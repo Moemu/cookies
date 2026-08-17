@@ -78,6 +78,41 @@ unique(
   manifest.coverage_cases.map((item) => item.id),
   "coverage-case IDs",
 );
+unique(
+  manifest.condition_vocabulary.map((item) => item.key),
+  "condition-vocabulary keys",
+);
+const forbiddenConditionNames = new Set([
+  "lead_mode",
+  "scenario",
+  "optimization_target",
+  "product_or_application",
+]);
+const conditionVocabulary = new Map(
+  manifest.condition_vocabulary.map((item) => [item.key, item]),
+);
+for (const item of manifest.condition_vocabulary) {
+  if (forbiddenConditionNames.has(item.key))
+    throw new Error(
+      `manifest contains a non-standard condition name: ${item.key}`,
+    );
+  if (item.unknown_value_treatment !== "platform_pending")
+    throw new Error(
+      `unknown condition values must be platform_pending: ${item.key}`,
+    );
+  if (/display.?name.?snapshot/i.test(item.source))
+    throw new Error(
+      `condition source cannot use a display-name snapshot: ${item.key}`,
+    );
+  if (item.known_values)
+    unique(item.known_values, `known values for ${item.key}`);
+}
+for (const dimension of manifest.path_dimensions) {
+  if (forbiddenConditionNames.has(dimension.key))
+    throw new Error(
+      `manifest contains a non-standard path name: ${dimension.key}`,
+    );
+}
 const manifestFieldKeys = new Set(manifest.fields.map((field) => field.key));
 const caseObservedFieldKeys = new Set();
 for (const item of manifest.coverage_cases) {
@@ -139,11 +174,64 @@ for (const field of manifest.fields) {
   if (!field.computer_use)
     throw new Error(`manifest field has no Computer Use control: ${field.key}`);
   const control = field.computer_use;
-  for (const locator of [control.scope, control.target, control.readback]) {
-    if (locator.kind === "css" || /nth-child|\[\d+\]/.test(locator.value))
+  if (field.condition) {
+    if (!field.condition_dimensions?.length)
       throw new Error(
-        `Computer Use control has an unstable locator: ${field.key}`,
+        `conditional field has no condition dimensions: ${field.key}`,
       );
+    unique(field.condition_dimensions, `condition dimensions for ${field.key}`);
+    for (const dimension of field.condition_dimensions) {
+      if (forbiddenConditionNames.has(dimension))
+        throw new Error(
+          `field uses a non-standard condition name: ${field.key}:${dimension}`,
+        );
+      if (!conditionVocabulary.has(dimension))
+        throw new Error(
+          `field uses an undeclared condition dimension: ${field.key}:${dimension}`,
+        );
+    }
+    if (field.condition_state === "dependency_only") {
+      if (field.condition_rule)
+        throw new Error(
+          `dependency-only field has a machine rule: ${field.key}`,
+        );
+      if (
+        field.evidence_state !== "platform_pending" ||
+        control.operation !== "no_action"
+      )
+        throw new Error(
+          `dependency-only field can produce a fill action: ${field.key}`,
+        );
+    } else {
+      if (!field.condition_rule?.all?.length)
+        throw new Error(`evaluable field has no machine rule: ${field.key}`);
+      for (const predicate of field.condition_rule.all) {
+        if (!field.condition_dimensions.includes(predicate.dimension))
+          throw new Error(
+            `machine rule uses an undeclared field dimension: ${field.key}:${predicate.dimension}`,
+          );
+        const vocabularyItem = conditionVocabulary.get(predicate.dimension);
+        if (!vocabularyItem)
+          throw new Error(
+            `machine rule uses an unknown vocabulary key: ${field.key}:${predicate.dimension}`,
+          );
+        if (
+          vocabularyItem.value_kind === "reference" &&
+          !["present", "absent"].includes(predicate.operator)
+        )
+          throw new Error(
+            `dynamic references cannot use semantic-value comparison: ${field.key}:${predicate.dimension}`,
+          );
+      }
+    }
+  }
+  if (control.operation !== "no_action") {
+    for (const locator of [control.scope, control.target, control.readback]) {
+      if (locator.kind === "css" || /nth-child|\[\d+\]/.test(locator.value))
+        throw new Error(
+          `Computer Use control has an unstable locator: ${field.key}`,
+        );
+    }
   }
   if (
     control.operation === "choose_exact_visible_option" &&

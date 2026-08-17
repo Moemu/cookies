@@ -15,12 +15,28 @@ const manifest = JSON.parse(
 ) as {
   session_evidence_ref: string;
   path_dimensions: Array<{ key: string; observed_values: string[] }>;
+  condition_vocabulary: Array<{
+    key: string;
+    source_kind: string;
+    source: string;
+    value_kind: string;
+    known_values?: string[];
+    unknown_value_treatment: string;
+  }>;
   fields: Array<{
     key: string;
     consumers: string[];
+    condition?: string;
+    condition_dimensions?: string[];
+    condition_state?: "evaluable" | "dependency_only";
+    condition_rule?: {
+      all: Array<{ dimension: string; operator: string; values?: string[] }>;
+    };
+    evidence_state: string;
     computer_use?: {
       operation: string;
-      expected_target_count: number;
+      expected_target_count?: number;
+      blocked_state?: string;
       observed_options?: string[];
     };
   }>;
@@ -41,6 +57,52 @@ const manifest = JSON.parse(
 test("OceanEngine calibration manifest drives consumer and coverage checks", () => {
   assert.ok(existsSync(join(root, manifest.session_evidence_ref)));
   const fieldKeys = new Set(manifest.fields.map((field) => field.key));
+  const vocabularyKeys = new Set(
+    manifest.condition_vocabulary.map((item) => item.key),
+  );
+  assert.equal(vocabularyKeys.size, manifest.condition_vocabulary.length);
+  for (const item of manifest.condition_vocabulary) {
+    assert.equal(item.unknown_value_treatment, "platform_pending");
+    assert.doesNotMatch(item.source, /display.?name.?snapshot/i);
+  }
+  for (const oldName of [
+    "lead_mode",
+    "scenario",
+    "optimization_target",
+    "product_or_application",
+  ]) {
+    assert.ok(
+      !vocabularyKeys.has(oldName),
+      `non-standard condition name: ${oldName}`,
+    );
+  }
+  const expectedConditionDimensions = new Map<string, string[]>([
+    ["project.marketing_scenario", ["marketing_purpose"]],
+    ["project.marketing_product_reference", ["marketing_purpose"]],
+    ["project.application_reference", ["marketing_purpose"]],
+    [
+      "project.optimization_target_reference",
+      [
+        "marketing_purpose",
+        "carrier",
+        "marketing_product_reference",
+        "application_reference",
+      ],
+    ],
+    ["project.targeting", ["delivery_mode"]],
+    ["project.monitoring_references", ["optimization_target_reference"]],
+    ["project.product_catalog_reference", ["marketing_purpose"]],
+    ["project.placement_strategy", ["marketing_purpose"]],
+    ["project.product_targeting", ["marketing_purpose"]],
+    [
+      "project.application_launch_mode",
+      ["marketing_purpose", "application_scenario"],
+    ],
+  ]);
+  for (const [fieldKey, dimensions] of expectedConditionDimensions) {
+    const field = manifest.fields.find((item) => item.key === fieldKey);
+    assert.deepEqual(field?.condition_dimensions, dimensions, fieldKey);
+  }
   const consumers = new Set<string>();
   const mappedPairs = new Set<string>();
   for (const mapping of manifest.consumer_mappings) {
@@ -79,11 +141,34 @@ test("OceanEngine calibration manifest drives consumer and coverage checks", () 
     "every Manifest field must be Computer Use-ready",
   );
   for (const field of computerUseFields) {
-    assert.equal(
-      field.computer_use?.expected_target_count,
-      1,
-      `non-unique Computer Use target: ${field.key}`,
-    );
+    if (field.condition) {
+      assert.ok(field.condition_dimensions?.length);
+      for (const dimension of field.condition_dimensions ?? [])
+        assert.ok(vocabularyKeys.has(dimension));
+      if (field.condition_state === "dependency_only") {
+        assert.equal(field.evidence_state, "platform_pending");
+        assert.equal(field.computer_use?.operation, "no_action");
+        assert.equal(field.computer_use?.blocked_state, "platform_pending");
+        assert.equal(field.condition_rule, undefined);
+      } else {
+        assert.equal(field.condition_state, "evaluable");
+        assert.ok(field.condition_rule?.all.length);
+        for (const predicate of field.condition_rule?.all ?? []) {
+          assert.ok(field.condition_dimensions?.includes(predicate.dimension));
+          const vocabularyItem = manifest.condition_vocabulary.find(
+            (item) => item.key === predicate.dimension,
+          );
+          if (vocabularyItem?.value_kind === "reference")
+            assert.ok(["present", "absent"].includes(predicate.operator));
+        }
+      }
+    }
+    if (field.computer_use?.operation !== "no_action")
+      assert.equal(
+        field.computer_use?.expected_target_count,
+        1,
+        `non-unique Computer Use target: ${field.key}`,
+      );
     assert.ok(
       field.computer_use?.operation.length,
       `missing Computer Use operation: ${field.key}`,
