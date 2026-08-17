@@ -234,6 +234,14 @@
       "properties": {
         "key": { "type": "string" },
         "semantic_label": { "type": "string", "minLength": 1 },
+        "value_labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "property_labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
         "configuration_requirement": { "type": "string", "minLength": 1 },
         "owner": {
           "enum": [

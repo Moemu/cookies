@@ -3,6 +3,8 @@ import manifestSource from '../../docs/delivery/fixtures/oceanengine-calibration
 type ManifestField = {
   key: string
   semantic_label?: string
+  value_labels?: Record<string, string>
+  property_labels?: Record<string, string>
   configuration_requirement?: string
   unit?: string
   page_family: string
@@ -37,6 +39,8 @@ export type VisibleManifestField = {
   label: string
   unit?: string
   value: unknown
+  valueLabels?: Record<string, string>
+  propertyLabels?: Record<string, string>
 }
 
 export type CalibrationDisposition = {
@@ -127,7 +131,7 @@ export function visibleOceanEngineManifestFields(configuration: unknown, scope: 
         ? mapping.contract_path.replace('OceanEngineConfiguration.Promotions[].', 'OceanEngineConfiguration.')
         : mapping.contract_path
       const values = usableMappingValues(mapping, valuesAtPath(scope === 'promotion' && promotion ? promotion : configuration, path))
-      return values.length ? [{ key: field.key, label: fieldLabel(field), unit: field.unit, value: values.length === 1 ? values[0] : values }] : []
+      return values.length ? [{ key: field.key, label: fieldLabel(field), unit: field.unit, value: values.length === 1 ? values[0] : values, valueLabels: field.value_labels, propertyLabels: field.property_labels }] : []
     })
 }
 

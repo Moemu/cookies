@@ -246,6 +246,7 @@
     {
       "key": "project.marketing_purpose",
       "semantic_label": "营销目的",
+      "value_labels": { "ecommerce": "商品", "lead_generation": "销售线索", "application": "应用推广", "product_catalog": "商品目录", "content_marketing": "内容营销" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -275,6 +276,7 @@
     {
       "key": "project.marketing_scenario",
       "semantic_label": "营销场景",
+      "value_labels": { "short_video_image_text": "短视频和图文", "manual_delivery": "短视频和图文", "live": "直播" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -402,6 +404,7 @@
     {
       "key": "project.application_scenario",
       "semantic_label": "应用场景",
+      "value_labels": { "app_download": "应用下载", "app_launch": "应用调起", "app_appointment_download": "预约下载" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -435,6 +438,7 @@
     {
       "key": "project.operating_system",
       "semantic_label": "操作系统",
+      "value_labels": { "android": "安卓", "ios": "iOS", "harmony": "鸿蒙" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -476,6 +480,7 @@
     {
       "key": "project.application_download_mode",
       "semantic_label": "应用下载方式",
+      "value_labels": { "direct_download": "直接下载", "landing_page_download": "落地页下载" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -514,6 +519,7 @@
     {
       "key": "project.product_selection_mode",
       "semantic_label": "营销产品选择方式",
+      "value_labels": { "manual": "手动选择", "automatic": "自动选择" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -547,6 +553,7 @@
     {
       "key": "project.lead_capture_mode",
       "semantic_label": "获取线索方式",
+      "value_labels": { "smart_lead": "智能获客", "custom_lead": "自定义获客" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -580,6 +587,7 @@
     {
       "key": "project.carrier",
       "semantic_label": "投放载体",
+      "value_labels": { "orange_landing_page_and_im": "橙子落地页和私信", "orange_landing_page": "橙子落地页", "owned_landing_page": "自研落地页", "im": "私信", "byte_miniapp": "字节小程序", "wechat_miniapp": "微信小程序" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -680,6 +688,8 @@
     },
     {
       "key": "project.delivery_mode",
+      "semantic_label": "投放模式",
+      "value_labels": { "ubmax": "自动投放（UBMax）", "manual": "手动投放", "manual_delivery": "手动投放" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -705,6 +715,8 @@
     },
     {
       "key": "project.deep_optimization_mode",
+      "semantic_label": "深度优化方式",
+      "value_labels": { "disabled": "不启用", "conversion_roi": "成交 ROI", "net_conversion_order": "净成交下单", "net_conversion_roi": "净成交 ROI" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -737,6 +749,7 @@
     },
     {
       "key": "project.targeting",
+      "property_labels": { "regions": "地域", "age_ranges": "年龄", "gender": "性别", "smart_expansion": "智能拓量" },
       "owner": "delivery_intent",
       "page_family": "project_create",
       "value_type": "object",
@@ -829,6 +842,8 @@
     },
     {
       "key": "project.bidding_strategy",
+      "semantic_label": "竞价策略",
+      "value_labels": { "stable_cost": "稳定成本", "optimal_cost": "最优成本", "maximum_conversion": "最大转化" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -854,6 +869,8 @@
     },
     {
       "key": "project.charging_mode",
+      "semantic_label": "付费方式",
+      "value_labels": { "CPC": "按点击付费（CPC）", "CPM": "按展示付费（CPM）", "OCPM": "按优化展示付费（OCPM）" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -1210,6 +1227,9 @@
     },
     {
       "key": "promotion.delivery_identity",
+      "semantic_label": "投放身份",
+      "value_labels": { "account_info": "账户信息", "douyin_account": "抖音号" },
+      "property_labels": { "mode": "身份方式" },
       "owner": "promotion_draft",
       "page_family": "promotion_create",
       "value_type": "dynamic_reference",

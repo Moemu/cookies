@@ -26,29 +26,34 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
 }
 
-function formatManifestValue(value: unknown, unit?: string): string {
+function formatManifestValue(value: unknown, unit?: string, valueLabels: Record<string, string> = {}, propertyLabels: Record<string, string> = {}): string {
   if (value === null || value === undefined) return ''
   if (typeof value === 'number' && unit === 'CNY_fen') return (value / 100).toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' })
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
-  if (Array.isArray(value)) return value.map(item => formatManifestValue(item, unit)).filter(Boolean).join('、')
+  if (typeof value === 'boolean') return value ? '开启' : '关闭'
+  if (typeof value === 'string' || typeof value === 'number') return valueLabels[String(value)] ?? String(value)
+  if (Array.isArray(value)) return value.map(item => formatManifestValue(item, unit, valueLabels, propertyLabels)).filter(Boolean).join('、')
   if (typeof value === 'object') {
     const record = value as Record<string, unknown>
     if (typeof record.display_name_snapshot === 'string' && record.display_name_snapshot) return record.display_name_snapshot
     if (typeof record.text === 'string') return record.text
-    if (typeof record.id === 'string' && record.id) return record.id
+    if (typeof record.id === 'string' && record.id) return '已选择平台对象'
     if (typeof record.start_at === 'string' && typeof record.end_at === 'string') {
       const start = new Date(record.start_at).toLocaleDateString('zh-CN')
       const end = new Date(record.end_at).toLocaleDateString('zh-CN')
       return `${start} — ${end}${typeof record.timezone === 'string' ? ` · ${record.timezone}` : ''}`
     }
-    return Object.entries(record).flatMap(([key, entry]) => typeof entry === 'string' || typeof entry === 'number' ? [`${key}: ${entry}`] : []).join(' · ')
+    return Object.entries(record).flatMap(([key, entry]) => {
+      if (typeof entry !== 'string' && typeof entry !== 'number' && typeof entry !== 'boolean') return []
+      const label = propertyLabels[key] ?? key
+      return [`${label}：${formatManifestValue(entry, undefined, valueLabels, propertyLabels)}`]
+    }).join(' · ')
   }
   return ''
 }
 
 function ManifestFieldList({ fields }: { fields: VisibleManifestField[] }) {
   if (!fields.length) return null
-  return <dl className="delivery-config-project-facts">{fields.map(field => <div key={field.key}><dt>{field.label}</dt><dd>{formatManifestValue(field.value, field.unit)}</dd></div>)}</dl>
+  return <dl className="delivery-config-project-facts">{fields.map(field => <div key={field.key}><dt>{field.label}</dt><dd>{formatManifestValue(field.value, field.unit, field.valueLabels, field.propertyLabels)}</dd></div>)}</dl>
 }
 
 const dispositionLabels: Record<CalibrationDisposition['state'], string> = {
