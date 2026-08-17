@@ -473,6 +473,7 @@ type OceanEngineTargeting struct {
 }
 
 type OceanEngineSchedule struct {
+	Mode     string    `json:"mode,omitempty"`
 	StartAt  time.Time `json:"start_at"`
 	EndAt    time.Time `json:"end_at"`
 	Timezone string    `json:"timezone"`
@@ -878,6 +879,9 @@ func validateOceanEngineConfiguration(configuration OceanEngineConfiguration) er
 	}
 	if project.Schedule.StartAt.IsZero() || !project.Schedule.EndAt.After(project.Schedule.StartAt) || strings.TrimSpace(project.Schedule.Timezone) == "" {
 		return contractFailure(ContractErrorProjectRequired, "payload.ocean_engine.project.schedule", "schedule requires timezone and end_at after start_at")
+	}
+	if project.Schedule.Mode != "" && project.Schedule.Mode != "long_term" && project.Schedule.Mode != "fixed_range" {
+		return contractFailure(ContractErrorInvalidConfiguration, "payload.ocean_engine.project.schedule.mode", "schedule mode must be long_term or fixed_range")
 	}
 	if err := validateOceanEngineBudgetAndBidding(project.BudgetAndBidding, "payload.ocean_engine.project.budget_and_bidding", false); err != nil {
 		return err

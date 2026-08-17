@@ -54,6 +54,7 @@ type Budget struct {
 }
 
 type Schedule struct {
+	Mode     string    `json:"mode,omitempty"`
 	StartAt  time.Time `json:"start_at"`
 	EndAt    time.Time `json:"end_at"`
 	Timezone string    `json:"timezone"`

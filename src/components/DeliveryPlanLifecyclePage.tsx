@@ -21,6 +21,14 @@ const deliveryCarrierOptions = [
   { value: 'orange_landing_page', label: '橙子落地页' },
   { value: 'owned_landing_page', label: '自研落地页' },
 ] as const
+const orangeOptimizationTargetOptions = [
+  { value: 'button_redirect', label: '按钮跳转' },
+  { value: 'in_app_order', label: 'app内下单' },
+  { value: 'click', label: '点击量' },
+  { value: 'impression', label: '展示量' },
+  { value: 'shop_launch', label: '调起店铺' },
+  { value: 'shop_stay', label: '店铺停留' },
+] as const
 type PlanSection = typeof planSections[number]
 
 const scenarioLabels: Partial<Record<DeliveryScenario | 'unsaved_draft', string>> = {
@@ -349,19 +357,20 @@ function TargetAccountFields({ draft, changeDraft, strategyTasks = [], marketing
 
 function BudgetScheduleFields({ draft, changeDraft }: FieldProps) {
   return <div className="delivery-field-grid">
-    <label>总预算（CNY）<input id="budget_total" aria-label="总预算" type="number" min="0" step="100" value={draft.budget.totalMinor / 100} onChange={event => changeDraft(current => ({
+    <label>{draft.schedule.mode === 'long_term' ? '日预算（CNY）' : '总预算（CNY）'}<input id="budget_total" aria-label={draft.schedule.mode === 'long_term' ? '日预算' : '总预算'} type="number" min="0" step="100" value={draft.budget.totalMinor / 100} onChange={event => changeDraft(current => ({
       ...current,
       budget: { ...current.budget, totalMinor: Math.max(0, Math.round(Number(event.target.value) * 100)) },
     }))}/></label>
     <label>币种<input aria-label="币种" readOnly value={draft.budget.currency}/></label>
+    <label>投放周期<select id="schedule_mode" aria-label="投放周期" value={draft.schedule.mode} onChange={event => changeDraft(current => ({ ...current, schedule: { ...current.schedule, mode: event.target.value as DeliveryPlanDraft['schedule']['mode'] } }))}><option value="long_term">从今天起长期投放</option><option value="fixed_range">设置开始和结束日期</option></select></label>
     <label>开始时间<input id="schedule_start" aria-label="开始时间" type="datetime-local" value={toDateTimeLocal(draft.schedule.startAt)} onChange={event => changeDraft(current => ({
       ...current,
       schedule: { ...current.schedule, startAt: fromDateTimeLocal(event.target.value) },
     }))}/></label>
-    <label>结束时间<input id="schedule_end" aria-label="结束时间" type="datetime-local" value={toDateTimeLocal(draft.schedule.endAt)} onChange={event => changeDraft(current => ({
+    {draft.schedule.mode === 'fixed_range' ? <label>结束时间<input id="schedule_end" aria-label="结束时间" type="datetime-local" value={toDateTimeLocal(draft.schedule.endAt)} onChange={event => changeDraft(current => ({
       ...current,
       schedule: { ...current.schedule, endAt: fromDateTimeLocal(event.target.value) },
-    }))}/></label>
+    }))}/></label> : null}
     <label>时区<input aria-label="投放时区" readOnly value={draft.schedule.timezone}/></label>
   </div>
 }
@@ -376,23 +385,19 @@ function TrackingFields({ draft, changeDraft }: FieldProps) {
       ...current,
       tracking: { ...current.tracking, landingPage: event.target.value },
     }))}/></label> : null}
-    <label>优化目标 ID<input id="tracking_optimization_target_id" aria-label="优化目标 ID" value={draft.tracking.optimizationTargetId} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, optimizationTargetId: event.target.value } }))}/></label>
-    <label>优化目标名称<input id="tracking_optimization_target_name" aria-label="优化目标名称" value={draft.tracking.optimizationTargetName} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, optimizationTargetName: event.target.value } }))}/></label>
-    {draft.tracking.deliveryCarrier === 'owned_landing_page' ? <>
+    {draft.tracking.deliveryCarrier === 'orange_landing_page' ? <label>优化目标<select id="tracking_optimization_target" aria-label="优化目标" value={draft.tracking.optimizationTargetSemanticKey} onChange={event => {
+      const option = orangeOptimizationTargetOptions.find(candidate => candidate.value === event.target.value)
+      changeDraft(current => ({ ...current, tracking: { ...current.tracking, optimizationTargetSemanticKey: option?.value ?? '', optimizationTargetId: option ? `builtin:${option.value}` : '', optimizationTargetName: option?.label ?? '', eventAssetName: '', eventAssetType: '' } }))
+    }}><option value="">请选择优化目标</option>{orangeOptimizationTargetOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label> : null}
+    {draft.tracking.deliveryCarrier === 'owned_landing_page' ? <fieldset className="delivery-composite-field"><legend>优化目标与事件资产</legend>
+      <label>优化目标名称<input id="tracking_optimization_target_name" aria-label="优化目标名称" value={draft.tracking.optimizationTargetName} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, optimizationTargetName: event.target.value } }))}/></label>
+      <label>优化目标 ID<input id="tracking_optimization_target_id" aria-label="优化目标 ID" value={draft.tracking.optimizationTargetId} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, optimizationTargetId: event.target.value, optimizationTargetSemanticKey: '' } }))}/></label>
       <label>事件资产名称<input id="tracking_event_asset_name" aria-label="事件资产名称" value={draft.tracking.eventAssetName} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, eventAssetName: event.target.value } }))}/></label>
       <label>事件资产类型<input id="tracking_event_asset_type" aria-label="事件资产类型" value={draft.tracking.eventAssetType} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, eventAssetType: event.target.value } }))}/></label>
-    </> : null}
+    </fieldset> : null}
     <label>搜索关键词<input id="tracking_search_keywords" aria-label="搜索关键词" placeholder="使用逗号分隔" value={draft.tracking.searchKeywords} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, searchKeywords: event.target.value } }))}/></label>
     <label>搜索出价系数<input id="tracking_search_bid_coefficient" aria-label="搜索出价系数" type="number" min="1" step="0.1" required value={draft.tracking.searchBidCoefficient} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, searchBidCoefficient: Number(event.target.value) } }))}/></label>
-    <label className="checkbox-field"><input id="tracking_search_expansion" aria-label="定向扩展" type="checkbox" checked={draft.tracking.searchTargetingExpansion} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, searchTargetingExpansion: event.target.checked } }))}/>定向扩展</label>
-    <label>像素 ID<input id="tracking_pixel_id" aria-label="追踪像素 ID" value={draft.tracking.pixelId} onChange={event => changeDraft(current => ({
-      ...current,
-      tracking: { ...current.tracking, pixelId: event.target.value },
-    }))}/></label>
-    <label>转化事件<input id="tracking_conversion_event" aria-label="转化事件" value={draft.tracking.conversionEvent} onChange={event => changeDraft(current => ({
-      ...current,
-      tracking: { ...current.tracking, conversionEvent: event.target.value },
-    }))}/></label>
+    <label className="delivery-toggle-field"><span><b>定向扩展</b><small>允许平台扩大搜索流量的定向范围。</small></span><input id="tracking_search_expansion" aria-label="定向扩展" type="checkbox" role="switch" checked={draft.tracking.searchTargetingExpansion} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, searchTargetingExpansion: event.target.checked } }))}/></label>
     <label>展示监测链接<input aria-label="展示监测链接" type="url" value={draft.tracking.monitoringImpression} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, monitoringImpression: event.target.value } }))}/></label>
     <label>有效触点监测链接<input aria-label="有效触点监测链接" type="url" value={draft.tracking.monitoringValidTouch} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, monitoringValidTouch: event.target.value } }))}/></label>
     <label>视频播放监测链接<input aria-label="视频播放监测链接" type="url" value={draft.tracking.monitoringVideoPlay} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, monitoringVideoPlay: event.target.value } }))}/></label>
@@ -489,8 +494,9 @@ function newMockDraft(project: ProjectRecord, workbench: ReturnType<typeof usePr
     advertiser: { id: 'mock-advertiser-001', name: '当前演示账户边界', platform: 'ocean_engine' },
     budget: { totalMinor: Math.max(project.budget || 3000, 0) * 100, currency: 'CNY' },
     schedule: {
-      startAt: '2026-08-01T00:00:00.000Z',
-      endAt: '2026-08-31T00:00:00.000Z',
+      mode: 'long_term',
+      startAt: todayInShanghaiISO(),
+      endAt: '2099-12-31T23:59:59+08:00',
       timezone: project.timezone || 'Asia/Shanghai',
     },
     tracking: {
@@ -498,7 +504,7 @@ function newMockDraft(project: ProjectRecord, workbench: ReturnType<typeof usePr
       landingPage: `https://demo.cookies.local/lead/${code.toLowerCase()}`,
       pixelId: `PX-${code}-LEAD`,
       conversionEvent: 'lead_submit',
-      optimizationTargetId: '', optimizationTargetName: '', eventAssetName: '', eventAssetType: '',
+      optimizationTargetId: '', optimizationTargetName: '', optimizationTargetSemanticKey: '', eventAssetName: '', eventAssetType: '',
       searchKeywords: '', searchBidCoefficient: 1.1, searchTargetingExpansion: false,
       monitoringImpression: '', monitoringValidTouch: '', monitoringVideoPlay: '', monitoringVideoComplete: '', monitoringValidVideoPlay: '',
     },
@@ -530,6 +536,12 @@ function draftFromVersion(version: DeliveryPlanVersion): DeliveryPlanDraft {
 
 function toDateTimeLocal(value: string) {
   return value ? new Date(value).toISOString().slice(0, 16) : ''
+}
+
+function todayInShanghaiISO() {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
+  const value = Object.fromEntries(parts.map(part => [part.type, part.value]))
+  return `${value.year}-${value.month}-${value.day}T00:00:00+08:00`
 }
 
 function fromDateTimeLocal(value: string) {

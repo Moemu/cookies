@@ -121,7 +121,7 @@ export type PlatformConfiguration = {
         deep_optimization_mode?: string
         delivery_mode: string
         targeting: { regions?: string[]; age_ranges?: string[]; gender?: string; smart_expansion: boolean }
-        schedule: { start_at: string; end_at: string; timezone: string }
+        schedule: { mode?: 'long_term' | 'fixed_range'; start_at: string; end_at: string; timezone: string }
         budget_and_bidding: { currency: 'CNY'; daily_budget_minor: number; bidding_strategy: string; charging_mode: string; bid_minor?: number }
         monitoring_references?: StableReference[]
         search_boost?: { keywords?: string[]; bid_coefficient?: number; targeting_expansion?: boolean }
@@ -179,6 +179,7 @@ export type DeliveryPlanDraft = {
     currency: 'CNY'
   }
   schedule: {
+    mode: 'long_term' | 'fixed_range'
     startAt: string
     endAt: string
     timezone: string
@@ -190,6 +191,7 @@ export type DeliveryPlanDraft = {
     conversionEvent: string
     optimizationTargetId: string
     optimizationTargetName: string
+    optimizationTargetSemanticKey: string
     eventAssetName: string
     eventAssetType: string
     searchKeywords: string
@@ -536,7 +538,7 @@ type WireDeliveryPlanDraft = {
   marketing_purpose?: OceanEngineMarketingPurpose
   advertiser: { id: string; name: string; platform: 'ocean_engine'; source?: DeliverySource; scenario?: DeliveryScenario }
   budget: { total_minor: number; currency: 'CNY' }
-  schedule: { start_at: string; end_at: string; timezone: string }
+  schedule: { mode?: 'long_term' | 'fixed_range'; start_at: string; end_at: string; timezone: string }
   marketing_product?: { id?: string; name?: string; activity_type?: string; activity_name?: string; brand_name?: string }
   tracking: {
     delivery_carrier?: '' | 'orange_landing_page' | 'owned_landing_page'; landing_page: string; pixel_id: string; conversion_event: string
@@ -1576,6 +1578,7 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
   } : undefined
   const optimizationTargetReference: StableReference | undefined = draft.tracking.optimizationTargetId ? {
     namespace: 'oceanengine', object_kind: 'optimization_target', scope, id: draft.tracking.optimizationTargetId, state: 'resolved',
+    semantic_key: draft.tracking.optimizationTargetSemanticKey || undefined,
     display_name_snapshot: draft.tracking.optimizationTargetName,
     audit_attributes: { event_asset_name: draft.tracking.eventAssetName, event_asset_type: draft.tracking.eventAssetType },
   } : undefined
@@ -1612,7 +1615,9 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
     configuration_provenance: { kind: 'manual', generator_ref: 'delivery-plan-editor' },
     fact_provenance: { source: 'mock', snapshot_ref: `mock://delivery-intent/${identity}/${versionNumber}` },
   }
-  const dailyBudget = Math.max(0, Math.floor(draft.budget.totalMinor / Math.max(1, Math.ceil((Date.parse(draft.schedule.endAt) - Date.parse(draft.schedule.startAt)) / 86_400_000))))
+  const dailyBudget = draft.schedule.mode === 'long_term'
+    ? draft.budget.totalMinor
+    : Math.max(0, Math.floor(draft.budget.totalMinor / Math.max(1, Math.ceil((Date.parse(draft.schedule.endAt) - Date.parse(draft.schedule.startAt)) / 86_400_000))))
   const configuration: PlatformConfiguration = {
     schema_version: 'delivery-platform-configuration/v2', configuration_id: `configuration-${identity}`, version_number: versionNumber,
     platform: 'ocean_engine', profile_version: 'oceanengine-configuration/v1', hash_algorithm: 'RFC8785-JCS-SHA256(canonical_payload)',
@@ -1628,7 +1633,7 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
           marketing_product_reference: marketingProductReference,
           carrier: draft.tracking.deliveryCarrier, optimization_target_reference: optimizationTargetReference, delivery_mode: 'manual',
           targeting: { smart_expansion: false },
-          schedule: { start_at: draft.schedule.startAt, end_at: draft.schedule.endAt, timezone: draft.schedule.timezone },
+          schedule: { mode: draft.schedule.mode, start_at: draft.schedule.startAt, end_at: draft.schedule.endAt, timezone: draft.schedule.timezone },
           budget_and_bidding: { currency: 'CNY', daily_budget_minor: dailyBudget, bidding_strategy: 'stable_cost', charging_mode: 'CPC', bid_minor: 0 },
           search_boost: { keywords: draft.tracking.searchKeywords.split(/[,，]/).map(value => value.trim()).filter(Boolean), bid_coefficient: draft.tracking.searchBidCoefficient, targeting_expansion: draft.tracking.searchTargetingExpansion },
           monitoring_references: monitoringReferences,
@@ -1638,7 +1643,7 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
           draft_schema_version: 'oceanengine-configuration/v1', promotion_draft_id: `promotion-${identity}-${index + 1}`,
           delivery_identity: { mode: 'account_info' }, base_material_references: [reference], copy_items: [],
           landing_page_reference: landingPageReference,
-          settings: { call_to_action: draft.tracking.conversionEvent }, promotion_name: `${draft.name}-${index + 1}`,
+          settings: {}, promotion_name: `${draft.name}-${index + 1}`,
         })),
       },
     },
@@ -1712,8 +1717,8 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
       ? { totalMinor: intent?.payload.budget_boundary.maximum_total_minor ?? 0, currency: intent?.payload.budget_boundary.currency ?? 'CNY' }
       : { totalMinor: version.budget?.total_minor ?? 0, currency: version.budget?.currency ?? 'CNY' },
     schedule: typedRuntime
-      ? { startAt: intent?.payload.schedule_boundary.earliest_start ?? '', endAt: intent?.payload.schedule_boundary.latest_end ?? '', timezone: intent?.payload.schedule_boundary.timezone ?? 'Asia/Shanghai' }
-      : { startAt: version.schedule?.start_at ?? '', endAt: version.schedule?.end_at ?? '', timezone: version.schedule?.timezone ?? 'Asia/Shanghai' },
+      ? { mode: project?.schedule.mode ?? 'fixed_range', startAt: intent?.payload.schedule_boundary.earliest_start ?? '', endAt: intent?.payload.schedule_boundary.latest_end ?? '', timezone: intent?.payload.schedule_boundary.timezone ?? 'Asia/Shanghai' }
+      : { mode: version.schedule?.mode ?? 'fixed_range', startAt: version.schedule?.start_at ?? '', endAt: version.schedule?.end_at ?? '', timezone: version.schedule?.timezone ?? 'Asia/Shanghai' },
     tracking: {
       deliveryCarrier: typedRuntime ? (project?.carrier === 'orange_landing_page' || project?.carrier === 'owned_landing_page' ? project.carrier : '') : version.tracking?.delivery_carrier ?? '',
       landingPage: typedRuntime ? intent?.payload.landing_page_references?.[0]?.id ?? '' : version.tracking?.landing_page ?? '',
@@ -1721,6 +1726,7 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
       conversionEvent: typedRuntime ? firstPromotion?.settings.call_to_action ?? '' : version.tracking?.conversion_event ?? '',
       optimizationTargetId: typedRuntime ? project?.optimization_target_reference?.id ?? '' : version.tracking?.optimization_target_id ?? '',
       optimizationTargetName: typedRuntime ? project?.optimization_target_reference?.display_name_snapshot ?? '' : version.tracking?.optimization_target_name ?? '',
+      optimizationTargetSemanticKey: typedRuntime ? project?.optimization_target_reference?.semantic_key ?? '' : '',
       eventAssetName: typedRuntime ? optimizationAudit.event_asset_name ?? '' : version.tracking?.event_asset_name ?? '',
       eventAssetType: typedRuntime ? optimizationAudit.event_asset_type ?? '' : version.tracking?.event_asset_type ?? '',
       searchKeywords: typedRuntime ? project?.search_boost?.keywords?.join('，') ?? '' : version.tracking?.search_keywords ?? '',
