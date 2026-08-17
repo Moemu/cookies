@@ -243,6 +243,9 @@ func (b CalibrationManifestBinding) validate(field string) error {
 	if err := manifest.ValidateBinding(b.SchemaVersion, b.ManifestID); err != nil {
 		return contractFailure(ContractErrorInvalidConfiguration, field, "the calibration manifest binding does not match the frozen Manifest")
 	}
+	if err := validateManifestContractOwnership(manifest); err != nil {
+		return contractFailure(ContractErrorInvalidConfiguration, field, "the calibration manifest contract paths do not match domain ownership")
+	}
 	return nil
 }
 

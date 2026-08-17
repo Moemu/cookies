@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/systems/delivery/calibrationmanifest"
 )
 
 func TestDeliveryContractFixturesMatchGoDomainValidation(t *testing.T) {
@@ -36,6 +37,27 @@ func TestDeliveryContractFixturesMatchGoDomainValidation(t *testing.T) {
 	if code := DeliveryContractErrorCode(magnetic.Validate()); code != ContractErrorCapabilityPending {
 		t.Fatalf("Magnetic fixture result code = %q", code)
 	}
+}
+
+func TestManifestNonEvidenceMappingsReachTheirDeclaredDomainFields(t *testing.T) {
+	manifest, err := calibrationmanifest.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateManifestContractOwnership(manifest); err != nil {
+		t.Fatal(err)
+	}
+	for index := range manifest.ConsumerMappings {
+		if manifest.ConsumerMappings[index].Treatment == calibrationmanifest.EvidenceOnly {
+			continue
+		}
+		manifest.ConsumerMappings[index].ContractPath += ".MissingField"
+		if err := validateManifestContractOwnership(manifest); err == nil {
+			t.Fatal("a non-evidence mapping to a missing domain field must fail closed")
+		}
+		return
+	}
+	t.Fatal("fixture must contain a non-evidence consumer mapping")
 }
 
 func TestCanonicalProjectionsContainEveryBusinessFieldAndEveryLeafIsHashSensitive(t *testing.T) {
