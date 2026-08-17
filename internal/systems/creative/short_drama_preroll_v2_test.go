@@ -321,6 +321,133 @@ func TestShortDramaPrerollV4BuildsReferenceBoardsAndSingleReferenceVideoInput(t 
 		!strings.Contains(input.Prompt, "不得出现宫格、拼贴") {
 		t.Fatalf("provider input = %#v", input)
 	}
+
+	generating, err := service.RegisterShortDramaV2VideoJob(context.Background(), rc.Actor, "project_1", taskID, "video_job_reference_rejected")
+	if err != nil {
+		t.Fatalf("register reference video job: %v", err)
+	}
+	failed, err := service.ReconcileShortDramaV2Video(context.Background(), rc.Actor, "project_1", taskID, ReconcileShortDramaV2VideoRequest{
+		ExpectedRevision: generating.VideoDraft.Revision,
+		Job: contract.ProviderJob{
+			ID: "video_job_reference_rejected", ProjectID: "project_1", ProviderStatus: contract.ProviderJobFailed,
+			Error: &contract.JobError{Code: "REFERENCE_ASSET_CONTENT_REJECTED", Message: "reference image contains a clear realistic person", Retryable: false},
+		},
+	})
+	if err != nil {
+		t.Fatalf("reconcile rejected reference video: %v", err)
+	}
+	fallbackSpec := failed.VideoDraft.ShortDramaPrerollV2.GenerationSpec
+	if fallbackSpec == nil || fallbackSpec.InputMode != string(provider.VideoInputTextOnly) || fallbackSpec.FallbackMode != "text_only_realistic" || fallbackSpec.FallbackReason != "REFERENCE_ASSET_CONTENT_REJECTED" {
+		t.Fatalf("fallback generation spec = %#v", fallbackSpec)
+	}
+	fallbackInput, _, _, err := service.ShortDramaV2ProviderInput(context.Background(), rc.Actor, "project_1", taskID)
+	if err != nil {
+		t.Fatalf("fallback provider input: %v", err)
+	}
+	if fallbackInput.InputMode != provider.VideoInputTextOnly || len(fallbackInput.ConditioningAssets) != 0 {
+		t.Fatalf("fallback provider input = %#v", fallbackInput)
+	}
+}
+
+func TestShortDramaReferenceBoardRecoversOnlyFailedCandidate(t *testing.T) {
+	t.Parallel()
+
+	service, taskID, rc := createShortDramaV2TestWorkspace(t)
+	prompts := advanceShortDramaV2ToPrompts(t, &service, taskID, rc)
+	jobs := &shortDramaV2ImageJobsStub{}
+	service.ShortDramaV2Images = jobs
+	current, err := service.GenerateShortDramaReferenceBoards(context.Background(), rc.Actor, "project_1", taskID, GenerateShortDramaReferenceBoardsRequest{ExpectedRevision: prompts.VideoDraft.Revision})
+	if err != nil {
+		t.Fatalf("generate reference boards: %v", err)
+	}
+	initialBatch := current.VideoDraft.ShortDramaPrerollV2.ReferenceBoardBatch
+	for index := 0; index < 2; index++ {
+		candidate := initialBatch.Candidates[index]
+		asset := contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: contract.AssetID(fmt.Sprintf("ready_board_%d", index+1)), Version: 1}}
+		current, err = service.ReconcileShortDramaReferenceBoard(context.Background(), rc.Actor, "project_1", taskID, ReconcileShortDramaReferenceBoardRequest{
+			ExpectedRevision: current.VideoDraft.Revision, CandidateID: candidate.ID,
+			Job: contract.ProviderJob{ID: candidate.ProviderJobID, ProjectID: "project_1", ProviderStatus: contract.ProviderJobSucceeded, ProjectAssetRefs: []contract.ProjectAssetRef{asset}},
+		})
+		if err != nil {
+			t.Fatalf("reconcile successful candidate %d: %v", index, err)
+		}
+	}
+	failedCandidate := initialBatch.Candidates[2]
+	current, err = service.ReconcileShortDramaReferenceBoard(context.Background(), rc.Actor, "project_1", taskID, ReconcileShortDramaReferenceBoardRequest{
+		ExpectedRevision: current.VideoDraft.Revision, CandidateID: failedCandidate.ID,
+		Job: contract.ProviderJob{ID: failedCandidate.ProviderJobID, ProjectID: "project_1", ProviderStatus: contract.ProviderJobFailed,
+			Error: &contract.JobError{Code: "MODEL_INPUT_POLICY_REJECTED", Message: "input rejected", Retryable: false}},
+	})
+	if err != nil {
+		t.Fatalf("reconcile failed candidate: %v", err)
+	}
+	partial := current.VideoDraft.ShortDramaPrerollV2.ReferenceBoardBatch
+	if partial.Status != ShortDramaV2ResourcePartial || partial.ReadyCount != 2 || partial.FailedCount != 1 || partial.RecoverableFailedCount != 1 {
+		t.Fatalf("partial batch = %#v", partial)
+	}
+	current, err = service.SelectShortDramaReferenceBoard(context.Background(), rc.Actor, "project_1", taskID, SelectShortDramaReferenceBoardRequest{
+		ExpectedRevision: current.VideoDraft.Revision, BatchID: partial.ID, CandidateID: partial.Candidates[0].ID,
+	})
+	if err != nil {
+		t.Fatalf("select successful candidate before recovery: %v", err)
+	}
+	partial = current.VideoDraft.ShortDramaPrerollV2.ReferenceBoardBatch
+	beforeFirst := partial.Candidates[0]
+	beforeSecond := partial.Candidates[1]
+	failedAttemptID := partial.Candidates[2].CurrentAttemptID
+	current, err = service.RetryShortDramaReferenceBoardCandidate(context.Background(), rc.Actor, "project_1", taskID, RetryShortDramaReferenceBoardCandidateRequest{
+		ExpectedRevision: current.VideoDraft.Revision, BatchID: partial.ID, CandidateID: failedCandidate.ID, FailedAttemptID: failedAttemptID,
+	})
+	if err != nil {
+		t.Fatalf("retry failed candidate: %v", err)
+	}
+	retrying := current.VideoDraft.ShortDramaPrerollV2.ReferenceBoardBatch
+	if jobs.calls != 4 || retrying.RunningCount != 1 || retrying.ReadyCount != 2 || len(retrying.Candidates[2].Attempts) != 2 || retrying.Candidates[2].Attempts[1].Mode != referenceBoardAttemptPolicyRewrite {
+		t.Fatalf("retrying batch=%#v calls=%d", retrying, jobs.calls)
+	}
+	if retrying.Candidates[0].ProviderJobID != beforeFirst.ProviderJobID || retrying.Candidates[1].ProviderJobID != beforeSecond.ProviderJobID ||
+		retrying.Candidates[0].ModelReferenceAsset.AssetVersion != beforeFirst.ModelReferenceAsset.AssetVersion || retrying.Candidates[1].ModelReferenceAsset.AssetVersion != beforeSecond.ModelReferenceAsset.AssetVersion {
+		t.Fatalf("successful candidates changed during repair: before=%#v/%#v after=%#v/%#v", beforeFirst, beforeSecond, retrying.Candidates[0], retrying.Candidates[1])
+	}
+	if len(jobs.requests) != 4 || jobs.requests[3].Prompt == jobs.requests[2].Prompt || !strings.Contains(jobs.requests[3].Prompt, "安全改写要求") {
+		t.Fatalf("recovery prompt was not rewritten: %#v", jobs.requests)
+	}
+
+	recovered := retrying.Candidates[2]
+	asset := contract.ProjectAssetRef{ProjectID: "project_1", AssetVersion: contract.AssetVersionRef{AssetID: "recovered_board", Version: 1}}
+	current, err = service.ReconcileShortDramaReferenceBoard(context.Background(), rc.Actor, "project_1", taskID, ReconcileShortDramaReferenceBoardRequest{
+		ExpectedRevision: current.VideoDraft.Revision, CandidateID: recovered.ID,
+		Job: contract.ProviderJob{ID: recovered.ProviderJobID, ProjectID: "project_1", ProviderStatus: contract.ProviderJobSucceeded, ProjectAssetRefs: []contract.ProjectAssetRef{asset}},
+	})
+	if err != nil {
+		t.Fatalf("reconcile recovered candidate: %v", err)
+	}
+	ready := current.VideoDraft.ShortDramaPrerollV2.ReferenceBoardBatch
+	readyWorkspace := current.VideoDraft.ShortDramaPrerollV2
+	if ready.Status != ShortDramaV2ResourceReady || ready.ReadyCount != 3 || ready.Candidates[2].Status != ShortDramaV2ResourceReady ||
+		readyWorkspace.ActiveStage != ShortDramaV2StageFrameSelected || readyWorkspace.GenerationSpec == nil || ready.SelectedCandidateID != beforeFirst.ID {
+		t.Fatalf("recovered batch = %#v", ready)
+	}
+}
+
+func TestShortDramaReferenceBoardPersistsAllSlotsWhenOneJobCreationFails(t *testing.T) {
+	t.Parallel()
+
+	service, taskID, rc := createShortDramaV2TestWorkspace(t)
+	prompts := advanceShortDramaV2ToPrompts(t, &service, taskID, rc)
+	jobs := &shortDramaV2ImageJobsStub{failAt: 2}
+	service.ShortDramaV2Images = jobs
+	generated, err := service.GenerateShortDramaReferenceBoards(context.Background(), rc.Actor, "project_1", taskID, GenerateShortDramaReferenceBoardsRequest{ExpectedRevision: prompts.VideoDraft.Revision})
+	if err != nil {
+		t.Fatalf("generate reference boards with one creation failure: %v", err)
+	}
+	batch := generated.VideoDraft.ShortDramaPrerollV2.ReferenceBoardBatch
+	if batch == nil || len(batch.Candidates) != 3 || batch.Candidates[1].Status != ShortDramaV2ResourceFailed || !batch.Candidates[1].Recoverable || batch.Candidates[1].CurrentAttemptID == "" {
+		t.Fatalf("persisted partial creation batch = %#v", batch)
+	}
+	if batch.Candidates[0].ProviderJobID == "" || batch.Candidates[2].ProviderJobID == "" {
+		t.Fatalf("successful provider job creations were lost: %#v", batch.Candidates)
+	}
 }
 
 func TestShortDramaReferenceBoardUsesBoundedStableRenderJobID(t *testing.T) {
@@ -491,7 +618,11 @@ type shortDramaV2PlannerStub struct {
 	prompt     ShortDramaV2PromptDraft
 }
 
-type shortDramaV2ImageJobsStub struct{ calls int }
+type shortDramaV2ImageJobsStub struct {
+	calls    int
+	requests []ShortDramaV2FirstFrameJobRequest
+	failAt   int
+}
 
 type shortDramaV2ImageReaderStub struct{}
 
@@ -528,6 +659,10 @@ func (shortDramaV2VideoNormalizerStub) NormalizeVideo(_ context.Context, request
 
 func (s *shortDramaV2ImageJobsStub) CreateFirstFrameJob(_ context.Context, _ contract.ActorContext, project contract.ProjectContext, request ShortDramaV2FirstFrameJobRequest) (contract.ProviderJob, error) {
 	s.calls++
+	s.requests = append(s.requests, request)
+	if s.failAt == s.calls {
+		return contract.ProviderJob{}, fmt.Errorf("injected image job creation failure")
+	}
 	return contract.ProviderJob{ID: fmt.Sprintf("image_job_%d", s.calls), ProjectID: project.ProjectID, ProviderStatus: contract.ProviderJobSubmitted}, nil
 }
 

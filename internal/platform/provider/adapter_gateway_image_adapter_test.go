@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -87,6 +88,44 @@ func TestAdapterGatewayImageAdapterTreatsServerErrorAsUnknown(t *testing.T) {
 	executionError, ok := err.(ExecutionError)
 	if !ok || executionError.JobError.Code != "MODEL_SUBMISSION_UNKNOWN" || executionError.JobError.Retryable {
 		t.Fatalf("Submit() error = %#v, want non-retryable unknown submission", err)
+	}
+}
+
+func TestAdapterGatewayImageAdapterClassifiesStructuredImageErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		wantCode  string
+		retryable bool
+	}{
+		{name: "input text policy", status: http.StatusBadRequest, body: `{"error":{"code":"InputTextSensitiveContentDetected","message":"sensitive input"}}`, wantCode: "MODEL_INPUT_POLICY_REJECTED"},
+		{name: "output image policy", status: http.StatusBadRequest, body: `{"error":{"code":"OutputImageSensitiveContentDetected","message":"sensitive output"}}`, wantCode: "MODEL_OUTPUT_POLICY_REJECTED"},
+		{name: "generic bad request", status: http.StatusBadRequest, body: `{"error":{"code":"BadRequest","message":"invalid"}}`, wantCode: "MODEL_REQUEST_REJECTED"},
+		{name: "quota", status: http.StatusTooManyRequests, body: `{"error":{"code":"QuotaExceeded","message":"queued tasks exceeded"}}`, wantCode: "MODEL_RATE_LIMITED", retryable: true},
+	}
+	for _, item := range tests {
+		item := item
+		t.Run(item.name, func(t *testing.T) {
+			t.Parallel()
+			adapter, _ := NewAdapterGatewayImageAdapter(staticGatewayCredential("service-token"), &memoryOutputHandles{})
+			adapter.client = &http.Client{Transport: roundTripper(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: item.status, Header: make(http.Header), Body: io.NopCloser(bytes.NewBufferString(item.body))}, nil
+			})}
+			_, err := adapter.Submit(context.Background(), ImageGenerationRequest{
+				OrganizationID: "org_1", ProjectID: "project_1", ProviderJobID: "provider_job_gateway_error",
+				ModelAlias: "cookies.image.standard", IdempotencyKey: "gateway-image-error",
+				Input: ImageGenerationInput{Prompt: "launch poster", Width: 1024, Height: 1024}, Route: testGatewayRoute(),
+			})
+			executionError, ok := err.(ExecutionError)
+			if !ok || executionError.JobError.Code != item.wantCode || executionError.JobError.Retryable != item.retryable {
+				t.Fatalf("Submit() error = %#v, want code=%s retryable=%t", err, item.wantCode, item.retryable)
+			}
+			if strings.Contains(executionError.JobError.Message, "sensitive input") || strings.Contains(executionError.JobError.Message, "sensitive output") {
+				t.Fatalf("raw upstream message leaked: %#v", executionError.JobError)
+			}
+		})
 	}
 }
 

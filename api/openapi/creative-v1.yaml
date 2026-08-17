@@ -30,7 +30,7 @@ paths:
   /api/creative/v1/projects/{project_id}/ai-native-ads/products:resolve:
     post:
       operationId: resolveAINativeAdProductPreview
-      summary: Recognize a Douyin, Taobao, Tmall, Xiaohongshu, or 1688 product link without requiring complete product details.
+      summary: Recognize a Douyin, Taobao, Tmall, or 1688 product link without calling a commerce-platform API.
       parameters: [{$ref: '#/components/parameters/ProjectID'}]
       requestBody:
         required: true
@@ -1722,10 +1722,10 @@ components:
       properties:
         product_id: {type: string, minLength: 1}
         product_name: {type: string}
-        source: {enum: [douyin_mall, taobao, tmall, xiaohongshu, '1688']}
+        source: {enum: [douyin_mall, taobao, tmall, '1688']}
         source_url: {type: string, format: uri}
         status: {enum: [recognized, partial, manual_required]}
-        resource_type: {enum: [product, note]}
+        resource_type: {const: product}
         missing_fields: {type: array, uniqueItems: true, items: {type: string, minLength: 1}}
     ProductionRunPage:
       $ref: '../contracts/creative-production-center-v1.schema.json#/$defs/ProductionRunPage'

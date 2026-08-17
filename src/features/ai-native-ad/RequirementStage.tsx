@@ -12,7 +12,7 @@ type ProductRecognitionState =
 function productRecognitionFailure(cause: unknown): { message: string; retryable: boolean } {
   if (cause instanceof AINativeApiError) {
     if (cause.code === 'AI_NATIVE_PRODUCT_LINK_INCOMPLETE') return { message: '复制内容不完整，商品参数在中途被截断。请回到商品页重新复制并完整粘贴。', retryable: false }
-    if (cause.code === 'AI_NATIVE_PRODUCT_LINK_UNSUPPORTED') return { message: '没有识别到受支持的商品链接，请粘贴抖音、淘宝、天猫、小红书或 1688 的商品链接。', retryable: false }
+    if (cause.code === 'AI_NATIVE_PRODUCT_LINK_UNSUPPORTED') return { message: '没有识别到受支持的商品链接，请粘贴抖音、淘宝、天猫或 1688 的商品链接。', retryable: false }
     if (cause.code === 'AI_NATIVE_PRODUCT_DETAIL_MISSING') return { message: '已识别平台，但链接中没有商品或内容 ID。请确认复制的是商品详情链接。', retryable: false }
     if (cause.code === 'CLIENT_TIMEOUT') return { message: '商品信息获取超时，链接格式可能正常，可以重新识别。', retryable: true }
   }
@@ -21,7 +21,7 @@ function productRecognitionFailure(cause: unknown): { message: string; retryable
     return { message: '复制内容不完整，商品参数在中途被截断。请回到商品页重新复制并完整粘贴。', retryable: false }
   }
   if (detail.includes('host') || detail.includes('unsupported product link') || detail.includes('https link is required')) {
-    return { message: '没有识别到受支持的商品链接，请粘贴抖音、淘宝、天猫、小红书或 1688 的商品链接。', retryable: false }
+    return { message: '没有识别到受支持的商品链接，请粘贴抖音、淘宝、天猫或 1688 的商品链接。', retryable: false }
   }
   if (detail.includes('goods_detail is absent') || detail.includes('product information is missing')) {
     return { message: '已识别平台，但链接中没有商品或内容 ID。请确认复制的是商品详情链接。', retryable: false }
@@ -141,11 +141,11 @@ export function RequirementStage({
   const locked = status === 'confirmed'
   if (!requirement) {
     return <section className="ai-native-stage-panel requirement-entry" role="tabpanel" id="ai-native-panel-requirement" aria-labelledby="ai-native-stage-requirement">
-      <div className="ai-native-stage-heading"><div><h3>从商品链接开始创作</h3><p>粘贴抖音、淘宝、天猫、小红书或 1688 商品链接，AI 将整理可获得的商品信息。</p></div><span className="ai-native-channel">5 类来源 · 已支持</span></div>
+      <div className="ai-native-stage-heading"><div><h3>从商品链接开始创作</h3><p>粘贴抖音、淘宝、天猫或 1688 商品链接，AI 将整理公开页面中可获得的商品信息。</p></div><span className="ai-native-channel">4 类来源 · 已支持</span></div>
       <div className="requirement-conversation">
         <div className="conversation-intro"><span>AI</span><p>请发送商品链接，并告诉我这条广告希望强调什么。商品来源与视频使用场景相互独立，分析后可选择平台场景和对应比例。</p></div>
         <div className="conversation-composer">
-          <label><Link2 size={15}/><input aria-label="商品链接" aria-describedby="product-link-recognition" value={productLink} onChange={event => onProductLinkChange(event.target.value)} placeholder="粘贴抖音、淘宝、天猫、小红书或 1688 商品链接/分享文案"/></label>
+          <label><Link2 size={15}/><input aria-label="商品链接" aria-describedby="product-link-recognition" value={productLink} onChange={event => onProductLinkChange(event.target.value)} placeholder="粘贴抖音、淘宝、天猫或 1688 商品链接/分享文案"/></label>
           {recognition.status !== 'idle' ? <div id="product-link-recognition" className={`product-link-recognition ${recognition.status}`} role={recognition.status === 'failed' ? 'alert' : 'status'}>
             {recognition.status === 'checking' ? <><LoaderCircle className="spin" size={15}/><span><b>正在识别商品链接</b><small>正在识别平台、商品类型并清理追踪参数…</small></span></> : recognition.status === 'success' ? <><CheckCircle2 size={16}/><span><b>识别成功</b><small>{recognition.product.product_name || `已识别${recognition.product.source}商品，商品名称需在下一步补充`}</small></span></> : <><AlertTriangle size={16}/><span><b>商品链接识别失败</b><small>{recognition.message}</small></span>{recognition.retryable ? <button type="button" onClick={() => setRecognitionRetry(value => value + 1)}><RefreshCw size={12}/>重新识别</button> : null}</>}
           </div> : null}
@@ -188,10 +188,13 @@ export function RequirementStage({
     const { status: _status, ...snapshot } = selected
     onChange({ ...requirement, output_preset: snapshot as AINativeOutputPresetSnapshot, channel: snapshot.channel, aspect_ratio: snapshot.aspect_ratio })
   }
-  const availableOutputPresets: AINativeOutputPreset[] = outputPresets.length > 0
-    ? outputPresets
-    : requirement.output_preset ? [{ ...requirement.output_preset, status: 'available' }] : []
-  const selectedOutputPresetID = requirement.output_preset?.id || availableOutputPresets[0]?.id || ''
+  const visibleOutputPresets = outputPresets.filter(preset => preset.channel !== 'xiaohongshu')
+  const availableOutputPresets: AINativeOutputPreset[] = visibleOutputPresets.length > 0
+    ? visibleOutputPresets
+    : requirement.output_preset && requirement.output_preset.channel !== 'xiaohongshu' ? [{ ...requirement.output_preset, status: 'available' }] : []
+  const selectedOutputPresetID = availableOutputPresets.some(preset => preset.id === requirement.output_preset?.id)
+    ? requirement.output_preset!.id
+    : availableOutputPresets[0]?.id || ''
   const delivery = requirement.delivery_treatment ?? deliveryTreatmentForPreset('full_ad')
   const selectDeliveryPreset = (preset: AINativeDeliveryTreatment['preset']) => {
     if (preset === 'custom') return

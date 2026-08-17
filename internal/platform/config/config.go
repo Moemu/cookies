@@ -792,8 +792,8 @@ func (c Config) Validate() error {
 	if c.Provider.TextAdapter != "fake" && c.Provider.TextAdapter != "adapter_gateway" && c.Provider.TextAdapter != "ark_text" {
 		return fmt.Errorf("COOKIES_PROVIDER_TEXT_ADAPTER must be fake, adapter_gateway, or ark_text")
 	}
-	if c.Provider.VideoAdapter != "fake" && c.Provider.VideoAdapter != "adapter_gateway" && c.Provider.VideoAdapter != "ark_video" {
-		return fmt.Errorf("COOKIES_PROVIDER_VIDEO_ADAPTER must be fake, adapter_gateway, or ark_video")
+	if c.Provider.VideoAdapter != "fake" && c.Provider.VideoAdapter != "adapter_gateway" {
+		return fmt.Errorf("COOKIES_PROVIDER_VIDEO_ADAPTER must be fake or adapter_gateway; direct video providers are not allowed")
 	}
 	if c.Provider.AudioAdapter != "fake" && c.Provider.AudioAdapter != "volcengine_asr" {
 		return fmt.Errorf("COOKIES_PROVIDER_AUDIO_ADAPTER must be fake or volcengine_asr")
@@ -861,9 +861,6 @@ func (c Config) Validate() error {
 	if c.Provider.ImageAdapter == "ark_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.ArkImage.APIKey) == "" || strings.TrimSpace(c.Provider.ArkImage.Model) == "") {
 		return fmt.Errorf("ark_image is local-only and requires COOKIES_ARK_IMAGE_API_KEY and COOKIES_ARK_IMAGE_MODEL")
 	}
-	if c.Provider.VideoAdapter == "ark_video" && c.Environment != EnvironmentLocal {
-		return fmt.Errorf("ark_video is local-only in Phase 1")
-	}
 	if c.Provider.ImageAdapter == "openai_image" && (c.Environment != EnvironmentLocal || strings.TrimSpace(c.Provider.OpenAIImage.APIKey) == "" || strings.TrimSpace(c.Provider.OpenAIImage.Model) == "" || strings.TrimSpace(c.Provider.OpenAIImage.BaseURL) == "") {
 		return fmt.Errorf("openai_image is local-only and requires COOKIES_OPENAI_IMAGE_API_KEY, COOKIES_OPENAI_IMAGE_MODEL, and COOKIES_OPENAI_IMAGE_BASE_URL")
 	}
@@ -903,7 +900,6 @@ func (c Config) Validate() error {
 	usesGenerationBroker := c.Provider.ImageAdapter == "adapter_gateway" ||
 		c.Provider.TextAdapter == "adapter_gateway" ||
 		c.Provider.VideoAdapter == "adapter_gateway" ||
-		c.Provider.VideoAdapter == "ark_video" ||
 		c.Provider.SpeechAdapter == "minimax_speech"
 	usesCredentialBroker := usesGenerationBroker || c.Research.SeedEnabled
 	if usesCredentialBroker && (strings.TrimSpace(c.Provider.MasterKey) == "" || strings.TrimSpace(c.Provider.MasterKeyVersion) == "") {

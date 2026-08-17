@@ -26,16 +26,12 @@ func TestResolverRecognizesMainlandCommerceLinksWithoutInventingDetails(t *testi
 			productID: "99887766", canonicalURL: "https://detail.1688.com/offer/99887766.html", productName: "商务双肩包",
 		},
 		{
-			name: "xiaohongshu note", input: "通勤好物分享 https://www.xiaohongshu.com/explore/66aa11bb22cc33dd44ee55ff?xsec_token=tracking", source: "xiaohongshu", resourceType: ResourceNote,
-			productID: "66aa11bb22cc33dd44ee55ff", canonicalURL: "https://www.xiaohongshu.com/explore/66aa11bb22cc33dd44ee55ff", productName: "通勤好物分享",
+			name: "taobao mobile", input: "旅行包 https://h5.m.taobao.com/awp/core/detail.htm?id=778899", source: "taobao", resourceType: ResourceProduct,
+			productID: "778899", canonicalURL: "https://item.taobao.com/item.htm?id=778899", productName: "旅行包",
 		},
 		{
-			name: "xiaohongshu discovery item", input: "https://www.xiaohongshu.com/discovery/item/77bb22cc33dd44ee55ff66aa?xsec_token=tracking", source: "xiaohongshu", resourceType: ResourceNote,
-			productID: "77bb22cc33dd44ee55ff66aa", canonicalURL: "https://www.xiaohongshu.com/explore/77bb22cc33dd44ee55ff66aa",
-		},
-		{
-			name: "xiaohongshu product", input: "轻量双肩包 https://www.xiaohongshu.com/goods-detail/778899?xsec_source=app_share", source: "xiaohongshu", resourceType: ResourceProduct,
-			productID: "778899", canonicalURL: "https://www.xiaohongshu.com/goods-detail/778899", productName: "轻量双肩包",
+			name: "1688 mobile", input: "钛保温杯 https://m.1688.com/offer/445566.html", source: "1688", resourceType: ResourceProduct,
+			productID: "445566", canonicalURL: "https://detail.1688.com/offer/445566.html", productName: "钛保温杯",
 		},
 	}
 
@@ -71,13 +67,67 @@ func TestResolverFollowsControlledShortLinkAndRevalidatesFinalPlatform(t *testin
 	}
 }
 
+func TestResolverExtractsTaobaoTargetFromHTMLShortLink(t *testing.T) {
+	shortURL, _ := url.Parse("https://e.tb.cn/h.example?tk=token")
+	body := `<html><script>var url = 'https://item.taobao.com/item.htm?id=1013712033785&amp;spm=tracking';</script></html>`
+	resolver := Resolver{Client: doerFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Request: &http.Request{URL: shortURL}}, nil
+	})}
+
+	value, err := resolver.Resolve(context.Background(), "【淘宝】7天无理由退货 https://e.tb.cn/h.example?tk=token MF278 「Unique blue波点托特包」")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Source != "taobao" || value.ProductID != "1013712033785" || value.Name != "Unique blue波点托特包" {
+		t.Fatalf("unexpected HTML short-link resolution: %#v", value)
+	}
+}
+
+func TestResolverEnrichesDirectCommerceLinkFromPublicMetadata(t *testing.T) {
+	productURL, _ := url.Parse("https://detail.1688.com/offer/99887766.html")
+	body := `<html><head><meta property="og:title" content="商务通勤双肩包"><meta property="og:image" content="https://cbu01.alicdn.com/img/ibank/example.jpg"><meta name="description" content="耐磨面料，可扩容设计"></head></html>`
+	resolver := Resolver{Client: doerFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Request: &http.Request{URL: productURL}}, nil
+	})}
+
+	value, err := resolver.Resolve(context.Background(), productURL.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Name != "商务通勤双肩包" || value.Description != "耐磨面料，可扩容设计" || len(value.Images) != 1 || value.ResolutionStatus != ResolutionPartial {
+		t.Fatalf("unexpected public metadata enrichment: %#v", value)
+	}
+}
+
+func TestResolverChoosesSupportedProductURLWhenShareTextContainsSeveralLinks(t *testing.T) {
+	productURL, _ := url.Parse("https://item.taobao.com/item.htm?id=24680")
+	resolver := Resolver{Client: doerFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Request: &http.Request{URL: productURL}}, nil
+	})}
+
+	value, err := resolver.Resolve(context.Background(), "活动页 https://example.com/promo 商品 https://item.taobao.com/item.htm?id=24680")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Source != "taobao" || value.ProductID != "24680" {
+		t.Fatalf("unexpected product selection: %#v", value)
+	}
+}
+
+func TestResolverRejectsXiaohongshuProductSource(t *testing.T) {
+	_, err := NewResolver().Resolve(context.Background(), "https://www.xiaohongshu.com/goods-detail/778899")
+	if err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("xiaohongshu must not remain an AI native product source, got %v", err)
+	}
+}
+
 func TestResolverRejectsShortLinkThatEscapesApprovedCommerceHosts(t *testing.T) {
 	evilURL, _ := url.Parse("https://example.com/product/1")
 	resolver := Resolver{Client: doerFunc(func(request *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("")), Request: &http.Request{URL: evilURL}}, nil
 	})}
 
-	_, err := resolver.Resolve(context.Background(), "https://xhslink.com/a/test")
+	_, err := resolver.Resolve(context.Background(), "https://e.tb.cn/h.test")
 	if err == nil || !strings.Contains(err.Error(), "not allowed") {
 		t.Fatalf("untrusted redirect must be rejected, got %v", err)
 	}

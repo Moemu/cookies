@@ -11,12 +11,23 @@ import (
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/provider"
+	"github.com/shikanon/cookies/internal/systems/creative"
 )
 
 type gameAnalyzerRouteStub struct{ route provider.GatewayRouteSnapshot }
 
 func (s gameAnalyzerRouteStub) ResolveTextRoute(context.Context, contract.OrganizationID, string) (provider.GatewayRouteSnapshot, error) {
 	return s.route, nil
+}
+
+func TestNormalizeGamePrerollAnalysisKeepsDefaultDownloadCTA(t *testing.T) {
+	result := creative.GamePrerollV2AnalysisResult{SuggestedBrief: []creative.GameBriefField{
+		{ID: "cta", Key: "cta", Label: "CTA", Value: "立即预约下载", Provenance: creative.GameProvenanceAI, Required: true},
+	}}
+	normalizeGamePrerollAnalysis(&result)
+	if got := result.SuggestedBrief[0]; got.Value != "立即下载" || got.Provenance != creative.GameProvenanceManual {
+		t.Fatalf("CTA must remain the editable product default: %#v", got)
+	}
 }
 
 type gameAnalyzerCredentialStub struct{}

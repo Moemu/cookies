@@ -72,6 +72,7 @@ func (a *GamePrerollV2Analyzer) Analyze(ctx context.Context, actor contract.Acto
 	if err != nil {
 		return creative.GamePrerollV2AnalysisResult{}, err
 	}
+	normalizeGamePrerollAnalysis(&result)
 	hash, err := contract.CanonicalJSONHash(struct {
 		Source contract.ProjectAssetRef `json:"source"`
 		Prompt string                   `json:"prompt"`
@@ -82,6 +83,23 @@ func (a *GamePrerollV2Analyzer) Analyze(ctx context.Context, actor contract.Acto
 	result.InputHash = "sha256:" + hash
 	result.PromptVersion = "game-preroll-analysis/v1"
 	return result, nil
+}
+
+func normalizeGamePrerollAnalysis(result *creative.GamePrerollV2AnalysisResult) {
+	for index := range result.SuggestedBrief {
+		if result.SuggestedBrief[index].Key != "cta" {
+			continue
+		}
+		result.SuggestedBrief[index].Value = "立即下载"
+		result.SuggestedBrief[index].Provenance = creative.GameProvenanceManual
+		result.SuggestedBrief[index].EvidenceRefs = []string{}
+		result.SuggestedBrief[index].Required = true
+		return
+	}
+	result.SuggestedBrief = append(result.SuggestedBrief, creative.GameBriefField{
+		ID: "cta", Key: "cta", Label: "CTA", Value: "立即下载",
+		Provenance: creative.GameProvenanceManual, EvidenceRefs: []string{}, Required: true,
+	})
 }
 
 func (a *GamePrerollV2Analyzer) callModel(ctx context.Context, actor contract.ActorContext, transcript string, frames []commerceSampledFrame) (creative.GamePrerollV2AnalysisResult, error) {

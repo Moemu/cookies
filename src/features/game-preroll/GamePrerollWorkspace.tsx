@@ -22,7 +22,7 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { useProject } from "../../context/ProjectContext";
-import { MockGamePrerollClient } from "./mockClient";
+import { HttpGamePrerollClient, shouldPauseEvidenceAt } from "./httpClient";
 import {
   briefCompleteness,
   createInitialGamePrerollState,
@@ -37,7 +37,6 @@ import {
 } from "./model";
 import "./gamePreroll.css";
 
-const client = new MockGamePrerollClient();
 const stepLabels: Record<GamePrerollStep, string> = {
   upload: "上传原视频",
   analysis: "AI 素材拆解",
@@ -77,14 +76,44 @@ export function GamePrerollWorkspace({
   onNotice: (message: string) => void;
 }) {
   const { currentProject } = useProject();
+  const client = useMemo(
+    () => new HttpGamePrerollClient(currentProject.id),
+    [currentProject.id],
+  );
   const [state, setState] = useState(() => restore(currentProject.id));
   const [busy, setBusy] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const sourceUrl = state.source?.previewUrl;
 
   useEffect(() => {
-    setState(restore(currentProject.id));
-  }, [currentProject.id]);
+    const saved = restore(currentProject.id);
+    setState(saved);
+    if (!saved.taskId) return;
+    let cancelled = false;
+    setBusy("restore");
+    void client
+      .restore(saved.taskId, saved.source ? { name: saved.source.name, sizeBytes: saved.source.sizeBytes } : undefined)
+      .then((restored) => {
+        if (!cancelled) setState(restored);
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setState((current) => ({
+            ...current,
+            notice:
+              cause instanceof Error
+                ? `恢复真实任务失败：${cause.message}`
+                : "恢复真实任务失败",
+          }));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setBusy("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, currentProject.id]);
   useEffect(() => {
     const serializable = {
       ...state,
@@ -121,24 +150,20 @@ export function GamePrerollWorkspace({
     }
     setBusy("upload");
     try {
-      const previewUrl = URL.createObjectURL(file);
-      const source = await client.upload(file, previewUrl);
-      update({
-        source,
+      const created = await client.create(file, state.config.durationSeconds);
+      setState({
+        ...created,
         step: "analysis",
         analysisStatus: "running",
         notice: "原视频已上传，正在进行 AI 素材拆解。",
       });
-      const result = await client.analyze(source);
-      setState((current) => ({
-        ...current,
-        analysisStatus: "succeeded",
-        analysisFacts: result.facts,
-        evidence: result.evidence,
-        brief: result.brief,
+      const analyzed = await client.analyze();
+      setState({
+        ...analyzed,
+        step: "analysis",
         notice: "素材拆解完成，所有结论均已标注来源。",
-      }));
-      onNotice("游戏原视频已完成前端模拟拆解。");
+      });
+      onNotice("游戏原视频已完成真实拆解，证据帧已写入 Project Asset。");
     } catch (cause) {
       update({
         analysisStatus: "failed",
@@ -162,19 +187,14 @@ export function GamePrerollWorkspace({
     }
     setBusy("plan");
     try {
-      const candidates = await client.plan(
-        state.brief,
-        state.evidence,
-        state.config.durationSeconds,
-      );
-      setState((current) => ({
-        ...current,
-        briefConfirmed: true,
-        candidates,
-        selectedCandidateId: undefined,
+      const planned = await client.confirmBriefAndPlan(state.brief);
+      setState({
+        ...planned,
         step: "candidates",
         notice: "已生成 3 套钩子规划；它们尚未调用视频模型。",
-      }));
+      });
+    } catch (cause) {
+      update({ notice: cause instanceof Error ? cause.message : "候选规划失败" });
     } finally {
       setBusy("");
     }
@@ -183,16 +203,14 @@ export function GamePrerollWorkspace({
   const regenerate = async () => {
     setBusy("plan");
     try {
-      const candidates = await client.plan(
-        state.brief,
-        state.evidence,
-        state.config.durationSeconds,
-      );
-      update({
-        candidates,
-        selectedCandidateId: undefined,
+      const planned = await client.replan();
+      setState({
+        ...planned,
+        step: "candidates",
         notice: "已重新规划 3 套候选，请再次人工选择。",
       });
+    } catch (cause) {
+      update({ notice: cause instanceof Error ? cause.message : "重新规划失败" });
     } finally {
       setBusy("");
     }
@@ -203,15 +221,16 @@ export function GamePrerollWorkspace({
     setBusy("generate");
     update({
       generation: { id: "submitting", status: "running", progress: 24 },
-      notice: "正在创建 Seedance 生成任务（当前为前端模拟）。",
+      notice: "正在创建 Seedance 2.0 生成任务，完成后会自动入库。",
     });
     try {
-      const generation = await client.generate(selectedCandidate, state.config);
-      update({
-        generation,
-        notice: generation.diagnostic || "游戏前贴生成完成。",
+      const generated = await client.generate(selectedCandidate, state.config);
+      setState({
+        ...generated,
+        step: "generate",
+        notice: "游戏前贴已真实生成并入库为 Project Asset。",
       });
-      onNotice("游戏前贴前端模拟生成完成。");
+      onNotice("游戏前贴已通过 Seedance 2.0 生成并入库。");
     } catch (cause) {
       update({
         generation: {
@@ -253,20 +272,19 @@ export function GamePrerollWorkspace({
           <AnalysisStep
             state={state}
             sourceUrl={sourceUrl}
-            busy={busy === "upload"}
-            onRetry={() =>
-              state.source &&
-              void upload(
-                new File([], state.source.name, { type: "video/mp4" }),
-              )
-            }
+            busy={busy === "upload" || busy === "analysis"}
+            onRetry={() => {
+              setBusy("analysis");
+              update({ analysisStatus: "running", notice: "正在重新拆解原视频…" });
+              void client.analyze().then((analyzed) => setState({ ...analyzed, step: "analysis", notice: "重新拆解完成，证据帧已更新。" })).catch((cause) => update({ analysisStatus: "failed", notice: cause instanceof Error ? cause.message : "重新拆解失败" })).finally(() => setBusy(""));
+            }}
             onConfirm={confirmAnalysis}
           />
         ) : null}
         {state.step === "brief" ? (
           <BriefStep
             state={state}
-            busy={busy === "plan"}
+            busy={busy === "plan" || busy === "select"}
             onChange={(brief) =>
               update({
                 brief,
@@ -282,7 +300,10 @@ export function GamePrerollWorkspace({
           <CandidateStep
             state={state}
             busy={busy === "plan"}
-            onSelect={(selectedCandidateId) => update({ selectedCandidateId })}
+            onSelect={(selectedCandidateId) => {
+              setBusy("select");
+              void client.select(selectedCandidateId).then((selected) => setState({ ...selected, step: "candidates", notice: "候选已经人工选择，证据约束已编译。" })).catch((cause) => update({ notice: cause instanceof Error ? cause.message : "选择候选失败" })).finally(() => setBusy(""));
+            }}
             onRegenerate={() => void regenerate()}
             onNext={() => go("generate")}
           />
@@ -294,12 +315,9 @@ export function GamePrerollWorkspace({
             busy={busy === "generate"}
             onConfig={(config) => update({ config })}
             onGenerate={() => void generate()}
-            onDownload={() =>
-              update({
-                notice:
-                  "下载入口已完成前端演示；接入后端后将下载正式 Project Asset。",
-              })
-            }
+            onDownload={() => {
+              if (state.generation.outputUrl) window.open(state.generation.outputUrl, "_blank", "noopener,noreferrer");
+            }}
             onBack={() => go("candidates")}
           />
         ) : null}
@@ -313,7 +331,7 @@ export function GamePrerollWorkspace({
           )}
           <span>{state.notice}</span>
         </div>
-        <small>前端 Mock 模式 · 后端接口将在下一阶段接入</small>
+        <small>真实服务模式 · Project {currentProject.id} · Task {state.taskId || "未创建"}</small>
       </footer>
     </section>
   );
@@ -570,6 +588,15 @@ function SourcePanel({
   state: GamePrerollState;
   sourceUrl?: string;
 }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const segmentEnd = useRef<number | undefined>(undefined);
+  const playEvidence = (startMs: number, endMs: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+    segmentEnd.current = endMs;
+    video.currentTime = startMs / 1000;
+    void video.play();
+  };
   return (
     <aside className="gp-panel gp-source">
       <SectionTitle
@@ -582,7 +609,18 @@ function SourcePanel({
       />
       <div className="gp-source-video">
         {sourceUrl ? (
-          <video src={sourceUrl} controls muted />
+          <video
+            ref={videoRef}
+            src={sourceUrl}
+            controls
+            muted
+            onTimeUpdate={(event) => {
+              if (shouldPauseEvidenceAt(event.currentTarget.currentTime, segmentEnd.current)) {
+                event.currentTarget.pause();
+                segmentEnd.current = undefined;
+              }
+            }}
+          />
         ) : (
           <div>
             <Gamepad2 />
@@ -594,8 +632,16 @@ function SourcePanel({
       <h3>视频证据片段</h3>
       <div className="gp-evidence-list">
         {state.evidence.map((moment, index) => (
-          <button type="button" key={moment.id}>
+          <button
+            type="button"
+            key={moment.id}
+            onClick={() => playEvidence(moment.startMs, moment.endMs)}
+            title={`播放原视频 ${formatRange(moment.startMs, moment.endMs)}`}
+          >
             <span className={`gp-evidence-thumb gp-scene-${index + 1}`}>
+              {moment.thumbnailUrl ? (
+                <img src={moment.thumbnailUrl} alt={`${moment.label} 证据帧`} />
+              ) : null}
               <Play size={13} />
             </span>
             <span>
@@ -786,6 +832,7 @@ function CandidateStep({
             candidate={candidate}
             index={index}
             selected={candidate.id === state.selectedCandidateId}
+            evidence={state.evidence}
             onSelect={() => onSelect(candidate.id)}
           />
         ))}
@@ -818,11 +865,13 @@ function CandidateCard({
   candidate,
   index,
   selected,
+  evidence,
   onSelect,
 }: {
   candidate: HookCandidate;
   index: number;
   selected: boolean;
+  evidence: GamePrerollState["evidence"];
   onSelect: () => void;
 }) {
   return (
@@ -858,7 +907,10 @@ function CandidateCard({
       </div>
       <div className="gp-candidate-evidence">
         <Clock3 />
-        证据 {candidate.evidenceRefs.map((id) => evidenceTime(id)).join(" · ")}
+        证据 {candidate.evidenceRefs.map((id) => {
+          const moment = evidence.find((item) => item.id === id);
+          return moment ? formatRange(moment.startMs, moment.endMs) : "来源片段";
+        }).join(" · ")}
       </div>
       <small className="gp-risk">
         <CircleAlert />
@@ -905,11 +957,19 @@ function GenerateStep({
           title={succeeded ? "游戏前贴已生成" : "配置并生成前贴"}
           description={
             succeeded
-              ? "当前结果仍处于前端模拟阶段，可继续调整参数后重新生成。"
+              ? "Seedance 输出已入库为 Project Asset，可预览、下载或调整参数后重生成。"
               : "固定事实约束不可修改；创意表现参数可按需要调整。"
           }
         />
         <div className={`gp-phone-preview ${succeeded ? "generated" : ""}`}>
+          {succeeded && state.generation.outputUrl ? (
+            <video
+              className="gp-output-video"
+              src={state.generation.outputUrl}
+              controls
+              playsInline
+            />
+          ) : (
           <div className="gp-phone-content">
             <span>9:16</span>
             <h3>{candidate?.hookLine || "请先选择钩子方案"}</h3>
@@ -923,11 +983,12 @@ function GenerateStep({
             </button>
             <b>{state.config.cta}</b>
           </div>
+          )}
         </div>
         <p>
           {succeeded
             ? state.generation.diagnostic
-            : "预览为创意分镜示意，正式视频将在后端接入 Seedance 后输出。"}
+            : "当前为创意分镜示意；点击生成后将提交 Seedance 2.0，并在完成后显示真实视频。"}
         </p>
         {succeeded ? (
           <div className="gp-result-actions">
@@ -1049,7 +1110,7 @@ function GenerateStep({
         >
           {busy ? <LoaderCircle className="gp-spin" /> : <WandSparkles />}
           {busy
-            ? "正在模拟生成…"
+            ? "Seedance 正在生成…"
             : `生成 ${state.config.durationSeconds} 秒游戏前贴`}
         </button>
         <button
@@ -1108,9 +1169,4 @@ function ProvenanceBadge({ value }: { value: Provenance }) {
 }
 function formatRange(startMs: number, endMs: number) {
   return `${(startMs / 1000).toFixed(1)}–${(endMs / 1000).toFixed(1)}s`;
-}
-function evidenceTime(id: string) {
-  if (id === "evidence-choice") return "00:20.2";
-  if (id === "evidence-fail") return "00:29.8";
-  return "00:34.0";
 }

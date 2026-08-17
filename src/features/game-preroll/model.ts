@@ -4,6 +4,8 @@ export type RunStatus = 'idle' | 'running' | 'succeeded' | 'failed'
 
 export type SourceVideo = {
   id: string
+  assetId?: string
+  assetVersion?: number
   name: string
   sizeBytes: number
   durationSeconds: number
@@ -19,6 +21,8 @@ export type EvidenceMoment = {
   startMs: number
   endMs: number
   provenance: Exclude<Provenance, 'manual'>
+  thumbnailUrl?: string
+  verifiedCopy?: string[]
 }
 
 export type AnalysisFact = {
@@ -67,11 +71,14 @@ export type GenerationJob = {
   progress: number
   outputUrl?: string
   diagnostic?: string
+  assetId?: string
+  assetVersion?: number
 }
 
 export type GamePrerollState = {
   projectId: string
   taskId: string
+  revision: number
   step: GamePrerollStep
   source?: SourceVideo
   analysisStatus: RunStatus
@@ -91,7 +98,8 @@ export const stepOrder: GamePrerollStep[] = ['upload', 'analysis', 'brief', 'can
 export function createInitialGamePrerollState(projectId: string): GamePrerollState {
   return {
     projectId,
-    taskId: `game-preroll-${projectId}`,
+    taskId: '',
+    revision: 0,
     step: 'upload',
     analysisStatus: 'idle',
     analysisFacts: [],

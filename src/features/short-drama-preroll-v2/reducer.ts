@@ -6,7 +6,7 @@ export const initialShortDramaPrerollState: ShortDramaPrerollState = {
   analysisStatus: 'idle', analysis: null, summaryDraft: '',
   hooksStatus: 'idle', hooks: [], selectedHookId: '', selectingHookId: '', duration: 10,
   imagePrompt: '', videoDescription: '', videoPrompt: '',
-  imagesStatus: 'idle', images: [], selectedImageId: '', selectingImageId: '',
+  imagesStatus: 'idle', images: [], selectedImageId: '', selectingImageId: '', retryingImageId: '',
   videoStatus: 'idle', output: null, error: '',
 }
 
@@ -28,6 +28,8 @@ export type ShortDramaPrerollAction =
   | { type: 'video-prompt-changed'; value: string }
   | { type: 'images-started' }
   | { type: 'images-ready'; images: FirstFrameCandidate[] }
+  | { type: 'image-retry-started'; id: string }
+  | { type: 'image-retry-failed'; message: string }
   | { type: 'image-selection-started'; id: string }
   | { type: 'image-selection-failed'; message: string }
   | { type: 'image-selected'; id: string; videoPrompt?: string }
@@ -37,7 +39,7 @@ export type ShortDramaPrerollAction =
 
 const clearVideo = { videoStatus: 'idle' as const, output: null }
 const clearImagesAndVideo = {
-  imagesStatus: 'idle' as const, images: [], selectedImageId: '', selectingImageId: '',
+  imagesStatus: 'idle' as const, images: [], selectedImageId: '', selectingImageId: '', retryingImageId: '',
   ...clearVideo,
 }
 
@@ -74,7 +76,9 @@ export function shortDramaPrerollReducer(state: ShortDramaPrerollState, action: 
     case 'video-description-changed': return { ...state, videoDescription: action.value, ...clearVideo }
     case 'video-prompt-changed': return { ...state, videoPrompt: action.value, ...clearVideo }
     case 'images-started': return { ...state, imagesStatus: 'loading', images: [], selectedImageId: '', selectingImageId: '', ...clearVideo, error: '' }
-    case 'images-ready': return { ...state, imagesStatus: 'ready', images: action.images, selectedImageId: '', selectingImageId: '', error: '' }
+    case 'images-ready': return { ...state, imagesStatus: 'ready', images: action.images, selectedImageId: action.images.some(item => item.id === state.selectedImageId && item.status === 'ready') ? state.selectedImageId : '', selectingImageId: '', retryingImageId: '', error: '' }
+    case 'image-retry-started': return { ...state, retryingImageId: action.id, images: state.images.map(item => item.id === action.id ? { ...item, status: 'queued', errorMessage: '' } : item), error: '' }
+    case 'image-retry-failed': return { ...state, retryingImageId: '', error: action.message }
     case 'image-selection-started': return { ...state, selectingImageId: action.id, error: '' }
     case 'image-selection-failed': return { ...state, selectingImageId: '', error: action.message }
     case 'image-selected': return { ...state, selectedImageId: action.id, selectingImageId: '', videoPrompt: action.videoPrompt ?? state.videoPrompt, activeStep: 'video', ...clearVideo }
