@@ -105,7 +105,16 @@ export type PlatformConfiguration = {
         account_reference: StableReference
         marketing_purpose: string
         marketing_scenario: string
+        marketing_product_reference?: StableReference
+        application_reference?: StableReference
+        application_scenario?: string
+        operating_system?: string
+        application_download_mode?: string
+        product_selection_mode?: string
+        lead_capture_mode?: string
         carrier: string
+        optimization_target_reference?: StableReference
+        deep_optimization_mode?: string
         delivery_mode: string
         targeting: { regions?: string[]; age_ranges?: string[]; gender?: string; smart_expansion: boolean }
         schedule: { start_at: string; end_at: string; timezone: string }

@@ -67,7 +67,7 @@ func TestOceanEngineSkillReadsTypedManifestControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var money, evidenceOnly, blocked bool
+	var money, evidenceOnly, marketingScenario bool
 	for _, field := range fields {
 		switch field.Field.Key {
 		case "project.daily_budget_minor":
@@ -75,10 +75,10 @@ func TestOceanEngineSkillReadsTypedManifestControls(t *testing.T) {
 		case "project.editable_surface":
 			evidenceOnly = field.Mapping.Treatment == "evidence_only" && !field.Executable
 		case "project.marketing_scenario":
-			blocked = field.Blocked && field.Reason == "platform_pending"
+			marketingScenario = field.Executable
 		}
 	}
-	if !money || !evidenceOnly || !blocked {
-		t.Fatalf("Skill did not consume typed Manifest controls: money=%t evidence=%t blocked=%t", money, evidenceOnly, blocked)
+	if !money || !evidenceOnly || !marketingScenario {
+		t.Fatalf("Skill did not consume typed Manifest controls: money=%t evidence=%t marketing_scenario=%t", money, evidenceOnly, marketingScenario)
 	}
 }

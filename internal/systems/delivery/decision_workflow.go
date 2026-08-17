@@ -644,6 +644,9 @@ func oceanEngineManifestFacts(project *OceanEngineProjectDraft) map[string]strin
 	facts := map[string]string{
 		"marketing_purpose":      project.MarketingPurpose,
 		"marketing_scenario":     project.MarketingScenario,
+		"application_scenario":   project.ApplicationScenario,
+		"operating_system":       project.OperatingSystem,
+		"lead_capture_mode":      project.LeadCaptureMode,
 		"delivery_mode":          project.DeliveryMode,
 		"carrier":                project.Carrier,
 		"deep_optimization_mode": project.DeepOptimizationMode,

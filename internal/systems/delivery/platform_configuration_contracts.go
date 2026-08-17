@@ -498,6 +498,11 @@ type OceanEngineProjectDraft struct {
 	MarketingScenario           string                      `json:"marketing_scenario"`
 	MarketingProductReference   *StableReference            `json:"marketing_product_reference,omitempty"`
 	ApplicationReference        *StableReference            `json:"application_reference,omitempty"`
+	ApplicationScenario         string                      `json:"application_scenario,omitempty"`
+	OperatingSystem             string                      `json:"operating_system,omitempty"`
+	ApplicationDownloadMode     string                      `json:"application_download_mode,omitempty"`
+	ProductSelectionMode        string                      `json:"product_selection_mode,omitempty"`
+	LeadCaptureMode             string                      `json:"lead_capture_mode,omitempty"`
 	Carrier                     string                      `json:"carrier"`
 	OptimizationTargetReference *StableReference            `json:"optimization_target_reference,omitempty"`
 	DeepOptimizationMode        string                      `json:"deep_optimization_mode,omitempty"`
@@ -597,6 +602,11 @@ type canonicalOceanEngineProject struct {
 	MarketingScenario           string                        `json:"marketing_scenario"`
 	MarketingProductReference   *canonicalStableReference     `json:"marketing_product_reference,omitempty"`
 	ApplicationReference        *canonicalStableReference     `json:"application_reference,omitempty"`
+	ApplicationScenario         string                        `json:"application_scenario,omitempty"`
+	OperatingSystem             string                        `json:"operating_system,omitempty"`
+	ApplicationDownloadMode     string                        `json:"application_download_mode,omitempty"`
+	ProductSelectionMode        string                        `json:"product_selection_mode,omitempty"`
+	LeadCaptureMode             string                        `json:"lead_capture_mode,omitempty"`
 	Carrier                     string                        `json:"carrier"`
 	OptimizationTargetReference *canonicalStableReference     `json:"optimization_target_reference,omitempty"`
 	DeepOptimizationMode        string                        `json:"deep_optimization_mode,omitempty"`
@@ -672,7 +682,9 @@ func canonicalOceanConfiguration(value *OceanEngineConfiguration) *canonicalOcea
 			DraftSchemaVersion: strings.TrimSpace(project.DraftSchemaVersion), ProjectDraftID: strings.TrimSpace(project.ProjectDraftID),
 			AccountReference: project.AccountReference.canonical(), MarketingPurpose: strings.TrimSpace(project.MarketingPurpose),
 			MarketingScenario: strings.TrimSpace(project.MarketingScenario), MarketingProductReference: canonicalReferencePointer(project.MarketingProductReference),
-			ApplicationReference: canonicalReferencePointer(project.ApplicationReference), Carrier: strings.TrimSpace(project.Carrier),
+			ApplicationReference: canonicalReferencePointer(project.ApplicationReference), ApplicationScenario: strings.TrimSpace(project.ApplicationScenario),
+			OperatingSystem: strings.TrimSpace(project.OperatingSystem), ApplicationDownloadMode: strings.TrimSpace(project.ApplicationDownloadMode),
+			ProductSelectionMode: strings.TrimSpace(project.ProductSelectionMode), LeadCaptureMode: strings.TrimSpace(project.LeadCaptureMode), Carrier: strings.TrimSpace(project.Carrier),
 			OptimizationTargetReference: canonicalReferencePointer(project.OptimizationTargetReference), DeepOptimizationMode: strings.TrimSpace(project.DeepOptimizationMode),
 			DeliveryMode: strings.TrimSpace(project.DeliveryMode), Schedule: project.Schedule, BudgetAndBidding: project.BudgetAndBidding,
 			MonitoringReferences: canonicalReferences(project.MonitoringReferences), ProjectName: strings.TrimSpace(project.ProjectName),

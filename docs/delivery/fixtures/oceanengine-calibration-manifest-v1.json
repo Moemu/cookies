@@ -69,13 +69,13 @@
       "source_kind": "configuration_path",
       "source": "OceanEngineConfiguration.Project.MarketingScenario",
       "value_kind": "enum",
-      "known_values": ["short_video_image_text", "live"],
+      "known_values": ["short_video_image_text"],
       "unknown_value_treatment": "platform_pending"
     },
     {
       "key": "lead_capture_mode",
       "source_kind": "configuration_path",
-      "source": "PlatformConfiguration.CompilationMetadata.FieldEvidence.project.lead_capture_mode",
+      "source": "OceanEngineConfiguration.Project.LeadCaptureMode",
       "value_kind": "enum",
       "known_values": ["smart_lead", "custom_lead"],
       "unknown_value_treatment": "platform_pending"
@@ -83,7 +83,7 @@
     {
       "key": "application_scenario",
       "source_kind": "configuration_path",
-      "source": "PlatformConfiguration.CompilationMetadata.FieldEvidence.project.application_scenario",
+      "source": "OceanEngineConfiguration.Project.ApplicationScenario",
       "value_kind": "enum",
       "known_values": [
         "app_download",
@@ -95,7 +95,7 @@
     {
       "key": "operating_system",
       "source_kind": "configuration_path",
-      "source": "PlatformConfiguration.CompilationMetadata.FieldEvidence.project.operating_system",
+      "source": "OceanEngineConfiguration.Project.OperatingSystem",
       "value_kind": "enum",
       "known_values": ["android", "ios", "harmony"],
       "unknown_value_treatment": "platform_pending"
@@ -237,6 +237,7 @@
   "fields": [
     {
       "key": "project.marketing_purpose",
+      "semantic_label": "营销目的",
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -265,26 +266,44 @@
     },
     {
       "key": "project.marketing_scenario",
+      "semantic_label": "营销场景",
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
-      "condition": "marketing_purpose",
+      "condition": "marketing_purpose != product_catalog",
       "condition_dimensions": ["marketing_purpose"],
-      "condition_state": "dependency_only",
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "not_in",
+            "values": ["product_catalog"]
+          }
+        ]
+      },
       "required_state": "unknown",
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "营销场景" },
       "computer_use": {
-        "operation": "no_action",
-        "blocked_state": "platform_pending",
-        "reason": "The evidence identifies a dependency but does not identify an exact marketing-purpose rule."
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "营销场景" },
+        "target": { "kind": "visible_text", "value": "短视频+图文" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "营销产品" },
+        "observed_options": ["短视频+图文"],
+        "input_constraints": {
+          "live": "blocked_by_platform_capability"
+        }
       },
-      "evidence_state": "platform_pending",
+      "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
     {
       "key": "project.marketing_product_reference",
+      "semantic_label": "巨量商品",
+      "configuration_requirement": "投放计划必须提供已解析的巨量商品引用。引用 ID 是巨量商品 ID。活动类型、活动名称和品牌名称只作为选择审计信息。",
       "owner": "platform_dynamic_reference",
       "page_family": "project_create",
       "value_type": "dynamic_reference",
@@ -312,6 +331,9 @@
         "readback": { "kind": "visible_text", "value": "优化目标" },
         "input_constraints": {
           "reference_kind": "existing_product",
+          "required_reference_fields": "namespace,object_kind,scope,id,state",
+          "platform_object_kind": "product",
+          "platform_id_source": "OceanEngine product ID",
           "persistence": "unsubmitted_local_only"
         }
       },
@@ -324,6 +346,8 @@
     },
     {
       "key": "project.application_reference",
+      "semantic_label": "应用",
+      "configuration_requirement": "应用营销目的必须提供已解析的巨量应用或应用分包引用。",
       "owner": "platform_dynamic_reference",
       "page_family": "project_create",
       "value_type": "dynamic_reference",
@@ -369,6 +393,7 @@
     },
     {
       "key": "project.application_scenario",
+      "semantic_label": "应用场景",
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -400,7 +425,8 @@
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
     {
-      "key": "project.application_platform",
+      "key": "project.operating_system",
+      "semantic_label": "操作系统",
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -441,6 +467,7 @@
     },
     {
       "key": "project.application_download_mode",
+      "semantic_label": "应用下载方式",
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -478,7 +505,8 @@
     },
     {
       "key": "project.product_selection_mode",
-      "owner": "platform_dynamic_reference",
+      "semantic_label": "营销产品选择方式",
+      "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
       "condition": "marketing_purpose == lead_generation",
@@ -510,6 +538,7 @@
     },
     {
       "key": "project.lead_capture_mode",
+      "semantic_label": "获取线索方式",
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -542,26 +571,49 @@
     },
     {
       "key": "project.carrier",
+      "semantic_label": "投放载体",
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
-      "condition": "marketing_purpose+marketing_scenario+lead_capture_mode",
+      "condition": "marketing_purpose in [ecommerce,lead_generation]",
       "condition_dimensions": [
         "marketing_purpose",
         "marketing_scenario",
         "lead_capture_mode"
       ],
-      "condition_state": "dependency_only",
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "in",
+            "values": ["ecommerce", "lead_generation"]
+          }
+        ]
+      },
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "投放载体" },
       "computer_use": {
-        "operation": "no_action",
-        "blocked_state": "platform_pending",
-        "reason": "The evidence identifies three dependencies but does not identify one exact carrier rule."
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "投放载体" },
+        "target": { "kind": "visible_text", "value": "橙子落地页" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "优化目标" },
+        "observed_options": [
+          "橙子落地页",
+          "自研落地页",
+          "抖音私信页",
+          "字节小程序",
+          "微信小程序"
+        ],
+        "input_constraints": {
+          "currently_supported": "orange_landing_page,owned_landing_page",
+          "deferred": "byte_miniapp,wechat_miniapp"
+        }
       },
-      "evidence_state": "platform_pending",
+      "evidence_state": "observed",
       "consumers": [
         "OceanEngineConfiguration",
         "DeliveryDecisionCandidate",
@@ -571,27 +623,45 @@
     },
     {
       "key": "project.optimization_target_reference",
+      "semantic_label": "优化目标",
+      "configuration_requirement": "投放计划必须提供当前前置选择可用的优化目标引用。自研落地页引用还必须保留事件资产名称和事件资产类型审计信息。",
       "owner": "platform_dynamic_reference",
       "page_family": "project_create",
       "value_type": "dynamic_reference",
-      "condition": "marketing_purpose+carrier+marketing_product_reference+application_reference",
+      "condition": "marketing_purpose",
       "condition_dimensions": [
         "marketing_purpose",
         "carrier",
         "marketing_product_reference",
         "application_reference"
       ],
-      "condition_state": "dependency_only",
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "present"
+          }
+        ]
+      },
       "required_state": "observed_required",
       "editable_state": "conditional",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "label", "value": "优化目标" },
       "computer_use": {
-        "operation": "no_action",
-        "blocked_state": "platform_pending",
-        "reason": "The current model has an unresolved optimization-target reference and no stable semantic target key."
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "优化目标" },
+        "target": { "kind": "role_name", "value": "textbox:请选择" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "textbox:请选择" },
+        "input_constraints": {
+          "orange_landing_page_picker": "optimization_target_name",
+          "owned_landing_page_picker": "optimization_target_name,event_asset_name,event_asset_type",
+          "reference_kind": "optimization_target",
+          "persistence": "unsubmitted_local_only"
+        }
       },
-      "evidence_state": "platform_pending",
+      "evidence_state": "observed",
       "consumers": [
         "DeliveryIntent",
         "OceanEngineConfiguration",
@@ -1614,9 +1684,10 @@
         "project.monitoring_references",
         "project.project_name"
       ],
-      "status": "covered",
+      "status": "blocked_by_platform_capability",
       "evidence_state": "observed",
-      "exit_verified": true
+      "exit_verified": true,
+      "reason": "the live marketing scenario is currently unavailable on the platform"
     },
     {
       "id": "OE-PROJECT-E-COMMERCE-MANUAL",
@@ -1694,7 +1765,7 @@
       "field_keys": [
         "project.marketing_purpose",
         "project.application_scenario",
-        "project.application_platform",
+        "project.operating_system",
         "project.application_reference",
         "project.application_download_mode",
         "project.optimization_target_reference",
@@ -1724,7 +1795,7 @@
       ],
       "field_keys": [
         "project.application_scenario",
-        "project.application_platform",
+        "project.operating_system",
         "project.application_reference",
         "project.application_download_mode",
         "project.optimization_target_reference",
@@ -1811,9 +1882,10 @@
         "project.monitoring_references",
         "project.project_name"
       ],
-      "status": "covered",
+      "status": "blocked_by_platform_capability",
       "evidence_state": "observed",
-      "exit_verified": true
+      "exit_verified": true,
+      "reason": "the live marketing scenario is currently unavailable on the platform"
     },
     {
       "id": "OE-PROJECT-APP-LAUNCH",
@@ -1825,7 +1897,7 @@
       ],
       "field_keys": [
         "project.application_scenario",
-        "project.application_platform",
+        "project.operating_system",
         "project.application_reference",
         "project.application_launch_mode",
         "project.optimization_target_reference"
@@ -1839,7 +1911,7 @@
       "path": ["project_create", "application", "app_launch", "android"],
       "field_keys": [
         "project.application_scenario",
-        "project.application_platform",
+        "project.operating_system",
         "project.application_reference",
         "project.application_launch_mode",
         "project.optimization_target_reference"
@@ -1853,7 +1925,7 @@
       "path": ["project_create", "application", "app_launch", "ios"],
       "field_keys": [
         "project.application_scenario",
-        "project.application_platform",
+        "project.operating_system",
         "project.application_reference",
         "project.application_launch_mode",
         "project.optimization_target_reference"
@@ -1867,7 +1939,7 @@
       "path": ["project_create", "application", "app_launch", "harmony"],
       "field_keys": [
         "project.application_scenario",
-        "project.application_platform",
+        "project.operating_system",
         "project.application_reference",
         "project.application_launch_mode",
         "project.optimization_target_reference"
@@ -1886,7 +1958,7 @@
       ],
       "field_keys": [
         "project.application_scenario",
-        "project.application_platform",
+        "project.operating_system",
         "project.application_reference",
         "project.optimization_target_reference"
       ],
@@ -1905,7 +1977,7 @@
       ],
       "field_keys": [
         "project.application_scenario",
-        "project.application_platform"
+        "project.operating_system"
       ],
       "status": "blocked_by_platform_capability",
       "evidence_state": "blocked_by_platform_capability",
@@ -2059,7 +2131,7 @@
     {
       "field_key": "project.marketing_purpose",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "modelled",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
@@ -2071,7 +2143,7 @@
     {
       "field_key": "project.marketing_scenario",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "modelled",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
@@ -2089,7 +2161,7 @@
     {
       "field_key": "project.marketing_product_reference",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "dynamic_reference",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
@@ -2101,73 +2173,73 @@
     {
       "field_key": "project.application_reference",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.ApplicationReference"
     },
     {
       "field_key": "project.application_reference",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "dynamic_reference",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
       "field_key": "project.application_scenario",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.ApplicationScenario"
     },
     {
       "field_key": "project.application_scenario",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "modelled",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
-      "field_key": "project.application_platform",
+      "field_key": "project.operating_system",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.OperatingSystem"
     },
     {
-      "field_key": "project.application_platform",
+      "field_key": "project.operating_system",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "modelled",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
       "field_key": "project.application_download_mode",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.ApplicationDownloadMode"
     },
     {
       "field_key": "project.application_download_mode",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "modelled",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
       "field_key": "project.product_selection_mode",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.ProductSelectionMode"
     },
     {
       "field_key": "project.product_selection_mode",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "modelled",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
       "field_key": "project.lead_capture_mode",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.LeadCaptureMode"
     },
     {
       "field_key": "project.lead_capture_mode",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "modelled",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
@@ -2191,7 +2263,7 @@
     {
       "field_key": "project.carrier",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "modelled",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
@@ -2221,7 +2293,7 @@
     {
       "field_key": "project.optimization_target_reference",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "dynamic_reference",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {

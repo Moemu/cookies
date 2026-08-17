@@ -2,12 +2,21 @@ import manifestSource from '../../docs/delivery/fixtures/oceanengine-calibration
 
 type ManifestField = {
   key: string
+  semantic_label?: string
+  configuration_requirement?: string
   unit?: string
   page_family: string
   locator?: { value?: string }
   computer_use?: { scope?: { value?: string }; target?: { value?: string }; blocked_state?: string; reason?: string; input_constraints?: Record<string, unknown> }
   condition?: string
   condition_state?: 'evaluable' | 'dependency_only'
+  condition_rule?: {
+    all: Array<{
+      dimension: string
+      operator: 'equals' | 'in' | 'not_in' | 'present' | 'absent'
+      values?: string[]
+    }>
+  }
   evidence_state?: string
 }
 
@@ -54,19 +63,16 @@ function valuesAtPath(root: unknown, contractPath: string) {
   }), [root])
 }
 
-function conditionMatches(condition: string | undefined, facts: Record<string, unknown>) {
-  if (!condition) return true
-  return condition.split(' and ').every(clause => {
-    const equals = clause.match(/^([a-z_]+) == ([a-z_]+)$/)
-    if (equals) return facts[equals[1]] === equals[2]
-    const inSet = clause.match(/^([a-z_]+) in \[([a-z_,]+)\]$/)
-    if (inSet) return inSet[2].split(',').includes(String(facts[inSet[1]] ?? ''))
-  const notInSet = clause.match(/^([a-z_]+) not in \[([a-z_,]+)\]$/)
-    if (notInSet) {
-      const value = facts[notInSet[1]]
-      return value !== undefined && value !== null && !notInSet[2].split(',').includes(String(value))
-    }
-    if (/^[a-z_]+$/.test(clause)) return Boolean(facts[clause])
+function conditionMatches(rule: ManifestField['condition_rule'], facts: Record<string, unknown>) {
+  if (!rule) return true
+  return rule.all.every(predicate => {
+    const value = facts[predicate.dimension]
+    const values = predicate.values ?? []
+    if (predicate.operator === 'present') return value !== undefined && value !== null && value !== ''
+    if (predicate.operator === 'absent') return value === undefined || value === null || value === ''
+    if (predicate.operator === 'equals') return value === values[0]
+    if (predicate.operator === 'in') return values.includes(String(value ?? ''))
+    if (predicate.operator === 'not_in') return value !== undefined && value !== null && !values.includes(String(value))
     return false
   })
 }
@@ -77,13 +83,21 @@ function configurationFacts(configuration: unknown) {
   return {
     marketing_purpose: project?.marketing_purpose,
     marketing_scenario: project?.marketing_scenario,
+    marketing_product_reference: project?.marketing_product_reference,
+    application_reference: project?.application_reference,
+    application_scenario: project?.application_scenario,
+    operating_system: project?.operating_system,
+    lead_capture_mode: project?.lead_capture_mode,
     carrier: project?.carrier,
+    optimization_target_reference: project?.optimization_target_reference,
     delivery_mode: project?.delivery_mode,
     bidding_strategy: budget?.bidding_strategy,
+    deep_optimization_mode: project?.deep_optimization_mode,
   }
 }
 
 function fieldLabel(field: ManifestField) {
+  if (field.semantic_label) return field.semantic_label
   const locator = field.locator?.value ?? ''
   const target = field.computer_use?.target?.value?.replace(/^button:/, '')
   if (locator.startsWith('button:') && target) return target
@@ -100,7 +114,7 @@ export function visibleOceanEngineManifestFields(configuration: unknown, scope: 
     .filter(mapping => mapping.destination === 'OceanEngineConfiguration' && (mapping.treatment === 'modelled' || mapping.treatment === 'dynamic_reference'))
     .flatMap(mapping => {
       const field = manifest.fields.find(candidate => candidate.key === mapping.field_key)
-      if (!field || field.condition_state === 'dependency_only' || !conditionMatches(field.condition, facts)) return []
+      if (!field || field.condition_state === 'dependency_only' || !conditionMatches(field.condition_rule, facts)) return []
       const mappingScope = mapping.field_key.startsWith('project.') ? 'project' : 'promotion'
       if (mappingScope !== scope) return []
       const path = scope === 'promotion' && promotion
@@ -127,8 +141,8 @@ export function oceanEngineCalibrationDispositions(configuration: unknown, scope
       if (mapping.treatment === 'evidence_only') return [disposition(field, mapping, 'evidence_only', `仅保留校准证据（${field.evidence_state ?? 'unknown'}）。`)]
       if (mapping.treatment === 'blocked') return [disposition(field, mapping, 'blocked', blockedReason)]
       if (field.condition_state === 'dependency_only') return [disposition(field, mapping, 'platform_pending', blockedReason)]
-      if (!conditionMatches(field.condition, facts)) return [disposition(field, mapping, 'condition_unmet', field.condition ? `当前条件不满足：${field.condition}` : '当前路径条件无法确认。')]
-      if (!values.length) return [disposition(field, mapping, 'missing_value', '当前计划未提供该字段的稳定值。')]
+      if (!conditionMatches(field.condition_rule, facts)) return [disposition(field, mapping, 'condition_unmet', field.condition ? `当前条件不满足：${field.condition}` : '当前路径条件无法确认。')]
+      if (!values.length) return [disposition(field, mapping, 'missing_value', field.configuration_requirement ?? '当前计划未提供该字段的稳定值。')]
       return [disposition(field, mapping, 'ready', '当前条件满足，且配置值已存在。')]
     })
 }

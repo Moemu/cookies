@@ -66,7 +66,7 @@
     "allowed": ["navigate", "identify_page", "identify_account", "identify_project", "fill_unsubmitted_form", "readback_field", "discard_local_draft", "verify_no_write", "controlled_final_submit_once", "record_post_write_result", "confirm_platform_mapping"],
     "forbidden": ["unattended_submit", "submit_without_current_turn_authorization", "resubmit_after_click", "enable", "pause_remote_object", "modify_remote_object", "delete", "upload"]
   },
-  "dynamic_condition_keys": ["marketing_purpose", "marketing_scenario", "marketing_product_ref", "optimization_target_reference", "deep_optimization_mode", "delivery_mode", "schedule", "daily_budget", "bidding_strategy", "charging_mode", "bid", "roi_coefficient"],
+  "dynamic_condition_keys": ["marketing_purpose", "marketing_scenario", "marketing_product_reference", "application_reference", "application_scenario", "operating_system", "application_download_mode", "product_selection_mode", "lead_capture_mode", "carrier", "optimization_target_reference", "deep_optimization_mode", "delivery_mode", "schedule", "daily_budget", "bidding_strategy", "charging_mode", "bid", "roi_coefficient"],
   "safety_exit": {
     "method": "discard_unsubmitted_local_form",
     "required_proof": "return_to_known_readonly_page_and_confirm_no_platform_write_or_approved_field_change"

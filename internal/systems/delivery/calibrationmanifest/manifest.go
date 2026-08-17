@@ -60,17 +60,19 @@ type ConditionRule struct {
 	All []ConditionPredicate `json:"all"`
 }
 type Field struct {
-	Key                 string             `json:"key"`
-	PageFamily          string             `json:"page_family"`
-	ValueType           string             `json:"value_type"`
-	Unit                string             `json:"unit,omitempty"`
-	Condition           string             `json:"condition,omitempty"`
-	ConditionDimensions []string           `json:"condition_dimensions,omitempty"`
-	ConditionState      string             `json:"condition_state,omitempty"`
-	ConditionRule       *ConditionRule     `json:"condition_rule,omitempty"`
-	EvidenceState       string             `json:"evidence_state"`
-	Consumers           []Consumer         `json:"consumers"`
-	ComputerUse         ComputerUseControl `json:"computer_use"`
+	Key                      string             `json:"key"`
+	SemanticLabel            string             `json:"semantic_label,omitempty"`
+	ConfigurationRequirement string             `json:"configuration_requirement,omitempty"`
+	PageFamily               string             `json:"page_family"`
+	ValueType                string             `json:"value_type"`
+	Unit                     string             `json:"unit,omitempty"`
+	Condition                string             `json:"condition,omitempty"`
+	ConditionDimensions      []string           `json:"condition_dimensions,omitempty"`
+	ConditionState           string             `json:"condition_state,omitempty"`
+	ConditionRule            *ConditionRule     `json:"condition_rule,omitempty"`
+	EvidenceState            string             `json:"evidence_state"`
+	Consumers                []Consumer         `json:"consumers"`
+	ComputerUse              ComputerUseControl `json:"computer_use"`
 }
 type ConsumerMapping struct {
 	FieldKey     string    `json:"field_key"`

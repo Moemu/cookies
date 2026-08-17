@@ -23,20 +23,20 @@ func TestCurrentManifestIsTheCanonicalTypedProjection(t *testing.T) {
 	if len(projections) == 0 {
 		t.Fatal("configuration must receive Manifest projections")
 	}
-	var applicationDownload, pending bool
+	var applicationDownload, marketingScenario bool
 	for _, projection := range projections {
 		if projection.Field.Key == "project.application_download_mode" {
 			applicationDownload = projection.Blocked && projection.Reason == "platform_pending"
 		}
 		if projection.Field.Key == "project.marketing_scenario" {
-			pending = projection.Blocked && projection.Reason == "platform_pending"
+			marketingScenario = projection.Executable
 		}
 		if projection.Mapping.Treatment == EvidenceOnly && projection.Executable {
 			t.Fatalf("evidence-only field became executable: %s", projection.Field.Key)
 		}
 	}
-	if !applicationDownload || !pending {
-		t.Fatal("missing conditions and dependency-only fields must remain platform_pending")
+	if !applicationDownload || !marketingScenario {
+		t.Fatal("known rules must execute and missing condition facts must remain platform_pending")
 	}
 }
 

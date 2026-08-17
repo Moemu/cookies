@@ -22,7 +22,7 @@
   ],
   "cases": [
     { "case_id": "OE-PROJECT-E-COMMERCE-DEFAULT", "outcome": "covered" },
-    { "case_id": "OE-PROJECT-E-COMMERCE-LIVE", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-E-COMMERCE-LIVE", "outcome": "blocked_by_platform_capability" },
     { "case_id": "OE-PROJECT-E-COMMERCE-MANUAL", "outcome": "covered" },
     { "case_id": "OE-PROJECT-LEADS-SMART", "outcome": "covered" },
     { "case_id": "OE-PROJECT-LEADS-CUSTOM", "outcome": "covered" },
@@ -30,7 +30,7 @@
     { "case_id": "OE-PROJECT-APP-DOWNLOAD-IOS-HARMONY-PACKAGE", "outcome": "covered" },
     { "case_id": "OE-PROJECT-CATALOG-DEFAULT", "outcome": "covered" },
     { "case_id": "OE-PROJECT-CONTENT-MARKETING", "outcome": "covered" },
-    { "case_id": "OE-PROJECT-CONTENT-MARKETING-LIVE", "outcome": "covered" },
+    { "case_id": "OE-PROJECT-CONTENT-MARKETING-LIVE", "outcome": "blocked_by_platform_capability" },
     { "case_id": "OE-PROJECT-APP-LAUNCH", "outcome": "covered" },
     { "case_id": "OE-PROJECT-APP-LAUNCH-ANDROID", "outcome": "covered" },
     { "case_id": "OE-PROJECT-APP-LAUNCH-IOS", "outcome": "covered" },
