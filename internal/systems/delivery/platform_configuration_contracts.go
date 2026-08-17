@@ -854,6 +854,9 @@ func validateOceanEngineConfiguration(configuration OceanEngineConfiguration) er
 	if project.DraftSchemaVersion != OceanEngineConfigurationProfileV1 || strings.TrimSpace(project.ProjectDraftID) == "" || strings.TrimSpace(project.MarketingPurpose) == "" || strings.TrimSpace(project.MarketingScenario) == "" || strings.TrimSpace(project.Carrier) == "" || strings.TrimSpace(project.DeliveryMode) == "" || strings.TrimSpace(project.ProjectName) == "" {
 		return contractFailure(ContractErrorProjectRequired, "payload.ocean_engine.project", "project profile version, id, marketing path, delivery mode, and name are required")
 	}
+	if !manifestAllowsMarketingPurpose(project.MarketingPurpose) {
+		return contractFailure(ContractErrorInvalidConfiguration, "payload.ocean_engine.project.marketing_purpose", "marketing purpose must be an enum allowed by the frozen calibration Manifest")
+	}
 	if err := project.AccountReference.validate("payload.ocean_engine.project.account_reference"); err != nil {
 		return err
 	}

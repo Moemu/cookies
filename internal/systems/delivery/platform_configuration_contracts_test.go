@@ -39,6 +39,15 @@ func TestDeliveryContractFixturesMatchGoDomainValidation(t *testing.T) {
 	}
 }
 
+func TestOceanEngineMarketingPurposeMustBeAllowedByTheFrozenManifest(t *testing.T) {
+	intent := validDeliveryIntent(t)
+	configuration := validOceanEnginePlatformConfiguration(t, intent, 1)
+	configuration.Payload.OceanEngine.Project.MarketingPurpose = "free_text_business_goal"
+	if code := DeliveryContractErrorCode(configuration.Validate()); code != ContractErrorInvalidConfiguration {
+		t.Fatalf("marketing purpose code = %q", code)
+	}
+}
+
 func TestManifestNonEvidenceMappingsReachTheirDeclaredDomainFields(t *testing.T) {
 	manifest, err := calibrationmanifest.Current()
 	if err != nil {

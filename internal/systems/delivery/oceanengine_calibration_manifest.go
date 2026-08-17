@@ -15,6 +15,24 @@ func currentOceanEngineCalibrationManifest() (calibrationmanifest.Manifest, erro
 	return calibrationmanifest.Current()
 }
 
+func manifestAllowsMarketingPurpose(value string) bool {
+	manifest, err := currentOceanEngineCalibrationManifest()
+	if err != nil {
+		return false
+	}
+	for _, entry := range manifest.ConditionVocabulary {
+		if entry.Key != "marketing_purpose" {
+			continue
+		}
+		for _, allowed := range entry.KnownValues {
+			if value == allowed {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // validateManifestContractOwnership proves that every non-evidence Manifest
 // mapping reaches a real field in its declared domain contract. It follows the
 // Manifest contract_path, rather than maintaining a second field-key map.
