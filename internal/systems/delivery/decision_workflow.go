@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/systems/delivery/calibrationmanifest"
 )
 
 const (
@@ -517,22 +518,22 @@ func CompileDeliveryWorkflow(workflowID string, decision DeliveryDecision, candi
 		return CompiledDeliveryWorkflow{}, ErrApprovalContentMismatch
 	}
 	project := configuration.Payload.OceanEngine.Project
-	steps := []CompiledWorkflowStep{
-		{ID: "observe-project-context", Sequence: 1, Page: "oceanengine/project", Action: "observe_project_context", Risk: WorkflowRiskObserve, Preconditions: []string{"authenticated context is supplied only in a later execution phase"}, Fields: []WorkflowField{}, TimeoutSeconds: 30, Recovery: "capture read-only evidence and stop on mismatch"},
-		{ID: "prepare-project-local-form", Sequence: 2, Page: "oceanengine/project", Action: "prepare_project_local_form", Risk: WorkflowRiskPrepareLocalForm, Preconditions: []string{"decision and configuration hashes match"}, Fields: []WorkflowField{
-			{Key: "project_name", Value: project.ProjectName, ExpectedReadback: project.ProjectName, EvidenceRef: "configuration://project/project_name"},
-			{Key: "daily_budget_minor", Value: project.BudgetAndBidding.DailyBudgetMinor, ExpectedReadback: project.BudgetAndBidding.DailyBudgetMinor, EvidenceRef: "configuration://project/budget_and_bidding/daily_budget_minor"},
-			{Key: "bidding_strategy", Value: project.BudgetAndBidding.BiddingStrategy, ExpectedReadback: project.BudgetAndBidding.BiddingStrategy, EvidenceRef: "configuration://project/budget_and_bidding/bidding_strategy"},
-		}, TimeoutSeconds: 60, Recovery: "discard local form state; no platform mutation exists"},
+	manifest, err := currentOceanEngineCalibrationManifest()
+	if err != nil || manifest.ValidateBinding(configuration.Payload.OceanEngine.CalibrationManifest.SchemaVersion, configuration.Payload.OceanEngine.CalibrationManifest.ManifestID) != nil {
+		return CompiledDeliveryWorkflow{}, ErrInvalidState
 	}
-	for index, promotion := range configuration.Payload.OceanEngine.Promotions {
+	projections := manifest.Project(calibrationmanifest.CompiledDeliveryWorkflow, oceanEngineManifestFacts(project))
+	steps := []CompiledWorkflowStep{
+		{ID: "observe-project-context", Sequence: 1, Page: "oceanengine/project", Action: "observe_project_context", Risk: WorkflowRiskObserve, Preconditions: []string{"authenticated context is supplied only in a later execution phase", "page fingerprint must match the frozen calibration Manifest"}, Fields: []WorkflowField{}, TimeoutSeconds: 30, Recovery: "capture read-only evidence and stop on mismatch"},
+	}
+	for _, projection := range projections {
+		if !projection.Executable {
+			continue
+		}
 		sequence := len(steps) + 1
 		steps = append(steps, CompiledWorkflowStep{
-			ID: fmt.Sprintf("prepare-promotion-%d-local-form", index+1), Sequence: sequence, Page: "oceanengine/promotion", Action: "prepare_promotion_local_form", Risk: WorkflowRiskPrepareLocalForm,
-			Preconditions: []string{"project local form is prepared"}, Fields: []WorkflowField{
-				{Key: "promotion_name", Value: promotion.PromotionName, ExpectedReadback: promotion.PromotionName, EvidenceRef: "configuration://promotion/" + promotion.PromotionDraftID + "/promotion_name"},
-				{Key: "material_count", Value: len(promotion.BaseMaterialReferences), ExpectedReadback: len(promotion.BaseMaterialReferences), EvidenceRef: "configuration://promotion/" + promotion.PromotionDraftID + "/base_material_references"},
-			}, TimeoutSeconds: 60, Recovery: "discard local promotion form state; no platform mutation exists",
+			ID: fmt.Sprintf("prepare-%s-local-form", strings.ReplaceAll(projection.Field.Key, ".", "-")), Sequence: sequence, Page: "oceanengine/" + projection.Field.PageFamily, Action: "prepare_local_form", Risk: WorkflowRiskPrepareLocalForm,
+			Preconditions: []string{"page fingerprint matches the frozen Manifest", "scope, target, and readback each resolve once", "reference picker is loaded before inspection"}, Fields: []WorkflowField{{Key: projection.Field.Key, Value: nil, ExpectedReadback: nil, EvidenceRef: "manifest://" + projection.Field.Key}}, TimeoutSeconds: 60, Recovery: "discard local form state; no platform mutation exists",
 		})
 	}
 	steps = append(steps, CompiledWorkflowStep{
@@ -556,6 +557,30 @@ func CompileDeliveryWorkflow(workflowID string, decision DeliveryDecision, candi
 		return CompiledDeliveryWorkflow{}, err
 	}
 	return workflow, nil
+}
+
+func oceanEngineManifestFacts(project *OceanEngineProjectDraft) map[string]string {
+	if project == nil {
+		return map[string]string{}
+	}
+	facts := map[string]string{
+		"marketing_purpose":      project.MarketingPurpose,
+		"marketing_scenario":     project.MarketingScenario,
+		"delivery_mode":          project.DeliveryMode,
+		"carrier":                project.Carrier,
+		"deep_optimization_mode": project.DeepOptimizationMode,
+		"bidding_strategy":       project.BudgetAndBidding.BiddingStrategy,
+	}
+	if project.MarketingProductReference != nil {
+		facts["marketing_product_reference"] = "present"
+	}
+	if project.ApplicationReference != nil {
+		facts["application_reference"] = "present"
+	}
+	if project.OptimizationTargetReference != nil {
+		facts["optimization_target_reference"] = "present"
+	}
+	return facts
 }
 
 type DecisionSelection struct {

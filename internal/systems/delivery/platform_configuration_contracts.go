@@ -236,6 +236,13 @@ func (b CalibrationManifestBinding) validate(field string) error {
 	if b.SchemaVersion != OceanEngineCalibrationManifestV1 || strings.TrimSpace(b.ManifestID) == "" {
 		return contractFailure(ContractErrorInvalidConfiguration, field, "a versioned OceanEngine calibration manifest binding is required")
 	}
+	manifest, err := currentOceanEngineCalibrationManifest()
+	if err != nil {
+		return contractFailure(ContractErrorInvalidConfiguration, field, "the frozen OceanEngine calibration manifest is unavailable or invalid")
+	}
+	if err := manifest.ValidateBinding(b.SchemaVersion, b.ManifestID); err != nil {
+		return contractFailure(ContractErrorInvalidConfiguration, field, "the calibration manifest binding does not match the frozen Manifest")
+	}
 	return nil
 }
 

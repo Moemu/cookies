@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+
+	"github.com/shikanon/cookies/internal/systems/delivery/calibrationmanifest"
 )
 
 const (
@@ -171,6 +173,7 @@ func Get(id, version string) (Definition, error) {
 }
 
 func (d Definition) Validate() error {
+	manifest, manifestErr := calibrationmanifest.Current()
 	if d.SchemaVersion != "delivery-platform-skill-definition/v1" ||
 		d.ID != OceanEngineEcommerceManualID ||
 		d.Version != OceanEngineEcommerceManualVersion ||
@@ -183,7 +186,6 @@ func (d Definition) Validate() error {
 		d.EvidenceObserved != "2026-08-06" ||
 		d.UIBaseline.RevalidatedAt != "2026-08-14" ||
 		d.CalibrationManifest.SchemaVersion != "oceanengine-calibration-manifest/v1" ||
-		d.CalibrationManifest.ManifestID != "oceanengine-calibration-current-test-account-2026-08-16" ||
 		d.CalibrationManifest.FixtureRef != "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json" ||
 		d.UIBaseline.LocatorContract != "project_and_promotion_forms_live_dom" ||
 		d.UIBaseline.DriftCheck != "existing_object_edit_surfaces_revalidated_with_brand_locator_drift" ||
@@ -253,8 +255,24 @@ func (d Definition) Validate() error {
 		d.SafetyExit.RequiredProof != "return_to_known_readonly_page_and_confirm_no_platform_write_or_approved_field_change" ||
 		len(d.WriteValidationPending) < 6 ||
 		len(d.GateOne.Scope) != 4 ||
-		len(d.GateOne.Checklist) < 7 {
+		len(d.GateOne.Checklist) < 7 ||
+		manifestErr != nil ||
+		manifest.ValidateBinding(d.CalibrationManifest.SchemaVersion, d.CalibrationManifest.ManifestID) != nil {
 		return ErrInvalidDefinition
 	}
 	return nil
+}
+
+// ManifestFields is the only Platform Skill field/control lookup. It reads the
+// same validated projection used by Delivery. Markdown describes safety rules;
+// it does not provide a second field mapping.
+func (d Definition) ManifestFields(facts map[string]string) ([]calibrationmanifest.FieldProjection, error) {
+	manifest, err := calibrationmanifest.Current()
+	if err != nil {
+		return nil, err
+	}
+	if err := manifest.ValidateBinding(d.CalibrationManifest.SchemaVersion, d.CalibrationManifest.ManifestID); err != nil {
+		return nil, err
+	}
+	return manifest.Project(calibrationmanifest.PlatformSkill, facts), nil
 }

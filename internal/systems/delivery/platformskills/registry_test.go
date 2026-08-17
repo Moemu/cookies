@@ -53,3 +53,32 @@ func TestOceanEngineEcommerceManualAllowsOnlyControlledSubmitWithoutClaimingDriv
 		t.Fatalf("gate-two evidence binding is wrong: %#v", definition)
 	}
 }
+
+func TestOceanEngineSkillReadsTypedManifestControls(t *testing.T) {
+	definition, err := Get(OceanEngineEcommerceManualID, OceanEngineEcommerceManualVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields, err := definition.ManifestFields(map[string]string{
+		"marketing_purpose": "ecommerce",
+		"delivery_mode":     "manual",
+		"carrier":           "orange_landing_page",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var money, evidenceOnly, blocked bool
+	for _, field := range fields {
+		switch field.Field.Key {
+		case "project.daily_budget_minor":
+			money = field.Field.Unit == "CNY_fen" && field.Field.ComputerUse.InputConstraints["minor_per_input_unit"] == float64(100)
+		case "project.editable_surface":
+			evidenceOnly = field.Mapping.Treatment == "evidence_only" && !field.Executable
+		case "project.marketing_scenario":
+			blocked = field.Blocked && field.Reason == "platform_pending"
+		}
+	}
+	if !money || !evidenceOnly || !blocked {
+		t.Fatalf("Skill did not consume typed Manifest controls: money=%t evidence=%t blocked=%t", money, evidenceOnly, blocked)
+	}
+}
