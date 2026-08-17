@@ -1,0 +1,58 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { oceanEngineCalibrationDispositions, visibleOceanEngineManifestFields } from '../src/lib/oceanengineCalibrationManifest'
+
+const configuration = {
+  project: {
+    marketing_purpose: 'lead_generation',
+    marketing_scenario: 'short_video_image_text',
+    carrier: 'orange_landing_page',
+    delivery_mode: 'manual',
+    targeting: { smart_expansion: false },
+    schedule: { start_at: '2026-08-24T00:00:00Z', end_at: '2026-09-07T00:00:00Z', timezone: 'Asia/Shanghai' },
+    budget_and_bidding: { currency: 'CNY', daily_budget_minor: 200000, bidding_strategy: 'stable_cost', charging_mode: 'CPC' },
+    project_name: 'Local plan',
+  },
+  promotions: [{
+    delivery_identity: { mode: 'account_info' },
+    base_material_references: [{ id: 'asset_1', state: 'resolved' }],
+    copy_items: [{ text: 'Local copy' }],
+    promotion_name: 'Promotion',
+  }],
+}
+
+test('the configuration page shows only usable Manifest fields', () => {
+  const projectFields = visibleOceanEngineManifestFields(configuration, 'project')
+  const promotionFields = visibleOceanEngineManifestFields(configuration, 'promotion', configuration.promotions[0])
+
+  assert.deepEqual(projectFields.map(field => field.key), [
+    'project.marketing_purpose',
+    'project.delivery_mode',
+    'project.schedule',
+    'project.daily_budget_minor',
+    'project.project_name',
+  ])
+  assert.equal(projectFields.find(field => field.key === 'project.daily_budget_minor')?.unit, 'CNY_fen')
+  assert.equal(projectFields.some(field => field.key === 'project.carrier'), false)
+  assert.equal(projectFields.some(field => field.key === 'project.marketing_scenario'), false)
+  assert.equal(projectFields.some(field => field.key === 'project.bidding_strategy'), false)
+  assert.deepEqual(promotionFields.map(field => field.key), [
+    'promotion.delivery_identity',
+    'promotion.base_materials',
+    'promotion.product_image_references',
+    'promotion.product_selling_points',
+    'promotion.material_replacement_edit',
+  ])
+})
+
+test('the calibration view preserves blocked and pending field reasons', () => {
+  const project = oceanEngineCalibrationDispositions(configuration, 'project')
+  const promotion = oceanEngineCalibrationDispositions(configuration, 'promotion')
+
+  assert.equal(project.find(field => field.key === 'project.marketing_scenario')?.state, 'platform_pending')
+  assert.equal(project.find(field => field.key === 'project.carrier')?.state, 'platform_pending')
+  assert.equal(project.find(field => field.key === 'project.bid_minor')?.state, 'condition_unmet')
+  assert.equal(promotion.find(field => field.key === 'promotion.bid')?.state, 'blocked')
+  assert.match(promotion.find(field => field.key === 'promotion.bid')?.reason ?? '', /输入约束/)
+  assert.equal(promotion.find(field => field.key === 'promotion.category')?.state, 'evidence_only')
+})

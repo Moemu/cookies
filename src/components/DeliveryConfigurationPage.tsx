@@ -8,13 +8,10 @@ import {
   type PlatformConfiguration,
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
+import { oceanEngineCalibrationDispositions, visibleOceanEngineManifestFields, type CalibrationDisposition, type VisibleManifestField } from '../lib/oceanengineCalibrationManifest'
 import { projectPath } from '../lib/router'
 import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
-
-function formatCny(value: number) {
-  return (value / 100).toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' })
-}
 
 function formatTime(value?: string) {
   return value ? new Date(value).toLocaleString('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }) : '暂无记录'
@@ -29,6 +26,58 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
 }
 
+function formatManifestValue(value: unknown, unit?: string): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'number' && unit === 'CNY_fen') return (value / 100).toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' })
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return value.map(item => formatManifestValue(item, unit)).filter(Boolean).join('、')
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if (typeof record.display_name_snapshot === 'string' && record.display_name_snapshot) return record.display_name_snapshot
+    if (typeof record.text === 'string') return record.text
+    if (typeof record.id === 'string' && record.id) return record.id
+    if (typeof record.start_at === 'string' && typeof record.end_at === 'string') {
+      const start = new Date(record.start_at).toLocaleDateString('zh-CN')
+      const end = new Date(record.end_at).toLocaleDateString('zh-CN')
+      return `${start} — ${end}${typeof record.timezone === 'string' ? ` · ${record.timezone}` : ''}`
+    }
+    return Object.entries(record).flatMap(([key, entry]) => typeof entry === 'string' || typeof entry === 'number' ? [`${key}: ${entry}`] : []).join(' · ')
+  }
+  return ''
+}
+
+function ManifestFieldList({ fields }: { fields: VisibleManifestField[] }) {
+  if (!fields.length) return null
+  return <dl className="delivery-config-project-facts">{fields.map(field => <div key={field.key}><dt>{field.label}</dt><dd>{formatManifestValue(field.value, field.unit)}</dd></div>)}</dl>
+}
+
+const dispositionLabels: Record<CalibrationDisposition['state'], string> = {
+  ready: '可手动配置',
+  evidence_only: '仅校准证据',
+  blocked: '已阻断',
+  platform_pending: '等待平台条件',
+  condition_unmet: '当前条件未满足',
+  missing_value: '缺少当前值',
+}
+
+function CalibrationDispositionList({ title, items }: { title: string; items: CalibrationDisposition[] }) {
+  return <section className="delivery-config-disposition-group"><h4>{title}</h4><ol>{items.map(item => <li key={item.key}>
+    <div><b>{item.label}</b><code>{item.key}</code></div>
+    <strong data-state={item.state}>{dispositionLabels[item.state]}</strong>
+    <p>{item.reason}</p>
+  </li>)}</ol></section>
+}
+
+function CalibrationDispositionView({ value }: { value: PlatformConfiguration }) {
+  if (value.platform !== 'ocean_engine' || !value.payload.ocean_engine) return <div className="delivery-config-empty-inline"><CircleAlert size={18}/>当前平台没有可读取的字段校准记录。</div>
+  const configuration = value.payload.ocean_engine
+  return <section className="delivery-config-calibration-card">
+    <header><div><span className="section-label">只读</span><h3>字段校准与处置</h3><p>状态和原因直接来自冻结 Manifest。此视图不填写、不保存、不提交平台表单。</p></div></header>
+    <CalibrationDispositionList title="项目字段" items={oceanEngineCalibrationDispositions(configuration, 'project')}/>
+    <CalibrationDispositionList title="推广单元字段" items={oceanEngineCalibrationDispositions(configuration, 'promotion')}/>
+  </section>
+}
+
 function PlatformConfigurationDetails({ value }: { value: PlatformConfiguration }) {
   if (value.platform === 'magnetic_engine') {
     return <div className="delivery-config-empty-inline"><CircleAlert size={18}/><div><b>磁力引擎能力尚未开放</b><p>{value.payload.magnetic_engine?.reason}</p></div></div>
@@ -36,21 +85,17 @@ function PlatformConfigurationDetails({ value }: { value: PlatformConfiguration 
   const ocean = value.payload.ocean_engine
   if (!ocean?.project) return <div className="delivery-config-empty-inline"><CircleAlert size={18}/>平台配置缺少主投放项目。</div>
   const project = ocean.project
+  const projectFields = visibleOceanEngineManifestFields(ocean, 'project')
   return <div className="delivery-config-business-map">
     <section className="delivery-config-project-card">
       <header><div><span className="delivery-config-eyebrow">主投放项目</span><h4>{project.project_name}</h4><p>预算、排期和营销目标在此项目下统一生效。</p></div><strong className="delivery-config-ready-state">配置已就绪</strong></header>
-      <dl className="delivery-config-project-facts">
-        <div><dt>营销目标</dt><dd>{project.marketing_purpose}</dd><small>{project.marketing_scenario}</small></div>
-        <div><dt>每日预算</dt><dd>{formatCny(project.budget_and_bidding.daily_budget_minor)}</dd><small>{project.budget_and_bidding.bidding_strategy} · {project.budget_and_bidding.charging_mode}</small></div>
-        <div><dt>投放时间</dt><dd>{new Date(project.schedule.start_at).toLocaleDateString('zh-CN')} — {new Date(project.schedule.end_at).toLocaleDateString('zh-CN')}</dd><small>{project.schedule.timezone}</small></div>
-        <div><dt>广告账户</dt><dd>{project.account_reference.display_name_snapshot || '已选择广告账户'}</dd><small>{project.account_reference.state}</small></div>
-      </dl>
+      <ManifestFieldList fields={projectFields}/>
     </section>
     <section className="delivery-config-promotion-section">
       <header><div><span className="delivery-config-eyebrow">推广单元</span><h4>素材与文案组合</h4><p>所有推广单元均归属于上方主投放项目。</p></div><strong>{ocean.promotions.length} 个</strong></header>
       {ocean.promotions.length ? <div className="delivery-config-promotion-grid">{ocean.promotions.map((promotion, index) => <article key={promotion.promotion_draft_id}>
         <header><span>推广单元 {index + 1}</span><h5>{promotion.promotion_name}</h5></header>
-        <dl><div><dt>素材</dt><dd>{promotion.base_material_references.length} 个</dd></div><div><dt>文案</dt><dd>{promotion.copy_items.length} 条</dd></div><div><dt>落地页</dt><dd>{promotion.landing_page_reference ? '已关联' : '未关联'}</dd></div></dl>
+        <ManifestFieldList fields={visibleOceanEngineManifestFields(ocean, 'promotion', promotion)}/>
       </article>)}</div> : <div className="delivery-config-empty-inline">暂未添加推广单元，可稍后从投放计划补充素材与文案。</div>}
     </section>
   </div>
@@ -71,6 +116,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const platformConfiguration = selectedPlan?.currentVersion.platformConfiguration
   const legacyReadOnly = Boolean(selectedPlan?.currentVersion.readOnly || (selectedPlan && !platformConfiguration))
   const showConfiguration = activeView === '配置映射'
+  const showCalibration = activeView === '字段校准与处置'
   const showPreflight = activeView === '检查与提交'
   const approvalURL = changeSet ? projectPath(projectId, 'delivery', 'approvals', changeSet.id, '待我审批', undefined, tourRunId, tourCase) : undefined
   const planEditorURL = projectPath(projectId, 'delivery', 'plans', undefined, '计划列表', undefined, tourRunId, tourCase)
@@ -139,6 +185,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
         <div className="delivery-config-empty-inline"><CircleAlert size={20}/><div><b>历史配置，仅供查看</b><p>这份计划不能继续修改、检查或提交。若要继续投放，请新建计划并选择目标广告平台。</p></div></div>
       </section> : <>
         {showConfiguration && platformConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><b>配置已就绪</b><span>内容随当前计划版本锁定</span></div></header><PlatformConfigurationDetails value={platformConfiguration}/></section> : null}
+        {showCalibration && platformConfiguration ? <CalibrationDispositionView value={platformConfiguration}/> : null}
         {showPreflight ? <section className="delivery-config-flow-grid delivery-config-flow-grid--preflight"><article className="delivery-config-preflight-card">
           <header><div><span className="section-label">提交前检查</span><h3>检查并提交变更申请</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `变更申请 ${changeSet.status}` : '尚未提交'}</strong></header>
           <div className="delivery-config-preflight-summary"><b>检查结果</b><p>{preflightMessage}</p></div>
