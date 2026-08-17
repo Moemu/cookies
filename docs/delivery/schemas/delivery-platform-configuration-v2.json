@@ -175,7 +175,30 @@
           "type": "array",
           "items": { "$ref": "#/$defs/StableReference" }
         },
+        "search_boost": { "$ref": "#/$defs/OceanEngineSearchBoost" },
+        "product_catalog_reference": { "$ref": "#/$defs/StableReference" },
+        "placement_strategy": { "type": "string", "minLength": 1 },
+        "product_targeting": { "$ref": "#/$defs/OceanEngineProductTargeting" },
+        "application_launch_mode": { "type": "string", "minLength": 1 },
         "project_name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "OceanEngineSearchBoost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keywords": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "bid_coefficient": { "type": "number", "exclusiveMinimum": 0 },
+        "targeting_expansion": { "type": "boolean" }
+      }
+    },
+    "OceanEngineProductTargeting": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rta_redirect": { "type": "boolean" },
+        "region_match": { "type": "boolean" },
+        "delivery_conditions": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
     "OceanEngineDeliveryIdentity": {
@@ -240,6 +263,14 @@
         "copy_items": {
           "type": "array",
           "items": { "$ref": "#/$defs/OceanEngineCopyItem" }
+        },
+        "product_image_references": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/StableReference" }
+        },
+        "product_selling_points": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
         },
         "native_anchor_reference": { "$ref": "#/$defs/StableReference" },
         "landing_page_reference": { "$ref": "#/$defs/StableReference" },

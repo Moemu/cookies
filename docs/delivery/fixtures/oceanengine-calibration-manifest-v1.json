@@ -164,6 +164,14 @@
       "source": "OceanEngineConfiguration.Project.OptimizationTargetReference",
       "value_kind": "reference",
       "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "optimization_target_semantic_key",
+      "source_kind": "configuration_path",
+      "source": "OceanEngineConfiguration.Project.OptimizationTargetReference.SemanticKey",
+      "value_kind": "enum",
+      "known_values": ["in_app_order"],
+      "unknown_value_treatment": "platform_pending"
     }
   ],
   "page_families": [
@@ -700,23 +708,26 @@
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
-      "condition": "marketing_purpose == ecommerce and carrier in [orange_landing_page,owned_landing_page] and optimization_target_reference has the in_app_order semantic key",
+      "condition": "marketing_purpose == ecommerce and carrier in [orange_landing_page,owned_landing_page] and optimization_target_semantic_key == in_app_order",
       "condition_dimensions": [
         "marketing_purpose",
         "carrier",
-        "optimization_target_reference"
+        "optimization_target_semantic_key"
       ],
-      "condition_state": "dependency_only",
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          { "dimension": "marketing_purpose", "operator": "equals", "values": ["ecommerce"] },
+          { "dimension": "carrier", "operator": "in", "values": ["orange_landing_page", "owned_landing_page"] },
+          { "dimension": "optimization_target_semantic_key", "operator": "equals", "values": ["in_app_order"] }
+        ]
+      },
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "深度优化方式" },
-      "computer_use": {
-        "operation": "no_action",
-        "blocked_state": "platform_pending",
-        "reason": "The optimization-target reference has no stable semantic key for in_app_order."
-      },
-      "evidence_state": "platform_pending",
+      "computer_use": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "深度优化方式" }, "target": { "kind": "visible_text", "value": "不启用" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "深度优化方式" }, "observed_options": ["不启用", "成交ROI", "净成交下单", "净成交ROI"] },
+      "evidence_state": "observed",
       "consumers": [
         "OceanEngineConfiguration",
         "DeliveryDecisionCandidate",
@@ -729,19 +740,20 @@
       "owner": "delivery_intent",
       "page_family": "project_create",
       "value_type": "object",
-      "condition": "delivery_mode",
-      "condition_dimensions": ["delivery_mode"],
-      "condition_state": "dependency_only",
       "required_state": "unknown",
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "受众倾向与过滤" },
       "computer_use": {
-        "operation": "no_action",
-        "blocked_state": "platform_pending",
-        "reason": "The evidence identifies a delivery-mode dependency but does not identify an exact rule."
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "受众倾向与过滤" },
+        "target": { "kind": "visible_text", "value": "新建定向" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "地域" },
+        "observed_options": ["地域", "性别", "年龄", "自定义人群", "已安装用户", "过滤已转化用户"],
+        "input_constraints": { "persistence": "unsubmitted_local_only" }
       },
-      "evidence_state": "platform_pending",
+      "evidence_state": "observed",
       "consumers": [
         "DeliveryIntent",
         "OceanEngineConfiguration",
@@ -820,23 +832,19 @@
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
-      "condition": "delivery_mode == manual",
-      "condition_dimensions": [
-        "delivery_mode",
-        "optimization_target_reference",
-        "deep_optimization_mode"
-      ],
-      "condition_state": "dependency_only",
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "竞价策略" },
       "computer_use": {
-        "operation": "no_action",
-        "blocked_state": "platform_pending",
-        "reason": "Some bidding-strategy branches require an optimization-target semantic key that the model does not contain."
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "竞价策略" },
+        "target": { "kind": "visible_text", "value": "稳定成本" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "日预算" },
+        "observed_options": ["稳定成本", "最大转化"]
       },
-      "evidence_state": "platform_pending",
+      "evidence_state": "observed",
       "consumers": [
         "OceanEngineConfiguration",
         "DeliveryDecisionCandidate",
@@ -849,13 +857,6 @@
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
-      "condition": "delivery_mode == manual",
-      "condition_dimensions": [
-        "delivery_mode",
-        "optimization_target_reference",
-        "deep_optimization_mode"
-      ],
-      "condition_state": "dependency_only",
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
@@ -865,7 +866,7 @@
         "blocked_state": "platform_pending",
         "reason": "Some charging-mode branches require an optimization-target semantic key that the model does not contain."
       },
-      "evidence_state": "platform_pending",
+      "evidence_state": "observed",
       "consumers": [
         "OceanEngineConfiguration",
         "DeliveryDecisionCandidate",
@@ -964,19 +965,20 @@
       "owner": "platform_dynamic_reference",
       "page_family": "project_create",
       "value_type": "dynamic_reference",
-      "condition": "optimization_target_reference",
-      "condition_dimensions": ["optimization_target_reference"],
-      "condition_state": "dependency_only",
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "visible_text", "value": "第三方监测链接" },
       "computer_use": {
-        "operation": "no_action",
-        "blocked_state": "platform_pending",
-        "reason": "The evidence identifies an optimization-target dependency but does not identify an exact rule."
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "第三方监测链接" },
+        "target": { "kind": "role_name", "value": "textbox:请输入链接地址" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "展示" },
+        "observed_options": ["展示", "有效触点", "视频播放", "视频播完", "视频有效播放"],
+        "input_constraints": { "format": "URL", "persistence": "unsubmitted_local_only" }
       },
-      "evidence_state": "platform_pending",
+      "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
     {
@@ -1447,8 +1449,7 @@
           "observed_minimums_cny": "0.01,4",
           "observed_cpm_path_minimum_cny": 4,
           "observed_cpm_path_maximum_cny": 100,
-          "calibration_value_rule": "use_current_page_minimum_without_exceeding_authorized_cap",
-          "authorized_cap_cny": 0.01
+          "calibration_value_rule": "use_current_page_minimum"
         }
       },
       "evidence_state": "observed",
@@ -1459,6 +1460,160 @@
         "CompiledDeliveryWorkflow",
         "PlatformSkill"
       ]
+    },
+    {
+      "key": "promotion.native_anchor_reference",
+      "semantic_label": "原生锚点",
+      "owner": "platform_dynamic_reference",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "原生锚点" },
+      "computer_use": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "原生锚点" }, "target": { "kind": "visible_text", "value": "手动选择" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "原生锚点" }, "observed_options": ["不启用", "自动选择", "手动选择"] },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.direct_link_mode",
+      "semantic_label": "直达链接模式",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_enum",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "直达链接" },
+      "computer_use": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "直达链接" }, "target": { "kind": "visible_text", "value": "自动" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "直达链接" }, "observed_options": ["自动", "手动"] },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.direct_link_reference",
+      "semantic_label": "直达链接内容",
+      "owner": "platform_dynamic_reference",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "conditional",
+      "editable_state": "conditional",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "直达链接内容" },
+      "computer_use": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "直达链接内容" }, "target": { "kind": "visible_text", "value": "添加直达链接" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "备用链接" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.product_reference",
+      "semantic_label": "产品名称",
+      "owner": "platform_dynamic_reference",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "conditional",
+      "editable_state": "conditional",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "产品名称" },
+      "computer_use": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "产品名称" }, "target": { "kind": "visible_text", "value": "产品名称" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "产品主图" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.creative_component_references",
+      "semantic_label": "创意组件",
+      "owner": "platform_dynamic_reference",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "创意组件" },
+      "computer_use": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "创意组件" }, "target": { "kind": "visible_text", "value": "添加组件" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "创意组件" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.call_to_action",
+      "semantic_label": "行动号召",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_enum",
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "行动号召" },
+      "computer_use": { "operation": "configure_object", "scope": { "kind": "visible_text", "value": "行动号召" }, "target": { "kind": "role_name", "value": "combobox:行动号召" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "combobox:行动号召" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.source_label",
+      "semantic_label": "来源",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "text",
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "label", "value": "来源" },
+      "computer_use": { "operation": "fill_text", "scope": { "kind": "visible_text", "value": "来源" }, "target": { "kind": "role_name", "value": "textbox:来源" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "textbox:来源" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.comments_enabled",
+      "semantic_label": "评论",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "boolean",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "评论" },
+      "computer_use": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "评论" }, "target": { "kind": "visible_text", "value": "开启" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "评论" }, "observed_options": ["开启", "关闭"] },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.smart_generation_enabled",
+      "semantic_label": "智能生成",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "boolean",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "智能生成" },
+      "computer_use": { "operation": "configure_object", "scope": { "kind": "visible_text", "value": "智能生成" }, "target": { "kind": "role_name", "value": "checkbox:智能生成" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "checkbox:智能生成" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.brand_reference",
+      "semantic_label": "品牌名称",
+      "owner": "platform_dynamic_reference",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "品牌名称" },
+      "computer_use": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "品牌名称" }, "target": { "kind": "role_name", "value": "combobox:品牌名称" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "combobox:品牌名称" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.promotion_name",
+      "semantic_label": "单元名称",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "text",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "label", "value": "单元名称" },
+      "computer_use": { "operation": "fill_text", "scope": { "kind": "visible_text", "value": "单元名称" }, "target": { "kind": "role_name", "value": "textbox:请输入单元名称" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "textbox:请输入单元名称" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
     },
     {
       "key": "promotion.editable_surface",
@@ -2011,14 +2166,25 @@
         "promotion.landing_page_reference",
         "promotion.product_image_references",
         "promotion.product_selling_points",
-        "promotion.category",
-        "promotion.daily_budget",
-        "promotion.bid"
-      ],
-      "status": "blocked_by_input_constraint",
-      "evidence_state": "blocked_by_input_constraint",
-      "exit_verified": true,
-      "reason": "all accessible local branches were traversed; the sampled CPM branch is stably blocked because its current page requires at least CNY 4 while the authorized cap is CNY 0.01; other branches may expose CNY 0.01 and must use their own live page constraint"
+      "promotion.category",
+      "promotion.daily_budget",
+      "promotion.bid",
+      "promotion.native_anchor_reference",
+      "promotion.direct_link_mode",
+      "promotion.direct_link_reference",
+      "promotion.product_reference",
+      "promotion.creative_component_references",
+      "promotion.call_to_action",
+      "promotion.source_label",
+      "promotion.comments_enabled",
+      "promotion.smart_generation_enabled",
+      "promotion.brand_reference",
+      "promotion.promotion_name"
+    ],
+    "status": "covered",
+    "evidence_state": "observed",
+    "exit_verified": true,
+    "reason": "all accessible local branches were traversed; each bid input uses its current page minimum, including observed CNY 0.01 and CNY 4 paths"
     },
     {
       "id": "OE-PROMOTION-EDIT",
@@ -2323,14 +2489,14 @@
     {
       "field_key": "project.deep_optimization_mode",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.DeepOptimizationMode"
     },
     {
       "field_key": "project.deep_optimization_mode",
       "destination": "DeliveryDecisionCandidate",
-      "treatment": "evidence_only",
-      "contract_path": "DeliveryDecisionCandidate.CalibrationManifest"
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.DeepOptimizationMode"
     },
     {
       "field_key": "project.deep_optimization_mode",
@@ -2341,7 +2507,7 @@
     {
       "field_key": "project.deep_optimization_mode",
       "destination": "PlatformSkill",
-      "treatment": "evidence_only",
+      "treatment": "modelled",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
@@ -2491,8 +2657,8 @@
     {
       "field_key": "project.search_boost",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.SearchBoost"
     },
     {
       "field_key": "project.search_boost",
@@ -2503,8 +2669,8 @@
     {
       "field_key": "project.monitoring_references",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "dynamic_reference",
+      "contract_path": "OceanEngineConfiguration.Project.MonitoringReferences"
     },
     {
       "field_key": "project.monitoring_references",
@@ -2539,8 +2705,8 @@
     {
       "field_key": "project.product_catalog_reference",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "dynamic_reference",
+      "contract_path": "OceanEngineConfiguration.Project.ProductCatalogReference"
     },
     {
       "field_key": "project.product_catalog_reference",
@@ -2551,8 +2717,8 @@
     {
       "field_key": "project.placement_strategy",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.PlacementStrategy"
     },
     {
       "field_key": "project.placement_strategy",
@@ -2575,8 +2741,8 @@
     {
       "field_key": "project.product_targeting",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.ProductTargeting"
     },
     {
       "field_key": "project.product_targeting",
@@ -2587,8 +2753,8 @@
     {
       "field_key": "project.application_launch_mode",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.ApplicationLaunchMode"
     },
     {
       "field_key": "project.application_launch_mode",
@@ -2708,7 +2874,7 @@
       "field_key": "promotion.product_image_references",
       "destination": "OceanEngineConfiguration",
       "treatment": "dynamic_reference",
-      "contract_path": "OceanEngineConfiguration.Promotions[].BaseMaterialReferences"
+      "contract_path": "OceanEngineConfiguration.Promotions[].ProductImageReferences"
     },
     {
       "field_key": "promotion.product_image_references",
@@ -2726,7 +2892,7 @@
       "field_key": "promotion.product_selling_points",
       "destination": "OceanEngineConfiguration",
       "treatment": "modelled",
-      "contract_path": "OceanEngineConfiguration.Promotions[].CopyItems"
+      "contract_path": "OceanEngineConfiguration.Promotions[].ProductSellingPoints"
     },
     {
       "field_key": "promotion.product_selling_points",
@@ -2743,8 +2909,8 @@
     {
       "field_key": "promotion.category",
       "destination": "OceanEngineConfiguration",
-      "treatment": "evidence_only",
-      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+      "treatment": "dynamic_reference",
+      "contract_path": "OceanEngineConfiguration.Promotions[].Settings.CategoryReference"
     },
     {
       "field_key": "promotion.category",
@@ -2797,7 +2963,7 @@
     {
       "field_key": "promotion.bid",
       "destination": "OceanEngineConfiguration",
-      "treatment": "blocked",
+      "treatment": "modelled",
       "contract_path": "OceanEngineConfiguration.Promotions[].BudgetAndBidding"
     },
     {
@@ -2818,6 +2984,29 @@
       "treatment": "evidence_only",
       "contract_path": "SkillDefinition.calibration_manifest"
     },
+    { "field_key": "promotion.native_anchor_reference", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].NativeAnchorReference" },
+    { "field_key": "promotion.native_anchor_reference", "destination": "PlatformSkill", "treatment": "dynamic_reference", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.direct_link_mode", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.DirectLinkMode" },
+    { "field_key": "promotion.direct_link_mode", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.direct_link_reference", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].DirectLinkReference" },
+    { "field_key": "promotion.direct_link_reference", "destination": "PlatformSkill", "treatment": "dynamic_reference", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.product_reference", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].ProductReference" },
+    { "field_key": "promotion.product_reference", "destination": "PlatformSkill", "treatment": "dynamic_reference", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.creative_component_references", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].CreativeComponentReferences" },
+    { "field_key": "promotion.creative_component_references", "destination": "PlatformSkill", "treatment": "dynamic_reference", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.call_to_action", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.CallToAction" },
+    { "field_key": "promotion.call_to_action", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.source_label", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.SourceLabel" },
+    { "field_key": "promotion.source_label", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.comments_enabled", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.CommentsEnabled" },
+    { "field_key": "promotion.comments_enabled", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.smart_generation_enabled", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.SmartGenerationEnabled" },
+    { "field_key": "promotion.smart_generation_enabled", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.brand_reference", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.BrandReference" },
+    { "field_key": "promotion.brand_reference", "destination": "PlatformSkill", "treatment": "dynamic_reference", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.promotion_name", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].PromotionName" },
+    { "field_key": "promotion.promotion_name", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.promotion_name", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
     {
       "field_key": "promotion.editable_surface",
       "destination": "OceanEngineConfiguration",

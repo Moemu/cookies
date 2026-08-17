@@ -90,6 +90,7 @@ function configurationFacts(configuration: unknown) {
     lead_capture_mode: project?.lead_capture_mode,
     carrier: project?.carrier,
     optimization_target_reference: project?.optimization_target_reference,
+    optimization_target_semantic_key: (project?.optimization_target_reference as Record<string, unknown> | undefined)?.semantic_key,
     delivery_mode: project?.delivery_mode,
     bidding_strategy: budget?.bidding_strategy,
     deep_optimization_mode: project?.deep_optimization_mode,

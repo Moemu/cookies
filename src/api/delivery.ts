@@ -50,6 +50,7 @@ export type StableReference = {
   id?: string
   version?: string
   content_hash?: string
+  semantic_key?: string
   state: 'resolved' | 'unresolved' | 'blocked' | 'redacted'
   reason?: string
   display_name_snapshot?: string
@@ -119,6 +120,12 @@ export type PlatformConfiguration = {
         targeting: { regions?: string[]; age_ranges?: string[]; gender?: string; smart_expansion: boolean }
         schedule: { start_at: string; end_at: string; timezone: string }
         budget_and_bidding: { currency: 'CNY'; daily_budget_minor: number; bidding_strategy: string; charging_mode: string; bid_minor?: number }
+        monitoring_references?: StableReference[]
+        search_boost?: { keywords?: string[]; bid_coefficient?: number; targeting_expansion?: boolean }
+        product_catalog_reference?: StableReference
+        placement_strategy?: string
+        product_targeting?: { rta_redirect?: boolean; region_match?: boolean; delivery_conditions?: string[] }
+        application_launch_mode?: string
         project_name: string
       }
       promotions: Array<{
@@ -127,8 +134,15 @@ export type PlatformConfiguration = {
         delivery_identity: { mode: string; authorized_identity?: StableReference }
         base_material_references: StableReference[]
         copy_items: Array<{ text: string }>
+        product_image_references?: StableReference[]
+        product_selling_points?: string[]
+        native_anchor_reference?: StableReference
         landing_page_reference?: StableReference
-        settings: { call_to_action?: string; source_label?: string; comments_enabled?: boolean }
+        direct_link_reference?: StableReference
+        product_reference?: StableReference
+        creative_component_references?: StableReference[]
+        budget_and_bidding?: { currency: 'CNY'; daily_budget_minor: number; bidding_strategy: string; charging_mode: string; bid_minor?: number }
+        settings: { call_to_action?: string; source_label?: string; comments_enabled?: boolean; smart_generation_enabled?: boolean; client_download_enabled?: boolean; direct_link_mode?: 'automatic' | 'manual'; category_reference?: StableReference; brand_reference?: StableReference }
         promotion_name: string
       }>
     }

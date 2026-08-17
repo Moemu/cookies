@@ -89,8 +89,6 @@ test("OceanEngine calibration manifest drives consumer and coverage checks", () 
         "application_reference",
       ],
     ],
-    ["project.targeting", ["delivery_mode"]],
-    ["project.monitoring_references", ["optimization_target_reference"]],
     ["project.product_catalog_reference", ["marketing_purpose"]],
     ["project.placement_strategy", ["marketing_purpose"]],
     ["project.product_targeting", ["marketing_purpose"]],

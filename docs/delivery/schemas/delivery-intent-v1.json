@@ -24,6 +24,7 @@
         "id": { "type": "string", "minLength": 1 },
         "version": { "type": "string", "minLength": 1 },
         "content_hash": { "type": "string", "minLength": 1 },
+        "semantic_key": { "type": "string", "minLength": 1 },
         "state": { "$ref": "#/$defs/ReferenceState" },
         "reason": { "type": "string", "minLength": 1 },
         "display_name_snapshot": { "type": "string" },

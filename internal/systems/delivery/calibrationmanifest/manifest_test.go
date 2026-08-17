@@ -7,7 +7,7 @@ func TestCurrentManifestIsTheCanonicalTypedProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Fields) != 40 || len(manifest.CoverageCases) != 26 {
+	if len(manifest.Fields) != 51 || len(manifest.CoverageCases) != 26 {
 		t.Fatalf("unexpected frozen coverage: %d fields, %d cases", len(manifest.Fields), len(manifest.CoverageCases))
 	}
 	if err := manifest.ValidateBinding(manifest.SchemaVersion, manifest.ManifestID); err != nil {

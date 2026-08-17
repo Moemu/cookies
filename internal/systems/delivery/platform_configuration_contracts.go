@@ -151,6 +151,7 @@ type StableReference struct {
 	ID                  string         `json:"id,omitempty"`
 	Version             string         `json:"version,omitempty"`
 	ContentHash         string         `json:"content_hash,omitempty"`
+	SemanticKey         string         `json:"semantic_key,omitempty"`
 	State               ReferenceState `json:"state"`
 	Reason              string         `json:"reason,omitempty"`
 	DisplayNameSnapshot string         `json:"display_name_snapshot,omitempty"`
@@ -164,6 +165,7 @@ type canonicalStableReference struct {
 	ID          string         `json:"id,omitempty"`
 	Version     string         `json:"version,omitempty"`
 	ContentHash string         `json:"content_hash,omitempty"`
+	SemanticKey string         `json:"semantic_key,omitempty"`
 	State       ReferenceState `json:"state"`
 	Reason      string         `json:"reason,omitempty"`
 }
@@ -171,7 +173,7 @@ type canonicalStableReference struct {
 func (r StableReference) canonical() canonicalStableReference {
 	return canonicalStableReference{
 		Namespace: strings.TrimSpace(r.Namespace), ObjectKind: strings.TrimSpace(r.ObjectKind), Scope: strings.TrimSpace(r.Scope),
-		ID: strings.TrimSpace(r.ID), Version: strings.TrimSpace(r.Version), ContentHash: strings.TrimSpace(r.ContentHash),
+		ID: strings.TrimSpace(r.ID), Version: strings.TrimSpace(r.Version), ContentHash: strings.TrimSpace(r.ContentHash), SemanticKey: strings.TrimSpace(r.SemanticKey),
 		State: r.State, Reason: strings.TrimSpace(r.Reason),
 	}
 }
@@ -491,27 +493,44 @@ const (
 )
 
 type OceanEngineProjectDraft struct {
-	DraftSchemaVersion          string                      `json:"draft_schema_version"`
-	ProjectDraftID              string                      `json:"project_draft_id"`
-	AccountReference            StableReference             `json:"account_reference"`
-	MarketingPurpose            string                      `json:"marketing_purpose"`
-	MarketingScenario           string                      `json:"marketing_scenario"`
-	MarketingProductReference   *StableReference            `json:"marketing_product_reference,omitempty"`
-	ApplicationReference        *StableReference            `json:"application_reference,omitempty"`
-	ApplicationScenario         string                      `json:"application_scenario,omitempty"`
-	OperatingSystem             string                      `json:"operating_system,omitempty"`
-	ApplicationDownloadMode     string                      `json:"application_download_mode,omitempty"`
-	ProductSelectionMode        string                      `json:"product_selection_mode,omitempty"`
-	LeadCaptureMode             string                      `json:"lead_capture_mode,omitempty"`
-	Carrier                     string                      `json:"carrier"`
-	OptimizationTargetReference *StableReference            `json:"optimization_target_reference,omitempty"`
-	DeepOptimizationMode        string                      `json:"deep_optimization_mode,omitempty"`
-	DeliveryMode                string                      `json:"delivery_mode"`
-	Targeting                   OceanEngineTargeting        `json:"targeting"`
-	Schedule                    OceanEngineSchedule         `json:"schedule"`
-	BudgetAndBidding            OceanEngineBudgetAndBidding `json:"budget_and_bidding"`
-	MonitoringReferences        []StableReference           `json:"monitoring_references,omitempty"`
-	ProjectName                 string                      `json:"project_name"`
+	DraftSchemaVersion          string                       `json:"draft_schema_version"`
+	ProjectDraftID              string                       `json:"project_draft_id"`
+	AccountReference            StableReference              `json:"account_reference"`
+	MarketingPurpose            string                       `json:"marketing_purpose"`
+	MarketingScenario           string                       `json:"marketing_scenario"`
+	MarketingProductReference   *StableReference             `json:"marketing_product_reference,omitempty"`
+	ApplicationReference        *StableReference             `json:"application_reference,omitempty"`
+	ApplicationScenario         string                       `json:"application_scenario,omitempty"`
+	OperatingSystem             string                       `json:"operating_system,omitempty"`
+	ApplicationDownloadMode     string                       `json:"application_download_mode,omitempty"`
+	ProductSelectionMode        string                       `json:"product_selection_mode,omitempty"`
+	LeadCaptureMode             string                       `json:"lead_capture_mode,omitempty"`
+	Carrier                     string                       `json:"carrier"`
+	OptimizationTargetReference *StableReference             `json:"optimization_target_reference,omitempty"`
+	DeepOptimizationMode        string                       `json:"deep_optimization_mode,omitempty"`
+	DeliveryMode                string                       `json:"delivery_mode"`
+	Targeting                   OceanEngineTargeting         `json:"targeting"`
+	Schedule                    OceanEngineSchedule          `json:"schedule"`
+	BudgetAndBidding            OceanEngineBudgetAndBidding  `json:"budget_and_bidding"`
+	MonitoringReferences        []StableReference            `json:"monitoring_references,omitempty"`
+	SearchBoost                 *OceanEngineSearchBoost      `json:"search_boost,omitempty"`
+	ProductCatalogReference     *StableReference             `json:"product_catalog_reference,omitempty"`
+	PlacementStrategy           string                       `json:"placement_strategy,omitempty"`
+	ProductTargeting            *OceanEngineProductTargeting `json:"product_targeting,omitempty"`
+	ApplicationLaunchMode       string                       `json:"application_launch_mode,omitempty"`
+	ProjectName                 string                       `json:"project_name"`
+}
+
+type OceanEngineSearchBoost struct {
+	Keywords           []string `json:"keywords,omitempty"`
+	BidCoefficient     *float64 `json:"bid_coefficient,omitempty"`
+	TargetingExpansion *bool    `json:"targeting_expansion,omitempty"`
+}
+
+type OceanEngineProductTargeting struct {
+	RTARedirect        *bool    `json:"rta_redirect,omitempty"`
+	RegionMatch        *bool    `json:"region_match,omitempty"`
+	DeliveryConditions []string `json:"delivery_conditions,omitempty"`
 }
 
 type OceanEngineDeliveryIdentity struct {
@@ -540,6 +559,8 @@ type OceanEnginePromotionDraft struct {
 	DeliveryIdentity            OceanEngineDeliveryIdentity  `json:"delivery_identity"`
 	BaseMaterialReferences      []StableReference            `json:"base_material_references"`
 	CopyItems                   []OceanEngineCopyItem        `json:"copy_items"`
+	ProductImageReferences      []StableReference            `json:"product_image_references,omitempty"`
+	ProductSellingPoints        []string                     `json:"product_selling_points,omitempty"`
 	NativeAnchorReference       *StableReference             `json:"native_anchor_reference,omitempty"`
 	LandingPageReference        *StableReference             `json:"landing_page_reference,omitempty"`
 	DirectLinkReference         *StableReference             `json:"direct_link_reference,omitempty"`
@@ -615,15 +636,23 @@ type canonicalOceanEngineProject struct {
 	Schedule                    OceanEngineSchedule           `json:"schedule"`
 	BudgetAndBidding            OceanEngineBudgetAndBidding   `json:"budget_and_bidding"`
 	MonitoringReferences        []canonicalStableReference    `json:"monitoring_references,omitempty"`
+	SearchBoost                 *OceanEngineSearchBoost       `json:"search_boost,omitempty"`
+	ProductCatalogReference     *canonicalStableReference     `json:"product_catalog_reference,omitempty"`
+	PlacementStrategy           string                        `json:"placement_strategy,omitempty"`
+	ProductTargeting            *OceanEngineProductTargeting  `json:"product_targeting,omitempty"`
+	ApplicationLaunchMode       string                        `json:"application_launch_mode,omitempty"`
 	ProjectName                 string                        `json:"project_name"`
 }
 
 type canonicalOceanEnginePromotionSettings struct {
-	CallToAction      string                    `json:"call_to_action,omitempty"`
-	SourceLabel       string                    `json:"source_label,omitempty"`
-	CommentsEnabled   *bool                     `json:"comments_enabled,omitempty"`
-	CategoryReference *canonicalStableReference `json:"category_reference,omitempty"`
-	BrandReference    *canonicalStableReference `json:"brand_reference,omitempty"`
+	CallToAction           string                    `json:"call_to_action,omitempty"`
+	SourceLabel            string                    `json:"source_label,omitempty"`
+	CommentsEnabled        *bool                     `json:"comments_enabled,omitempty"`
+	SmartGenerationEnabled *bool                     `json:"smart_generation_enabled,omitempty"`
+	ClientDownloadEnabled  *bool                     `json:"client_download_enabled,omitempty"`
+	DirectLinkMode         string                    `json:"direct_link_mode,omitempty"`
+	CategoryReference      *canonicalStableReference `json:"category_reference,omitempty"`
+	BrandReference         *canonicalStableReference `json:"brand_reference,omitempty"`
 }
 
 type canonicalOceanEnginePromotion struct {
@@ -632,6 +661,8 @@ type canonicalOceanEnginePromotion struct {
 	DeliveryIdentity            canonicalOceanEngineDeliveryIdentity  `json:"delivery_identity"`
 	BaseMaterialReferences      []canonicalStableReference            `json:"base_material_references"`
 	CopyItems                   []OceanEngineCopyItem                 `json:"copy_items"`
+	ProductImageReferences      []canonicalStableReference            `json:"product_image_references,omitempty"`
+	ProductSellingPoints        []string                              `json:"product_selling_points,omitempty"`
 	NativeAnchorReference       *canonicalStableReference             `json:"native_anchor_reference,omitempty"`
 	LandingPageReference        *canonicalStableReference             `json:"landing_page_reference,omitempty"`
 	DirectLinkReference         *canonicalStableReference             `json:"direct_link_reference,omitempty"`
@@ -687,7 +718,9 @@ func canonicalOceanConfiguration(value *OceanEngineConfiguration) *canonicalOcea
 			ProductSelectionMode: strings.TrimSpace(project.ProductSelectionMode), LeadCaptureMode: strings.TrimSpace(project.LeadCaptureMode), Carrier: strings.TrimSpace(project.Carrier),
 			OptimizationTargetReference: canonicalReferencePointer(project.OptimizationTargetReference), DeepOptimizationMode: strings.TrimSpace(project.DeepOptimizationMode),
 			DeliveryMode: strings.TrimSpace(project.DeliveryMode), Schedule: project.Schedule, BudgetAndBidding: project.BudgetAndBidding,
-			MonitoringReferences: canonicalReferences(project.MonitoringReferences), ProjectName: strings.TrimSpace(project.ProjectName),
+			MonitoringReferences: canonicalReferences(project.MonitoringReferences), SearchBoost: project.SearchBoost,
+			ProductCatalogReference: canonicalReferencePointer(project.ProductCatalogReference), PlacementStrategy: strings.TrimSpace(project.PlacementStrategy),
+			ProductTargeting: project.ProductTargeting, ApplicationLaunchMode: strings.TrimSpace(project.ApplicationLaunchMode), ProjectName: strings.TrimSpace(project.ProjectName),
 			Targeting: canonicalOceanEngineTargeting{
 				AudiencePackageReference: canonicalReferencePointer(project.Targeting.AudiencePackageReference),
 				Regions:                  append([]string(nil), project.Targeting.Regions...), AgeRanges: append([]string(nil), project.Targeting.AgeRanges...),
@@ -701,11 +734,13 @@ func canonicalOceanConfiguration(value *OceanEngineConfiguration) *canonicalOcea
 			DraftSchemaVersion: strings.TrimSpace(promotion.DraftSchemaVersion), PromotionDraftID: strings.TrimSpace(promotion.PromotionDraftID),
 			DeliveryIdentity:       canonicalOceanEngineDeliveryIdentity{Mode: strings.TrimSpace(promotion.DeliveryIdentity.Mode), AuthorizedIdentity: canonicalReferencePointer(promotion.DeliveryIdentity.AuthorizedIdentity)},
 			BaseMaterialReferences: canonicalReferences(promotion.BaseMaterialReferences), CopyItems: append([]OceanEngineCopyItem(nil), promotion.CopyItems...),
+			ProductImageReferences: canonicalReferences(promotion.ProductImageReferences), ProductSellingPoints: append([]string(nil), promotion.ProductSellingPoints...),
 			NativeAnchorReference: canonicalReferencePointer(promotion.NativeAnchorReference), LandingPageReference: canonicalReferencePointer(promotion.LandingPageReference),
 			DirectLinkReference: canonicalReferencePointer(promotion.DirectLinkReference), ProductReference: canonicalReferencePointer(promotion.ProductReference),
 			CreativeComponentReferences: canonicalReferences(promotion.CreativeComponentReferences), PromotionName: strings.TrimSpace(promotion.PromotionName),
 			Settings: canonicalOceanEnginePromotionSettings{
 				CallToAction: strings.TrimSpace(promotion.Settings.CallToAction), SourceLabel: strings.TrimSpace(promotion.Settings.SourceLabel), CommentsEnabled: promotion.Settings.CommentsEnabled,
+				SmartGenerationEnabled: promotion.Settings.SmartGenerationEnabled, ClientDownloadEnabled: promotion.Settings.ClientDownloadEnabled, DirectLinkMode: strings.TrimSpace(promotion.Settings.DirectLinkMode),
 				CategoryReference: canonicalReferencePointer(promotion.Settings.CategoryReference), BrandReference: canonicalReferencePointer(promotion.Settings.BrandReference),
 			},
 		}
@@ -827,6 +862,7 @@ func validateOceanEngineConfiguration(configuration OceanEngineConfiguration) er
 		{"marketing_product_reference", project.MarketingProductReference},
 		{"application_reference", project.ApplicationReference},
 		{"optimization_target_reference", project.OptimizationTargetReference},
+		{"product_catalog_reference", project.ProductCatalogReference},
 		{"targeting.audience_package_reference", project.Targeting.AudiencePackageReference},
 	}
 	for _, candidate := range optionalProjectReferences {
@@ -871,6 +907,9 @@ func validateOceanEngineConfiguration(configuration OceanEngineConfiguration) er
 			}
 		}
 		if err := validateReferenceSlices(promotion.BaseMaterialReferences, field+".base_material_references"); err != nil {
+			return err
+		}
+		if err := validateReferenceSlices(promotion.ProductImageReferences, field+".product_image_references"); err != nil {
 			return err
 		}
 		if promotion.BudgetAndBidding != nil {
