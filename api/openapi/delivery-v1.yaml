@@ -2354,6 +2354,38 @@ components:
         value: {}
         expected_readback: {}
         evidence_ref: { type: string }
+        treatment: { type: string, enum: [modelled, dynamic_reference] }
+        control:
+          type: object
+          additionalProperties: false
+          required: [operation, scope, target, readback, expected_target_count]
+          properties:
+            operation: { type: string }
+            scope:
+              type: object
+              additionalProperties: false
+              required: [kind, value]
+              properties:
+                kind: { type: string, enum: [role_name, label, visible_text, placeholder, attribute, domain_key] }
+                value: { type: string, minLength: 1 }
+            target:
+              type: object
+              additionalProperties: false
+              required: [kind, value]
+              properties:
+                kind: { type: string, enum: [role_name, label, visible_text, placeholder, attribute, domain_key] }
+                value: { type: string, minLength: 1 }
+            readback:
+              type: object
+              additionalProperties: false
+              required: [kind, value]
+              properties:
+                kind: { type: string, enum: [role_name, label, visible_text, placeholder, attribute, domain_key] }
+                value: { type: string, minLength: 1 }
+            expected_target_count: { type: integer, const: 1 }
+            unit: { type: string }
+            observed_options: { type: array, items: { type: string } }
+            input_constraints: { type: object, additionalProperties: true }
     CompiledWorkflowStep:
       type: object
       additionalProperties: false
@@ -2403,6 +2435,17 @@ components:
           type: array
           minItems: 3
           items: { $ref: '#/components/schemas/CompiledWorkflowStep' }
+        manifest_diagnostics:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [field_key, treatment, state]
+            properties:
+              field_key: { type: string }
+              treatment: { type: string, enum: [modelled, dynamic_reference, evidence_only, blocked] }
+              state: { type: string, enum: [ready, evidence_only, blocked] }
+              reason: { type: string }
         canonical_hash: { $ref: '#/components/schemas/CanonicalHash' }
         created_by: { type: string }
         created_at: { type: string, format: date-time }

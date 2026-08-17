@@ -387,10 +387,32 @@ const (
 )
 
 type WorkflowField struct {
-	Key              string `json:"key"`
-	Value            any    `json:"value"`
-	ExpectedReadback any    `json:"expected_readback"`
-	EvidenceRef      string `json:"evidence_ref"`
+	Key              string                `json:"key"`
+	Value            any                   `json:"value"`
+	ExpectedReadback any                   `json:"expected_readback"`
+	EvidenceRef      string                `json:"evidence_ref"`
+	Control          *WorkflowFieldControl `json:"control,omitempty"`
+	Treatment        string                `json:"treatment,omitempty"`
+}
+
+// WorkflowFieldControl is copied from the typed Manifest projection. It is
+// descriptive only: this workflow still cannot execute a remote write.
+type WorkflowFieldControl struct {
+	Operation           string                      `json:"operation"`
+	Scope               calibrationmanifest.Locator `json:"scope"`
+	Target              calibrationmanifest.Locator `json:"target"`
+	Readback            calibrationmanifest.Locator `json:"readback"`
+	ExpectedTargetCount int                         `json:"expected_target_count"`
+	Unit                string                      `json:"unit,omitempty"`
+	ObservedOptions     []string                    `json:"observed_options,omitempty"`
+	InputConstraints    map[string]any              `json:"input_constraints,omitempty"`
+}
+
+type ManifestWorkflowDiagnostic struct {
+	FieldKey  string `json:"field_key"`
+	Treatment string `json:"treatment"`
+	State     string `json:"state"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 type CompiledWorkflowStep struct {
@@ -408,53 +430,55 @@ type CompiledWorkflowStep struct {
 }
 
 type CompiledDeliveryWorkflow struct {
-	SchemaVersion              string                     `json:"schema_version"`
-	ID                         string                     `json:"id"`
-	OrganizationID             contract.OrganizationID    `json:"organization_id"`
-	ProjectID                  contract.ProjectID         `json:"project_id"`
-	DecisionID                 string                     `json:"decision_id"`
-	DecisionCanonicalHash      string                     `json:"decision_canonical_hash"`
-	SelectedCandidateID        string                     `json:"selected_candidate_id"`
-	ConfigurationCanonicalHash string                     `json:"configuration_canonical_hash"`
-	ConfigurationID            string                     `json:"configuration_id"`
-	ConfigurationVersion       int                        `json:"configuration_version"`
-	Platform                   DeliveryPlatform           `json:"platform"`
-	ProfileVersion             string                     `json:"profile_version"`
-	AccountReference           StableReference            `json:"account_reference"`
-	CapabilityContractVersion  string                     `json:"capability_contract_version"`
-	SelectorContractVersion    string                     `json:"selector_contract_version"`
-	ActionContractVersion      string                     `json:"action_contract_version"`
-	CalibrationManifest        CalibrationManifestBinding `json:"calibration_manifest"`
-	CompilerVersion            string                     `json:"compiler_version"`
-	Status                     string                     `json:"status"`
-	RemoteWriteEnabled         bool                       `json:"remote_write_enabled"`
-	Steps                      []CompiledWorkflowStep     `json:"steps"`
-	CanonicalHash              string                     `json:"canonical_hash"`
-	CreatedBy                  string                     `json:"created_by"`
-	CreatedAt                  time.Time                  `json:"created_at"`
+	SchemaVersion              string                       `json:"schema_version"`
+	ID                         string                       `json:"id"`
+	OrganizationID             contract.OrganizationID      `json:"organization_id"`
+	ProjectID                  contract.ProjectID           `json:"project_id"`
+	DecisionID                 string                       `json:"decision_id"`
+	DecisionCanonicalHash      string                       `json:"decision_canonical_hash"`
+	SelectedCandidateID        string                       `json:"selected_candidate_id"`
+	ConfigurationCanonicalHash string                       `json:"configuration_canonical_hash"`
+	ConfigurationID            string                       `json:"configuration_id"`
+	ConfigurationVersion       int                          `json:"configuration_version"`
+	Platform                   DeliveryPlatform             `json:"platform"`
+	ProfileVersion             string                       `json:"profile_version"`
+	AccountReference           StableReference              `json:"account_reference"`
+	CapabilityContractVersion  string                       `json:"capability_contract_version"`
+	SelectorContractVersion    string                       `json:"selector_contract_version"`
+	ActionContractVersion      string                       `json:"action_contract_version"`
+	CalibrationManifest        CalibrationManifestBinding   `json:"calibration_manifest"`
+	CompilerVersion            string                       `json:"compiler_version"`
+	Status                     string                       `json:"status"`
+	RemoteWriteEnabled         bool                         `json:"remote_write_enabled"`
+	Steps                      []CompiledWorkflowStep       `json:"steps"`
+	ManifestDiagnostics        []ManifestWorkflowDiagnostic `json:"manifest_diagnostics,omitempty"`
+	CanonicalHash              string                       `json:"canonical_hash"`
+	CreatedBy                  string                       `json:"created_by"`
+	CreatedAt                  time.Time                    `json:"created_at"`
 }
 
 func (w CompiledDeliveryWorkflow) canonicalPayload() any {
 	return struct {
-		SchemaVersion              string                     `json:"schema_version"`
-		DecisionID                 string                     `json:"decision_id"`
-		DecisionCanonicalHash      string                     `json:"decision_canonical_hash"`
-		SelectedCandidateID        string                     `json:"selected_candidate_id"`
-		ConfigurationCanonicalHash string                     `json:"configuration_canonical_hash"`
-		ConfigurationID            string                     `json:"configuration_id"`
-		ConfigurationVersion       int                        `json:"configuration_version"`
-		Platform                   DeliveryPlatform           `json:"platform"`
-		ProfileVersion             string                     `json:"profile_version"`
-		AccountReference           canonicalStableReference   `json:"account_reference"`
-		CapabilityContractVersion  string                     `json:"capability_contract_version"`
-		SelectorContractVersion    string                     `json:"selector_contract_version"`
-		ActionContractVersion      string                     `json:"action_contract_version"`
-		CalibrationManifest        CalibrationManifestBinding `json:"calibration_manifest"`
-		CompilerVersion            string                     `json:"compiler_version"`
-		Status                     string                     `json:"status"`
-		RemoteWriteEnabled         bool                       `json:"remote_write_enabled"`
-		Steps                      []CompiledWorkflowStep     `json:"steps"`
-	}{w.SchemaVersion, w.DecisionID, w.DecisionCanonicalHash, w.SelectedCandidateID, w.ConfigurationCanonicalHash, w.ConfigurationID, w.ConfigurationVersion, w.Platform, w.ProfileVersion, w.AccountReference.canonical(), w.CapabilityContractVersion, w.SelectorContractVersion, w.ActionContractVersion, w.CalibrationManifest, w.CompilerVersion, w.Status, w.RemoteWriteEnabled, w.Steps}
+		SchemaVersion              string                       `json:"schema_version"`
+		DecisionID                 string                       `json:"decision_id"`
+		DecisionCanonicalHash      string                       `json:"decision_canonical_hash"`
+		SelectedCandidateID        string                       `json:"selected_candidate_id"`
+		ConfigurationCanonicalHash string                       `json:"configuration_canonical_hash"`
+		ConfigurationID            string                       `json:"configuration_id"`
+		ConfigurationVersion       int                          `json:"configuration_version"`
+		Platform                   DeliveryPlatform             `json:"platform"`
+		ProfileVersion             string                       `json:"profile_version"`
+		AccountReference           canonicalStableReference     `json:"account_reference"`
+		CapabilityContractVersion  string                       `json:"capability_contract_version"`
+		SelectorContractVersion    string                       `json:"selector_contract_version"`
+		ActionContractVersion      string                       `json:"action_contract_version"`
+		CalibrationManifest        CalibrationManifestBinding   `json:"calibration_manifest"`
+		CompilerVersion            string                       `json:"compiler_version"`
+		Status                     string                       `json:"status"`
+		RemoteWriteEnabled         bool                         `json:"remote_write_enabled"`
+		Steps                      []CompiledWorkflowStep       `json:"steps"`
+		ManifestDiagnostics        []ManifestWorkflowDiagnostic `json:"manifest_diagnostics,omitempty"`
+	}{w.SchemaVersion, w.DecisionID, w.DecisionCanonicalHash, w.SelectedCandidateID, w.ConfigurationCanonicalHash, w.ConfigurationID, w.ConfigurationVersion, w.Platform, w.ProfileVersion, w.AccountReference.canonical(), w.CapabilityContractVersion, w.SelectorContractVersion, w.ActionContractVersion, w.CalibrationManifest, w.CompilerVersion, w.Status, w.RemoteWriteEnabled, w.Steps, w.ManifestDiagnostics}
 }
 
 func (w CompiledDeliveryWorkflow) ComputeCanonicalHash() (string, error) {
@@ -477,6 +501,17 @@ func (w CompiledDeliveryWorkflow) Validate() error {
 		return ErrApprovalContentMismatch
 	}
 	remoteWriteSteps := 0
+	diagnostics := map[string]struct{}{}
+	for _, diagnostic := range w.ManifestDiagnostics {
+		if diagnostic.FieldKey == "" || diagnostic.Treatment == "" || diagnostic.State == "" || diagnostic.FieldKey+":"+diagnostic.Treatment+":"+diagnostic.State == "::" {
+			return ErrInvalidState
+		}
+		key := diagnostic.FieldKey + ":" + diagnostic.Treatment
+		if _, exists := diagnostics[key]; exists {
+			return ErrInvalidState
+		}
+		diagnostics[key] = struct{}{}
+	}
 	for index, step := range w.Steps {
 		if step.Sequence != index+1 {
 			return ErrInvalidState
@@ -489,6 +524,14 @@ func (w CompiledDeliveryWorkflow) Validate() error {
 		if step.Risk == WorkflowRiskRemoteWrite {
 			remoteWriteSteps++
 			if !step.Blocked || step.BlockReason != "PHASE_C_REMOTE_WRITE_PROHIBITED" {
+				return ErrInvalidState
+			}
+		}
+		for _, field := range step.Fields {
+			if field.Control == nil {
+				continue
+			}
+			if field.Treatment != string(calibrationmanifest.Modelled) && field.Treatment != string(calibrationmanifest.DynamicReference) || field.Control.ExpectedTargetCount != 1 || !workflowLocatorValid(field.Control.Scope) || !workflowLocatorValid(field.Control.Target) || !workflowLocatorValid(field.Control.Readback) {
 				return ErrInvalidState
 			}
 		}
@@ -523,6 +566,7 @@ func CompileDeliveryWorkflow(workflowID string, decision DeliveryDecision, candi
 		return CompiledDeliveryWorkflow{}, ErrInvalidState
 	}
 	projections := manifest.Project(calibrationmanifest.CompiledDeliveryWorkflow, oceanEngineManifestFacts(project))
+	diagnostics := workflowManifestDiagnostics(projections)
 	steps := []CompiledWorkflowStep{
 		{ID: "observe-project-context", Sequence: 1, Page: "oceanengine/project", Action: "observe_project_context", Risk: WorkflowRiskObserve, Preconditions: []string{"authenticated context is supplied only in a later execution phase", "page fingerprint must match the frozen calibration Manifest"}, Fields: []WorkflowField{}, TimeoutSeconds: 30, Recovery: "capture read-only evidence and stop on mismatch"},
 	}
@@ -533,7 +577,7 @@ func CompileDeliveryWorkflow(workflowID string, decision DeliveryDecision, candi
 		sequence := len(steps) + 1
 		steps = append(steps, CompiledWorkflowStep{
 			ID: fmt.Sprintf("prepare-%s-local-form", strings.ReplaceAll(projection.Field.Key, ".", "-")), Sequence: sequence, Page: "oceanengine/" + projection.Field.PageFamily, Action: "prepare_local_form", Risk: WorkflowRiskPrepareLocalForm,
-			Preconditions: []string{"page fingerprint matches the frozen Manifest", "scope, target, and readback each resolve once", "reference picker is loaded before inspection"}, Fields: []WorkflowField{{Key: projection.Field.Key, Value: nil, ExpectedReadback: nil, EvidenceRef: "manifest://" + projection.Field.Key}}, TimeoutSeconds: 60, Recovery: "discard local form state; no platform mutation exists",
+			Preconditions: []string{"page fingerprint matches the frozen Manifest", "scope, target, and readback each resolve once", "reference picker is loaded before inspection"}, Fields: []WorkflowField{workflowFieldFromProjection(projection)}, TimeoutSeconds: 60, Recovery: "discard local form state; no platform mutation exists",
 		})
 	}
 	steps = append(steps, CompiledWorkflowStep{
@@ -546,7 +590,7 @@ func CompileDeliveryWorkflow(workflowID string, decision DeliveryDecision, candi
 		DecisionID: decision.ID, DecisionCanonicalHash: decision.CanonicalHash, SelectedCandidateID: candidate.ID, ConfigurationCanonicalHash: configuration.CanonicalHash,
 		ConfigurationID: configuration.ConfigurationID, ConfigurationVersion: configuration.VersionNumber, Platform: configuration.Platform, ProfileVersion: configuration.ProfileVersion,
 		AccountReference: project.AccountReference, CapabilityContractVersion: OceanEngineCapabilityContractV01, SelectorContractVersion: OceanEngineSelectorContractV01, ActionContractVersion: OceanEngineActionContractV01,
-		CalibrationManifest: configuration.Payload.OceanEngine.CalibrationManifest, CompilerVersion: DeliveryWorkflowCompilerV1, Status: "ready_for_final_approval", RemoteWriteEnabled: false, Steps: steps, CreatedBy: actor, CreatedAt: now,
+		CalibrationManifest: configuration.Payload.OceanEngine.CalibrationManifest, CompilerVersion: DeliveryWorkflowCompilerV1, Status: "ready_for_final_approval", RemoteWriteEnabled: false, Steps: steps, ManifestDiagnostics: diagnostics, CreatedBy: actor, CreatedAt: now,
 	}
 	hash, err := workflow.ComputeCanonicalHash()
 	if err != nil {
@@ -557,6 +601,40 @@ func CompileDeliveryWorkflow(workflowID string, decision DeliveryDecision, candi
 		return CompiledDeliveryWorkflow{}, err
 	}
 	return workflow, nil
+}
+
+func workflowFieldFromProjection(projection calibrationmanifest.FieldProjection) WorkflowField {
+	control := projection.Field.ComputerUse
+	return WorkflowField{
+		Key: projection.Field.Key, Value: nil, ExpectedReadback: nil, EvidenceRef: "manifest://" + projection.Field.Key, Treatment: string(projection.Mapping.Treatment),
+		Control: &WorkflowFieldControl{Operation: control.Operation, Scope: control.Scope, Target: control.Target, Readback: control.Readback, ExpectedTargetCount: control.ExpectedTargetCount, Unit: projection.Field.Unit, ObservedOptions: append([]string(nil), control.ObservedOptions...), InputConstraints: control.InputConstraints},
+	}
+}
+
+func workflowManifestDiagnostics(projections []calibrationmanifest.FieldProjection) []ManifestWorkflowDiagnostic {
+	diagnostics := make([]ManifestWorkflowDiagnostic, 0, len(projections))
+	for _, projection := range projections {
+		state := "ready"
+		if projection.Blocked {
+			state = "blocked"
+		} else if !projection.Executable {
+			state = "evidence_only"
+		}
+		diagnostics = append(diagnostics, ManifestWorkflowDiagnostic{FieldKey: projection.Field.Key, Treatment: string(projection.Mapping.Treatment), State: state, Reason: projection.Reason})
+	}
+	return diagnostics
+}
+
+func workflowLocatorValid(locator calibrationmanifest.Locator) bool {
+	if locator.Value == "" {
+		return false
+	}
+	switch locator.Kind {
+	case "role_name", "label", "visible_text", "placeholder", "attribute", "domain_key":
+		return true
+	default:
+		return false
+	}
 }
 
 func oceanEngineManifestFacts(project *OceanEngineProjectDraft) map[string]string {

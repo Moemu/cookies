@@ -50,7 +50,23 @@
                 "key": { "type": "string" },
                 "value": true,
                 "expected_readback": true,
-                "evidence_ref": { "type": "string" }
+                "evidence_ref": { "type": "string" },
+                "treatment": { "enum": ["modelled", "dynamic_reference"] },
+                "control": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["operation", "scope", "target", "readback", "expected_target_count"],
+                  "properties": {
+                    "operation": { "type": "string" },
+                    "scope": { "$ref": "#/$defs/manifestLocator" },
+                    "target": { "$ref": "#/$defs/manifestLocator" },
+                    "readback": { "$ref": "#/$defs/manifestLocator" },
+                    "expected_target_count": { "const": 1 },
+                    "unit": { "type": "string" },
+                    "observed_options": { "type": "array", "items": { "type": "string" } },
+                    "input_constraints": { "type": "object", "additionalProperties": true }
+                  }
+                }
               }
             }
           },
@@ -63,8 +79,33 @@
       }
     },
     "canonical_hash": { "$ref": "#/$defs/hash" },
+    "manifest_diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field_key", "treatment", "state"],
+        "properties": {
+          "field_key": { "type": "string" },
+          "treatment": { "enum": ["modelled", "dynamic_reference", "evidence_only", "blocked"] },
+          "state": { "enum": ["ready", "evidence_only", "blocked"] },
+          "reason": { "type": "string" }
+        }
+      }
+    },
     "created_by": { "type": "string" },
     "created_at": { "type": "string", "format": "date-time" }
   },
-  "$defs": { "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "manifestLocator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "enum": ["role_name", "label", "visible_text", "placeholder", "attribute", "domain_key"] },
+        "value": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
 }
