@@ -145,17 +145,18 @@ func isPlatformEvidenceState(value PlatformEvidenceState) bool {
 // copying that object's business entity into Delivery. Display/evidence fields
 // are audit metadata and are intentionally excluded from canonical payloads.
 type StableReference struct {
-	Namespace           string         `json:"namespace"`
-	ObjectKind          string         `json:"object_kind"`
-	Scope               string         `json:"scope"`
-	ID                  string         `json:"id,omitempty"`
-	Version             string         `json:"version,omitempty"`
-	ContentHash         string         `json:"content_hash,omitempty"`
-	SemanticKey         string         `json:"semantic_key,omitempty"`
-	State               ReferenceState `json:"state"`
-	Reason              string         `json:"reason,omitempty"`
-	DisplayNameSnapshot string         `json:"display_name_snapshot,omitempty"`
-	EvidenceVersion     string         `json:"evidence_version,omitempty"`
+	Namespace           string            `json:"namespace"`
+	ObjectKind          string            `json:"object_kind"`
+	Scope               string            `json:"scope"`
+	ID                  string            `json:"id,omitempty"`
+	Version             string            `json:"version,omitempty"`
+	ContentHash         string            `json:"content_hash,omitempty"`
+	SemanticKey         string            `json:"semantic_key,omitempty"`
+	AuditAttributes     map[string]string `json:"audit_attributes,omitempty"`
+	State               ReferenceState    `json:"state"`
+	Reason              string            `json:"reason,omitempty"`
+	DisplayNameSnapshot string            `json:"display_name_snapshot,omitempty"`
+	EvidenceVersion     string            `json:"evidence_version,omitempty"`
 }
 
 type canonicalStableReference struct {

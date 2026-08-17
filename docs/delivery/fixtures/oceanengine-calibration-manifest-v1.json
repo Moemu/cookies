@@ -246,7 +246,7 @@
     {
       "key": "project.marketing_purpose",
       "semantic_label": "营销目的",
-      "value_labels": { "ecommerce": "商品", "lead_generation": "销售线索", "application": "应用推广", "product_catalog": "商品目录", "content_marketing": "内容营销" },
+      "value_labels": { "ecommerce": "电商", "lead_generation": "销售线索", "application": "应用", "product_catalog": "商品", "content_marketing": "内容营销" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -317,15 +317,15 @@
       "owner": "platform_dynamic_reference",
       "page_family": "project_create",
       "value_type": "dynamic_reference",
-      "condition": "marketing_purpose in [ecommerce,lead_generation]",
+      "condition": "marketing_purpose not in [ecommerce]",
       "condition_dimensions": ["marketing_purpose"],
       "condition_state": "evaluable",
       "condition_rule": {
         "all": [
           {
             "dimension": "marketing_purpose",
-            "operator": "in",
-            "values": ["ecommerce", "lead_generation"]
+            "operator": "not_in",
+            "values": ["ecommerce"]
           }
         ]
       },
@@ -523,15 +523,15 @@
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
-      "condition": "marketing_purpose == lead_generation",
+      "condition": "marketing_purpose not in [ecommerce]",
       "condition_dimensions": ["marketing_purpose"],
       "condition_state": "evaluable",
       "condition_rule": {
         "all": [
           {
             "dimension": "marketing_purpose",
-            "operator": "equals",
-            "values": ["lead_generation"]
+            "operator": "not_in",
+            "values": ["ecommerce"]
           }
         ]
       },
@@ -944,6 +944,7 @@
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "object",
+      "configuration_requirement": "搜索快投包含关键词、必填出价系数和定向扩展。出价系数建议默认值为 1.1。",
       "condition": "marketing_purpose == ecommerce and delivery_mode == manual",
       "condition_dimensions": ["marketing_purpose", "delivery_mode"],
       "condition_state": "evaluable",
@@ -982,6 +983,7 @@
       "owner": "platform_dynamic_reference",
       "page_family": "project_create",
       "value_type": "dynamic_reference",
+      "configuration_requirement": "第三方监测链接按展示、有效触点、视频播放、视频播完和视频有效播放分别配置。",
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "dynamic_reference",

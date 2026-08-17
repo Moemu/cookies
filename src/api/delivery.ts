@@ -43,6 +43,8 @@ export type DeliverySource = 'mock'
 export type DeliveryScenario = 'golden_path' | 'budget_zero' | 'creative_unconfirmed' | 'tracking_missing' | 'incomplete_draft' | 'project_plan_list' | 'approval_queue' | 'missing_required_field' | 'orphan_dependency' | 'missing_confirmation' | 'platform_fields_pending' | 'platform_configuration' | 'capability_pending' | 'preflight_failure' | 'approval_expired' | 'plan_stale' | 'partial_execution' | 'result_unknown' | 'review_rejected_alert'
 
 export type DeliveryPlatform = 'ocean_engine' | 'magnetic_engine'
+export const oceanEngineMarketingPurposes = ['ecommerce', 'lead_generation', 'application', 'product_catalog', 'content_marketing'] as const
+export type OceanEngineMarketingPurpose = typeof oceanEngineMarketingPurposes[number]
 export type StableReference = {
   namespace: string
   object_kind: string
@@ -51,6 +53,7 @@ export type StableReference = {
   version?: string
   content_hash?: string
   semantic_key?: string
+  audit_attributes?: Record<string, string>
   state: 'resolved' | 'unresolved' | 'blocked' | 'redacted'
   reason?: string
   display_name_snapshot?: string
@@ -157,6 +160,15 @@ export type PlatformConfiguration = {
 export type DeliveryPlanDraft = {
   name: string
   objective: string
+  /** A confirmed platform enum. It is separate from the free-text business objective. */
+  marketingPurpose: OceanEngineMarketingPurpose | ''
+  marketingProduct: {
+    id: string
+    name: string
+    activityType: string
+    activityName: string
+    brandName: string
+  }
   advertiser: {
     id: string
     name: string
@@ -172,9 +184,22 @@ export type DeliveryPlanDraft = {
     timezone: string
   }
   tracking: {
+    deliveryCarrier: '' | 'orange_landing_page' | 'owned_landing_page'
     landingPage: string
     pixelId: string
     conversionEvent: string
+    optimizationTargetId: string
+    optimizationTargetName: string
+    eventAssetName: string
+    eventAssetType: string
+    searchKeywords: string
+    searchBidCoefficient: number
+    searchTargetingExpansion: boolean
+    monitoringImpression: string
+    monitoringValidTouch: string
+    monitoringVideoPlay: string
+    monitoringVideoComplete: string
+    monitoringValidVideoPlay: string
   }
   creativeReferences: Array<{
     assetId: string
@@ -508,10 +533,17 @@ export type DeliveryExecutionRecord = {
 type WireDeliveryPlanDraft = {
   name: string
   objective: string
+  marketing_purpose?: OceanEngineMarketingPurpose
   advertiser: { id: string; name: string; platform: 'ocean_engine'; source?: DeliverySource; scenario?: DeliveryScenario }
   budget: { total_minor: number; currency: 'CNY' }
   schedule: { start_at: string; end_at: string; timezone: string }
-  tracking: { landing_page: string; pixel_id: string; conversion_event: string }
+  marketing_product?: { id?: string; name?: string; activity_type?: string; activity_name?: string; brand_name?: string }
+  tracking: {
+    delivery_carrier?: '' | 'orange_landing_page' | 'owned_landing_page'; landing_page: string; pixel_id: string; conversion_event: string
+    optimization_target_id?: string; optimization_target_name?: string; event_asset_name?: string; event_asset_type?: string
+    search_keywords?: string; search_bid_coefficient?: number; search_targeting_expansion?: boolean
+    monitoring_impression?: string; monitoring_valid_touch?: string; monitoring_video_play?: string; monitoring_video_complete?: string; monitoring_valid_video_play?: string
+  }
   creative_references: Array<{ asset_id: string; version: number; content_hash?: string; route?: string; confirmed: boolean }>
   strategy_reference?: { task_id: string; version: number; content_hash?: string; route?: string }
   source_strategy_version: string
@@ -1509,6 +1541,7 @@ function toWireDraft(draft: DeliveryPlanDraft): WireDeliveryPlanDraft {
   return {
     name: draft.name,
     objective: draft.objective,
+    marketing_purpose: draft.marketingPurpose || undefined,
     advertiser: draft.advertiser,
     budget: { total_minor: draft.budget.totalMinor, currency: draft.budget.currency },
     schedule: { start_at: draft.schedule.startAt, end_at: draft.schedule.endAt, timezone: draft.schedule.timezone },
@@ -1536,6 +1569,24 @@ function toWireDraft(draft: DeliveryPlanDraft): WireDeliveryPlanDraft {
 
 function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumber: number, draft: DeliveryPlanDraft) {
   const scope = `project:${projectId}`
+  const marketingProductReference: StableReference | undefined = draft.marketingProduct.id ? {
+    namespace: 'oceanengine', object_kind: 'product', scope, id: draft.marketingProduct.id, state: 'resolved',
+    display_name_snapshot: draft.marketingProduct.name,
+    audit_attributes: { activity_type: draft.marketingProduct.activityType, activity_name: draft.marketingProduct.activityName, brand_name: draft.marketingProduct.brandName },
+  } : undefined
+  const optimizationTargetReference: StableReference | undefined = draft.tracking.optimizationTargetId ? {
+    namespace: 'oceanengine', object_kind: 'optimization_target', scope, id: draft.tracking.optimizationTargetId, state: 'resolved',
+    display_name_snapshot: draft.tracking.optimizationTargetName,
+    audit_attributes: { event_asset_name: draft.tracking.eventAssetName, event_asset_type: draft.tracking.eventAssetType },
+  } : undefined
+  const monitoringReferences = [
+    ['impression', draft.tracking.monitoringImpression], ['valid_touch', draft.tracking.monitoringValidTouch],
+    ['video_play', draft.tracking.monitoringVideoPlay], ['video_complete', draft.tracking.monitoringVideoComplete],
+    ['valid_video_play', draft.tracking.monitoringValidVideoPlay],
+  ].flatMap(([kind, url]) => url ? [{ namespace: 'oceanengine', object_kind: `monitoring_link_${kind}`, scope, id: url, state: 'resolved' as const }] : [])
+  const landingPageReference: StableReference | undefined = draft.tracking.deliveryCarrier === 'owned_landing_page' && draft.tracking.landingPage ? {
+    namespace: 'cookies', object_kind: 'landing_page', scope, id: draft.tracking.landingPage, state: 'resolved',
+  } : undefined
   const materialReferences: StableReference[] = draft.creativeReferences.map(reference => ({
     namespace: 'cookies', object_kind: 'asset_version', scope,
     id: reference.assetId, version: String(reference.version), content_hash: reference.contentHash,
@@ -1554,7 +1605,7 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
       budget_boundary: { currency: 'CNY', minimum_total_minor: 0, maximum_total_minor: draft.budget.totalMinor },
       schedule_boundary: { earliest_start: draft.schedule.startAt, latest_end: draft.schedule.endAt, timezone: draft.schedule.timezone },
       optimization_preferences: [], material_references: materialReferences,
-      landing_page_references: [{ namespace: 'cookies', object_kind: 'landing_page', scope, id: draft.tracking.landingPage, state: 'resolved' }],
+      landing_page_references: landingPageReference ? [landingPageReference] : [],
       audience_constraints: { constraints: [] }, strategy_reference: strategyReference,
       calibration_manifest: { schema_version: 'oceanengine-calibration-manifest/v1', manifest_id: 'oceanengine-calibration-current-test-account-2026-08-16' },
     },
@@ -1572,16 +1623,21 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
         project: {
           draft_schema_version: 'oceanengine-configuration/v1', project_draft_id: `project-${identity}-${versionNumber}`,
           account_reference: { namespace: 'oceanengine', object_kind: 'advertiser_account', scope, id: draft.advertiser.id, state: 'resolved', display_name_snapshot: draft.advertiser.name },
-          marketing_purpose: draft.objective, marketing_scenario: 'manual_delivery', carrier: 'landing_page', delivery_mode: 'manual',
+          marketing_purpose: draft.marketingPurpose, marketing_scenario: 'short_video_image_text',
+          product_selection_mode: draft.marketingPurpose && draft.marketingPurpose !== 'ecommerce' ? 'manual' : undefined,
+          marketing_product_reference: marketingProductReference,
+          carrier: draft.tracking.deliveryCarrier, optimization_target_reference: optimizationTargetReference, delivery_mode: 'manual',
           targeting: { smart_expansion: false },
           schedule: { start_at: draft.schedule.startAt, end_at: draft.schedule.endAt, timezone: draft.schedule.timezone },
-          budget_and_bidding: { currency: 'CNY', daily_budget_minor: dailyBudget, bidding_strategy: 'manual_bid', charging_mode: 'CPC', bid_minor: 0 },
+          budget_and_bidding: { currency: 'CNY', daily_budget_minor: dailyBudget, bidding_strategy: 'stable_cost', charging_mode: 'CPC', bid_minor: 0 },
+          search_boost: { keywords: draft.tracking.searchKeywords.split(/[,，]/).map(value => value.trim()).filter(Boolean), bid_coefficient: draft.tracking.searchBidCoefficient, targeting_expansion: draft.tracking.searchTargetingExpansion },
+          monitoring_references: monitoringReferences,
           project_name: draft.name,
         },
         promotions: materialReferences.map((reference, index) => ({
           draft_schema_version: 'oceanengine-configuration/v1', promotion_draft_id: `promotion-${identity}-${index + 1}`,
           delivery_identity: { mode: 'account_info' }, base_material_references: [reference], copy_items: [],
-          landing_page_reference: { namespace: 'cookies', object_kind: 'landing_page', scope, id: draft.tracking.landingPage, state: 'resolved' },
+          landing_page_reference: landingPageReference,
           settings: { call_to_action: draft.tracking.conversionEvent }, promotion_name: `${draft.name}-${index + 1}`,
         })),
       },
@@ -1621,6 +1677,9 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
   const firstPromotion = configuration?.payload.ocean_engine?.promotions[0]
   const materialReferences = intent?.payload.material_references ?? []
   const typedRuntime = Boolean(intent && configuration)
+  const productAudit = project?.marketing_product_reference?.audit_attributes ?? {}
+  const optimizationAudit = project?.optimization_target_reference?.audit_attributes ?? {}
+  const monitoringValue = (kind: string) => project?.monitoring_references?.find(reference => reference.object_kind === `monitoring_link_${kind}`)?.id ?? ''
   const fallbackAdvertiser = { id: project?.account_reference.id ?? '', name: project?.account_reference.display_name_snapshot ?? '平台账户', platform: 'ocean_engine' as const, source: version.source, scenario: version.scenario }
   return {
     planId: version.plan_id,
@@ -1634,6 +1693,14 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
     readOnly: version.read_only,
     name: typedRuntime ? project?.project_name ?? '平台投放配置' : version.name ?? '平台投放配置',
     objective: typedRuntime ? intent?.payload.marketing_objective ?? '' : version.objective ?? '',
+    marketingPurpose: marketingPurposeValue(typedRuntime ? project?.marketing_purpose : version.marketing_purpose),
+    marketingProduct: typedRuntime ? {
+      id: project?.marketing_product_reference?.id ?? '', name: project?.marketing_product_reference?.display_name_snapshot ?? '',
+      activityType: productAudit.activity_type ?? '', activityName: productAudit.activity_name ?? '', brandName: productAudit.brand_name ?? '',
+    } : {
+      id: version.marketing_product?.id ?? '', name: version.marketing_product?.name ?? '', activityType: version.marketing_product?.activity_type ?? '',
+      activityName: version.marketing_product?.activity_name ?? '', brandName: version.marketing_product?.brand_name ?? '',
+    },
     advertiser: {
       id: typedRuntime ? fallbackAdvertiser.id : version.advertiser?.id ?? '',
       name: typedRuntime ? fallbackAdvertiser.name : version.advertiser?.name ?? '',
@@ -1648,9 +1715,22 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
       ? { startAt: intent?.payload.schedule_boundary.earliest_start ?? '', endAt: intent?.payload.schedule_boundary.latest_end ?? '', timezone: intent?.payload.schedule_boundary.timezone ?? 'Asia/Shanghai' }
       : { startAt: version.schedule?.start_at ?? '', endAt: version.schedule?.end_at ?? '', timezone: version.schedule?.timezone ?? 'Asia/Shanghai' },
     tracking: {
+      deliveryCarrier: typedRuntime ? (project?.carrier === 'orange_landing_page' || project?.carrier === 'owned_landing_page' ? project.carrier : '') : version.tracking?.delivery_carrier ?? '',
       landingPage: typedRuntime ? intent?.payload.landing_page_references?.[0]?.id ?? '' : version.tracking?.landing_page ?? '',
       pixelId: typedRuntime ? '' : version.tracking?.pixel_id ?? '',
       conversionEvent: typedRuntime ? firstPromotion?.settings.call_to_action ?? '' : version.tracking?.conversion_event ?? '',
+      optimizationTargetId: typedRuntime ? project?.optimization_target_reference?.id ?? '' : version.tracking?.optimization_target_id ?? '',
+      optimizationTargetName: typedRuntime ? project?.optimization_target_reference?.display_name_snapshot ?? '' : version.tracking?.optimization_target_name ?? '',
+      eventAssetName: typedRuntime ? optimizationAudit.event_asset_name ?? '' : version.tracking?.event_asset_name ?? '',
+      eventAssetType: typedRuntime ? optimizationAudit.event_asset_type ?? '' : version.tracking?.event_asset_type ?? '',
+      searchKeywords: typedRuntime ? project?.search_boost?.keywords?.join('，') ?? '' : version.tracking?.search_keywords ?? '',
+      searchBidCoefficient: typedRuntime ? project?.search_boost?.bid_coefficient ?? 1.1 : version.tracking?.search_bid_coefficient ?? 1.1,
+      searchTargetingExpansion: typedRuntime ? project?.search_boost?.targeting_expansion ?? false : version.tracking?.search_targeting_expansion ?? false,
+      monitoringImpression: typedRuntime ? monitoringValue('impression') : version.tracking?.monitoring_impression ?? '',
+      monitoringValidTouch: typedRuntime ? monitoringValue('valid_touch') : version.tracking?.monitoring_valid_touch ?? '',
+      monitoringVideoPlay: typedRuntime ? monitoringValue('video_play') : version.tracking?.monitoring_video_play ?? '',
+      monitoringVideoComplete: typedRuntime ? monitoringValue('video_complete') : version.tracking?.monitoring_video_complete ?? '',
+      monitoringValidVideoPlay: typedRuntime ? monitoringValue('valid_video_play') : version.tracking?.monitoring_valid_video_play ?? '',
     },
     creativeReferences: (typedRuntime ? materialReferences.map(reference => ({ asset_id: reference.id ?? '', version: Number(reference.version ?? 1), content_hash: reference.content_hash, route: undefined, confirmed: reference.state === 'resolved' })) : version.creative_references ?? []).map(reference => ({
       assetId: reference.asset_id,
@@ -1680,6 +1760,12 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
     deliveryIntent: intent,
     platformConfiguration: configuration,
   }
+}
+
+function marketingPurposeValue(value: unknown): OceanEngineMarketingPurpose | '' {
+  return typeof value === 'string' && (oceanEngineMarketingPurposes as readonly string[]).includes(value)
+    ? value as OceanEngineMarketingPurpose
+    : ''
 }
 
 function toDeliveryDecision(value: WireDeliveryDecision): DeliveryDecision {

@@ -71,3 +71,10 @@ test('the calibration view preserves blocked and pending field reasons', () => {
   assert.equal(promotion.find(field => field.key === 'promotion.bid')?.state, 'missing_value')
   assert.equal(promotion.find(field => field.key === 'promotion.category')?.state, 'missing_value')
 })
+
+test('legacy generic carrier is not treated as a configured platform value', () => {
+  const legacy = structuredClone(configuration)
+  legacy.project.carrier = 'landing_page'
+  const project = oceanEngineCalibrationDispositions(legacy, 'project')
+  assert.equal(project.find(field => field.key === 'project.carrier')?.state, 'platform_pending')
+})

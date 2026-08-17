@@ -32,6 +32,7 @@ type ConsumerMapping = {
 type ManifestSource = {
   fields: ManifestField[]
   consumer_mappings: ConsumerMapping[]
+  condition_vocabulary: Array<{ key: string; known_values?: string[]; unknown_value_treatment: 'platform_pending' }>
 }
 
 export type VisibleManifestField = {
@@ -53,6 +54,7 @@ export type CalibrationDisposition = {
 }
 
 const manifest = manifestSource as ManifestSource
+const conditionVocabulary = new Map(manifest.condition_vocabulary.map(entry => [entry.key, entry]))
 
 function toSnakeCase(value: string) {
   return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/\[\]$/, '').toLowerCase()
@@ -114,6 +116,12 @@ function usableMappingValues(mapping: ConsumerMapping, values: unknown[]) {
   return values.filter(value => value && typeof value === 'object' && (value as Record<string, unknown>).state === 'resolved')
 }
 
+function hasUnknownVocabularyValue(field: ManifestField, values: unknown[]) {
+  const vocabulary = conditionVocabulary.get(field.key.replace(/^project\./, '').replace(/^promotion\./, ''))
+  if (!vocabulary?.known_values?.length) return false
+  return values.some(value => typeof value === 'string' && !vocabulary.known_values?.includes(value))
+}
+
 function disposition(field: ManifestField, mapping: ConsumerMapping, state: CalibrationDisposition['state'], reason: string): CalibrationDisposition {
   return { key: field.key, label: fieldLabel(field), pageFamily: field.page_family, treatment: mapping.treatment, state, reason }
 }
@@ -152,6 +160,7 @@ export function oceanEngineCalibrationDispositions(configuration: unknown, scope
       if (mapping.treatment === 'blocked') return [disposition(field, mapping, 'blocked', blockedReason)]
       if (field.condition_state === 'dependency_only') return [disposition(field, mapping, 'platform_pending', blockedReason)]
       if (!conditionMatches(field.condition_rule, facts)) return [disposition(field, mapping, 'condition_unmet', field.condition ? `当前条件不满足：${field.condition}` : '当前路径条件无法确认。')]
+      if (hasUnknownVocabularyValue(field, values)) return [disposition(field, mapping, 'platform_pending', '当前值不是冻结 Manifest 的已知平台值。请在投放计划中重新选择。')]
       if (!values.length) return [disposition(field, mapping, 'missing_value', field.configuration_requirement ?? '当前计划未提供该字段的稳定值。')]
       return [disposition(field, mapping, 'ready', '当前条件满足，且配置值已存在。')]
     })
