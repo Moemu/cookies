@@ -104,6 +104,11 @@ function fieldLabel(field: ManifestField) {
   return field.computer_use?.scope?.value || locator || field.key
 }
 
+function usableMappingValues(mapping: ConsumerMapping, values: unknown[]) {
+  if (mapping.treatment !== 'dynamic_reference') return values
+  return values.filter(value => value && typeof value === 'object' && (value as Record<string, unknown>).state === 'resolved')
+}
+
 function disposition(field: ManifestField, mapping: ConsumerMapping, state: CalibrationDisposition['state'], reason: string): CalibrationDisposition {
   return { key: field.key, label: fieldLabel(field), pageFamily: field.page_family, treatment: mapping.treatment, state, reason }
 }
@@ -120,7 +125,7 @@ export function visibleOceanEngineManifestFields(configuration: unknown, scope: 
       const path = scope === 'promotion' && promotion
         ? mapping.contract_path.replace('OceanEngineConfiguration.Promotions[].', 'OceanEngineConfiguration.')
         : mapping.contract_path
-      const values = valuesAtPath(scope === 'promotion' && promotion ? promotion : configuration, path)
+      const values = usableMappingValues(mapping, valuesAtPath(scope === 'promotion' && promotion ? promotion : configuration, path))
       return values.length ? [{ key: field.key, label: fieldLabel(field), unit: field.unit, value: values.length === 1 ? values[0] : values }] : []
     })
 }
@@ -132,7 +137,7 @@ export function oceanEngineCalibrationDispositions(configuration: unknown, scope
     .flatMap<CalibrationDisposition>(mapping => {
       const field = manifest.fields.find(candidate => candidate.key === mapping.field_key)
       if (!field || (mapping.field_key.startsWith('project.') ? 'project' : 'promotion') !== scope) return []
-      const values = valuesAtPath(configuration, mapping.contract_path)
+      const values = usableMappingValues(mapping, valuesAtPath(configuration, mapping.contract_path))
       const blockedReason = field.computer_use?.reason
         ?? (field.computer_use?.blocked_state ? `稳定阻断状态：${field.computer_use.blocked_state}` : undefined)
         ?? (field.computer_use?.input_constraints ? '当前页面输入约束不允许生成可执行配置。' : undefined)

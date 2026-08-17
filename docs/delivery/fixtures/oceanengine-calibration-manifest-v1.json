@@ -2155,7 +2155,7 @@
     {
       "field_key": "project.marketing_product_reference",
       "destination": "OceanEngineConfiguration",
-      "treatment": "modelled",
+      "treatment": "dynamic_reference",
       "contract_path": "OceanEngineConfiguration.Project.MarketingProductReference"
     },
     {
@@ -2173,7 +2173,7 @@
     {
       "field_key": "project.application_reference",
       "destination": "OceanEngineConfiguration",
-      "treatment": "modelled",
+      "treatment": "dynamic_reference",
       "contract_path": "OceanEngineConfiguration.Project.ApplicationReference"
     },
     {

@@ -9,6 +9,7 @@ const configuration = {
     product_selection_mode: 'manual',
     lead_capture_mode: 'custom_lead',
     carrier: 'orange_landing_page',
+    optimization_target_reference: { namespace: 'oceanengine', object_kind: 'optimization_target', scope: 'account:test', state: 'unresolved', reason: 'pending' },
     delivery_mode: 'manual',
     targeting: { smart_expansion: false },
     schedule: { start_at: '2026-08-24T00:00:00Z', end_at: '2026-09-07T00:00:00Z', timezone: 'Asia/Shanghai' },
