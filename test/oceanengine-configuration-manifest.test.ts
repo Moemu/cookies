@@ -45,10 +45,12 @@ test('the configuration page shows only usable Manifest fields', () => {
   assert.equal(projectFields.find(field => field.key === 'project.daily_budget_minor')?.unit, 'CNY_fen')
   assert.equal(projectFields.find(field => field.key === 'project.product_selection_mode')?.label, '营销产品选择方式')
   assert.equal(projectFields.find(field => field.key === 'project.carrier')?.label, '投放载体')
+  assert.equal(projectFields.find(field => field.key === 'project.carrier')?.valueLabels?.landing_page, '落地页（类型未细分）')
   assert.equal(projectFields.find(field => field.key === 'project.marketing_purpose')?.valueLabels?.lead_generation, '销售线索')
   assert.equal(projectFields.find(field => field.key === 'project.marketing_scenario')?.valueLabels?.manual_delivery, '短视频和图文')
   assert.equal(projectFields.find(field => field.key === 'project.delivery_mode')?.valueLabels?.manual_delivery, '手动投放')
   assert.equal(projectFields.find(field => field.key === 'project.bidding_strategy')?.valueLabels?.stable_cost, '稳定成本')
+  assert.equal(projectFields.find(field => field.key === 'project.bidding_strategy')?.valueLabels?.manual_bid, '手动出价')
   assert.equal(promotionFields.find(field => field.key === 'promotion.delivery_identity')?.propertyLabels?.mode, '身份方式')
   assert.deepEqual(promotionFields.map(field => field.key), [
     'promotion.delivery_identity',

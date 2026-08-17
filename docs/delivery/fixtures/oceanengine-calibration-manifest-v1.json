@@ -587,7 +587,7 @@
     {
       "key": "project.carrier",
       "semantic_label": "投放载体",
-      "value_labels": { "orange_landing_page_and_im": "橙子落地页和私信", "orange_landing_page": "橙子落地页", "owned_landing_page": "自研落地页", "im": "私信", "byte_miniapp": "字节小程序", "wechat_miniapp": "微信小程序" },
+      "value_labels": { "landing_page": "落地页（类型未细分）", "orange_landing_page_and_im": "橙子落地页和私信", "orange_landing_page": "橙子落地页", "owned_landing_page": "自研落地页", "im": "私信", "byte_miniapp": "字节小程序", "wechat_miniapp": "微信小程序" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
@@ -843,7 +843,7 @@
     {
       "key": "project.bidding_strategy",
       "semantic_label": "竞价策略",
-      "value_labels": { "stable_cost": "稳定成本", "optimal_cost": "最优成本", "maximum_conversion": "最大转化" },
+      "value_labels": { "manual_bid": "手动出价", "stable_cost": "稳定成本", "optimal_cost": "最优成本", "maximum_conversion": "最大转化" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
