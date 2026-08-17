@@ -133,7 +133,6 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
 
   return <StateBoundary state={state} contextLabel="智能投放 / 平台配置" errorDetail="当前 Project 的平台配置无法读取。">
     <div className="delivery-config-workspace">
-      <header className="delivery-config-heading"><div><span className="section-label">投放配置</span><h2>平台投放配置</h2><p>核对业务意图对应的平台项目、预算、排期和推广单元，并在提交前完成检查。</p></div><div className="delivery-config-source"><button onClick={() => void refresh()} disabled={busy}><RefreshCw size={14}/>刷新当前 Project</button></div></header>
       <section className="delivery-config-toolbar"><label>投放计划<select value={selectedId} onChange={event => setSelectedId(event.target.value)}>{plans.map(plan => <option value={plan.id} key={plan.id}>{plan.currentVersion.name} · V{plan.currentVersionNumber}</option>)}</select></label><a className="secondary-button" href={planEditorURL}>查看投放计划</a></section>
 
       {!selectedPlan ? <div className="panel-empty">当前 Project 暂无投放计划。<a href={planEditorURL}>前往创建</a></div> : legacyReadOnly ? <section className="delivery-config-config-card">
