@@ -1,24 +1,56 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Archive, Check, Package, Pencil, Plus, RefreshCw, Save, X } from 'lucide-react'
 import {
+  activityTypeLabels,
+  brandTypeLabels,
   platformClient,
+  productPriceBandLabels,
+  type PlatformBrandType,
   type PlatformProduct,
+  type PlatformProductCategory,
+  type PlatformProductPriceBand,
   type PlatformProductProjectRef,
 } from '../data/platformClient'
 
 type ProductForm = {
+  category: PlatformProductCategory
   name: string
+  productImage: string
+  priceBand: PlatformProductPriceBand | ''
   activityType: string
-  activityName: string
+  brandType: PlatformBrandType | ''
   brandName: string
+  description: string
 }
 
-const emptyForm: ProductForm = { name: '', activityType: '', activityName: '', brandName: '' }
+const emptyForm: ProductForm = {
+  category: 'product', name: '', productImage: '', priceBand: '', activityType: '', brandType: '', brandName: '', description: '',
+}
 
 type ProductDialog = { mode: 'create' } | { mode: 'edit'; product: PlatformProduct }
 
 function formatTime(value?: string) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
+}
+
+function categoryLabel(category?: PlatformProductCategory) {
+  return category === 'activity' ? '活动' : '商品'
+}
+
+function brandTypeLabel(brandType?: PlatformBrandType) {
+  return brandType ? brandTypeLabels[brandType] : '—'
+}
+
+function priceBandLabel(band?: PlatformProductPriceBand) {
+  return band ? productPriceBandLabels[band] : '—'
+}
+
+function activityLabel(product: PlatformProduct) {
+  if (product.category === 'activity') {
+    const type = product.activity_type ? (activityTypeLabels[product.activity_type] ?? product.activity_type) : '活动'
+    return `${type} · ${product.activity_name || product.name}`
+  }
+  return `${priceBandLabel(product.price_band)} · ${product.brand_name || '未设置品牌'}`
 }
 
 function mappingStatus(product: PlatformProduct) {
@@ -76,37 +108,46 @@ export function ProductsPage({ activeView }: { activeView: string }) {
 
   const openEdit = (product: PlatformProduct) => {
     setForm({
+      category: product.category,
       name: product.name,
+      productImage: product.product_image ?? '',
+      priceBand: product.price_band ?? '',
       activityType: product.activity_type ?? '',
-      activityName: product.activity_name ?? '',
+      brandType: product.brand_type ?? '',
       brandName: product.brand_name ?? '',
+      description: product.description ?? '',
     })
     setDialog({ mode: 'edit', product })
   }
 
   const submitDialog = async () => {
     if (!form.name.trim()) {
-      setNotice('产品名称不能为空。')
+      setNotice(`${form.category === 'activity' ? '活动' : '商品'}名称不能为空。`)
       return
+    }
+    if (form.category === 'activity' && !form.activityType.trim()) {
+      setNotice('请选择活动类型。')
+      return
+    }
+    const input = {
+      name: form.name.trim(),
+      category: form.category,
+      product_image: form.category === 'product' ? form.productImage.trim() || undefined : undefined,
+      price_band: form.category === 'product' && form.priceBand ? form.priceBand : undefined,
+      activity_type: form.category === 'activity' ? form.activityType.trim() || undefined : undefined,
+      activity_name: form.category === 'activity' ? form.name.trim() || undefined : undefined,
+      brand_type: form.brandType || undefined,
+      brand_name: form.brandName.trim() || undefined,
+      description: form.description.trim() || undefined,
     }
     setBusy(true)
     try {
       if (dialog?.mode === 'edit') {
-        const updated = await platformClient.updateProduct(dialog.product.id, {
-          name: form.name.trim(),
-          activity_type: form.activityType.trim() || undefined,
-          activity_name: form.activityName.trim() || undefined,
-          brand_name: form.brandName.trim() || undefined,
-        })
+        const updated = await platformClient.updateProduct(dialog.product.id, input)
         setProducts(current => current.map(item => item.id === updated.id ? updated : item))
         setNotice(`${updated.name} 已更新。`)
       } else {
-        const created = await platformClient.createProduct({
-          name: form.name.trim(),
-          activity_type: form.activityType.trim() || undefined,
-          activity_name: form.activityName.trim() || undefined,
-          brand_name: form.brandName.trim() || undefined,
-        })
+        const created = await platformClient.createProduct(input)
         setProducts(current => [...current, created])
         setSelectedId(created.id)
         setNotice(`${created.name} 已创建。`)
@@ -164,7 +205,7 @@ export function ProductsPage({ activeView }: { activeView: string }) {
   return <div className="products-view">
     <div className="table-surface">
       <div className="surface-toolbar">
-        <div><span className="section-label">PRODUCT CATALOG</span><h3>{isMapping ? '巨量映射' : '产品列表'}</h3><span className="products-count">{products.length} 个产品</span></div>
+        <div><span className="section-label">PRODUCT CATALOG</span><h3>{isMapping ? '巨量映射' : '产品列表'}</h3><span className="products-count">{products.length} 个{isMapping ? '' : '产品'}</span></div>
         <div className="products-toolbar-actions">
           <button aria-label="刷新" onClick={() => void load()} disabled={busy}><RefreshCw size={15}/></button>
           <button className="primary-button" onClick={openCreate} disabled={busy}><Plus size={15}/>新建产品</button>
@@ -172,11 +213,11 @@ export function ProductsPage({ activeView }: { activeView: string }) {
       </div>
 
       {isMapping ? <table>
-        <thead><tr><th>产品</th><th>活动</th><th>映射状态</th><th>巨量商品 ID</th></tr></thead>
+        <thead><tr><th>名称</th><th>类型 / 规格</th><th>映射状态</th><th>巨量商品 ID</th></tr></thead>
         <tbody>
           {products.map(product => <tr key={product.id}>
             <td><b>{product.name}</b><small>{product.id}</small></td>
-            <td><b>{[product.activity_name, product.brand_name].filter(Boolean).join(' · ') || '—'}</b><small>{product.activity_type || '未设置活动类型'}</small></td>
+            <td><b>{categoryLabel(product.category)}</b><small>{activityLabel(product)}</small></td>
             <td>{mappingStatus(product)}</td>
             <td>{product.ocean_engine_product_id
               ? <span className="products-mapping-value"><code>{product.ocean_engine_product_id}</code><button className="text-button" onClick={() => void clearMapping(product)} disabled={busy}>清空</button></span>
@@ -188,11 +229,12 @@ export function ProductsPage({ activeView }: { activeView: string }) {
           </tr>)}
         </tbody>
       </table> : <table>
-        <thead><tr><th>产品</th><th>活动 / 品牌</th><th>巨量映射</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th>名称</th><th>类型 / 规格</th><th>品牌</th><th>巨量映射</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
           {products.map(product => <tr key={product.id} className={product.id === selectedId ? 'products-row-selected' : undefined} onClick={() => setSelectedId(product.id)}>
             <td><b>{product.name}</b><small className="products-id">{product.id}</small></td>
-            <td><b>{[product.activity_name, product.brand_name].filter(Boolean).join(' · ') || '—'}</b><small>{product.activity_type || '未设置活动类型'}</small></td>
+            <td><b>{categoryLabel(product.category)}</b><small>{activityLabel(product)}</small></td>
+            <td><b>{brandTypeLabel(product.brand_type)}</b><small>{product.brand_name || '—'}</small></td>
             <td>{mappingStatus(product)}</td>
             <td><span className={`status ${product.status === 'archived' ? 'warning' : 'success'}`}><span/>{product.status === 'archived' ? '已归档' : '启用'}</span></td>
             <td><span className="products-row-actions">
@@ -207,15 +249,19 @@ export function ProductsPage({ activeView }: { activeView: string }) {
 
     {!isMapping && selected ? <div className="products-detail">
       <header>
-        <div><span className="section-label">产品对象</span><h2>{selected.name}</h2><p>cookies 产品是事实源；巨量商品 ID 只是平台映射。</p></div>
+        <div><span className="section-label">{categoryLabel(selected.category)}对象</span><h2>{selected.name}</h2><p>cookies 产品是事实源；巨量商品 ID 只是平台映射。</p></div>
         <span className="products-detail-id">{selected.id}</span>
       </header>
       <dl>
-        <div><dt>活动类型</dt><dd>{selected.activity_type || '—'}</dd></div>
-        <div><dt>活动名称</dt><dd>{selected.activity_name || '—'}</dd></div>
+        {selected.category === 'activity'
+          ? <><div><dt>活动类型</dt><dd>{selected.activity_type ? (activityTypeLabels[selected.activity_type] ?? selected.activity_type) : '—'}</dd></div>
+              <div><dt>活动名称</dt><dd>{selected.activity_name || selected.name}</dd></div></>
+          : <><div><dt>价格带</dt><dd>{priceBandLabel(selected.price_band)}</dd></div>
+              <div><dt>商品图片</dt><dd>{selected.product_image ? <a href={selected.product_image} target="_blank" rel="noreferrer">查看图片</a> : '—'}</dd></div></>}
+        <div><dt>品牌类型</dt><dd>{brandTypeLabel(selected.brand_type)}</dd></div>
         <div><dt>品牌名称</dt><dd>{selected.brand_name || '—'}</dd></div>
+        <div><dt>描述</dt><dd>{selected.description || '—'}</dd></div>
         <div><dt>创建时间</dt><dd>{formatTime(selected.created_at)}</dd></div>
-        <div><dt>更新时间</dt><dd>{formatTime(selected.updated_at)}</dd></div>
       </dl>
       <footer>
         <div><span>巨量映射</span>{mappingStatus(selected)}</div>
@@ -229,10 +275,42 @@ export function ProductsPage({ activeView }: { activeView: string }) {
           <div><span className="section-label">{dialog.mode === 'edit' ? 'EDIT PRODUCT' : 'NEW PRODUCT'}</span><h3>{dialog.mode === 'edit' ? `编辑 ${dialog.product.name}` : '新建产品'}</h3></div>
           <button type="button" aria-label="关闭" onClick={() => setDialog(null)} disabled={busy}><X size={16}/></button>
         </header>
-        <label>产品名称 <em>必填</em><input autoFocus required placeholder="如 双十一主推款礼盒" value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))}/></label>
-        <label>活动类型<input placeholder="如 promotion / 新品上市" value={form.activityType} onChange={event => setForm(current => ({ ...current, activityType: event.target.value }))}/></label>
-        <label>活动名称<input placeholder="如 双十一大促" value={form.activityName} onChange={event => setForm(current => ({ ...current, activityName: event.target.value }))}/></label>
-        <label>品牌名称<input placeholder="如 娇兰" value={form.brandName} onChange={event => setForm(current => ({ ...current, brandName: event.target.value }))}/></label>
+
+        <label><span className="products-dialog-label">商品类型</span>
+          <span className="products-category-switch">
+            <button type="button" className={form.category === 'product' ? 'active' : ''} onClick={() => setForm(current => ({ ...current, category: 'product', activityType: '', activityName: '' }))}>商品</button>
+            <button type="button" className={form.category === 'activity' ? 'active' : ''} onClick={() => setForm(current => ({ ...current, category: 'activity', productImage: '', priceBand: '' }))}>活动</button>
+          </span>
+        </label>
+
+        {form.category === 'activity' ? <>
+          <label><span className="products-dialog-label">活动类型</span>
+            <select value={form.activityType} onChange={event => setForm(current => ({ ...current, activityType: event.target.value }))}>
+              <option value="">请选择活动类型</option>
+              {Object.entries(activityTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <label><span className="products-dialog-label">活动名称</span><input autoFocus required placeholder="如 双十一红包雨" value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))}/></label>
+        </> : <>
+          <label><span className="products-dialog-label">商品名称</span><input autoFocus required placeholder="如 山茶花面霜" value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))}/></label>
+          <label><span className="products-dialog-label">商品图片</span><input placeholder="https://cdn.example.com/cream.jpg" value={form.productImage} onChange={event => setForm(current => ({ ...current, productImage: event.target.value }))}/></label>
+          <label><span className="products-dialog-label">价格带</span>
+            <select value={form.priceBand} onChange={event => setForm(current => ({ ...current, priceBand: event.target.value as PlatformProductPriceBand }))}>
+              <option value="">请选择价格带</option>
+              {Object.entries(productPriceBandLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+        </>}
+
+        <label><span className="products-dialog-label">品牌类型</span>
+          <select value={form.brandType} onChange={event => setForm(current => ({ ...current, brandType: event.target.value as PlatformBrandType }))}>
+            <option value="">请选择品牌类型</option>
+            {Object.entries(brandTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label><span className="products-dialog-label">品牌名称</span><input placeholder="如 香缇卡 / 自营旗舰店" value={form.brandName} onChange={event => setForm(current => ({ ...current, brandName: event.target.value }))}/></label>
+        <label><span className="products-dialog-label">{form.category === 'activity' ? '活动描述' : '商品描述'}</span><textarea rows={3} placeholder={form.category === 'activity' ? '如 全场满减红包活动' : '如 保湿面霜 50ml'} value={form.description} onChange={event => setForm(current => ({ ...current, description: event.target.value }))}/></label>
+
         <footer>
           <button type="button" className="secondary-button" onClick={() => setDialog(null)} disabled={busy}>取消</button>
           <button type="submit" className="primary-button" disabled={busy}><Save size={14}/>{busy ? '保存中…' : dialog.mode === 'edit' ? '保存修改' : '创建产品'}</button>

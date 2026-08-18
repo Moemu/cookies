@@ -407,42 +407,59 @@ type Brand struct {
 	UpdatedAt      time.Time               `json:"updated_at"`
 }
 
-// Product is the organization-level catalog object. OceanEngineProductID is
-// a platform mapping that is bound after the product is created on the
-// platform by the launch pipeline; until then the product is treated as not
-// present on OceanEngine.
+// Product is the organization-level catalog object. Category splits the
+// two broad OceanEngine product kinds: ordinary products and promotional
+// activities. OceanEngineProductID is a platform mapping that is bound after
+// the product is created on the platform by the launch pipeline; until then
+// the product is treated as not present on OceanEngine.
 type Product struct {
-	ID                   contract.ProductID      `json:"id"`
-	OrganizationID       contract.OrganizationID `json:"organization_id"`
-	Name                 string                  `json:"name"`
-	Status               string                  `json:"status"`
-	ActivityType         string                  `json:"activity_type,omitempty"`
-	ActivityName         string                  `json:"activity_name,omitempty"`
-	BrandName            string                  `json:"brand_name,omitempty"`
-	OceanEngineProductID string                  `json:"ocean_engine_product_id,omitempty"`
-	CreatedAt            time.Time               `json:"created_at"`
-	UpdatedAt            time.Time               `json:"updated_at"`
+	ID                   contract.ProductID        `json:"id"`
+	OrganizationID       contract.OrganizationID   `json:"organization_id"`
+	Name                 string                    `json:"name"`
+	Category             contract.ProductCategory  `json:"category"`
+	Status               string                    `json:"status"`
+	ProductImage         string                    `json:"product_image,omitempty"`
+	PriceBand            contract.ProductPriceBand `json:"price_band,omitempty"`
+	ActivityType         string                    `json:"activity_type,omitempty"`
+	ActivityName         string                    `json:"activity_name,omitempty"`
+	BrandType            contract.BrandType        `json:"brand_type,omitempty"`
+	BrandName            string                    `json:"brand_name,omitempty"`
+	Description          string                    `json:"description,omitempty"`
+	OceanEngineProductID string                    `json:"ocean_engine_product_id,omitempty"`
+	CreatedAt            time.Time                 `json:"created_at"`
+	UpdatedAt            time.Time                 `json:"updated_at"`
 }
 
 // CreateProductRequest is the input for creating an organization-level
-// product object. The OceanEngine mapping is intentionally absent: it is
-// bound later by the launch pipeline after the product exists on the platform.
+// product object. Category selects ordinary product vs promotional activity
+// fields. The OceanEngine mapping is intentionally absent: it is bound later
+// by the launch pipeline after the product exists on the platform.
 type CreateProductRequest struct {
-	Name         string `json:"name"`
-	ActivityType string `json:"activity_type,omitempty"`
-	ActivityName string `json:"activity_name,omitempty"`
-	BrandName    string `json:"brand_name,omitempty"`
+	Name         string                    `json:"name"`
+	Category     contract.ProductCategory  `json:"category"`
+	ProductImage string                    `json:"product_image,omitempty"`
+	PriceBand    contract.ProductPriceBand `json:"price_band,omitempty"`
+	ActivityType string                    `json:"activity_type,omitempty"`
+	ActivityName string                    `json:"activity_name,omitempty"`
+	BrandType    contract.BrandType        `json:"brand_type,omitempty"`
+	BrandName    string                    `json:"brand_name,omitempty"`
+	Description  string                    `json:"description,omitempty"`
 }
 
 // UpdateProductRequest carries optional field updates. A nil pointer keeps
 // the existing value; an empty string clears the field.
 type UpdateProductRequest struct {
-	Name                 *string `json:"name,omitempty"`
-	Status               *string `json:"status,omitempty"`
-	ActivityType         *string `json:"activity_type,omitempty"`
-	ActivityName         *string `json:"activity_name,omitempty"`
-	BrandName            *string `json:"brand_name,omitempty"`
-	OceanEngineProductID *string `json:"ocean_engine_product_id,omitempty"`
+	Name                 *string                    `json:"name,omitempty"`
+	Category             *contract.ProductCategory  `json:"category,omitempty"`
+	Status               *string                    `json:"status,omitempty"`
+	ProductImage         *string                    `json:"product_image,omitempty"`
+	PriceBand            *contract.ProductPriceBand `json:"price_band,omitempty"`
+	ActivityType         *string                    `json:"activity_type,omitempty"`
+	ActivityName         *string                    `json:"activity_name,omitempty"`
+	BrandType            *contract.BrandType        `json:"brand_type,omitempty"`
+	BrandName            *string                    `json:"brand_name,omitempty"`
+	Description          *string                    `json:"description,omitempty"`
+	OceanEngineProductID *string                    `json:"ocean_engine_product_id,omitempty"`
 }
 
 type CreateProjectRequest struct {

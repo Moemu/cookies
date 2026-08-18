@@ -90,9 +90,11 @@ func (s Service) CreateBrand(ctx context.Context, actor contract.ActorContext, n
 	return brand, nil
 }
 
-// CreateProduct creates an organization-level product object. The product is
-// the cookies source of truth; its OceanEngine mapping is bound later by the
-// launch pipeline, so a new product always starts without a platform ID.
+// CreateProduct creates an organization-level product object. Category
+// selects the OceanEngine product kind (ordinary product or promotional
+// activity); product-only and activity-only fields are validated against it.
+// The OceanEngine mapping is bound later by the launch pipeline, so a new
+// product always starts without a platform ID.
 func (s Service) CreateProduct(ctx context.Context, actor contract.ActorContext, request CreateProductRequest) (Product, error) {
 	if s.Store == nil {
 		return Product{}, fmt.Errorf("project store is required")
@@ -104,13 +106,37 @@ func (s Service) CreateProduct(ctx context.Context, actor contract.ActorContext,
 	if name == "" || len(name) > 255 {
 		return Product{}, fmt.Errorf("product name must be between 1 and 255 characters")
 	}
+	category := contract.ProductCategory(strings.TrimSpace(string(request.Category)))
+	if category == "" {
+		category = contract.ProductCategoryProduct
+	}
+	if category != contract.ProductCategoryProduct && category != contract.ProductCategoryActivity {
+		return Product{}, fmt.Errorf("product category must be product or activity")
+	}
+	if request.BrandType != "" && request.BrandType != contract.BrandTypeStandard && request.BrandType != contract.BrandTypeCustom {
+		return Product{}, fmt.Errorf("brand_type must be standard or custom")
+	}
+	if request.PriceBand != "" && !validPriceBand(request.PriceBand) {
+		return Product{}, fmt.Errorf("price_band is not a supported OceanEngine price tier")
+	}
+	if category == contract.ProductCategoryActivity {
+		activityType := strings.TrimSpace(request.ActivityType)
+		if activityType == "" {
+			return Product{}, fmt.Errorf("activity_type is required for activity products")
+		}
+		if activityType != "red_packet" {
+			return Product{}, fmt.Errorf("activity_type currently supports only red_packet")
+		}
+	}
 	for field, value := range map[string]string{
 		"activity_type": request.ActivityType,
 		"activity_name": request.ActivityName,
 		"brand_name":    request.BrandName,
+		"description":   request.Description,
+		"product_image": request.ProductImage,
 	} {
-		if len(value) > 255 {
-			return Product{}, fmt.Errorf("%s must not exceed 255 characters", field)
+		if len(value) > 2000 {
+			return Product{}, fmt.Errorf("%s must not exceed 2000 characters", field)
 		}
 	}
 	newID := s.NewID
@@ -122,8 +148,10 @@ func (s Service) CreateProduct(ctx context.Context, actor contract.ActorContext,
 		return Product{}, err
 	}
 	product := Product{
-		ID: contract.ProductID(id), OrganizationID: actor.OrganizationID, Name: name, Status: "active",
-		ActivityType: strings.TrimSpace(request.ActivityType), ActivityName: strings.TrimSpace(request.ActivityName), BrandName: strings.TrimSpace(request.BrandName),
+		ID: contract.ProductID(id), OrganizationID: actor.OrganizationID, Name: name, Category: category, Status: "active",
+		ProductImage: strings.TrimSpace(request.ProductImage), PriceBand: request.PriceBand,
+		ActivityType: strings.TrimSpace(request.ActivityType), ActivityName: strings.TrimSpace(request.ActivityName),
+		BrandType: request.BrandType, BrandName: strings.TrimSpace(request.BrandName), Description: strings.TrimSpace(request.Description),
 	}
 	if err := s.Store.CreateProduct(ctx, product); err != nil {
 		return Product{}, err
@@ -133,6 +161,16 @@ func (s Service) CreateProduct(ctx context.Context, actor contract.ActorContext,
 		return Product{}, err
 	}
 	return created, nil
+}
+
+func validPriceBand(value contract.ProductPriceBand) bool {
+	switch value {
+	case contract.PriceBand0To9, contract.PriceBand10To99, contract.PriceBand100To999,
+		contract.PriceBand1000To9999, contract.PriceBand10000To99999, contract.PriceBand100000Plus:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s Service) ListProducts(ctx context.Context, actor contract.ActorContext) ([]Product, error) {
@@ -177,6 +215,13 @@ func (s Service) UpdateProduct(ctx context.Context, actor contract.ActorContext,
 	if request.Name != nil {
 		product.Name = strings.TrimSpace(*request.Name)
 	}
+	if request.Category != nil {
+		category := contract.ProductCategory(strings.TrimSpace(string(*request.Category)))
+		if category != contract.ProductCategoryProduct && category != contract.ProductCategoryActivity {
+			return Product{}, fmt.Errorf("product category must be product or activity")
+		}
+		product.Category = category
+	}
 	if request.Status != nil {
 		status := strings.TrimSpace(*request.Status)
 		if status != "active" && status != "archived" {
@@ -184,14 +229,38 @@ func (s Service) UpdateProduct(ctx context.Context, actor contract.ActorContext,
 		}
 		product.Status = status
 	}
+	if request.ProductImage != nil {
+		product.ProductImage = strings.TrimSpace(*request.ProductImage)
+	}
+	if request.PriceBand != nil {
+		band := contract.ProductPriceBand(strings.TrimSpace(string(*request.PriceBand)))
+		if band != "" && !validPriceBand(band) {
+			return Product{}, fmt.Errorf("price_band is not a supported OceanEngine price tier")
+		}
+		product.PriceBand = band
+	}
 	if request.ActivityType != nil {
-		product.ActivityType = strings.TrimSpace(*request.ActivityType)
+		activityType := strings.TrimSpace(*request.ActivityType)
+		if product.Category == contract.ProductCategoryActivity && activityType != "" && activityType != "red_packet" {
+			return Product{}, fmt.Errorf("activity_type currently supports only red_packet")
+		}
+		product.ActivityType = activityType
 	}
 	if request.ActivityName != nil {
 		product.ActivityName = strings.TrimSpace(*request.ActivityName)
 	}
+	if request.BrandType != nil {
+		brandType := contract.BrandType(strings.TrimSpace(string(*request.BrandType)))
+		if brandType != "" && brandType != contract.BrandTypeStandard && brandType != contract.BrandTypeCustom {
+			return Product{}, fmt.Errorf("brand_type must be standard or custom")
+		}
+		product.BrandType = brandType
+	}
 	if request.BrandName != nil {
 		product.BrandName = strings.TrimSpace(*request.BrandName)
+	}
+	if request.Description != nil {
+		product.Description = strings.TrimSpace(*request.Description)
 	}
 	if request.OceanEngineProductID != nil {
 		product.OceanEngineProductID = strings.TrimSpace(*request.OceanEngineProductID)

@@ -34,18 +34,47 @@ export type PlatformBrand = {
   updated_at: string;
 };
 
+export type PlatformProductCategory = 'product' | 'activity'
+
+export type PlatformProductPriceBand = '0_9' | '10_99' | '100_999' | '1000_9999' | '10000_99999' | '100000_plus'
+
+export type PlatformBrandType = 'standard' | 'custom'
+
 export type PlatformProduct = {
   id: string;
   organization_id: string;
   name: string;
+  category: PlatformProductCategory;
   status: "active" | "archived";
+  product_image?: string;
+  price_band?: PlatformProductPriceBand;
   activity_type?: string;
   activity_name?: string;
+  brand_type?: PlatformBrandType;
   brand_name?: string;
+  description?: string;
   ocean_engine_product_id?: string;
   created_at: string;
   updated_at: string;
 };
+
+export const productPriceBandLabels: Record<PlatformProductPriceBand, string> = {
+  '0_9': '0-9元',
+  '10_99': '10-99元',
+  '100_999': '100-999元',
+  '1000_9999': '1000-9999元',
+  '10000_99999': '10000-99999元',
+  '100000_plus': '100000元以上',
+}
+
+export const brandTypeLabels: Record<PlatformBrandType, string> = {
+  standard: '标准品牌',
+  custom: '自定义品牌',
+}
+
+export const activityTypeLabels: Record<string, string> = {
+  red_packet: '红包活动',
+}
 
 export type PlatformProductProjectRef = {
   project_id: string;
@@ -54,17 +83,27 @@ export type PlatformProductProjectRef = {
 
 export type PlatformCreateProductInput = {
   name: string;
+  category: PlatformProductCategory;
+  product_image?: string;
+  price_band?: PlatformProductPriceBand;
   activity_type?: string;
   activity_name?: string;
+  brand_type?: PlatformBrandType;
   brand_name?: string;
+  description?: string;
 };
 
 export type PlatformUpdateProductInput = {
   name?: string;
+  category?: PlatformProductCategory;
   status?: "active" | "archived";
+  product_image?: string;
+  price_band?: PlatformProductPriceBand;
   activity_type?: string;
   activity_name?: string;
+  brand_type?: PlatformBrandType;
   brand_name?: string;
+  description?: string;
   ocean_engine_product_id?: string;
 };
 
