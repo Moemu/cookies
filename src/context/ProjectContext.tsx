@@ -311,6 +311,7 @@ function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], job
     name: project.name,
     brand: project.brand,
     product: project.runtime.product,
+    products: project.products,
     goal: project.objective,
     industry: project.industry ?? 'ecommerce',
     stage: project.runtime.stage,

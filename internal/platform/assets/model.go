@@ -64,6 +64,7 @@ type AssetVersion struct {
 	DerivationID          string                   `json:"derivation_id,omitempty"`
 	ProviderJobID         string                   `json:"provider_job_id,omitempty"`
 	ProviderOutputID      string                   `json:"provider_output_id,omitempty"`
+	OceanEngineMaterialID string                   `json:"ocean_engine_material_id,omitempty"`
 	ProjectContextVersion int64                    `json:"project_context_version,omitempty"`
 	CreatedAt             time.Time                `json:"created_at"`
 	Blob                  ObjectLocation           `json:"-"`

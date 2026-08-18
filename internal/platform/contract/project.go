@@ -53,8 +53,9 @@ type ProjectBusinessContext struct {
 }
 
 type ProjectBusinessProduct struct {
-	ID   ProductID `json:"id"`
-	Name string    `json:"name"`
+	ID                   ProductID `json:"id"`
+	Name                 string    `json:"name"`
+	OceanEngineProductID string    `json:"ocean_engine_product_id,omitempty"`
 }
 
 func (c ProjectContext) Validate() error {

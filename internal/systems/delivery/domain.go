@@ -80,11 +80,14 @@ type Tracking struct {
 }
 
 type MarketingProduct struct {
-	ID           string `json:"id,omitempty"`
-	Name         string `json:"name,omitempty"`
-	ActivityType string `json:"activity_type,omitempty"`
-	ActivityName string `json:"activity_name,omitempty"`
-	BrandName    string `json:"brand_name,omitempty"`
+	// ID is the cookies product ID. OceanEngineProductID is an optional
+	// deterministic RPA mapping. An empty mapping requires product ingestion.
+	ID                   string `json:"id,omitempty"`
+	OceanEngineProductID string `json:"ocean_engine_product_id,omitempty"`
+	Name                 string `json:"name,omitempty"`
+	ActivityType         string `json:"activity_type,omitempty"`
+	ActivityName         string `json:"activity_name,omitempty"`
+	BrandName            string `json:"brand_name,omitempty"`
 }
 
 type CreativeReference struct {
@@ -93,6 +96,8 @@ type CreativeReference struct {
 	ContentHash string `json:"content_hash,omitempty"`
 	Route       string `json:"route,omitempty"`
 	Confirmed   bool   `json:"confirmed"`
+	// OceanEngineMaterialID is empty until deterministic RPA ingestion succeeds.
+	OceanEngineMaterialID string `json:"ocean_engine_material_id,omitempty"`
 }
 
 // StrategyReference is a resolvable forward reference to the immutable

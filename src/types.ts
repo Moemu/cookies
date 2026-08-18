@@ -230,6 +230,8 @@ export interface AssetVersionPointer {
   }
   owner: string
   updatedAt: string
+  /** Optional platform mapping. Empty means Playwright RPA must ingest it. */
+  oceanEngineMaterialId?: string
 }
 
 export interface ProjectRecord {
@@ -239,6 +241,7 @@ export interface ProjectRecord {
   name: string
   brand: string
   product: string
+  products?: Array<{ id: string; name: string; oceanEngineProductId?: string }>
   goal: string
   industry: 'short_drama' | 'game' | 'ecommerce' | 'automotive_brand'
   stage: string
