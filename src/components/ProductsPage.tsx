@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Archive, Check, Package, Pencil, Plus, RefreshCw, Save, X } from 'lucide-react'
+import { Archive, Check, ImagePlus, Package, Pencil, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
 import {
   activityTypeLabels,
   brandTypeLabels,
@@ -15,16 +15,16 @@ import {
 type ProductForm = {
   category: PlatformProductCategory
   name: string
-  productImage: string
   priceBand: PlatformProductPriceBand | ''
   activityType: string
   brandType: PlatformBrandType | ''
   brandName: string
   description: string
+  oceanEngineProductID: string
 }
 
 const emptyForm: ProductForm = {
-  category: 'product', name: '', productImage: '', priceBand: '', activityType: '', brandType: '', brandName: '', description: '',
+  category: 'product', name: '', priceBand: '', activityType: '', brandType: '', brandName: '', description: '', oceanEngineProductID: '',
 }
 
 type ProductDialog = { mode: 'create' } | { mode: 'edit'; product: PlatformProduct }
@@ -65,6 +65,8 @@ export function ProductsPage({ activeView }: { activeView: string }) {
   const [selectedId, setSelectedId] = useState('')
   const [dialog, setDialog] = useState<ProductDialog | null>(null)
   const [form, setForm] = useState<ProductForm>(emptyForm)
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [removeImage, setRemoveImage] = useState(false)
   const [mappingInput, setMappingInput] = useState('')
   const [projectRefs, setProjectRefs] = useState<PlatformProductProjectRef[]>([])
   const [busy, setBusy] = useState(false)
@@ -103,6 +105,8 @@ export function ProductsPage({ activeView }: { activeView: string }) {
 
   const openCreate = () => {
     setForm(emptyForm)
+    setImageFile(null)
+    setRemoveImage(false)
     setDialog({ mode: 'create' })
   }
 
@@ -110,13 +114,15 @@ export function ProductsPage({ activeView }: { activeView: string }) {
     setForm({
       category: product.category,
       name: product.name,
-      productImage: product.product_image ?? '',
       priceBand: product.price_band ?? '',
       activityType: product.activity_type ?? '',
       brandType: product.brand_type ?? '',
       brandName: product.brand_name ?? '',
       description: product.description ?? '',
+      oceanEngineProductID: product.ocean_engine_product_id ?? '',
     })
+    setImageFile(null)
+    setRemoveImage(false)
     setDialog({ mode: 'edit', product })
   }
 
@@ -132,24 +138,26 @@ export function ProductsPage({ activeView }: { activeView: string }) {
     const input = {
       name: form.name.trim(),
       category: form.category,
-      product_image: form.category === 'product' ? form.productImage.trim() || undefined : undefined,
       price_band: form.category === 'product' && form.priceBand ? form.priceBand : undefined,
       activity_type: form.category === 'activity' ? form.activityType.trim() || undefined : undefined,
       activity_name: form.category === 'activity' ? form.name.trim() || undefined : undefined,
       brand_type: form.brandType || undefined,
       brand_name: form.brandName.trim() || undefined,
       description: form.description.trim() || undefined,
+      ocean_engine_product_id: form.oceanEngineProductID.trim() || undefined,
     }
     setBusy(true)
     try {
       if (dialog?.mode === 'edit') {
         const updated = await platformClient.updateProduct(dialog.product.id, input)
         setProducts(current => current.map(item => item.id === updated.id ? updated : item))
+        await applyImageChanges(dialog.product.id)
         setNotice(`${updated.name} 已更新。`)
       } else {
         const created = await platformClient.createProduct(input)
         setProducts(current => [...current, created])
         setSelectedId(created.id)
+        await applyImageChanges(created.id)
         setNotice(`${created.name} 已创建。`)
       }
       setDialog(null)
@@ -157,6 +165,18 @@ export function ProductsPage({ activeView }: { activeView: string }) {
       setNotice(error instanceof Error ? error.message : dialog?.mode === 'edit' ? '更新产品失败' : '创建产品失败')
     } finally {
       setBusy(false)
+    }
+  }
+
+  // applyImageChanges uploads a newly selected image or clears the stored
+  // image after the product object exists.
+  const applyImageChanges = async (productId: string) => {
+    if (imageFile) {
+      const uploaded = await platformClient.putProductImage(productId, imageFile)
+      setProducts(current => current.map(item => item.id === uploaded.id ? uploaded : item))
+    } else if (removeImage) {
+      const cleared = await platformClient.updateProduct(productId, { product_image: '' })
+      setProducts(current => current.map(item => item.id === cleared.id ? cleared : item))
     }
   }
 
@@ -257,7 +277,7 @@ export function ProductsPage({ activeView }: { activeView: string }) {
           ? <><div><dt>活动类型</dt><dd>{selected.activity_type ? (activityTypeLabels[selected.activity_type] ?? selected.activity_type) : '—'}</dd></div>
               <div><dt>活动名称</dt><dd>{selected.activity_name || selected.name}</dd></div></>
           : <><div><dt>价格带</dt><dd>{priceBandLabel(selected.price_band)}</dd></div>
-              <div><dt>商品图片</dt><dd>{selected.product_image ? <a href={selected.product_image} target="_blank" rel="noreferrer">查看图片</a> : '—'}</dd></div></>}
+              <div><dt>商品图片</dt><dd>{selected.product_image ? <img className="products-detail-image" src={platformClient.productImageUrl(selected.id)} alt={selected.name}/> : '—'}</dd></div></>}
         <div><dt>品牌类型</dt><dd>{brandTypeLabel(selected.brand_type)}</dd></div>
         <div><dt>品牌名称</dt><dd>{selected.brand_name || '—'}</dd></div>
         <div><dt>描述</dt><dd>{selected.description || '—'}</dd></div>
@@ -278,8 +298,8 @@ export function ProductsPage({ activeView }: { activeView: string }) {
 
         <label><span className="products-dialog-label">商品类型</span>
           <span className="products-category-switch">
-            <button type="button" className={form.category === 'product' ? 'active' : ''} onClick={() => setForm(current => ({ ...current, category: 'product', activityType: '', activityName: '' }))}>商品</button>
-            <button type="button" className={form.category === 'activity' ? 'active' : ''} onClick={() => setForm(current => ({ ...current, category: 'activity', productImage: '', priceBand: '' }))}>活动</button>
+            <button type="button" className={form.category === 'product' ? 'active' : ''} onClick={() => setForm(current => ({ ...current, category: 'product', activityType: '' }))}>商品</button>
+            <button type="button" className={form.category === 'activity' ? 'active' : ''} onClick={() => setForm(current => ({ ...current, category: 'activity', priceBand: '' }))}>活动</button>
           </span>
         </label>
 
@@ -293,7 +313,21 @@ export function ProductsPage({ activeView }: { activeView: string }) {
           <label><span className="products-dialog-label">活动名称</span><input autoFocus required placeholder="如 双十一红包雨" value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))}/></label>
         </> : <>
           <label><span className="products-dialog-label">商品名称</span><input autoFocus required placeholder="如 山茶花面霜" value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))}/></label>
-          <label><span className="products-dialog-label">商品图片</span><input placeholder="https://cdn.example.com/cream.jpg" value={form.productImage} onChange={event => setForm(current => ({ ...current, productImage: event.target.value }))}/></label>
+          <label><span className="products-dialog-label">商品图片</span>
+            <span className="products-image-picker">
+              {imageFile
+                ? <><img className="products-image-preview" src={URL.createObjectURL(imageFile)} alt="商品图片预览"/><small>{imageFile.name}</small></>
+                : dialog.mode === 'edit' && !removeImage && dialog.product.product_image
+                  ? <><img className="products-image-preview" src={platformClient.productImageUrl(dialog.product.id)} alt="当前商品图片"/><small>当前图片</small></>
+                  : <span className="products-image-empty"><ImagePlus size={16}/>选择图片</span>}
+              <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={event => {
+                const file = event.target.files?.[0]
+                if (file) { setImageFile(file); setRemoveImage(false) }
+                event.target.value = ''
+              }}/>
+              {(imageFile || (dialog.mode === 'edit' && dialog.product.product_image && !removeImage)) ? <button type="button" className="text-button" onClick={() => { setImageFile(null); setRemoveImage(true) }}><Trash2 size={13}/>移除</button> : null}
+            </span>
+          </label>
           <label><span className="products-dialog-label">价格带</span>
             <select value={form.priceBand} onChange={event => setForm(current => ({ ...current, priceBand: event.target.value as PlatformProductPriceBand }))}>
               <option value="">请选择价格带</option>
@@ -310,6 +344,7 @@ export function ProductsPage({ activeView }: { activeView: string }) {
         </label>
         <label><span className="products-dialog-label">品牌名称</span><input placeholder="如 香缇卡 / 自营旗舰店" value={form.brandName} onChange={event => setForm(current => ({ ...current, brandName: event.target.value }))}/></label>
         <label><span className="products-dialog-label">{form.category === 'activity' ? '活动描述' : '商品描述'}</span><textarea rows={3} placeholder={form.category === 'activity' ? '如 全场满减红包活动' : '如 保湿面霜 50ml'} value={form.description} onChange={event => setForm(current => ({ ...current, description: event.target.value }))}/></label>
+        <label><span className="products-dialog-label">巨量商品 ID <small>可选 · 人工预先在巨量创建后填写</small></span><input placeholder="如 1700000000000000000" value={form.oceanEngineProductID} onChange={event => setForm(current => ({ ...current, oceanEngineProductID: event.target.value }))}/></label>
 
         <footer>
           <button type="button" className="secondary-button" onClick={() => setDialog(null)} disabled={busy}>取消</button>

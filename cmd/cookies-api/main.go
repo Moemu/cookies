@@ -450,7 +450,7 @@ func main() {
 		ProjectAuthorizer: projectStore,
 		Readiness:         database.Readiness{DB: db},
 		Identities:        identityStore, Accounts: identityStore, Projects: projectService, ProjectMembers: projectStore,
-		Uploads: uploadService, Intakes: intakeService, Creative: creativeService, ProductionCenter: productionCenter, ProductionAssets: productionCenter, ProductionRetry: productionRetry,
+		Uploads: uploadService, Blobs: blobs, Intakes: intakeService, Creative: creativeService, ProductionCenter: productionCenter, ProductionAssets: productionCenter, ProductionRetry: productionRetry,
 		Sessions: sessionService, Knowledge: knowledgeService,
 		RemixPlans: remixService, Evals: remixService, AgentRuns: agentService,
 		ProviderConfig: provider.MySQLGatewayConfigStore{DB: db},

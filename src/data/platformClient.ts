@@ -338,6 +338,22 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
       const refs = asArray((await request<ItemsResponse<PlatformProductProjectRef>>(`/products/${encodeURIComponent(productId)}/projects`)).items);
       return refs;
     },
+    putProductImage: async (productId: string, file: File) => {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await fetch(`${defaultPlatformBase}/products/${encodeURIComponent(productId)}/image`, {
+        method: "PUT",
+        credentials: "include",
+        body,
+      });
+      const payload = await readPayload<PlatformProduct>(response);
+      if (!response.ok) {
+        const error = payload as { error?: { message?: string }; message?: string };
+        throw new Error(error.error?.message ?? error.message ?? "上传商品图片失败");
+      }
+      return payload as PlatformProduct;
+    },
+    productImageUrl: (productId: string) => `${defaultPlatformBase}/products/${encodeURIComponent(productId)}/image`,
     listProjects: async () => {
       const projects = asArray((await request<ItemsResponse<PlatformProject>>("/projects")).items);
       // The application workbench can only operate on active, brand-bound

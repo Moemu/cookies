@@ -349,10 +349,10 @@ func (s MySQLStore) CreateProduct(ctx context.Context, product Product) error {
 	if s.DB == nil {
 		return fmt.Errorf("project database is required")
 	}
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO products (id, organization_id, name, category, status, product_image, price_band, activity_type, activity_name, brand_type, brand_name, description)
-		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO products (id, organization_id, name, category, status, product_image, price_band, activity_type, activity_name, brand_type, brand_name, description, ocean_engine_product_id)
+		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
 		product.ID, product.OrganizationID, product.Name, product.Category, product.Status,
-		product.ProductImage, product.PriceBand, product.ActivityType, product.ActivityName, product.BrandType, product.BrandName, product.Description)
+		product.ProductImage, product.PriceBand, product.ActivityType, product.ActivityName, product.BrandType, product.BrandName, product.Description, product.OceanEngineProductID)
 	return err
 }
 

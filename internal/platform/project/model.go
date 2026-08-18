@@ -432,18 +432,20 @@ type Product struct {
 
 // CreateProductRequest is the input for creating an organization-level
 // product object. Category selects ordinary product vs promotional activity
-// fields. The OceanEngine mapping is intentionally absent: it is bound later
-// by the launch pipeline after the product exists on the platform.
+// fields. OceanEngineProductID is optional: operators may have created the
+// product on OceanEngine manually beforehand and bind it here directly.
+// Otherwise it is bound later by the launch pipeline.
 type CreateProductRequest struct {
-	Name         string                    `json:"name"`
-	Category     contract.ProductCategory  `json:"category"`
-	ProductImage string                    `json:"product_image,omitempty"`
-	PriceBand    contract.ProductPriceBand `json:"price_band,omitempty"`
-	ActivityType string                    `json:"activity_type,omitempty"`
-	ActivityName string                    `json:"activity_name,omitempty"`
-	BrandType    contract.BrandType        `json:"brand_type,omitempty"`
-	BrandName    string                    `json:"brand_name,omitempty"`
-	Description  string                    `json:"description,omitempty"`
+	Name                 string                    `json:"name"`
+	Category             contract.ProductCategory  `json:"category"`
+	ProductImage         string                    `json:"product_image,omitempty"`
+	PriceBand            contract.ProductPriceBand `json:"price_band,omitempty"`
+	ActivityType         string                    `json:"activity_type,omitempty"`
+	ActivityName         string                    `json:"activity_name,omitempty"`
+	BrandType            contract.BrandType        `json:"brand_type,omitempty"`
+	BrandName            string                    `json:"brand_name,omitempty"`
+	Description          string                    `json:"description,omitempty"`
+	OceanEngineProductID string                    `json:"ocean_engine_product_id,omitempty"`
 }
 
 // UpdateProductRequest carries optional field updates. A nil pointer keeps

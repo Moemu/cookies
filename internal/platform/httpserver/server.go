@@ -37,6 +37,7 @@ type Server struct {
 	projects          ProjectManager
 	projectMembers    ProjectMembershipManager
 	uploads           AssetUploadManager
+	blobs             assets.BlobStore
 	intakes           GeneratedIntakeManager
 	creative          CreativeManager
 	productionCenter  creative.ProductionCenterQuery
@@ -66,6 +67,7 @@ type Dependencies struct {
 	Projects          ProjectManager
 	ProjectMembers    ProjectMembershipManager
 	Uploads           AssetUploadManager
+	Blobs             assets.BlobStore
 	Intakes           GeneratedIntakeManager
 	Creative          CreativeManager
 	ProductionCenter  creative.ProductionCenterQuery
@@ -342,7 +344,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 		resolver: dependencies.Resolver, projectAuthorizer: dependencies.ProjectAuthorizer,
 		providerJobs: dependencies.ProviderJobs, readiness: dependencies.Readiness,
 		identities: dependencies.Identities, accounts: dependencies.Accounts, projects: dependencies.Projects,
-		projectMembers: dependencies.ProjectMembers, uploads: dependencies.Uploads,
+		projectMembers: dependencies.ProjectMembers, uploads: dependencies.Uploads, blobs: dependencies.Blobs,
 		intakes: dependencies.Intakes, newID: newRequestID,
 		creative: dependencies.Creative, productionCenter: dependencies.ProductionCenter, productionAssets: dependencies.ProductionAssets, productionRetry: dependencies.ProductionRetry, sessions: dependencies.Sessions, knowledge: dependencies.Knowledge,
 		remixPlans: dependencies.RemixPlans, evals: dependencies.Evals, agentRuns: dependencies.AgentRuns,
@@ -368,6 +370,8 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("GET /platform/v1/products/{product_id}", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.getProduct))))
 	server.mux.Handle("PATCH /platform/v1/products/{product_id}", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.updateProduct))))
 	server.mux.Handle("GET /platform/v1/products/{product_id}/projects", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.listProductProjects))))
+	server.mux.Handle("PUT /platform/v1/products/{product_id}/image", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.putProductImage))))
+	server.mux.Handle("GET /platform/v1/products/{product_id}/image", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.getProductImage))))
 	server.mux.Handle("POST /platform/v1/projects", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createProject))))
 	server.mux.Handle("GET /platform/v1/projects", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.listProjects))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.projectDetail))))

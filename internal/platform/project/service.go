@@ -152,6 +152,7 @@ func (s Service) CreateProduct(ctx context.Context, actor contract.ActorContext,
 		ProductImage: strings.TrimSpace(request.ProductImage), PriceBand: request.PriceBand,
 		ActivityType: strings.TrimSpace(request.ActivityType), ActivityName: strings.TrimSpace(request.ActivityName),
 		BrandType: request.BrandType, BrandName: strings.TrimSpace(request.BrandName), Description: strings.TrimSpace(request.Description),
+		OceanEngineProductID: strings.TrimSpace(request.OceanEngineProductID),
 	}
 	if err := s.Store.CreateProduct(ctx, product); err != nil {
 		return Product{}, err
