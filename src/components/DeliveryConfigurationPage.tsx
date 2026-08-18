@@ -6,6 +6,7 @@ import {
   type DeliveryControlChangeSet,
   type DeliveryPlan,
   type PlatformConfiguration,
+  type StableReference,
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
 import { oceanEngineCalibrationDispositions, visibleOceanEngineManifestFields, type CalibrationDisposition, type VisibleManifestField } from '../lib/oceanengineCalibrationManifest'
@@ -109,6 +110,32 @@ function PlatformConfigurationDetails({ value }: { value: PlatformConfiguration 
 type OceanConfiguration = NonNullable<PlatformConfiguration['payload']['ocean_engine']>
 type OceanPromotion = OceanConfiguration['promotions'][number]
 
+function updateReference(current: StableReference | undefined, id: string, objectKind: string): StableReference | undefined {
+  const value = id.trim()
+  if (!value) return undefined
+  return { namespace: 'cookies', object_kind: objectKind, scope: current?.scope ?? 'current_project', state: 'resolved', ...current, id: value }
+}
+
+function referenceIDs(references: StableReference[] | undefined) {
+  return references?.map(reference => reference.id).filter(Boolean).join(', ') ?? ''
+}
+
+function updateReferenceList(value: string, objectKind: string, current: StableReference[] = []) {
+  const existing = new Map(current.map(reference => [reference.id, reference]))
+  return value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean).map(id => updateReference(existing.get(id), id, objectKind)!)
+}
+
+function toLocalDateTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const offset = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
+}
+
+function fromLocalDateTime(value: string) {
+  return value ? new Date(value).toISOString() : ''
+}
+
 function PlatformConfigurationEditor({ value, onChange }: { value: PlatformConfiguration; onChange: (value: PlatformConfiguration) => void }) {
   const ocean = value.payload.ocean_engine
   if (!ocean?.project) return null
@@ -129,22 +156,87 @@ function PlatformConfigurationEditor({ value, onChange }: { value: PlatformConfi
   return <section className="delivery-config-editor" aria-labelledby="platform-config-editor-title">
     <header className="delivery-config-editor-intro"><div><span className="section-label">本地配置</span><h3 id="platform-config-editor-title">编辑投放项目和推广单元</h3><p>保存后生成 cookies 计划版本。Playwright RPA 在执行阶段读取该版本。</p></div><span className="delivery-config-local-badge">不会写入巨量</span></header>
     <div className="delivery-config-project-editor">
-      <div className="delivery-config-subheading"><div><span>01</span><div><h4>投放项目</h4><p>设置项目名称、预算和投放周期。</p></div></div></div>
-      <div className="delivery-config-editor-fields">
-      <label><span>项目名称</span><input name="oceanengine_project_name" autoComplete="off" value={ocean.project.project_name} onChange={event => updateProject({ project_name: event.target.value })}/></label>
-      <label><span>项目日预算</span><div className="delivery-config-money-input"><input name="oceanengine_project_daily_budget" autoComplete="off" type="number" inputMode="decimal" min="0" value={ocean.project.budget_and_bidding.daily_budget_minor / 100} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, daily_budget_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元 / 天</small></div></label>
-      <label><span>投放周期</span><select name="oceanengine_project_schedule_mode" autoComplete="off" value={ocean.project.schedule.mode ?? 'fixed_range'} onChange={event => updateProject({ schedule: { ...ocean.project.schedule, mode: event.target.value as 'long_term' | 'fixed_range' } })}><option value="long_term">从今天起长期投放</option><option value="fixed_range">设置开始和结束日期</option></select></label>
+      <div className="delivery-config-subheading"><div><span>01</span><div><h4>投放项目</h4><p>设置营销路径、预算、竞价、排期和定向。</p></div></div></div>
+      <div className="delivery-config-editor-fields delivery-config-editor-fields--wide">
+        <label><span>项目名称</span><input name="oceanengine_project_name" autoComplete="off" value={ocean.project.project_name} onChange={event => updateProject({ project_name: event.target.value })}/></label>
+        <label><span>营销目的</span><select value={ocean.project.marketing_purpose} onChange={event => updateProject({ marketing_purpose: event.target.value })}><option value="ecommerce">电商</option><option value="lead_generation">销售线索</option><option value="application">应用</option><option value="product_catalog">商品</option><option value="content_marketing">内容营销</option></select></label>
+        {ocean.project.marketing_purpose !== 'product_catalog' ? <label><span>营销场景</span><select value={ocean.project.marketing_scenario} onChange={event => updateProject({ marketing_scenario: event.target.value })}><option value="manual_delivery">短视频与图文</option><option value="live_stream" disabled>直播（平台暂不可用）</option></select></label> : null}
+        <label><span>cookies 产品 ID</span><input value={ocean.project.marketing_product_reference?.id ?? ''} placeholder="选择或输入 cookies 产品对象 ID" onChange={event => updateProject({ marketing_product_reference: updateReference(ocean.project.marketing_product_reference, event.target.value, 'product') })}/><small>{ocean.project.marketing_product_reference?.audit_attributes?.ocean_engine_product_id ? '该产品已有巨量商品 ID' : '未绑定巨量商品 ID时，RPA 将创建商品'}</small></label>
+        {ocean.project.marketing_purpose !== 'product_catalog' ? <label><span>营销产品选择方式</span><select value={ocean.project.product_selection_mode ?? 'manual'} onChange={event => updateProject({ product_selection_mode: event.target.value })}><option value="manual">手动选择 cookies 产品</option><option value="automatic">自动选择</option></select></label> : null}
+        {ocean.project.marketing_purpose === 'application' ? <>
+          <label><span>应用引用</span><input value={ocean.project.application_reference?.id ?? ''} placeholder="应用链接或应用对象 ID" onChange={event => updateProject({ application_reference: updateReference(ocean.project.application_reference, event.target.value, 'application') })}/></label>
+          <label><span>应用场景</span><input value={ocean.project.application_scenario ?? ''} onChange={event => updateProject({ application_scenario: event.target.value })}/></label>
+          <label><span>操作系统</span><select value={ocean.project.operating_system ?? ''} onChange={event => updateProject({ operating_system: event.target.value })}><option value="">请选择</option><option value="android">安卓</option><option value="ios">iOS</option><option value="harmonyos">鸿蒙</option></select></label>
+          <label><span>下载方式</span><select value={ocean.project.application_download_mode ?? ''} onChange={event => updateProject({ application_download_mode: event.target.value })}><option value="">请选择</option><option value="direct_download">直接下载</option><option value="reservation_download">预约下载</option></select></label>
+          <label><span>调起方式</span><input value={ocean.project.application_launch_mode ?? ''} onChange={event => updateProject({ application_launch_mode: event.target.value })}/></label>
+        </> : null}
+        {ocean.project.marketing_purpose === 'lead_generation' ? <label><span>获取线索方式</span><input value={ocean.project.lead_capture_mode ?? ''} onChange={event => updateProject({ lead_capture_mode: event.target.value })}/></label> : null}
+        <label><span>投放模式</span><select value={ocean.project.delivery_mode} onChange={event => updateProject({ delivery_mode: event.target.value })}><option value="manual">手动投放</option><option value="ubmax">UBMax</option></select></label>
+        <label><span>深度优化方式</span><input value={ocean.project.deep_optimization_mode ?? ''} placeholder="按当前优化目标选择" onChange={event => updateProject({ deep_optimization_mode: event.target.value })}/></label>
+        <label><span>竞价策略</span><select value={ocean.project.budget_and_bidding.bidding_strategy} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, bidding_strategy: event.target.value } })}><option value="manual_bid">手动出价</option><option value="stable_cost">稳定成本</option><option value="maximum_conversion">最大转化</option></select></label>
+        <label><span>付费方式</span><select value={ocean.project.budget_and_bidding.charging_mode} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, charging_mode: event.target.value } })}><option value="CPC">按点击付费</option><option value="CPM">按展示付费</option><option value="OCPM">按目标转化出价</option></select></label>
+        <label><span>项目日预算</span><div className="delivery-config-money-input"><input type="number" inputMode="decimal" min="0" value={ocean.project.budget_and_bidding.daily_budget_minor / 100} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, daily_budget_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元 / 天</small></div></label>
+        <label><span>项目出价</span><div className="delivery-config-money-input"><input type="number" inputMode="decimal" min="0" step="0.01" value={(ocean.project.budget_and_bidding.bid_minor ?? 0) / 100} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, bid_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元</small></div></label>
+        <label><span>投放周期</span><select value={ocean.project.schedule.mode ?? 'fixed_range'} onChange={event => updateProject({ schedule: { ...ocean.project.schedule, mode: event.target.value as 'long_term' | 'fixed_range' } })}><option value="long_term">从今天起长期投放</option><option value="fixed_range">设置开始和结束日期</option></select></label>
+        <label><span>开始时间</span><input type="datetime-local" value={toLocalDateTime(ocean.project.schedule.start_at)} onChange={event => updateProject({ schedule: { ...ocean.project.schedule, start_at: fromLocalDateTime(event.target.value) } })}/></label>
+        {ocean.project.schedule.mode !== 'long_term' ? <label><span>结束时间</span><input type="datetime-local" value={toLocalDateTime(ocean.project.schedule.end_at)} onChange={event => updateProject({ schedule: { ...ocean.project.schedule, end_at: fromLocalDateTime(event.target.value) } })}/></label> : null}
+        <label><span>投放版位</span><input value={ocean.project.placement_strategy ?? ''} onChange={event => updateProject({ placement_strategy: event.target.value })}/></label>
+        <label><span>地域</span><input value={ocean.project.targeting.regions?.join(', ') ?? ''} placeholder="多个地域用逗号分隔" onChange={event => updateProject({ targeting: { ...ocean.project.targeting, regions: event.target.value.split(/[,，]/).map(item => item.trim()).filter(Boolean) } })}/></label>
+        <label><span>年龄</span><input value={ocean.project.targeting.age_ranges?.join(', ') ?? ''} placeholder="例如 18-23, 24-30" onChange={event => updateProject({ targeting: { ...ocean.project.targeting, age_ranges: event.target.value.split(/[,，]/).map(item => item.trim()).filter(Boolean) } })}/></label>
+        <label><span>性别</span><select value={ocean.project.targeting.gender ?? ''} onChange={event => updateProject({ targeting: { ...ocean.project.targeting, gender: event.target.value } })}><option value="">不限</option><option value="male">男</option><option value="female">女</option></select></label>
+        <label className="delivery-config-switch"><span>智能定向扩展</span><input type="checkbox" role="switch" checked={ocean.project.targeting.smart_expansion} onChange={event => updateProject({ targeting: { ...ocean.project.targeting, smart_expansion: event.target.checked } })}/></label>
+      </div>
+    </div>
+    <div className="delivery-config-project-editor">
+      <div className="delivery-config-subheading"><div><span>02</span><div><h4>投放载体和监测</h4><p>设置落地页、优化目标、搜索快投和第三方监测。</p></div></div></div>
+      <div className="delivery-config-editor-fields delivery-config-editor-fields--wide">
+        <label><span>投放载体</span><select value={ocean.project.carrier} onChange={event => updateProject({ carrier: event.target.value })}><option value="orange_landing_page">橙子落地页</option><option value="owned_landing_page">自研落地页</option><option value="douyin_mini_program">字节小程序（暂不支持）</option><option value="wechat_mini_program">微信小程序（暂不支持）</option></select></label>
+        <label><span>优化目标 ID</span><input value={ocean.project.optimization_target_reference?.id ?? ''} placeholder={ocean.project.carrier === 'orange_landing_page' ? '选择平台内置优化目标' : '选择事件资产绑定目标'} onChange={event => updateProject({ optimization_target_reference: updateReference(ocean.project.optimization_target_reference, event.target.value, 'optimization_target') })}/></label>
+        {ocean.project.carrier === 'owned_landing_page' ? <>
+          <label><span>优化目标名称</span><input value={ocean.project.optimization_target_reference?.display_name_snapshot ?? ''} onChange={event => updateProject({ optimization_target_reference: { ...(updateReference(ocean.project.optimization_target_reference, ocean.project.optimization_target_reference?.id ?? 'unresolved', 'optimization_target')!), display_name_snapshot: event.target.value } })}/></label>
+          <label><span>事件资产名称</span><input value={ocean.project.optimization_target_reference?.audit_attributes?.event_asset_name ?? ''} onChange={event => updateProject({ optimization_target_reference: { ...(updateReference(ocean.project.optimization_target_reference, ocean.project.optimization_target_reference?.id ?? 'unresolved', 'optimization_target')!), audit_attributes: { ...ocean.project.optimization_target_reference?.audit_attributes, event_asset_name: event.target.value } } })}/></label>
+          <label><span>事件资产类型</span><input value={ocean.project.optimization_target_reference?.audit_attributes?.event_asset_type ?? ''} onChange={event => updateProject({ optimization_target_reference: { ...(updateReference(ocean.project.optimization_target_reference, ocean.project.optimization_target_reference?.id ?? 'unresolved', 'optimization_target')!), audit_attributes: { ...ocean.project.optimization_target_reference?.audit_attributes, event_asset_type: event.target.value } } })}/></label>
+        </> : null}
+        <label><span>商品目录 ID</span><input value={ocean.project.product_catalog_reference?.id ?? ''} onChange={event => updateProject({ product_catalog_reference: updateReference(ocean.project.product_catalog_reference, event.target.value, 'product_catalog') })}/></label>
+        <label className="delivery-config-switch"><span>商品定向 · RTA 跳转</span><input type="checkbox" role="switch" checked={ocean.project.product_targeting?.rta_redirect ?? false} onChange={event => updateProject({ product_targeting: { ...ocean.project.product_targeting, rta_redirect: event.target.checked } })}/></label>
+        <label className="delivery-config-switch"><span>商品定向 · 地域匹配</span><input type="checkbox" role="switch" checked={ocean.project.product_targeting?.region_match ?? false} onChange={event => updateProject({ product_targeting: { ...ocean.project.product_targeting, region_match: event.target.checked } })}/></label>
+        <label><span>商品投放条件</span><textarea rows={2} value={ocean.project.product_targeting?.delivery_conditions?.join(', ') ?? ''} onChange={event => updateProject({ product_targeting: { ...ocean.project.product_targeting, delivery_conditions: event.target.value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean) } })}/></label>
+        <label><span>搜索关键词</span><textarea rows={2} value={ocean.project.search_boost?.keywords?.join(', ') ?? ''} placeholder="多个关键词用逗号分隔" onChange={event => updateProject({ search_boost: { ...ocean.project.search_boost, keywords: event.target.value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean) } })}/></label>
+        <label><span>搜索出价系数</span><input type="number" min="1" step="0.1" value={ocean.project.search_boost?.bid_coefficient ?? 1.1} onChange={event => updateProject({ search_boost: { ...ocean.project.search_boost, bid_coefficient: Number(event.target.value) } })}/></label>
+        <label className="delivery-config-switch"><span>搜索定向扩展</span><input type="checkbox" role="switch" checked={ocean.project.search_boost?.targeting_expansion ?? false} onChange={event => updateProject({ search_boost: { ...ocean.project.search_boost, targeting_expansion: event.target.checked } })}/></label>
+        {['impression', 'valid_touch', 'video_play', 'video_complete', 'valid_video_play'].map((kind, index) => { const labels = ['展示监测链接', '有效触点监测链接', '视频播放监测链接', '视频播完监测链接', '视频有效播放监测链接']; const reference = ocean.project.monitoring_references?.find(item => item.object_kind === `monitoring_link_${kind}`); return <label key={kind}><span>{labels[index]}</span><input type="url" value={reference?.id ?? ''} onChange={event => { const remaining = ocean.project.monitoring_references?.filter(item => item.object_kind !== `monitoring_link_${kind}`) ?? []; const next = updateReference(reference, event.target.value, `monitoring_link_${kind}`); updateProject({ monitoring_references: next ? [...remaining, next] : remaining }) }}/></label> })}
       </div>
     </div>
     <div className="delivery-config-unit-editor">
-      <div className="delivery-config-subheading"><div><span>02</span><div><h4>推广单元</h4><p>每个单元可使用独立名称、预算、出价和素材组合。</p></div></div><button className="secondary-button" type="button" onClick={addPromotion}><Plus size={15} aria-hidden="true"/>增加推广单元</button></div>
+      <div className="delivery-config-subheading"><div><span>03</span><div><h4>推广单元</h4><p>每个单元使用独立身份、预算、出价、落地页和设置。</p></div></div><button className="secondary-button" type="button" onClick={addPromotion}><Plus size={15} aria-hidden="true"/>增加推广单元</button></div>
       <div className="delivery-config-unit-list">{ocean.promotions.map((promotion, index) => <article key={promotion.promotion_draft_id} className="delivery-config-unit-card">
         <header><div><span>推广单元 {String(index + 1).padStart(2, '0')}</span><strong>{promotion.promotion_name || '未命名单元'}</strong></div><button className="delivery-config-delete-unit" type="button" aria-label={`删除推广单元 ${index + 1}`} onClick={() => removePromotion(index)}><Trash2 size={15} aria-hidden="true"/></button></header>
-        <div className="delivery-config-unit-fields">
+        <div className="delivery-config-unit-fields delivery-config-unit-fields--wide">
           <label><span>单元名称</span><input name={`promotion_${index}_name`} autoComplete="off" value={promotion.promotion_name} onChange={event => updatePromotion(index, { promotion_name: event.target.value })}/></label>
+          <label><span>投放身份</span><select value={promotion.delivery_identity.mode} onChange={event => updatePromotion(index, { delivery_identity: { ...promotion.delivery_identity, mode: event.target.value } })}><option value="account_info">账户信息</option><option value="authorized_identity">授权身份</option></select></label>
+          {promotion.delivery_identity.mode === 'authorized_identity' ? <label><span>授权身份 ID</span><input value={promotion.delivery_identity.authorized_identity?.id ?? ''} onChange={event => updatePromotion(index, { delivery_identity: { ...promotion.delivery_identity, authorized_identity: updateReference(promotion.delivery_identity.authorized_identity, event.target.value, 'delivery_identity') } })}/></label> : null}
           <label><span>单元日预算</span><div className="delivery-config-money-input"><input name={`promotion_${index}_daily_budget`} autoComplete="off" type="number" inputMode="decimal" min="0" value={(promotion.budget_and_bidding?.daily_budget_minor ?? 0) / 100} onChange={event => updatePromotion(index, { budget_and_bidding: { currency: 'CNY', bidding_strategy: promotion.budget_and_bidding?.bidding_strategy ?? 'stable_cost', charging_mode: promotion.budget_and_bidding?.charging_mode ?? 'CPC', ...promotion.budget_and_bidding, daily_budget_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元 / 天</small></div></label>
           <label><span>单元出价</span><div className="delivery-config-money-input"><input name={`promotion_${index}_bid`} autoComplete="off" type="number" inputMode="decimal" min="0" step="0.01" value={(promotion.budget_and_bidding?.bid_minor ?? 0) / 100} onChange={event => updatePromotion(index, { budget_and_bidding: { currency: 'CNY', daily_budget_minor: promotion.budget_and_bidding?.daily_budget_minor ?? 0, bidding_strategy: promotion.budget_and_bidding?.bidding_strategy ?? 'stable_cost', charging_mode: promotion.budget_and_bidding?.charging_mode ?? 'CPC', ...promotion.budget_and_bidding, bid_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元</small></div></label>
+          <label><span>落地页引用</span><input value={promotion.landing_page_reference?.id ?? ''} onChange={event => updatePromotion(index, { landing_page_reference: updateReference(promotion.landing_page_reference, event.target.value, 'landing_page') })}/></label>
+          <label><span>直达链接引用</span><input value={promotion.direct_link_reference?.id ?? ''} onChange={event => updatePromotion(index, { direct_link_reference: updateReference(promotion.direct_link_reference, event.target.value, 'direct_link') })}/></label>
+          <label><span>产品引用</span><input value={promotion.product_reference?.id ?? ''} onChange={event => updatePromotion(index, { product_reference: updateReference(promotion.product_reference, event.target.value, 'product') })}/></label>
+          <label><span>原生锚点 ID</span><input value={promotion.native_anchor_reference?.id ?? ''} onChange={event => updatePromotion(index, { native_anchor_reference: updateReference(promotion.native_anchor_reference, event.target.value, 'native_anchor') })}/></label>
+          <label><span>所属类别 ID</span><input value={promotion.settings.category_reference?.id ?? ''} onChange={event => updatePromotion(index, { settings: { ...promotion.settings, category_reference: updateReference(promotion.settings.category_reference, event.target.value, 'category') } })}/></label>
+          <label><span>品牌 ID</span><input value={promotion.settings.brand_reference?.id ?? ''} onChange={event => updatePromotion(index, { settings: { ...promotion.settings, brand_reference: updateReference(promotion.settings.brand_reference, event.target.value, 'brand') } })}/></label>
+          <label><span>行动号召</span><input value={promotion.settings.call_to_action ?? ''} onChange={event => updatePromotion(index, { settings: { ...promotion.settings, call_to_action: event.target.value } })}/></label>
+          <label><span>来源说明</span><input value={promotion.settings.source_label ?? ''} onChange={event => updatePromotion(index, { settings: { ...promotion.settings, source_label: event.target.value } })}/></label>
+          <label><span>直达链接方式</span><select value={promotion.settings.direct_link_mode ?? 'automatic'} onChange={event => updatePromotion(index, { settings: { ...promotion.settings, direct_link_mode: event.target.value as 'automatic' | 'manual' } })}><option value="automatic">自动</option><option value="manual">手动</option></select></label>
+          <label className="delivery-config-switch"><span>开启评论</span><input type="checkbox" role="switch" checked={promotion.settings.comments_enabled ?? false} onChange={event => updatePromotion(index, { settings: { ...promotion.settings, comments_enabled: event.target.checked } })}/></label>
+          <label className="delivery-config-switch"><span>智能生成</span><input type="checkbox" role="switch" checked={promotion.settings.smart_generation_enabled ?? false} onChange={event => updatePromotion(index, { settings: { ...promotion.settings, smart_generation_enabled: event.target.checked } })}/></label>
+          <label className="delivery-config-switch"><span>允许客户端下载</span><input type="checkbox" role="switch" checked={promotion.settings.client_download_enabled ?? false} onChange={event => updatePromotion(index, { settings: { ...promotion.settings, client_download_enabled: event.target.checked } })}/></label>
         </div>
+        <section className="delivery-config-material-editor"><h5>04 素材与文案</h5><div className="delivery-config-unit-fields delivery-config-unit-fields--wide">
+          <label><span>基础素材 ID</span><textarea rows={2} value={referenceIDs(promotion.base_material_references)} placeholder="支持多选；用逗号分隔" onChange={event => updatePromotion(index, { base_material_references: updateReferenceList(event.target.value, 'material', promotion.base_material_references) })}/></label>
+          <label><span>产品主图 ID</span><textarea rows={2} value={referenceIDs(promotion.product_image_references)} placeholder="支持多选；默认使用产品主图" onChange={event => updatePromotion(index, { product_image_references: updateReferenceList(event.target.value, 'product_image', promotion.product_image_references) })}/></label>
+          <label><span>广告文案</span><textarea rows={2} value={promotion.copy_items.map(item => item.text).join('\n')} placeholder="每行一条文案" onChange={event => updatePromotion(index, { copy_items: event.target.value.split('\n').map(text => text.trim()).filter(Boolean).map(text => ({ text })) })}/></label>
+          <label><span>产品卖点</span><textarea rows={2} value={promotion.product_selling_points?.join('\n') ?? ''} placeholder="每行一个卖点" onChange={event => updatePromotion(index, { product_selling_points: event.target.value.split('\n').map(text => text.trim()).filter(Boolean) })}/></label>
+          <label><span>创意组件 ID</span><textarea rows={2} value={referenceIDs(promotion.creative_component_references)} placeholder="支持多个组件" onChange={event => updatePromotion(index, { creative_component_references: updateReferenceList(event.target.value, 'creative_component', promotion.creative_component_references) })}/></label>
+        </div></section>
         <footer><span>{promotion.base_material_references.length} 个素材</span><small>{promotion.base_material_references.length ? '素材已关联' : '尚未关联素材'}</small></footer>
       </article>)}</div>
       {!ocean.promotions.length ? <div className="delivery-config-empty-units"><b>还没有推广单元</b><p>增加一个推广单元，然后设置预算、出价和素材。</p><button className="secondary-button" type="button" onClick={addPromotion}><Plus size={15} aria-hidden="true"/>增加推广单元</button></div> : null}

@@ -8986,6 +8986,11 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   gap: 14px;
 }
 
+.delivery-config-editor-fields--wide,
+.delivery-config-unit-fields--wide {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .delivery-config-editor-fields label,
 .delivery-config-unit-fields label {
   display: grid;
@@ -8999,7 +9004,10 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 
 .delivery-config-editor-fields input,
 .delivery-config-editor-fields select,
-.delivery-config-unit-fields input {
+.delivery-config-editor-fields textarea,
+.delivery-config-unit-fields input,
+.delivery-config-unit-fields select,
+.delivery-config-unit-fields textarea {
   width: 100%;
   min-width: 0;
   min-height: 40px;
@@ -9010,6 +9018,36 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   border-radius: 7px;
   font: inherit;
   font-size: 11px;
+}
+
+.delivery-config-editor-fields textarea,
+.delivery-config-unit-fields textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.delivery-config-editor-fields label > small,
+.delivery-config-unit-fields label > small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.delivery-config-switch {
+  grid-template-columns: 1fr auto !important;
+  align-items: center;
+  align-self: end;
+  min-height: 40px;
+  padding: 9px 11px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.delivery-config-switch input {
+  width: 18px;
+  min-height: 18px;
 }
 
 .delivery-config-editor-fields input:focus-visible,
@@ -9119,6 +9157,17 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   font-size: 9px;
 }
 
+.delivery-config-material-editor {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.delivery-config-material-editor h5 {
+  margin: 14px 0;
+  color: var(--cobalt-dark);
+  font-size: 10px;
+}
+
 .delivery-config-unit-card > footer span {
   padding: 3px 7px;
   color: var(--cobalt-dark);
@@ -9164,6 +9213,11 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   .delivery-config-editor-fields,
   .delivery-config-unit-fields {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .delivery-config-editor-fields--wide,
+  .delivery-config-unit-fields--wide {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .delivery-config-editor-fields label:first-child,
