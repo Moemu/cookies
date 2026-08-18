@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Archive, Check, Package, Plus, RefreshCw, Save, X } from 'lucide-react'
+import { Archive, Check, Package, Plus, RefreshCw, Save } from 'lucide-react'
 import {
   platformClient,
   type PlatformProduct,
@@ -20,19 +20,14 @@ function formatTime(value?: string) {
 }
 
 export function ProductsPage({ activeView }: { activeView: string }) {
+  const view = activeView === '新建产品' ? 'create' : activeView === '巨量映射' ? 'mapping' : 'list'
   const [products, setProducts] = useState<PlatformProduct[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [form, setForm] = useState<ProductForm>(emptyForm)
-  const [showCreate, setShowCreate] = useState(() => activeView === '新建产品')
   const [mappingInput, setMappingInput] = useState('')
   const [projectRefs, setProjectRefs] = useState<PlatformProductProjectRef[]>([])
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
-
-  // 顶部视图 tabs（产品列表 / 新建产品 / 巨量映射）驱动表单与列表切换。
-  useEffect(() => {
-    setShowCreate(activeView === '新建产品')
-  }, [activeView])
 
   const selected = useMemo(() => products.find(product => product.id === selectedId), [products, selectedId])
 
@@ -79,9 +74,8 @@ export function ProductsPage({ activeView }: { activeView: string }) {
         brand_name: form.brandName.trim() || undefined,
       })
       setProducts(current => [...current, created])
-      setSelectedId(created.id)
       setForm(emptyForm)
-      setNotice(`${created.name} 已创建；巨量商品在录入后回绑。`)
+      setNotice(`${created.name} 已创建，可在「产品列表」查看并回绑巨量商品。`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '创建产品失败')
     } finally {
@@ -89,14 +83,15 @@ export function ProductsPage({ activeView }: { activeView: string }) {
     }
   }
 
-  const bindMapping = async () => {
-    if (!selected) return
+  const bindMapping = async (product: PlatformProduct) => {
+    const value = mappingInput.trim()
+    if (!value) return
     setBusy(true)
     try {
-      const updated = await platformClient.updateProduct(selected.id, { ocean_engine_product_id: mappingInput.trim() || undefined })
-      setProducts(current => current.map(product => product.id === updated.id ? updated : product))
+      const updated = await platformClient.updateProduct(product.id, { ocean_engine_product_id: value })
+      setProducts(current => current.map(item => item.id === updated.id ? updated : item))
       setMappingInput('')
-      setNotice(updated.ocean_engine_product_id ? `已回绑巨量商品 ${updated.ocean_engine_product_id}。` : '已清空巨量商品映射。')
+      setNotice(`${updated.name} 已回绑巨量商品 ${updated.ocean_engine_product_id}。`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '回绑巨量商品失败')
     } finally {
@@ -104,12 +99,24 @@ export function ProductsPage({ activeView }: { activeView: string }) {
     }
   }
 
-  const archiveProduct = async () => {
-    if (!selected) return
+  const clearMapping = async (product: PlatformProduct) => {
     setBusy(true)
     try {
-      const updated = await platformClient.updateProduct(selected.id, { status: selected.status === 'archived' ? 'active' : 'archived' })
-      setProducts(current => current.map(product => product.id === updated.id ? updated : product))
+      const updated = await platformClient.updateProduct(product.id, { ocean_engine_product_id: undefined })
+      setProducts(current => current.map(item => item.id === updated.id ? updated : item))
+      setNotice(`${updated.name} 已清空巨量商品映射。`)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '清空映射失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const toggleArchive = async (product: PlatformProduct) => {
+    setBusy(true)
+    try {
+      const updated = await platformClient.updateProduct(product.id, { status: product.status === 'archived' ? 'active' : 'archived' })
+      setProducts(current => current.map(item => item.id === updated.id ? updated : item))
       setNotice(updated.status === 'archived' ? `${updated.name} 已归档。` : `${updated.name} 已恢复为启用。`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '更新产品状态失败')
@@ -118,57 +125,95 @@ export function ProductsPage({ activeView }: { activeView: string }) {
     }
   }
 
-  return <div className="products-surface">
-    <section className="products-list-panel">
-      <div className="surface-toolbar">
-        <div><span className="section-label">PRODUCT CATALOG</span><h3>组织级产品</h3></div>
-        <button aria-label="刷新产品列表" onClick={() => void load()} disabled={busy}><RefreshCw size={15}/></button>
-        <button className="primary-button" onClick={() => setShowCreate(current => !current)} disabled={busy}><Plus size={15}/>新建产品</button>
-      </div>
-      {showCreate ? <form className="products-create-form" onSubmit={event => { event.preventDefault(); void createProduct() }}>
-        <label>产品名称<input autoFocus required value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))}/></label>
-        <label>活动类型<input placeholder="如 promotion / 新品上市" value={form.activityType} onChange={event => setForm(current => ({ ...current, activityType: event.target.value }))}/></label>
-        <label>活动名称<input placeholder="如 双十一活动" value={form.activityName} onChange={event => setForm(current => ({ ...current, activityName: event.target.value }))}/></label>
-        <label>品牌名称<input placeholder="如 娇兰" value={form.brandName} onChange={event => setForm(current => ({ ...current, brandName: event.target.value }))}/></label>
-        <footer><button className="primary-button" type="submit" disabled={busy}><Save size={14}/>创建</button><button type="button" className="secondary-button" onClick={() => setShowCreate(false)}><X size={14}/>取消</button></footer>
-      </form> : null}
-      <div className="products-scroll">
-        {products.map(product => <button key={product.id} className={product.id === selectedId ? 'products-list-item active' : 'products-list-item'} onClick={() => setSelectedId(product.id)}>
-          <span className={`products-status ${product.status}`}>{product.status === 'archived' ? '已归档' : '启用'}</span>
-          <b>{product.name}</b>
-          <small>{product.ocean_engine_product_id ? `已录入巨量 · ${product.ocean_engine_product_id}` : '待录入巨量'}</small>
-        </button>)}
-        {!products.length && !busy ? <div className="panel-empty">当前组织还没有产品，点击「新建产品」创建第一个产品对象。</div> : null}
-      </div>
-    </section>
+  const mappingStatus = (product: PlatformProduct) => product.ocean_engine_product_id
+    ? <span className="status success"><span/>已录入 · {product.ocean_engine_product_id}</span>
+    : <span className="status warning"><span/>待录入</span>
 
-    <main className="products-detail-panel">
-      {selected ? <article className="products-detail">
-        <header>
-          <div><span className="section-label">{selected.status === 'archived' ? '已归档' : '产品对象'}</span><h2>{selected.name}</h2><p>cookies 产品是事实源；巨量商品 ID 只是平台映射，回绑前视为尚未在巨量创建。</p></div>
-          <button className="secondary-button" onClick={() => void archiveProduct()} disabled={busy}><Archive size={14}/>{selected.status === 'archived' ? '恢复启用' : '归档'}</button>
-        </header>
-        <dl className="products-fields">
-          <div><dt>产品 ID</dt><dd>{selected.id}</dd></div>
-          <div><dt>活动类型</dt><dd>{selected.activity_type || '—'}</dd></div>
-          <div><dt>活动名称</dt><dd>{selected.activity_name || '—'}</dd></div>
-          <div><dt>品牌名称</dt><dd>{selected.brand_name || '—'}</dd></div>
-          <div><dt>创建时间</dt><dd>{formatTime(selected.created_at)}</dd></div>
-          <div><dt>更新时间</dt><dd>{formatTime(selected.updated_at)}</dd></div>
-        </dl>
-        <section className="products-mapping">
-          <div><span className="section-label">OCEAN ENGINE MAPPING</span><h3>巨量商品映射</h3><p>{selected.ocean_engine_product_id ? `已回绑商品 ${selected.ocean_engine_product_id}` : '尚未录入巨量；录入工作流会在投放前创建商品并回绑 ID。'}</p></div>
-          <form className="products-mapping-form" onSubmit={event => { event.preventDefault(); void bindMapping() }}>
-            <input placeholder="巨量商品 ID" value={mappingInput} onChange={event => setMappingInput(event.target.value)}/>
-            <button className="primary-button" type="submit" disabled={busy}><Check size={14}/>回绑</button>
-          </form>
-        </section>
-        <section className="products-projects">
-          <div><span className="section-label">USED BY</span><h3>项目关联</h3></div>
-          {projectRefs.length ? <ul>{projectRefs.map(ref => <li key={ref.project_id}><b>{ref.name}</b><small>{ref.project_id}</small></li>)}</ul> : <div className="panel-empty">该产品尚未关联到任何项目。</div>}
-        </section>
-      </article> : <div className="panel-empty"><Package size={22}/><h3>选择或新建一个产品</h3><p>产品目录是组织级业务对象，供投放计划、策略 Brief 与米云素材引用。</p></div>}
-    </main>
+  const toolbar = (title: string, sub: string) => <div className="surface-toolbar">
+    <div><span className="section-label">PRODUCT CATALOG</span><h3>{title}</h3><span>{sub}</span></div>
+    <button aria-label="刷新产品列表" onClick={() => void load()} disabled={busy}><RefreshCw size={15}/></button>
+  </div>
+
+  if (view === 'create') {
+    return <div className="products-view">
+      <div className="table-surface">
+        {toolbar('新建产品', '创建组织级业务产品对象；巨量映射在录入后回绑。')}
+        <form className="products-create-form" onSubmit={event => { event.preventDefault(); void createProduct() }}>
+          <label>产品名称 <em>必填</em><input autoFocus required placeholder="如 双十一主推款礼盒" value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))}/></label>
+          <label>活动类型<input placeholder="如 promotion / 新品上市" value={form.activityType} onChange={event => setForm(current => ({ ...current, activityType: event.target.value }))}/></label>
+          <label>活动名称<input placeholder="如 双十一大促" value={form.activityName} onChange={event => setForm(current => ({ ...current, activityName: event.target.value }))}/></label>
+          <label>品牌名称<input placeholder="如 娇兰" value={form.brandName} onChange={event => setForm(current => ({ ...current, brandName: event.target.value }))}/></label>
+          <footer><button className="primary-button" type="submit" disabled={busy}><Save size={14}/>{busy ? '创建中…' : '创建产品'}</button></footer>
+        </form>
+        <div className="products-create-note"><Package size={16}/><span>cookies 产品是事实源：投放下拉、策略 Brief 与米云素材都引用这里的对象。创建后进入「巨量映射」完成平台录入与回绑。</span></div>
+      </div>
+      {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+    </div>
+  }
+
+  if (view === 'mapping') {
+    return <div className="products-view">
+      <div className="table-surface">
+        {toolbar('巨量映射', '商品在巨量平台录入后回绑商品 ID；未回绑视为尚未在巨量创建。')}
+        <table>
+          <thead><tr><th>产品</th><th>活动</th><th>映射状态</th><th>巨量商品 ID</th></tr></thead>
+          <tbody>
+            {products.map(product => <tr key={product.id}>
+              <td><b>{product.name}</b><small>{product.id}</small></td>
+              <td><b>{[product.activity_name, product.brand_name].filter(Boolean).join(' · ') || '—'}</b><small>{product.activity_type || '未设置活动类型'}</small></td>
+              <td>{mappingStatus(product)}</td>
+              <td>{product.ocean_engine_product_id
+                ? <span className="products-mapping-value"><code>{product.ocean_engine_product_id}</code><button className="text-button" onClick={() => void clearMapping(product)} disabled={busy}>清空</button></span>
+                : <form className="products-mapping-form" onSubmit={event => { event.preventDefault(); void bindMapping(product) }}>
+                    <input placeholder="粘贴巨量商品 ID" value={mappingInput} onChange={event => setMappingInput(event.target.value)}/>
+                    <button className="primary-button" type="submit" disabled={busy || !mappingInput.trim()}><Check size={14}/>回绑</button>
+                  </form>}
+              </td>
+            </tr>)}
+          </tbody>
+        </table>
+        {!products.length && !busy ? <div className="panel-empty">当前组织还没有产品，先去「新建产品」创建一个。</div> : null}
+      </div>
+      {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
+    </div>
+  }
+
+  return <div className="products-view">
+    <div className="table-surface">
+      {toolbar('产品列表', `${products.length} 个产品`) }
+      <table>
+        <thead><tr><th>产品</th><th>活动 / 品牌</th><th>巨量映射</th><th>状态</th><th>项目关联</th></tr></thead>
+        <tbody>
+          {products.map(product => <tr key={product.id} className={product.id === selectedId ? 'products-row-selected' : undefined} onClick={() => setSelectedId(product.id)}>
+            <td><b>{product.name}</b><small>{product.id}</small></td>
+            <td><b>{[product.activity_name, product.brand_name].filter(Boolean).join(' · ') || '—'}</b><small>{product.activity_type || '未设置活动类型'}</small></td>
+            <td>{mappingStatus(product)}</td>
+            <td><span className={`status ${product.status === 'archived' ? 'warning' : 'success'}`}><span/>{product.status === 'archived' ? '已归档' : '启用'}</span></td>
+            <td><button className="text-button" onClick={event => { event.stopPropagation(); void toggleArchive(product) }} disabled={busy}><Archive size={14}/>{product.status === 'archived' ? '恢复' : '归档'}</button></td>
+          </tr>)}
+        </tbody>
+      </table>
+      {!products.length && !busy ? <div className="panel-empty">当前组织还没有产品，先去「新建产品」创建第一个产品对象。</div> : null}
+    </div>
+
+    {selected ? <div className="products-detail">
+      <header>
+        <div><span className="section-label">产品对象</span><h2>{selected.name}</h2><p>cookies 产品是事实源；巨量商品 ID 只是平台映射。</p></div>
+        <span className="products-detail-id">{selected.id}</span>
+      </header>
+      <dl>
+        <div><dt>活动类型</dt><dd>{selected.activity_type || '—'}</dd></div>
+        <div><dt>活动名称</dt><dd>{selected.activity_name || '—'}</dd></div>
+        <div><dt>品牌名称</dt><dd>{selected.brand_name || '—'}</dd></div>
+        <div><dt>创建时间</dt><dd>{formatTime(selected.created_at)}</dd></div>
+        <div><dt>更新时间</dt><dd>{formatTime(selected.updated_at)}</dd></div>
+      </dl>
+      <footer>
+        <div><span>巨量映射</span>{mappingStatus(selected)}</div>
+        <div><span>项目关联</span>{projectRefs.length ? <em>{projectRefs.map(ref => ref.name).join('、')}</em> : <em>尚未关联项目</em>}</div>
+      </footer>
+    </div> : null}
+
     {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
   </div>
 }
