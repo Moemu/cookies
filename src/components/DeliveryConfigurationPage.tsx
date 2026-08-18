@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Check, CircleAlert, RefreshCw, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Check, CircleAlert, Plus, RefreshCw, Save, ShieldCheck, Trash2 } from 'lucide-react'
 import {
   DeliveryApiError,
   deliveryPlanApi,
@@ -106,6 +106,39 @@ function PlatformConfigurationDetails({ value }: { value: PlatformConfiguration 
   </div>
 }
 
+type OceanConfiguration = NonNullable<PlatformConfiguration['payload']['ocean_engine']>
+type OceanPromotion = OceanConfiguration['promotions'][number]
+
+function PlatformConfigurationEditor({ value, onChange }: { value: PlatformConfiguration; onChange: (value: PlatformConfiguration) => void }) {
+  const ocean = value.payload.ocean_engine
+  if (!ocean?.project) return null
+  const updateOcean = (next: OceanConfiguration) => onChange({ ...value, payload: { ...value.payload, ocean_engine: next } })
+  const updateProject = (patch: Partial<OceanConfiguration['project']>) => updateOcean({ ...ocean, project: { ...ocean.project, ...patch } })
+  const updatePromotion = (index: number, patch: Partial<OceanPromotion>) => updateOcean({ ...ocean, promotions: ocean.promotions.map((promotion, itemIndex) => itemIndex === index ? { ...promotion, ...patch } : promotion) })
+  const addPromotion = () => updateOcean({ ...ocean, promotions: [...ocean.promotions, {
+    draft_schema_version: 'oceanengine-configuration/v1',
+    promotion_draft_id: `promotion-local-${Date.now()}`,
+    delivery_identity: { mode: 'account_info' }, base_material_references: [], copy_items: [], settings: {},
+    promotion_name: `${ocean.project.project_name}-${ocean.promotions.length + 1}`,
+  }] })
+  return <section className="delivery-config-editor" aria-label="平台配置直接编辑">
+    <header><div><span className="section-label">本地配置</span><h3>编辑投放项目和推广单元</h3><p>保存只生成 cookies 计划版本。Playwright RPA 在执行阶段读取此版本。</p></div></header>
+    <div className="delivery-field-grid">
+      <label>项目名称<input value={ocean.project.project_name} onChange={event => updateProject({ project_name: event.target.value })}/></label>
+      <label>项目日预算（元）<input type="number" min="0" value={ocean.project.budget_and_bidding.daily_budget_minor / 100} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, daily_budget_minor: Math.round(Number(event.target.value) * 100) } })}/></label>
+      <label>投放周期<select value={ocean.project.schedule.mode ?? 'fixed_range'} onChange={event => updateProject({ schedule: { ...ocean.project.schedule, mode: event.target.value as 'long_term' | 'fixed_range' } })}><option value="long_term">从今天起长期投放</option><option value="fixed_range">设置开始和结束日期</option></select></label>
+    </div>
+    <div className="delivery-config-editor-heading"><h4>推广单元</h4><button type="button" onClick={addPromotion}><Plus size={14}/>增加推广单元</button></div>
+    <div className="delivery-config-promotion-grid">{ocean.promotions.map((promotion, index) => <article key={promotion.promotion_draft_id}>
+      <header><span>推广单元 {index + 1}</span><button type="button" aria-label={`删除推广单元 ${index + 1}`} onClick={() => updateOcean({ ...ocean, promotions: ocean.promotions.filter((_, itemIndex) => itemIndex !== index) })}><Trash2 size={14}/></button></header>
+      <label>单元名称<input value={promotion.promotion_name} onChange={event => updatePromotion(index, { promotion_name: event.target.value })}/></label>
+      <label>单元日预算（元）<input type="number" min="0" value={(promotion.budget_and_bidding?.daily_budget_minor ?? 0) / 100} onChange={event => updatePromotion(index, { budget_and_bidding: { currency: 'CNY', bidding_strategy: promotion.budget_and_bidding?.bidding_strategy ?? 'stable_cost', charging_mode: promotion.budget_and_bidding?.charging_mode ?? 'CPC', ...promotion.budget_and_bidding, daily_budget_minor: Math.round(Number(event.target.value) * 100) } })}/></label>
+      <label>单元出价（元）<input type="number" min="0" step="0.01" value={(promotion.budget_and_bidding?.bid_minor ?? 0) / 100} onChange={event => updatePromotion(index, { budget_and_bidding: { currency: 'CNY', daily_budget_minor: promotion.budget_and_bidding?.daily_budget_minor ?? 0, bidding_strategy: promotion.budget_and_bidding?.bidding_strategy ?? 'stable_cost', charging_mode: promotion.budget_and_bidding?.charging_mode ?? 'CPC', ...promotion.budget_and_bidding, bid_minor: Math.round(Number(event.target.value) * 100) } })}/></label>
+      <small>{promotion.base_material_references.length} 个素材</small>
+    </article>)}</div>
+  </section>
+}
+
 export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCase }: { state: DataState; activeView: string; tourRunId?: string; tourCase?: string }) {
   const { currentProject } = useProject()
   const projectId = currentProject.id
@@ -115,6 +148,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const [preflightMessage, setPreflightMessage] = useState('尚未检查当前计划。')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [editableConfiguration, setEditableConfiguration] = useState<PlatformConfiguration>()
   const refreshGenerationRef = useRef(0)
 
   const selectedPlan = useMemo(() => plans.find(plan => plan.id === selectedId), [plans, selectedId])
@@ -155,6 +189,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
 
   useEffect(() => { void refresh() }, [projectId])
   useEffect(() => { if (selectedId) void restoreWorkflow(selectedId) }, [projectId, selectedId])
+  useEffect(() => { setEditableConfiguration(platformConfiguration ? structuredClone(platformConfiguration) : undefined) }, [selectedId, selectedPlan?.currentVersionNumber])
   useEffect(() => {
     if (!selectedId) return
     const url = new URL(window.location.href)
@@ -182,6 +217,16 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
     } catch (error) { setNotice(errorMessage(error, '提交变更申请失败。')) } finally { setBusy(false) }
   }
 
+  const saveConfiguration = async () => {
+    if (!selectedPlan || !editableConfiguration) return
+    setBusy(true)
+    try {
+      const updated = await deliveryPlanApi.updatePlatformConfiguration(projectId, selectedPlan, editableConfiguration)
+      setPlans(current => current.map(plan => plan.id === updated.id ? updated : plan))
+      setNotice(`平台配置已保存为 V${updated.currentVersionNumber}。未执行巨量远端操作。`)
+    } catch (error) { setNotice(errorMessage(error, '保存平台配置失败。')) } finally { setBusy(false) }
+  }
+
   return <StateBoundary state={state} contextLabel="智能投放 / 平台配置" errorDetail="当前 Project 的平台配置无法读取。">
     <div className="delivery-config-workspace">
       <section className="delivery-config-toolbar"><label>投放计划<select value={selectedId} onChange={event => setSelectedId(event.target.value)}>{plans.map(plan => <option value={plan.id} key={plan.id}>{plan.currentVersion.name} · V{plan.currentVersionNumber}</option>)}</select></label><a className="secondary-button" href={planEditorURL}>查看投放计划</a></section>
@@ -189,7 +234,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
       {!selectedPlan ? <div className="panel-empty">当前 Project 暂无投放计划。<a href={planEditorURL}>前往创建</a></div> : legacyReadOnly ? <section className="delivery-config-config-card">
         <div className="delivery-config-empty-inline"><CircleAlert size={20}/><div><b>历史配置，仅供查看</b><p>这份计划不能继续修改、检查或提交。若要继续投放，请新建计划并选择目标广告平台。</p></div></div>
       </section> : <>
-        {showConfiguration && platformConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><b>配置已就绪</b><span>内容随当前计划版本锁定</span></div></header><PlatformConfigurationDetails value={platformConfiguration}/></section> : null}
+        {showConfiguration && platformConfiguration && editableConfiguration ? <><section className="delivery-config-config-card"><header><div><span>当前计划 V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><b>配置草稿</b><button type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={14}/>保存新版本</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration}/><PlatformConfigurationDetails value={editableConfiguration}/></section></> : null}
         {showCalibration && platformConfiguration ? <CalibrationDispositionView value={platformConfiguration}/> : null}
         {showPreflight ? <section className="delivery-config-flow-grid delivery-config-flow-grid--preflight"><article className="delivery-config-preflight-card">
           <header><div><span className="section-label">提交前检查</span><h3>检查并提交变更申请</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `变更申请 ${changeSet.status}` : '尚未提交'}</strong></header>

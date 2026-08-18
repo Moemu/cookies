@@ -19,6 +19,7 @@ const (
 	OceanEngineCapabilityContractV01 = "oceanengine-capability/v0.1"
 	OceanEngineSelectorContractV01   = "oceanengine-selector-contract/v0.1"
 	OceanEngineActionContractV01     = "oceanengine-action-contract/v0.1"
+	OceanEngineExecutionDriverV1     = "playwright-rpa/edge/v1"
 )
 
 type DecisionCandidateKind string
@@ -446,6 +447,7 @@ type CompiledDeliveryWorkflow struct {
 	CapabilityContractVersion  string                       `json:"capability_contract_version"`
 	SelectorContractVersion    string                       `json:"selector_contract_version"`
 	ActionContractVersion      string                       `json:"action_contract_version"`
+	ExecutionDriver            string                       `json:"execution_driver"`
 	CalibrationManifest        CalibrationManifestBinding   `json:"calibration_manifest"`
 	CompilerVersion            string                       `json:"compiler_version"`
 	Status                     string                       `json:"status"`
@@ -472,13 +474,14 @@ func (w CompiledDeliveryWorkflow) canonicalPayload() any {
 		CapabilityContractVersion  string                       `json:"capability_contract_version"`
 		SelectorContractVersion    string                       `json:"selector_contract_version"`
 		ActionContractVersion      string                       `json:"action_contract_version"`
+		ExecutionDriver            string                       `json:"execution_driver"`
 		CalibrationManifest        CalibrationManifestBinding   `json:"calibration_manifest"`
 		CompilerVersion            string                       `json:"compiler_version"`
 		Status                     string                       `json:"status"`
 		RemoteWriteEnabled         bool                         `json:"remote_write_enabled"`
 		Steps                      []CompiledWorkflowStep       `json:"steps"`
 		ManifestDiagnostics        []ManifestWorkflowDiagnostic `json:"manifest_diagnostics,omitempty"`
-	}{w.SchemaVersion, w.DecisionID, w.DecisionCanonicalHash, w.SelectedCandidateID, w.ConfigurationCanonicalHash, w.ConfigurationID, w.ConfigurationVersion, w.Platform, w.ProfileVersion, w.AccountReference.canonical(), w.CapabilityContractVersion, w.SelectorContractVersion, w.ActionContractVersion, w.CalibrationManifest, w.CompilerVersion, w.Status, w.RemoteWriteEnabled, w.Steps, w.ManifestDiagnostics}
+	}{w.SchemaVersion, w.DecisionID, w.DecisionCanonicalHash, w.SelectedCandidateID, w.ConfigurationCanonicalHash, w.ConfigurationID, w.ConfigurationVersion, w.Platform, w.ProfileVersion, w.AccountReference.canonical(), w.CapabilityContractVersion, w.SelectorContractVersion, w.ActionContractVersion, w.ExecutionDriver, w.CalibrationManifest, w.CompilerVersion, w.Status, w.RemoteWriteEnabled, w.Steps, w.ManifestDiagnostics}
 }
 
 func (w CompiledDeliveryWorkflow) ComputeCanonicalHash() (string, error) {
@@ -487,7 +490,7 @@ func (w CompiledDeliveryWorkflow) ComputeCanonicalHash() (string, error) {
 
 func (w CompiledDeliveryWorkflow) Validate() error {
 	if w.SchemaVersion != CompiledDeliveryWorkflowSchemaV1 || strings.TrimSpace(w.ID) == "" || w.OrganizationID == "" || w.ProjectID == "" || strings.TrimSpace(w.DecisionID) == "" || strings.TrimSpace(w.SelectedCandidateID) == "" || w.CompilerVersion != DeliveryWorkflowCompilerV1 || w.Status != "ready_for_final_approval" || w.RemoteWriteEnabled ||
-		w.Platform != DeliveryPlatformOceanEngine || w.ProfileVersion != OceanEngineConfigurationProfileV1 || w.CapabilityContractVersion != OceanEngineCapabilityContractV01 || w.SelectorContractVersion != OceanEngineSelectorContractV01 || w.ActionContractVersion != OceanEngineActionContractV01 {
+		w.Platform != DeliveryPlatformOceanEngine || w.ProfileVersion != OceanEngineConfigurationProfileV1 || w.CapabilityContractVersion != OceanEngineCapabilityContractV01 || w.SelectorContractVersion != OceanEngineSelectorContractV01 || w.ActionContractVersion != OceanEngineActionContractV01 || w.ExecutionDriver != OceanEngineExecutionDriverV1 {
 		return ErrInvalidState
 	}
 	if w.CalibrationManifest.validate("calibration_manifest") != nil {
@@ -589,7 +592,7 @@ func CompileDeliveryWorkflow(workflowID string, decision DeliveryDecision, candi
 		SchemaVersion: CompiledDeliveryWorkflowSchemaV1, ID: workflowID, OrganizationID: decision.OrganizationID, ProjectID: decision.ProjectID,
 		DecisionID: decision.ID, DecisionCanonicalHash: decision.CanonicalHash, SelectedCandidateID: candidate.ID, ConfigurationCanonicalHash: configuration.CanonicalHash,
 		ConfigurationID: configuration.ConfigurationID, ConfigurationVersion: configuration.VersionNumber, Platform: configuration.Platform, ProfileVersion: configuration.ProfileVersion,
-		AccountReference: project.AccountReference, CapabilityContractVersion: OceanEngineCapabilityContractV01, SelectorContractVersion: OceanEngineSelectorContractV01, ActionContractVersion: OceanEngineActionContractV01,
+		AccountReference: project.AccountReference, CapabilityContractVersion: OceanEngineCapabilityContractV01, SelectorContractVersion: OceanEngineSelectorContractV01, ActionContractVersion: OceanEngineActionContractV01, ExecutionDriver: OceanEngineExecutionDriverV1,
 		CalibrationManifest: configuration.Payload.OceanEngine.CalibrationManifest, CompilerVersion: DeliveryWorkflowCompilerV1, Status: "ready_for_final_approval", RemoteWriteEnabled: false, Steps: steps, ManifestDiagnostics: diagnostics, CreatedBy: actor, CreatedAt: now,
 	}
 	hash, err := workflow.ComputeCanonicalHash()
@@ -604,7 +607,7 @@ func CompileDeliveryWorkflow(workflowID string, decision DeliveryDecision, candi
 }
 
 func workflowFieldFromProjection(projection calibrationmanifest.FieldProjection) WorkflowField {
-	control := projection.Field.ComputerUse
+		control := projection.Field.PlaywrightRPA
 	return WorkflowField{
 		Key: projection.Field.Key, Value: nil, ExpectedReadback: nil, EvidenceRef: "manifest://" + projection.Field.Key, Treatment: string(projection.Mapping.Treatment),
 		Control: &WorkflowFieldControl{Operation: control.Operation, Scope: control.Scope, Target: control.Target, Readback: control.Readback, ExpectedTargetCount: control.ExpectedTargetCount, Unit: projection.Field.Unit, ObservedOptions: append([]string(nil), control.ObservedOptions...), InputConstraints: control.InputConstraints},

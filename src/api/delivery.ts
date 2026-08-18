@@ -164,6 +164,7 @@ export type DeliveryPlanDraft = {
   marketingPurpose: OceanEngineMarketingPurpose | ''
   marketingProduct: {
     id: string
+    oceanEngineProductId?: string
     name: string
     activityType: string
     activityName: string
@@ -209,6 +210,7 @@ export type DeliveryPlanDraft = {
     contentHash?: string
     route?: string
     confirmed: boolean
+    oceanEngineMaterialId?: string
   }>
   strategyReference: {
     taskId: string
@@ -311,6 +313,7 @@ export type CompiledDeliveryWorkflow = {
   capabilityContractVersion: 'oceanengine-capability/v0.1'
   selectorContractVersion: 'oceanengine-selector-contract/v0.1'
   actionContractVersion: 'oceanengine-action-contract/v0.1'
+  executionDriver: 'playwright-rpa/edge/v1'
   calibrationManifest: OceanEngineCalibrationManifestBinding
   compilerVersion: 'oceanengine-workflow-compiler/v1'
   status: 'ready_for_final_approval'
@@ -539,14 +542,14 @@ type WireDeliveryPlanDraft = {
   advertiser: { id: string; name: string; platform: 'ocean_engine'; source?: DeliverySource; scenario?: DeliveryScenario }
   budget: { total_minor: number; currency: 'CNY' }
   schedule: { mode?: 'long_term' | 'fixed_range'; start_at: string; end_at: string; timezone: string }
-  marketing_product?: { id?: string; name?: string; activity_type?: string; activity_name?: string; brand_name?: string }
+  marketing_product?: { id?: string; ocean_engine_product_id?: string; name?: string; activity_type?: string; activity_name?: string; brand_name?: string }
   tracking: {
     delivery_carrier?: '' | 'orange_landing_page' | 'owned_landing_page'; landing_page: string; pixel_id: string; conversion_event: string
     optimization_target_id?: string; optimization_target_name?: string; event_asset_name?: string; event_asset_type?: string
     search_keywords?: string; search_bid_coefficient?: number; search_targeting_expansion?: boolean
     monitoring_impression?: string; monitoring_valid_touch?: string; monitoring_video_play?: string; monitoring_video_complete?: string; monitoring_valid_video_play?: string
   }
-  creative_references: Array<{ asset_id: string; version: number; content_hash?: string; route?: string; confirmed: boolean }>
+  creative_references: Array<{ asset_id: string; version: number; content_hash?: string; route?: string; confirmed: boolean; ocean_engine_material_id?: string }>
   strategy_reference?: { task_id: string; version: number; content_hash?: string; route?: string }
   source_strategy_version: string
 }
@@ -724,7 +727,7 @@ type WireDecisionSelection = {
   candidate_id: string
   configuration: PlatformConfiguration
   workflow: {
-    schema_version: 'compiled-delivery-workflow/v1'; id: string; decision_id: string; decision_canonical_hash: string; selected_candidate_id: string; configuration_canonical_hash: string; configuration_id: string; configuration_version: number; platform: 'ocean_engine'; profile_version: 'oceanengine-configuration/v1'; account_reference: StableReference; capability_contract_version: 'oceanengine-capability/v0.1'; selector_contract_version: 'oceanengine-selector-contract/v0.1'; action_contract_version: 'oceanengine-action-contract/v0.1'; calibration_manifest: OceanEngineCalibrationManifestBinding; compiler_version: 'oceanengine-workflow-compiler/v1'; status: 'ready_for_final_approval'; remote_write_enabled: false
+    schema_version: 'compiled-delivery-workflow/v1'; id: string; decision_id: string; decision_canonical_hash: string; selected_candidate_id: string; configuration_canonical_hash: string; configuration_id: string; configuration_version: number; platform: 'ocean_engine'; profile_version: 'oceanengine-configuration/v1'; account_reference: StableReference; capability_contract_version: 'oceanengine-capability/v0.1'; selector_contract_version: 'oceanengine-selector-contract/v0.1'; action_contract_version: 'oceanengine-action-contract/v0.1'; execution_driver: 'playwright-rpa/edge/v1'; calibration_manifest: OceanEngineCalibrationManifestBinding; compiler_version: 'oceanengine-workflow-compiler/v1'; status: 'ready_for_final_approval'; remote_write_enabled: false
     steps: Array<{ id: string; sequence: number; page: string; action: string; risk: 'observe' | 'prepare_local_form' | 'remote_write'; preconditions: string[]; fields: Array<{ key: string; value: unknown; expected_readback: unknown; evidence_ref: string }>; timeout_seconds: number; recovery: string; blocked: boolean; block_reason?: 'PHASE_C_REMOTE_WRITE_PROHIBITED' }>
     canonical_hash: string; created_at: string
   }
@@ -919,6 +922,22 @@ export const deliveryPlanApi = {
       body: JSON.stringify({ expected_version: expectedVersion, ...toPlatformRuntimeDraft(projectId, planId, expectedVersion + 1, draft) }),
     })
     return toDeliveryPlan(response)
+  },
+  async updatePlatformConfiguration(projectId: string, plan: DeliveryPlan, configuration: PlatformConfiguration): Promise<DeliveryPlan> {
+    const intent = plan.currentVersion.deliveryIntent
+    if (!intent) throw new DeliveryApiError('LEGACY_CONFIGURATION_UNSUPPORTED', 409, '当前计划没有可编辑的业务意图。')
+    const nextVersion = plan.currentVersionNumber + 1
+    const nextIntent = { ...intent, version_number: nextVersion, canonical_hash: undefined }
+    const nextConfiguration = {
+      ...configuration,
+      version_number: nextVersion,
+      canonical_hash: undefined,
+      intent: { schema_version: 'delivery-intent/v1' as const, intent_id: nextIntent.intent_id, version_number: nextVersion },
+    }
+    return toDeliveryPlan(await deliveryPlanRequest<WireDeliveryPlan>(projectId, `/plans/${encodeURIComponent(plan.id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ expected_version: plan.currentVersionNumber, intent: nextIntent, platform_configuration: nextConfiguration }),
+    }))
   },
   async preflight(projectId: string, planId: string): Promise<DeliveryPreflightResult> {
     const response = await deliveryPlanRequest<WirePreflightResult>(projectId, `/plans/${encodeURIComponent(planId)}/preflight`, { method: 'POST' })
@@ -1547,6 +1566,11 @@ function toWireDraft(draft: DeliveryPlanDraft): WireDeliveryPlanDraft {
     advertiser: draft.advertiser,
     budget: { total_minor: draft.budget.totalMinor, currency: draft.budget.currency },
     schedule: { start_at: draft.schedule.startAt, end_at: draft.schedule.endAt, timezone: draft.schedule.timezone },
+    marketing_product: draft.marketingProduct.id ? {
+      id: draft.marketingProduct.id, ocean_engine_product_id: draft.marketingProduct.oceanEngineProductId,
+      name: draft.marketingProduct.name, activity_type: draft.marketingProduct.activityType,
+      activity_name: draft.marketingProduct.activityName, brand_name: draft.marketingProduct.brandName,
+    } : undefined,
     tracking: {
       landing_page: draft.tracking.landingPage,
       pixel_id: draft.tracking.pixelId,
@@ -1558,6 +1582,7 @@ function toWireDraft(draft: DeliveryPlanDraft): WireDeliveryPlanDraft {
       content_hash: reference.contentHash,
       route: reference.route,
       confirmed: reference.confirmed,
+      ocean_engine_material_id: reference.oceanEngineMaterialId,
     })),
     strategy_reference: {
       task_id: draft.strategyReference.taskId,
@@ -1572,9 +1597,9 @@ function toWireDraft(draft: DeliveryPlanDraft): WireDeliveryPlanDraft {
 function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumber: number, draft: DeliveryPlanDraft) {
   const scope = `project:${projectId}`
   const marketingProductReference: StableReference | undefined = draft.marketingProduct.id ? {
-    namespace: 'oceanengine', object_kind: 'product', scope, id: draft.marketingProduct.id, state: 'resolved',
+    namespace: 'cookies', object_kind: 'product', scope, id: draft.marketingProduct.id, state: 'resolved',
     display_name_snapshot: draft.marketingProduct.name,
-    audit_attributes: { activity_type: draft.marketingProduct.activityType, activity_name: draft.marketingProduct.activityName, brand_name: draft.marketingProduct.brandName },
+    audit_attributes: { ocean_engine_product_id: draft.marketingProduct.oceanEngineProductId ?? '', activity_type: draft.marketingProduct.activityType, activity_name: draft.marketingProduct.activityName, brand_name: draft.marketingProduct.brandName },
   } : undefined
   const optimizationTargetReference: StableReference | undefined = draft.tracking.optimizationTargetId ? {
     namespace: 'oceanengine', object_kind: 'optimization_target', scope, id: draft.tracking.optimizationTargetId, state: 'resolved',
@@ -1594,6 +1619,7 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
     namespace: 'cookies', object_kind: 'asset_version', scope,
     id: reference.assetId, version: String(reference.version), content_hash: reference.contentHash,
     state: 'resolved', display_name_snapshot: reference.assetId,
+    audit_attributes: { ocean_engine_material_id: reference.oceanEngineMaterialId ?? '' },
   }))
   const strategyReference: StableReference = {
     namespace: 'cookies', object_kind: 'strategy_version', scope,
@@ -1701,6 +1727,7 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
     marketingPurpose: marketingPurposeValue(typedRuntime ? project?.marketing_purpose : version.marketing_purpose),
     marketingProduct: typedRuntime ? {
       id: project?.marketing_product_reference?.id ?? '', name: project?.marketing_product_reference?.display_name_snapshot ?? '',
+      oceanEngineProductId: productAudit.ocean_engine_product_id ?? '',
       activityType: productAudit.activity_type ?? '', activityName: productAudit.activity_name ?? '', brandName: productAudit.brand_name ?? '',
     } : {
       id: version.marketing_product?.id ?? '', name: version.marketing_product?.name ?? '', activityType: version.marketing_product?.activity_type ?? '',
@@ -1738,12 +1765,13 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
       monitoringVideoComplete: typedRuntime ? monitoringValue('video_complete') : version.tracking?.monitoring_video_complete ?? '',
       monitoringValidVideoPlay: typedRuntime ? monitoringValue('valid_video_play') : version.tracking?.monitoring_valid_video_play ?? '',
     },
-    creativeReferences: (typedRuntime ? materialReferences.map(reference => ({ asset_id: reference.id ?? '', version: Number(reference.version ?? 1), content_hash: reference.content_hash, route: undefined, confirmed: reference.state === 'resolved' })) : version.creative_references ?? []).map(reference => ({
+    creativeReferences: (typedRuntime ? materialReferences.map(reference => ({ asset_id: reference.id ?? '', version: Number(reference.version ?? 1), content_hash: reference.content_hash, route: undefined, confirmed: reference.state === 'resolved', ocean_engine_material_id: reference.audit_attributes?.ocean_engine_material_id })) : version.creative_references ?? []).map(reference => ({
       assetId: reference.asset_id,
       version: reference.version,
       contentHash: reference.content_hash,
       route: reference.route,
       confirmed: reference.confirmed,
+      oceanEngineMaterialId: reference.ocean_engine_material_id,
     })),
     strategyReference: !typedRuntime && version.strategy_reference ? {
       taskId: version.strategy_reference.task_id,
@@ -1798,7 +1826,7 @@ function toDecisionSelection(value: WireDecisionSelection): DeliveryDecisionSele
       schemaVersion: value.workflow.schema_version, id: value.workflow.id, decisionId: value.workflow.decision_id, decisionCanonicalHash: value.workflow.decision_canonical_hash,
       selectedCandidateId: value.workflow.selected_candidate_id, configurationCanonicalHash: value.workflow.configuration_canonical_hash, compilerVersion: value.workflow.compiler_version,
       configurationId: value.workflow.configuration_id, configurationVersion: value.workflow.configuration_version, platform: value.workflow.platform, profileVersion: value.workflow.profile_version,
-      accountReference: value.workflow.account_reference, capabilityContractVersion: value.workflow.capability_contract_version, selectorContractVersion: value.workflow.selector_contract_version, actionContractVersion: value.workflow.action_contract_version, calibrationManifest: value.workflow.calibration_manifest,
+      accountReference: value.workflow.account_reference, capabilityContractVersion: value.workflow.capability_contract_version, selectorContractVersion: value.workflow.selector_contract_version, actionContractVersion: value.workflow.action_contract_version, executionDriver: value.workflow.execution_driver, calibrationManifest: value.workflow.calibration_manifest,
       status: value.workflow.status, remoteWriteEnabled: value.workflow.remote_write_enabled,
       steps: value.workflow.steps.map(step => ({ id: step.id, sequence: step.sequence, page: step.page, action: step.action, risk: step.risk, preconditions: step.preconditions ?? [], fields: step.fields.map(field => ({ key: field.key, value: field.value, expectedReadback: field.expected_readback, evidenceRef: field.evidence_ref })), timeoutSeconds: step.timeout_seconds, recovery: step.recovery, blocked: step.blocked, blockReason: step.block_reason })),
       canonicalHash: value.workflow.canonical_hash, createdAt: value.workflow.created_at,

@@ -2,12 +2,12 @@ package platformskills
 
 import "testing"
 
-func TestOceanEngineEcommerceManualAllowsOnlyControlledSubmitWithoutClaimingDriverReadiness(t *testing.T) {
+func TestOceanEngineSkillUsesDeterministicPlaywrightDriver(t *testing.T) {
 	definition, err := Get(OceanEngineEcommerceManualID, OceanEngineEcommerceManualVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if definition.Executable || definition.RealBrowserDriver || !definition.SubmitAllowed {
+	if !definition.Executable || !definition.RealBrowserDriver || definition.ExecutionDriver != OceanEngineExecutionDriverV1 || definition.ScriptRef != "scripts/oceanengine-playwright-rpa.ts" || !definition.SubmitAllowed {
 		t.Fatalf("controlled submit or driver boundary is wrong: %#v", definition)
 	}
 	if definition.EvidenceObserved != "2026-08-06" || definition.UIBaseline.RevalidatedAt != "2026-08-14" || definition.UIBaseline.DriftCheck != "existing_object_edit_surfaces_revalidated_with_brand_locator_drift" {
@@ -71,7 +71,7 @@ func TestOceanEngineSkillReadsTypedManifestControls(t *testing.T) {
 	for _, field := range fields {
 		switch field.Field.Key {
 		case "project.daily_budget_minor":
-			money = field.Field.Unit == "CNY_fen" && field.Field.ComputerUse.InputConstraints["minor_per_input_unit"] == float64(100)
+			money = field.Field.Unit == "CNY_fen" && field.Field.PlaywrightRPA.InputConstraints["minor_per_input_unit"] == float64(100)
 		case "project.editable_surface":
 			evidenceOnly = field.Mapping.Treatment == "evidence_only" && !field.Executable
 		case "project.marketing_scenario":

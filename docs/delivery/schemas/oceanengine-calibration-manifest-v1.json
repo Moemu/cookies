@@ -227,7 +227,7 @@
         "editable_state",
         "enum_state",
         "locator",
-        "computer_use",
+        "playwright_rpa",
         "evidence_state",
         "consumers"
       ],
@@ -295,7 +295,7 @@
           ]
         },
         "locator": { "$ref": "#/$defs/locator" },
-        "computer_use": { "$ref": "#/$defs/computerUse" },
+        "playwright_rpa": { "$ref": "#/$defs/playwrightRpa" },
         "evidence_state": {
           "enum": [
             "observed",
@@ -335,7 +335,7 @@
             "not": { "required": ["condition_rule"] },
             "properties": {
               "evidence_state": { "const": "platform_pending" },
-              "computer_use": { "$ref": "#/$defs/noActionComputerUse" }
+              "playwright_rpa": { "$ref": "#/$defs/noActionPlaywrightRpa" }
             }
           }
         }
@@ -387,13 +387,13 @@
         }
       }
     },
-    "computerUse": {
+    "playwrightRpa": {
       "oneOf": [
-        { "$ref": "#/$defs/actionComputerUse" },
-        { "$ref": "#/$defs/noActionComputerUse" }
+        { "$ref": "#/$defs/actionPlaywrightRPA" },
+        { "$ref": "#/$defs/noActionPlaywrightRpa" }
       ]
     },
-    "actionComputerUse": {
+    "actionPlaywrightRPA": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -425,7 +425,7 @@
         }
       }
     },
-    "noActionComputerUse": {
+    "noActionPlaywrightRpa": {
       "type": "object",
       "additionalProperties": false,
       "required": ["operation", "blocked_state", "reason"],

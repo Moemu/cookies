@@ -283,7 +283,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
         </nav>
 
         <section className="delivery-plan-form" aria-label={`${section}编辑区`}>
-          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft} strategyTasks={strategyTasks} marketingPurposeSuggestion={marketingPurposeSuggestion}/> : null}
+          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft} strategyTasks={strategyTasks} products={currentProject.products} marketingPurposeSuggestion={marketingPurposeSuggestion}/> : null}
           {section === '预算与排期' ? <BudgetScheduleFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '投放载体和监测' ? <TrackingFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '素材引用' ? <CreativeFields draft={draft} changeDraft={changeDraft} confirmedAssets={confirmedAssets}/> : null}
@@ -325,7 +325,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   </StateBoundary>
 }
 
-function TargetAccountFields({ draft, changeDraft, strategyTasks = [], marketingPurposeSuggestion }: FieldProps) {
+function TargetAccountFields({ draft, changeDraft, strategyTasks = [], products = [], marketingPurposeSuggestion }: FieldProps) {
   const hasPlanAdvertiserOption = Boolean(draft.advertiser.id && draft.advertiser.id !== 'mock-advertiser-001')
   return <div className="delivery-field-grid">
     <label>计划名称<input id="plan_name" aria-label="计划名称" value={draft.name} onChange={event => changeDraft(current => ({ ...current, name: event.target.value }))}/></label>
@@ -343,12 +343,15 @@ function TargetAccountFields({ draft, changeDraft, strategyTasks = [], marketing
     }}><option value="">请选择已就绪策略任务</option>{strategyTasks.map(task => <option key={task.id} value={task.id}>{task.name} · V{task.version}</option>)}</select></label>
     <label><span className="delivery-field-label">巨量营销目的{!draft.marketingPurpose ? <em>必填</em> : null}</span><select id="marketing_purpose" aria-label="巨量营销目的" aria-required="true" required className={!draft.marketingPurpose ? 'field-missing' : undefined} value={draft.marketingPurpose} onChange={event => changeDraft(current => ({ ...current, marketingPurpose: event.target.value as OceanEngineMarketingPurpose }))}><option value="">请选择巨量营销目的</option>{oceanEngineMarketingPurposes.map(value => <option key={value} value={value}>{marketingPurposeLabel(value)}{marketingPurposeSuggestion?.value === value ? '（策略建议）' : ''}</option>)}</select></label>
     {draft.marketingPurpose && draft.marketingPurpose !== 'ecommerce' ? <>
-      <label>巨量商品 ID<input id="marketing_product_id" aria-label="巨量商品 ID" value={draft.marketingProduct.id} onChange={event => changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, id: event.target.value } }))}/></label>
-      <label>商品名称<input id="marketing_product_name" aria-label="商品名称" value={draft.marketingProduct.name} onChange={event => changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, name: event.target.value } }))}/></label>
+      <label><span className="delivery-field-label">cookies 产品{!draft.marketingProduct.id ? <em>必填</em> : null}</span><select id="marketing_product_id" aria-label="cookies 产品" value={draft.marketingProduct.id} onChange={event => {
+        const product = products.find(candidate => candidate.id === event.target.value)
+        changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, id: product?.id ?? '', name: product?.name ?? '', oceanEngineProductId: product?.oceanEngineProductId ?? '' } }))
+      }}><option value="">请选择 cookies 产品</option>{products.map(product => <option key={product.id} value={product.id}>{product.name}{product.oceanEngineProductId ? ' · 已录入巨量' : ' · 待 RPA 录入'}</option>)}</select></label>
+      <label>商品名称<input id="marketing_product_name" aria-label="商品名称" readOnly value={draft.marketingProduct.name}/></label>
       <label>活动类型<input id="marketing_product_activity_type" aria-label="活动类型" value={draft.marketingProduct.activityType} onChange={event => changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, activityType: event.target.value } }))}/></label>
       <label>活动名称<input id="marketing_product_activity_name" aria-label="活动名称" value={draft.marketingProduct.activityName} onChange={event => changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, activityName: event.target.value } }))}/></label>
       <label>品牌名称<input id="marketing_product_brand_name" aria-label="品牌名称" value={draft.marketingProduct.brandName} onChange={event => changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, brandName: event.target.value } }))}/></label>
-      {!draft.marketingProduct.id ? <div className="field-provenance"><b>需绑定巨量真实商品对象</b><span>请填写巨量商品 ID。活动和品牌字段只用于审计与选择确认。</span></div> : null}
+      {draft.marketingProduct.id ? <div className="field-provenance"><b>{draft.marketingProduct.oceanEngineProductId ? '巨量商品已存在' : '待 Playwright RPA 批量录入'}</b><span>cookies 产品是事实源。巨量商品 ID 只保存平台映射。</span></div> : <div className="field-provenance"><b>当前项目没有可选产品</b><span>请先在 cookies 产品对象中关联产品。</span></div>}
     </> : null}
     <div className="field-provenance"><b>可追溯来源</b><span>保存时由服务端解析策略任务版本并写入内容哈希与返回入口。</span></div>
     <div className="field-provenance"><b>{marketingPurposeSuggestion ? `策略建议：${marketingPurposeLabel(marketingPurposeSuggestion.value)}` : '暂无可靠策略建议'}</b><span>{marketingPurposeSuggestion?.reason ?? '项目和策略内容没有平台枚举的可靠映射。请由投手选择。'} 保存后会冻结选择值及策略版本。</span></div>
@@ -407,18 +410,20 @@ function TrackingFields({ draft, changeDraft }: FieldProps) {
 }
 
 function CreativeFields({ draft, changeDraft, confirmedAssets = [] }: FieldProps) {
-  const reference = draft.creativeReferences[0] ?? { assetId: '', version: 1, confirmed: true }
-  const updateReference = (patch: Partial<typeof reference>) => changeDraft(current => ({
+  const selected = new Set(draft.creativeReferences.map(reference => reference.assetId))
+  const toggle = (pointer: ApiAssetVersionPointer) => changeDraft(current => ({
     ...current,
-    creativeReferences: [{ ...(current.creativeReferences[0] ?? reference), ...patch }],
+    creativeReferences: selected.has(pointer.assetId)
+      ? current.creativeReferences.filter(reference => reference.assetId !== pointer.assetId)
+      : [...current.creativeReferences, { assetId: pointer.assetId, version: pointer.humanConfirmedVersion ?? 0, confirmed: true, oceanEngineMaterialId: pointer.oceanEngineMaterialId }],
   }))
-  return <div className="delivery-field-grid">
-    <label><span className="delivery-field-label">已确认素材{!reference.assetId ? <em>必填</em> : null}</span><select id="creative_asset_id" aria-label="已确认素材" aria-required="true" required className={!reference.assetId ? 'field-missing' : undefined} value={reference.assetId} onChange={event => {
-      const pointer = confirmedAssets.find(candidate => candidate.assetId === event.target.value)
-      updateReference({ assetId: pointer?.assetId ?? '', version: pointer?.humanConfirmedVersion ?? 0, confirmed: Boolean(pointer) })
-    }}><option value="">请选择已人工确认素材</option>{confirmedAssets.map(pointer => <option key={pointer.id} value={pointer.assetId}>{pointer.assetId} · V{pointer.humanConfirmedVersion}</option>)}</select></label>
-    <label>引用版本<input id="creative_version" aria-label="素材版本" readOnly value={reference.version || '—'}/></label>
-    <div className="field-provenance"><b>{reference.confirmed ? '已人工确认' : '尚未选择'}</b><span>保存时由服务端校验 Workbench 指针并冻结内容哈希。</span></div>
+  return <div className="delivery-material-picker" role="group" aria-label="已确认素材多选">
+    {confirmedAssets.map(pointer => <label key={pointer.id} className={selected.has(pointer.assetId) ? 'selected' : ''}>
+      <input type="checkbox" checked={selected.has(pointer.assetId)} onChange={() => toggle(pointer)}/>
+      <span className="delivery-material-preview">{pointer.contentUrl ? (pointer.mediaKind === 'video' ? <video src={pointer.contentUrl} controls preload="metadata"/> : <img src={pointer.contentUrl} alt={pointer.assetId}/>) : <span>无预览</span>}</span>
+      <b>{pointer.assetId}</b><small>V{pointer.humanConfirmedVersion} · {pointer.oceanEngineMaterialId ? '已录入巨量' : '待 RPA 录入'}</small>
+    </label>)}
+    {!confirmedAssets.length ? <div className="field-provenance"><b>没有已确认素材</b><span>先在素材库完成人工确认。</span></div> : null}
   </div>
 }
 
@@ -463,6 +468,7 @@ type FieldProps = {
   draft: DeliveryPlanDraft
   changeDraft: (update: (current: DeliveryPlanDraft) => DeliveryPlanDraft) => void
   strategyTasks?: ProjectRecord['tasks']
+  products?: ProjectRecord['products']
   confirmedAssets?: ApiAssetVersionPointer[]
   marketingPurposeSuggestion?: MarketingPurposeSuggestion
 }
@@ -508,11 +514,11 @@ function newMockDraft(project: ProjectRecord, workbench: ReturnType<typeof usePr
       searchKeywords: '', searchBidCoefficient: 1.1, searchTargetingExpansion: false,
       monitoringImpression: '', monitoringValidTouch: '', monitoringVideoPlay: '', monitoringVideoComplete: '', monitoringValidVideoPlay: '',
     },
-    creativeReferences: [{
+    creativeReferences: creative ? [{
       assetId: creative?.assetId ?? '',
       version: creative?.humanConfirmedVersion ?? 0,
       confirmed: Boolean(creative),
-    }],
+    }] : [],
     strategyReference: { taskId: strategy?.id ?? '', version: strategy?.version ?? 0 },
     sourceStrategyVersion: strategy ? `${strategy.id}@v${strategy.version}` : '',
   }

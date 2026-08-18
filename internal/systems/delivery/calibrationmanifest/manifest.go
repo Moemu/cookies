@@ -40,7 +40,7 @@ type Locator struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`
 }
-type ComputerUseControl struct {
+type PlaywrightRPAControl struct {
 	Operation           string         `json:"operation"`
 	Scope               Locator        `json:"scope"`
 	Target              Locator        `json:"target"`
@@ -60,19 +60,19 @@ type ConditionRule struct {
 	All []ConditionPredicate `json:"all"`
 }
 type Field struct {
-	Key                      string             `json:"key"`
-	SemanticLabel            string             `json:"semantic_label,omitempty"`
-	ConfigurationRequirement string             `json:"configuration_requirement,omitempty"`
-	PageFamily               string             `json:"page_family"`
-	ValueType                string             `json:"value_type"`
-	Unit                     string             `json:"unit,omitempty"`
-	Condition                string             `json:"condition,omitempty"`
-	ConditionDimensions      []string           `json:"condition_dimensions,omitempty"`
-	ConditionState           string             `json:"condition_state,omitempty"`
-	ConditionRule            *ConditionRule     `json:"condition_rule,omitempty"`
-	EvidenceState            string             `json:"evidence_state"`
-	Consumers                []Consumer         `json:"consumers"`
-	ComputerUse              ComputerUseControl `json:"computer_use"`
+	Key                      string               `json:"key"`
+	SemanticLabel            string               `json:"semantic_label,omitempty"`
+	ConfigurationRequirement string               `json:"configuration_requirement,omitempty"`
+	PageFamily               string               `json:"page_family"`
+	ValueType                string               `json:"value_type"`
+	Unit                     string               `json:"unit,omitempty"`
+	Condition                string               `json:"condition,omitempty"`
+	ConditionDimensions      []string             `json:"condition_dimensions,omitempty"`
+	ConditionState           string               `json:"condition_state,omitempty"`
+	ConditionRule            *ConditionRule       `json:"condition_rule,omitempty"`
+	EvidenceState            string               `json:"evidence_state"`
+	Consumers                []Consumer           `json:"consumers"`
+	PlaywrightRPA            PlaywrightRPAControl `json:"playwright_rpa"`
 }
 type ConsumerMapping struct {
 	FieldKey     string    `json:"field_key"`
@@ -231,9 +231,9 @@ func (m Manifest) Project(consumer Consumer, facts map[string]string) []FieldPro
 			p.Reason = "blocked by frozen Manifest treatment"
 		} else if mapping.Treatment == EvidenceOnly {
 			p.Reason = "evidence-only field"
-		} else if field.ComputerUse.Operation == "no_action" {
+		} else if field.PlaywrightRPA.Operation == "no_action" {
 			p.Blocked = true
-			p.Reason = field.ComputerUse.BlockedState
+			p.Reason = field.PlaywrightRPA.BlockedState
 		} else {
 			p.Executable = true
 		}
@@ -281,7 +281,7 @@ func (f Field) matches(facts map[string]string) (bool, string) {
 	return true, ""
 }
 func validateField(f Field, vocabulary map[string]ConditionVocabularyEntry) error {
-	if f.ComputerUse.Operation == "" {
+	if f.PlaywrightRPA.Operation == "" {
 		return fmt.Errorf("%w: field %q lacks Computer Use control", ErrInvalid, f.Key)
 	}
 	if f.Condition != "" {
@@ -296,7 +296,7 @@ func validateField(f Field, vocabulary map[string]ConditionVocabularyEntry) erro
 			dims[d] = struct{}{}
 		}
 		if f.ConditionState == "dependency_only" {
-			if f.ConditionRule != nil || f.EvidenceState != "platform_pending" || f.ComputerUse.Operation != "no_action" {
+			if f.ConditionRule != nil || f.EvidenceState != "platform_pending" || f.PlaywrightRPA.Operation != "no_action" {
 				return fmt.Errorf("%w: dependency-only field can act", ErrInvalid)
 			}
 			return nil
@@ -310,10 +310,10 @@ func validateField(f Field, vocabulary map[string]ConditionVocabularyEntry) erro
 			}
 		}
 	}
-	if f.ComputerUse.Operation == "no_action" {
+	if f.PlaywrightRPA.Operation == "no_action" {
 		return nil
 	}
-	if f.ComputerUse.ExpectedTargetCount != 1 || !validLocator(f.ComputerUse.Scope) || !validLocator(f.ComputerUse.Target) || !validLocator(f.ComputerUse.Readback) {
+	if f.PlaywrightRPA.ExpectedTargetCount != 1 || !validLocator(f.PlaywrightRPA.Scope) || !validLocator(f.PlaywrightRPA.Target) || !validLocator(f.PlaywrightRPA.Readback) {
 		return fmt.Errorf("%w: unsafe Computer Use control", ErrInvalid)
 	}
 	return nil

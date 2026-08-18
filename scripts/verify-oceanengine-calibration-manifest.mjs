@@ -39,7 +39,7 @@ if (!validate(manifest))
 if (manifest.observation_boundary.remote_write_authorized)
   throw new Error("calibration manifest must never authorize remote writes");
 for (const requiredSkillTerm of [
-  "computer_use",
+  "playwright_rpa",
   "expected_target_count",
   "blocked_by_platform_capability",
   "page_drift",
@@ -171,9 +171,9 @@ for (const field of manifest.fields) {
         `unconsumed manifest field destination: ${field.key}:${destination}`,
       );
   }
-  if (!field.computer_use)
+  if (!field.playwright_rpa)
     throw new Error(`manifest field has no Computer Use control: ${field.key}`);
-  const control = field.computer_use;
+  const control = field.playwright_rpa;
   if (field.condition) {
     if (!field.condition_dimensions?.length)
       throw new Error(

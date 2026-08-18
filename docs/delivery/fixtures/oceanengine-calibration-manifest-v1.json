@@ -254,7 +254,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "营销目的" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "营销目的" },
         "target": {
@@ -296,7 +296,7 @@
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "营销场景" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "营销场景" },
         "target": { "kind": "visible_text", "value": "短视频+图文" },
@@ -333,7 +333,7 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "visible_text", "value": "营销产品" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "open_reference_picker",
         "scope": { "kind": "visible_text", "value": "营销产品" },
         "target": { "kind": "visible_text", "value": "点击选择商品" },
@@ -377,7 +377,7 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "role_name", "value": "button:选择" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "open_reference_picker",
         "scope": { "kind": "visible_text", "value": "投放载体" },
         "target": {
@@ -424,7 +424,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "应用下载" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "营销目的" },
         "target": { "kind": "visible_text", "value": "应用下载" },
@@ -458,7 +458,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "安卓" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "投放载体" },
         "target": { "kind": "visible_text", "value": "安卓" },
@@ -505,7 +505,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "下载方式" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "下载方式" },
         "target": { "kind": "visible_text", "value": "直接下载" },
@@ -539,7 +539,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "营销产品" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "营销产品" },
         "target": { "kind": "visible_text", "value": "手动选择" },
@@ -573,7 +573,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "获取线索方式" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "获取线索方式" },
         "target": { "kind": "visible_text", "value": "智能优选" },
@@ -611,7 +611,7 @@
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "投放载体" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "投放载体" },
         "target": { "kind": "visible_text", "value": "橙子落地页" },
@@ -664,7 +664,7 @@
       "editable_state": "conditional",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "label", "value": "优化目标" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "open_reference_picker",
         "scope": { "kind": "visible_text", "value": "优化目标" },
         "target": { "kind": "role_name", "value": "textbox:请选择" },
@@ -697,7 +697,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "投放模式" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "投放模式" },
         "target": { "kind": "visible_text", "value": "手动投放" },
@@ -738,7 +738,7 @@
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "深度优化方式" },
-      "computer_use": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "深度优化方式" }, "target": { "kind": "visible_text", "value": "不启用" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "深度优化方式" }, "observed_options": ["不启用", "成交ROI", "净成交下单", "净成交ROI"] },
+      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "深度优化方式" }, "target": { "kind": "visible_text", "value": "不启用" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "深度优化方式" }, "observed_options": ["不启用", "成交ROI", "净成交下单", "净成交ROI"] },
       "evidence_state": "observed",
       "consumers": [
         "OceanEngineConfiguration",
@@ -757,7 +757,7 @@
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "受众倾向与过滤" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "configure_object",
         "scope": { "kind": "visible_text", "value": "受众倾向与过滤" },
         "target": { "kind": "visible_text", "value": "新建定向" },
@@ -783,7 +783,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "投放时间" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "configure_object",
         "scope": { "kind": "visible_text", "value": "投放时间" },
         "target": { "kind": "visible_text", "value": "从今天起长期投放" },
@@ -818,7 +818,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "日预算" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "fill_money",
         "scope": { "kind": "visible_text", "value": "日预算" },
         "target": { "kind": "role_name", "value": "spinbutton" },
@@ -851,7 +851,7 @@
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "竞价策略" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "竞价策略" },
         "target": { "kind": "visible_text", "value": "稳定成本" },
@@ -878,7 +878,7 @@
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "付费方式" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "no_action",
         "blocked_state": "platform_pending",
         "reason": "Some charging-mode branches require an optimization-target semantic key that the model does not contain."
@@ -918,7 +918,7 @@
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "出价" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "fill_money",
         "scope": { "kind": "visible_text", "value": "出价" },
         "target": { "kind": "role_name", "value": "spinbutton" },
@@ -966,7 +966,7 @@
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "搜索快投" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "configure_object",
         "scope": { "kind": "visible_text", "value": "搜索快投" },
         "target": { "kind": "visible_text", "value": "关键词" },
@@ -988,7 +988,7 @@
       "editable_state": "conditional",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "visible_text", "value": "第三方监测链接" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "configure_object",
         "scope": { "kind": "visible_text", "value": "第三方监测链接" },
         "target": { "kind": "role_name", "value": "textbox:请输入链接地址" },
@@ -1009,7 +1009,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_open_set",
       "locator": { "kind": "label", "value": "项目名称" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "fill_text",
         "scope": { "kind": "visible_text", "value": "项目名称" },
         "target": { "kind": "role_name", "value": "textbox:请输入项目名称" },
@@ -1048,7 +1048,7 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "label", "value": "商品目录" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "open_reference_picker",
         "scope": { "kind": "visible_text", "value": "商品目录" },
         "target": {
@@ -1093,7 +1093,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "版位" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "投放版位" },
         "target": { "kind": "visible_text", "value": "通投智选" },
@@ -1129,7 +1129,7 @@
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "商品定向" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "configure_object",
         "scope": { "kind": "visible_text", "value": "商品定向" },
         "target": { "kind": "visible_text", "value": "RTA重定向" },
@@ -1171,7 +1171,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "拉起方式" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "调起方式" },
         "target": { "kind": "visible_text", "value": "直接调起" },
@@ -1196,7 +1196,7 @@
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "编辑项目" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "configure_object",
         "scope": { "kind": "visible_text", "value": "编辑项目" },
         "target": { "kind": "visible_text", "value": "排期与预算" },
@@ -1239,7 +1239,7 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "visible_text", "value": "投放身份" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "open_reference_picker",
         "scope": { "kind": "visible_text", "value": "投放身份" },
         "target": { "kind": "placeholder", "value": "请选择投放抖音号" },
@@ -1264,7 +1264,7 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "visible_text", "value": "基础素材" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "open_reference_picker",
         "scope": { "kind": "visible_text", "value": "基础素材" },
         "target": { "kind": "role_name", "value": "button:添加视频" },
@@ -1294,7 +1294,7 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "placeholder", "value": "请选择橙子落地页链接" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "open_reference_picker",
         "scope": { "kind": "visible_text", "value": "落地页" },
         "target": { "kind": "placeholder", "value": "请选择橙子落地页链接" },
@@ -1321,7 +1321,7 @@
         "kind": "attribute",
         "value": "data-auto-id=oc-create-product-img-add-button"
       },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "open_reference_picker",
         "scope": { "kind": "visible_text", "value": "产品主图" },
         "target": {
@@ -1358,7 +1358,7 @@
         "kind": "placeholder",
         "value": "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交"
       },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "fill_text",
         "scope": { "kind": "visible_text", "value": "产品卖点" },
         "target": {
@@ -1393,7 +1393,7 @@
         "kind": "attribute",
         "value": "data-e2e=createad_yuntuCategory"
       },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "所属类别" },
         "target": {
@@ -1422,7 +1422,7 @@
       "editable_state": "observed_editable",
       "enum_state": "sample_only",
       "locator": { "kind": "visible_text", "value": "单元预算" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "fill_money",
         "scope": { "kind": "visible_text", "value": "单元预算" },
         "target": { "kind": "role_name", "value": "spinbutton:单元预算" },
@@ -1454,7 +1454,7 @@
       "editable_state": "observed_editable",
       "enum_state": "sample_only",
       "locator": { "kind": "visible_text", "value": "单元出价" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "fill_money",
         "scope": { "kind": "visible_text", "value": "单元出价" },
         "target": { "kind": "role_name", "value": "spinbutton:单元出价" },
@@ -1493,7 +1493,7 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "visible_text", "value": "原生锚点" },
-      "computer_use": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "原生锚点" }, "target": { "kind": "visible_text", "value": "手动选择" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "原生锚点" }, "observed_options": ["不启用", "自动选择", "手动选择"] },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "原生锚点" }, "target": { "kind": "visible_text", "value": "手动选择" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "原生锚点" }, "observed_options": ["不启用", "自动选择", "手动选择"] },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1507,7 +1507,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "直达链接" },
-      "computer_use": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "直达链接" }, "target": { "kind": "visible_text", "value": "自动" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "直达链接" }, "observed_options": ["自动", "手动"] },
+      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "直达链接" }, "target": { "kind": "visible_text", "value": "自动" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "直达链接" }, "observed_options": ["自动", "手动"] },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1521,7 +1521,7 @@
       "editable_state": "conditional",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "visible_text", "value": "直达链接内容" },
-      "computer_use": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "直达链接内容" }, "target": { "kind": "visible_text", "value": "添加直达链接" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "备用链接" } },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "直达链接内容" }, "target": { "kind": "visible_text", "value": "添加直达链接" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "备用链接" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1535,7 +1535,7 @@
       "editable_state": "conditional",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "visible_text", "value": "产品名称" },
-      "computer_use": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "产品名称" }, "target": { "kind": "visible_text", "value": "产品名称" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "产品主图" } },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "产品名称" }, "target": { "kind": "visible_text", "value": "产品名称" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "产品主图" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1549,7 +1549,7 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "visible_text", "value": "创意组件" },
-      "computer_use": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "创意组件" }, "target": { "kind": "visible_text", "value": "添加组件" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "创意组件" } },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "创意组件" }, "target": { "kind": "visible_text", "value": "添加组件" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "创意组件" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1563,7 +1563,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "行动号召" },
-      "computer_use": { "operation": "configure_object", "scope": { "kind": "visible_text", "value": "行动号召" }, "target": { "kind": "role_name", "value": "combobox:行动号召" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "combobox:行动号召" } },
+      "playwright_rpa": { "operation": "configure_object", "scope": { "kind": "visible_text", "value": "行动号召" }, "target": { "kind": "role_name", "value": "combobox:行动号召" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "combobox:行动号召" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1577,7 +1577,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_open_set",
       "locator": { "kind": "label", "value": "来源" },
-      "computer_use": { "operation": "fill_text", "scope": { "kind": "visible_text", "value": "来源" }, "target": { "kind": "role_name", "value": "textbox:来源" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "textbox:来源" } },
+      "playwright_rpa": { "operation": "fill_text", "scope": { "kind": "visible_text", "value": "来源" }, "target": { "kind": "role_name", "value": "textbox:来源" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "textbox:来源" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1591,7 +1591,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "评论" },
-      "computer_use": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "评论" }, "target": { "kind": "visible_text", "value": "开启" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "评论" }, "observed_options": ["开启", "关闭"] },
+      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "评论" }, "target": { "kind": "visible_text", "value": "开启" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "评论" }, "observed_options": ["开启", "关闭"] },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1605,7 +1605,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "智能生成" },
-      "computer_use": { "operation": "configure_object", "scope": { "kind": "visible_text", "value": "智能生成" }, "target": { "kind": "role_name", "value": "checkbox:智能生成" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "checkbox:智能生成" } },
+      "playwright_rpa": { "operation": "configure_object", "scope": { "kind": "visible_text", "value": "智能生成" }, "target": { "kind": "role_name", "value": "checkbox:智能生成" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "checkbox:智能生成" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1619,7 +1619,7 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "visible_text", "value": "品牌名称" },
-      "computer_use": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "品牌名称" }, "target": { "kind": "role_name", "value": "combobox:品牌名称" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "combobox:品牌名称" } },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "品牌名称" }, "target": { "kind": "role_name", "value": "combobox:品牌名称" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "combobox:品牌名称" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1633,7 +1633,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_open_set",
       "locator": { "kind": "label", "value": "单元名称" },
-      "computer_use": { "operation": "fill_text", "scope": { "kind": "visible_text", "value": "单元名称" }, "target": { "kind": "role_name", "value": "textbox:请输入单元名称" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "textbox:请输入单元名称" } },
+      "playwright_rpa": { "operation": "fill_text", "scope": { "kind": "visible_text", "value": "单元名称" }, "target": { "kind": "role_name", "value": "textbox:请输入单元名称" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "textbox:请输入单元名称" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
     },
@@ -1646,7 +1646,7 @@
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "编辑单元" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "configure_object",
         "scope": { "kind": "visible_text", "value": "编辑单元" },
         "target": { "kind": "visible_text", "value": "单元素材" },
@@ -1686,7 +1686,7 @@
       "editable_state": "observed_editable",
       "enum_state": "observed_open_set",
       "locator": { "kind": "visible_text", "value": "单元预算" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "fill_money",
         "scope": { "kind": "visible_text", "value": "单元预算" },
         "target": { "kind": "role_name", "value": "spinbutton:单元日预算" },
@@ -1721,7 +1721,7 @@
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
       "locator": { "kind": "role_name", "value": "button:换视频" },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "open_reference_picker",
         "scope": { "kind": "visible_text", "value": "基础素材" },
         "target": { "kind": "role_name", "value": "button:换视频" },
@@ -1758,7 +1758,7 @@
         "kind": "attribute",
         "value": "data-e2e=promotion_project_on-off"
       },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "toggle",
         "scope": { "kind": "visible_text", "value": "项目" },
         "target": {
@@ -1794,7 +1794,7 @@
         "kind": "attribute",
         "value": "data-e2e=promotion_promotion_on-off"
       },
-      "computer_use": {
+      "playwright_rpa": {
         "operation": "toggle",
         "scope": { "kind": "visible_text", "value": "单元" },
         "target": {

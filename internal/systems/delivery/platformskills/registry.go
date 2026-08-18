@@ -12,6 +12,7 @@ import (
 const (
 	OceanEngineEcommerceManualID      = "oceanengine-ecommerce-manual"
 	OceanEngineEcommerceManualVersion = "v0.1-calibration"
+	OceanEngineExecutionDriverV1      = "playwright-rpa/edge/v1"
 )
 
 var ErrInvalidDefinition = errors.New("invalid delivery Platform Skill definition")
@@ -46,6 +47,8 @@ type Definition struct {
 	Owner               string `json:"owner"`
 	Executable          bool   `json:"executable"`
 	RealBrowserDriver   bool   `json:"real_browser_driver"`
+	ExecutionDriver     string `json:"execution_driver"`
+	ScriptRef           string `json:"script_ref"`
 	SubmitAllowed       bool   `json:"submit_allowed"`
 	EvidenceObserved    string `json:"evidence_observed_at"`
 	LastReviewedAt      string `json:"last_reviewed_at"`
@@ -177,12 +180,12 @@ func (d Definition) Validate() error {
 	if d.SchemaVersion != "delivery-platform-skill-definition/v1" ||
 		d.ID != OceanEngineEcommerceManualID ||
 		d.Version != OceanEngineEcommerceManualVersion ||
-		d.DisplayName != "巨量引擎·电商手动投放" ||
+		d.DisplayName != "巨量引擎·Playwright RPA 投放" ||
 		d.Platform != "ocean_engine" ||
 		d.Capability != "ecommerce_manual_delivery" ||
 		d.Status != "gate_two_passed_takeover_submit_calibration" ||
 		d.Owner != "delivery" ||
-		d.Executable || d.RealBrowserDriver || !d.SubmitAllowed ||
+		!d.Executable || !d.RealBrowserDriver || d.ExecutionDriver != OceanEngineExecutionDriverV1 || d.ScriptRef != "scripts/oceanengine-playwright-rpa.ts" || !d.SubmitAllowed ||
 		d.EvidenceObserved != "2026-08-06" ||
 		d.UIBaseline.RevalidatedAt != "2026-08-14" ||
 		d.CalibrationManifest.SchemaVersion != "oceanengine-calibration-manifest/v1" ||

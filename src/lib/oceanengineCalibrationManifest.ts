@@ -9,7 +9,7 @@ type ManifestField = {
   unit?: string
   page_family: string
   locator?: { value?: string }
-  computer_use?: { scope?: { value?: string }; target?: { value?: string }; blocked_state?: string; reason?: string; input_constraints?: Record<string, unknown> }
+  playwright_rpa?: { scope?: { value?: string }; target?: { value?: string }; blocked_state?: string; reason?: string; input_constraints?: Record<string, unknown> }
   condition?: string
   condition_state?: 'evaluable' | 'dependency_only'
   condition_rule?: {
@@ -106,9 +106,9 @@ function configurationFacts(configuration: unknown) {
 function fieldLabel(field: ManifestField) {
   if (field.semantic_label) return field.semantic_label
   const locator = field.locator?.value ?? ''
-  const target = field.computer_use?.target?.value?.replace(/^button:/, '')
+  const target = field.playwright_rpa?.target?.value?.replace(/^button:/, '')
   if (locator.startsWith('button:') && target) return target
-  return field.computer_use?.scope?.value || locator || field.key
+  return field.playwright_rpa?.scope?.value || locator || field.key
 }
 
 function usableMappingValues(mapping: ConsumerMapping, values: unknown[]) {
@@ -151,9 +151,9 @@ export function oceanEngineCalibrationDispositions(configuration: unknown, scope
       const field = manifest.fields.find(candidate => candidate.key === mapping.field_key)
       if (!field || (mapping.field_key.startsWith('project.') ? 'project' : 'promotion') !== scope) return []
       const values = usableMappingValues(mapping, valuesAtPath(configuration, mapping.contract_path))
-      const blockedReason = field.computer_use?.reason
-        ?? (field.computer_use?.blocked_state ? `稳定阻断状态：${field.computer_use.blocked_state}` : undefined)
-        ?? (field.computer_use?.input_constraints ? '当前页面输入约束不允许生成可执行配置。' : undefined)
+      const blockedReason = field.playwright_rpa?.reason
+        ?? (field.playwright_rpa?.blocked_state ? `稳定阻断状态：${field.playwright_rpa.blocked_state}` : undefined)
+        ?? (field.playwright_rpa?.input_constraints ? '当前页面输入约束不允许生成可执行配置。' : undefined)
         ?? field.condition
         ?? '冻结 Manifest 未提供可执行处置。'
       if (mapping.treatment === 'evidence_only') return [disposition(field, mapping, 'evidence_only', `仅保留校准证据（${field.evidence_state ?? 'unknown'}）。`)]

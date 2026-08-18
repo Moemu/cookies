@@ -1,9 +1,18 @@
 ---
 name: oceanengine-ecommerce-manual
-description: Prepare, calibrate, or perform a controlled Ocean Engine ecommerce manual promotion workflow in a visible authenticated browser. Use for 巨量引擎电商手动投放 account/project identification, promotion form fill and readback, safe draft discard, or one explicitly authorized final promotion submission with fenced ComputerUseRun evidence and Mapping reconciliation.
+description: Compile and run deterministic Ocean Engine operations with Playwright in an external authenticated Edge session. Use for 巨量引擎 project, promotion, cookies product, and cookies material ingestion, editing, state changes, readback, and reconciliation.
 ---
 
-# Ocean Engine ecommerce manual promotion
+# Ocean Engine Playwright RPA
+
+Run `scripts/oceanengine-playwright-rpa.ts`. Do not operate the page through
+free-form Computer Use. Compile each action from the frozen configuration and
+Manifest. Require one semantic locator to match exactly one element.
+
+Treat cookies products and assets as facts. Use their optional Ocean Engine ID
+as the platform mapping. If the ID is empty, compile a product or material
+ingestion step before the delivery step. Write the returned platform ID back to
+the cookies object only after an independent list readback confirms it.
 
 Treat the machine-readable [SkillDefinition](../../definitions/oceanengine-ecommerce-manual-v0.1.json) as the capability boundary. Read the relevant evidence and locator references it names before interacting with a page. Never infer a selector or permission from business semantics alone.
 
@@ -16,7 +25,7 @@ Bid bounds are path-dependent and must be read from the current page validation 
 ## Fill a project-create field from the Manifest
 
 For a no-write project-create calibration, use only a field carrying a
-`computer_use` specification in the frozen Manifest. Reidentify the matching
+`playwright_rpa` specification in the frozen Manifest. Reidentify the matching
 page fingerprint first, then apply this sequence:
 
 1. Resolve the `scope`, then resolve the `target` inside that scope; require the
@@ -37,7 +46,7 @@ page fingerprint first, then apply this sequence:
    the current page contradicts the frozen Manifest record; otherwise stop the
    case as incomplete calibration.
 
-A field without `computer_use` remains observation-only. It must not be
+A field without `playwright_rpa` remains observation-only. It must not be
 presented as an executable form action until a later calibration adds a unique
 scope, target and readback. This rule applies equally to fields marked
 `evidence_only`: the Manifest may document them without granting a modelled
@@ -47,7 +56,7 @@ platform write.
 
 - Use gate one for page identification, form fill, field readback, and draft discard. Do not save or create an object.
 - Use gate two only for one final submission explicitly authorized in the current user turn. A generic continuation, an earlier approval, a zero account balance, or this Skill never grants write authority.
-- Keep `executable=false` and `real_browser_driver=false`: operate only through a visible authenticated browser takeover and the persisted control-plane APIs. Do not claim an unattended Browser Driver.
+- Use `execution_driver=playwright-rpa/edge/v1`. Connect only to the declared external Edge CDP session. Do not use the in-app browser.
 
 ## Require exact gate-two authority
 
@@ -81,7 +90,7 @@ If the submission result is unclear, record `result_unknown`; permit only query,
 
 ## Calibrate finite actions as one ordered batch
 
-Use one visible-browser session, one shared promotion-form fixture, and one
+Use one external Edge Playwright session, one shared promotion-form fixture, and one
 machine-readable batch evidence record for `update_promotion_budget`,
 `update_promotion_materials`, `pause_promotion`, and `resume_promotion`. Do not
 split these paths into separate calibration narratives. Resolve the exact object

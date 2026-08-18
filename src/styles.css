@@ -8765,3 +8765,38 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .c6-review-panel { display: grid; gap: 8px; margin-top: 12px; padding: 10px; border: 1px solid var(--line); background: var(--surface); }.c6-review-panel header { display: flex; justify-content: space-between; gap: 8px; font-size: 9px; }.c6-review-panel header span { color: var(--cobalt); }.c6-review-panel ol { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; counter-reset: review-step; }.c6-review-panel li { color: var(--muted); font-size: 8px; }.c6-review-panel li::before { counter-increment: review-step; content: counter(review-step); display: inline-grid; place-items: center; width: 14px; height: 14px; margin-right: 5px; border: 1px solid var(--line); border-radius: 50%; }.c6-review-panel li.done { color: var(--success); }.c6-review-panel li.done::before { content: '✓'; border-color: var(--success); }.c6-review-panel .primary-button { width: 100%; padding: 7px; font-size: 9px; }.c6-review-panel details { padding-top: 7px; border-top: 1px solid var(--line); }.c6-review-panel summary { color: var(--cobalt); cursor: pointer; font-size: 8px; }.c6-review-panel dl { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 4px; margin: 7px 0 0; font-size: 7px; }.c6-review-panel dt { color: var(--muted); }.c6-review-panel dd { overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }.c6-blockers { display: grid; gap: 3px; padding: 7px; color: var(--danger); background: color-mix(in oklch, var(--danger) 8%, white); font-size: 8px; }
 .c5-original-audio { margin-top: 9px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; }.c5-original-audio > label:first-child { display: flex; gap: 6px; font-size: 9px; }
 .c5-playback { display: none; }
+.delivery-material-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.delivery-material-picker > label {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.delivery-material-picker > label.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.delivery-material-preview {
+  display: grid;
+  place-items: center;
+  min-height: 128px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.delivery-material-preview img,
+.delivery-material-preview video {
+  width: 100%;
+  height: 160px;
+  object-fit: contain;
+}

@@ -33,7 +33,7 @@ const manifest = JSON.parse(
       all: Array<{ dimension: string; operator: string; values?: string[] }>;
     };
     evidence_state: string;
-    computer_use?: {
+    playwright_rpa?: {
       operation: string;
       expected_target_count?: number;
       blocked_state?: string;
@@ -130,23 +130,23 @@ test("OceanEngine calibration manifest drives consumer and coverage checks", () 
       );
     }
   }
-  const computerUseFields = manifest.fields.filter(
-    (field) => field.computer_use,
+  const playwrightRpaFields = manifest.fields.filter(
+    (field) => field.playwright_rpa,
   );
   assert.equal(
-    computerUseFields.length,
+    playwrightRpaFields.length,
     manifest.fields.length,
     "every Manifest field must be Computer Use-ready",
   );
-  for (const field of computerUseFields) {
+  for (const field of playwrightRpaFields) {
     if (field.condition) {
       assert.ok(field.condition_dimensions?.length);
       for (const dimension of field.condition_dimensions ?? [])
         assert.ok(vocabularyKeys.has(dimension));
       if (field.condition_state === "dependency_only") {
         assert.equal(field.evidence_state, "platform_pending");
-        assert.equal(field.computer_use?.operation, "no_action");
-        assert.equal(field.computer_use?.blocked_state, "platform_pending");
+        assert.equal(field.playwright_rpa?.operation, "no_action");
+        assert.equal(field.playwright_rpa?.blocked_state, "platform_pending");
         assert.equal(field.condition_rule, undefined);
       } else {
         assert.equal(field.condition_state, "evaluable");
@@ -161,20 +161,20 @@ test("OceanEngine calibration manifest drives consumer and coverage checks", () 
         }
       }
     }
-    if (field.computer_use?.operation !== "no_action")
+    if (field.playwright_rpa?.operation !== "no_action")
       assert.equal(
-        field.computer_use?.expected_target_count,
+        field.playwright_rpa?.expected_target_count,
         1,
         `non-unique Computer Use target: ${field.key}`,
       );
     assert.ok(
-      field.computer_use?.operation.length,
+      field.playwright_rpa?.operation.length,
       `missing Computer Use operation: ${field.key}`,
     );
-    if (field.computer_use?.observed_options) {
+    if (field.playwright_rpa?.observed_options) {
       assert.equal(
-        new Set(field.computer_use.observed_options).size,
-        field.computer_use.observed_options.length,
+        new Set(field.playwright_rpa.observed_options).size,
+        field.playwright_rpa.observed_options.length,
         `duplicate Computer Use options: ${field.key}`,
       );
     }
