@@ -4,18 +4,20 @@
   "title": "Delivery Platform Skill Definition v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "id", "version", "display_name", "platform", "capability", "status", "owner", "executable", "real_browser_driver", "submit_allowed", "evidence_observed_at", "last_reviewed_at", "ui_baseline", "schema_ref", "calibration_manifest", "evidence_refs", "page_types", "capabilities", "dynamic_condition_keys", "safety_exit", "write_validation_pending", "runtime_policy", "rollback", "gate_one", "gate_two_preparation", "gate_two_validation", "existing_object_edit_calibration", "controlled_action_batch_calibration"],
+  "required": ["schema_version", "id", "version", "display_name", "platform", "capability", "status", "owner", "executable", "real_browser_driver", "execution_driver", "script_ref", "submit_allowed", "evidence_observed_at", "last_reviewed_at", "ui_baseline", "schema_ref", "calibration_manifest", "evidence_refs", "page_types", "capabilities", "dynamic_condition_keys", "safety_exit", "write_validation_pending", "runtime_policy", "rollback", "gate_one", "gate_two_preparation", "gate_two_validation", "existing_object_edit_calibration", "controlled_action_batch_calibration"],
   "properties": {
     "schema_version": { "const": "delivery-platform-skill-definition/v1" },
     "id": { "const": "oceanengine-ecommerce-manual" },
     "version": { "const": "v0.1-calibration" },
-    "display_name": { "const": "巨量引擎·电商手动投放" },
+    "display_name": { "const": "巨量引擎·Playwright RPA 投放" },
     "platform": { "const": "ocean_engine" },
     "capability": { "const": "ecommerce_manual_delivery" },
     "status": { "const": "gate_two_passed_takeover_submit_calibration" },
     "owner": { "const": "delivery" },
-    "executable": { "const": false },
-    "real_browser_driver": { "const": false },
+    "executable": { "const": true },
+    "real_browser_driver": { "const": true },
+    "execution_driver": { "const": "playwright-rpa/edge/v1" },
+    "script_ref": { "const": "scripts/oceanengine-playwright-rpa.ts" },
     "submit_allowed": { "const": true },
     "evidence_observed_at": { "const": "2026-08-06" },
     "last_reviewed_at": { "type": "string", "format": "date" },
@@ -53,7 +55,7 @@
       "required": ["allowed", "forbidden"],
       "properties": {
         "allowed": { "type": "array", "items": { "enum": ["navigate", "identify_page", "identify_account", "identify_project", "fill_unsubmitted_form", "readback_field", "discard_local_draft", "verify_no_write", "controlled_final_submit_once", "record_post_write_result", "confirm_platform_mapping"] }, "minItems": 1, "uniqueItems": true },
-        "forbidden": { "type": "array", "items": { "enum": ["unattended_submit", "submit_without_current_turn_authorization", "resubmit_after_click", "enable", "pause_remote_object", "modify_remote_object", "delete", "upload"] }, "minItems": 1, "uniqueItems": true }
+        "forbidden": { "type": "array", "items": { "enum": ["unattended_submit", "submit_without_current_turn_authorization", "resubmit_after_click", "enable", "pause_remote_object", "modify_remote_object", "delete", "upload", "delete_without_authority", "coordinate_locator", "display_name_as_reference_key"] }, "minItems": 1, "uniqueItems": true }
       }
     },
     "dynamic_condition_keys": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 6, "uniqueItems": true },
