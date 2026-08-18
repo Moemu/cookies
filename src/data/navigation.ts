@@ -3,7 +3,7 @@ import {
   Boxes, BrainCircuit, ChartNoAxesCombined, CircleGauge, ClipboardCheck, Compass,
   Database, FileCheck2, FileSearch, Film, FlaskConical, FolderKanban,
   GalleryHorizontalEnd, Library, Lightbulb, ListChecks,
-  Megaphone, MonitorCog, PackageCheck, PanelTop, PlaySquare, Rocket, Route,
+  Megaphone, MonitorCog, PackageCheck, PanelTop, PlaySquare, Rocket,
   SearchCheck, Send, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
   TableProperties, Target, TrendingUp, UsersRound, Video, WandSparkles,
 } from 'lucide-react'
@@ -150,7 +150,6 @@ export const systems: SystemDefinition[] = [
     key: 'delivery', label: '智能投放', shortLabel: '投放', icon: Rocket,
     statement: '把批准策略和创意转化为安全、可审计的投放动作。',
     nav: [
-        { id: 'tour', label: '上线后优化闭环', icon: Route, group: '计划与执行', layout: 'workspace', description: '从计划来源、首次上线授权、平台操作演练走到指标、告警与优化申请。', views: ['走测总览'] },
       { id: 'plans', label: '投放计划', icon: Megaphone, group: '计划与执行', layout: 'workspace', description: '配置目标、预算、受众、版位、创意和校验。', views: ['全部计划', '草稿', '待审批', '执行中', '已完成', '版本'] },
         { id: 'configuration', label: '平台配置', icon: Boxes, group: '计划与执行', layout: 'workspace', description: '查看业务意图到平台配置的不可变映射，并提交检查与审批。', views: ['配置映射', '字段校准与处置', '检查与提交'] },
       { id: 'execution', label: '执行中心', icon: PlaySquare, group: '计划与执行', layout: 'operations', description: '管理受控执行、等待用户、接管、恢复和验证。', views: ['待执行', '执行中', '等待用户', '结果未知', '失败', '接管', '完成'] },

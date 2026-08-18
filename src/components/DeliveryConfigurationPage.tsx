@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Check, CircleAlert, Plus, RefreshCw, Save, ShieldCheck, Trash2 } from 'lucide-react'
+import { Check, CircleAlert, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 import {
   DeliveryApiError,
   deliveryPlanApi,
+  deliveryExecutionApi,
   type DeliveryControlChangeSet,
   type DeliveryPlan,
   type PlatformConfiguration,
@@ -255,7 +256,6 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const [plans, setPlans] = useState<DeliveryPlan[]>([])
   const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get('plan_id') ?? '')
   const [changeSet, setChangeSet] = useState<DeliveryControlChangeSet>()
-  const [preflightMessage, setPreflightMessage] = useState('尚未检查当前计划。')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [editableConfiguration, setEditableConfiguration] = useState<PlatformConfiguration>()
@@ -267,9 +267,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const showConfiguration = activeView === '配置映射'
   const showCalibration = activeView === '字段校准与处置'
   const showPreflight = activeView === '检查与提交'
-  const approvalURL = changeSet ? projectPath(projectId, 'delivery', 'approvals', changeSet.id, '待我审批', undefined, tourRunId, tourCase) : undefined
   const planEditorURL = projectPath(projectId, 'delivery', 'plans', undefined, '计划列表', undefined, tourRunId, tourCase)
-  const canSubmit = !legacyReadOnly && (!changeSet || changeSet.status === 'draft' || changeSet.status === 'preflight_failed' || changeSet.status === 'rejected')
 
   const restoreWorkflow = async (planId: string) => {
     if (!planId) return
@@ -307,26 +305,6 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
     window.history.replaceState(window.history.state, '', url)
   }, [selectedId])
 
-  const preflightPlan = async () => {
-    if (!selectedPlan || legacyReadOnly) return
-    setBusy(true)
-    try {
-      const result = await deliveryPlanApi.preflight(projectId, selectedPlan.id)
-      setPreflightMessage(result.passed ? `检查通过（${formatTime(result.checkedAt)}）。` : `检查未通过：${result.checks.filter(check => !check.passed).map(check => check.message).join('；')}`)
-    } catch (error) { setNotice(errorMessage(error, '检查计划失败。')) } finally { setBusy(false) }
-  }
-
-  const createAndPreflightChangeSet = async () => {
-    if (!selectedPlan || legacyReadOnly) return
-    setBusy(true)
-    try {
-      const draft = changeSet?.status === 'draft' ? changeSet : await deliveryPlanApi.createChangeSet(projectId, selectedPlan.id, selectedPlan.currentVersionNumber)
-      const checked = await deliveryPlanApi.preflightChangeSet(projectId, draft.id, draft.version)
-      setChangeSet(checked)
-      setNotice(checked.status === 'preflight_passed' ? '变更申请已提交审批中心。' : '变更申请未通过最终检查。')
-    } catch (error) { setNotice(errorMessage(error, '提交变更申请失败。')) } finally { setBusy(false) }
-  }
-
   const saveConfiguration = async () => {
     if (!selectedPlan || !editableConfiguration) return
     setBusy(true)
@@ -337,6 +315,27 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
     } catch (error) { setNotice(errorMessage(error, '保存平台配置失败。')) } finally { setBusy(false) }
   }
 
+  const confirmLaunch = async () => {
+    if (!selectedPlan) return
+    setBusy(true)
+    try {
+      const idempotencyKey = `launch-${selectedPlan.id}-${selectedPlan.currentVersionNumber}-${Date.now()}`
+      const result = await deliveryExecutionApi.executePlan(projectId, selectedPlan.id, selectedPlan.currentVersionNumber, idempotencyKey)
+      setNotice(
+        result.execution.status === 'succeeded'
+          ? '已确认投放并完成平台写入（本地模拟）。'
+          : `投放执行结果为 ${result.execution.status}：${result.execution.recoveryReason || '详见执行记录'}。`,
+      )
+      setChangeSet(result.changeSet)
+    } catch (error) {
+      if (error instanceof DeliveryApiError && error.code === 'VALIDATION_FAILED' && error.violations.length) {
+        setNotice(`当前配置无法投放：${error.violations.map(item => item.reason).join('；')}`)
+      } else {
+        setNotice(errorMessage(error, '确认投放失败。'))
+      }
+    } finally { setBusy(false) }
+  }
+
   return <StateBoundary state={state} contextLabel="智能投放 / 平台配置" errorDetail="当前 Project 的平台配置无法读取。">
     <div className="delivery-config-workspace">
       <section className="delivery-config-toolbar"><label><span>投放计划</span><select name="delivery_plan" autoComplete="off" value={selectedId} onChange={event => setSelectedId(event.target.value)}>{plans.map(plan => <option value={plan.id} key={plan.id}>{plan.currentVersion.name} · V{plan.currentVersionNumber}</option>)}</select></label><a className="secondary-button" href={planEditorURL}>查看投放计划</a></section>
@@ -344,12 +343,14 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
       {!selectedPlan ? <div className="panel-empty">当前 Project 暂无投放计划。<a href={planEditorURL}>前往创建</a></div> : legacyReadOnly ? <section className="delivery-config-config-card">
         <div className="delivery-config-empty-inline"><CircleAlert size={20}/><div><b>历史配置，仅供查看</b><p>这份计划不能继续修改、检查或提交。若要继续投放，请新建计划并选择目标广告平台。</p></div></div>
       </section> : <>
-        {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存新版本'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration} products={currentProject.products ?? []} assets={confirmedAssets}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
+        {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration} products={currentProject.products ?? []} assets={confirmedAssets}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
         {showCalibration && platformConfiguration ? <CalibrationDispositionView value={platformConfiguration}/> : null}
         {showPreflight ? <section className="delivery-config-flow-grid delivery-config-flow-grid--preflight"><article className="delivery-config-preflight-card">
-          <header><div><span className="section-label">提交前检查</span><h3>检查并提交变更申请</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `变更申请 ${changeSet.status}` : '尚未提交'}</strong></header>
-          <div className="delivery-config-preflight-summary"><b>检查结果</b><p>{preflightMessage}</p></div>
-          <div className="delivery-config-actions delivery-config-preflight-actions"><button onClick={() => void preflightPlan()} disabled={busy}><ShieldCheck size={14}/>检查当前计划</button><button onClick={() => void createAndPreflightChangeSet()} disabled={busy || !canSubmit}><Check size={14}/>提交变更申请</button>{approvalURL && changeSet?.status !== 'draft' ? <a className="primary-button" href={approvalURL}>查看审批记录<ArrowRight size={14}/></a> : null}</div>
+          <header><div><span className="section-label">确认投放</span><h3>检查并确认投放</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `最近执行 ${changeSet.status}` : '尚未投放'}</strong></header>
+          <div className="delivery-config-preflight-summary"><b>服务端校验</b><p>保存时会校验结构；确认投放时要求执行所需引用与平台证据均已解析。</p></div>
+          <div className="delivery-config-actions delivery-config-preflight-actions">
+            <button className="primary-button" onClick={() => void confirmLaunch()} disabled={busy || legacyReadOnly}><Check size={14}/>确认投放</button>
+          </div>
         </article></section> : null}
       </>}
       {notice ? <div className="inline-notice" role="status">{notice}</div> : null}

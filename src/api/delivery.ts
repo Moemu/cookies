@@ -1,9 +1,11 @@
 import { platformClient } from '../data/platformClient'
 
 export class DeliveryApiError extends Error {
-  constructor(readonly code: string | undefined, readonly status: number, message: string) {
+  readonly violations: Array<{ field: string; reason: string }>
+  constructor(readonly code: string | undefined, readonly status: number, message: string, violations: Array<{ field: string; reason: string }> = []) {
     super(message)
     this.name = 'DeliveryApiError'
+    this.violations = violations
   }
 }
 
@@ -389,29 +391,6 @@ export type DeliveryPlan = {
   updatedAt: string
 }
 
-export type DeliveryPreflightCheck = {
-  code: 'delivery_intent_valid' | 'platform_configuration_valid' | 'INVALID_STABLE_REFERENCE' | 'CANONICAL_HASH_MISMATCH' | 'CAPABILITY_PENDING' | 'platform_pending' | 'blocked_by_event_asset' | 'write_validation_pending'
-  severity: 'error' | 'warning'
-  passed: boolean
-  message: string
-  repair?: {
-    field: string
-    section: string
-    label: string
-  }
-}
-
-export type DeliveryPreflightResult = {
-  planId: string
-  planVersion: number
-  passed: boolean
-  blocked: boolean
-  checks: DeliveryPreflightCheck[]
-  source: DeliverySource
-  scenario: DeliveryScenario
-  checkedAt: string
-}
-
 export type DeliveryApproval = {
   approvalId: string
   valid: boolean
@@ -768,23 +747,6 @@ type WireDeliveryPlan = {
   updated_at: string
 }
 
-type WirePreflightResult = {
-  plan_id: string
-  plan_version: number
-  passed: boolean
-  blocked: boolean
-  checks: Array<{
-    code: DeliveryPreflightCheck['code']
-    severity: DeliveryPreflightCheck['severity']
-    passed: boolean
-    message: string
-    repair: DeliveryPreflightCheck['repair'] | null
-  }>
-  source: DeliverySource
-  scenario: DeliveryScenario
-  checked_at: string
-}
-
 type WireDeliveryApproval = {
   approval_id: string
   valid: boolean
@@ -940,19 +902,6 @@ export const deliveryPlanApi = {
       body: JSON.stringify({ expected_version: plan.currentVersionNumber, intent: nextIntent, platform_configuration: nextConfiguration }),
     }))
   },
-  async preflight(projectId: string, planId: string): Promise<DeliveryPreflightResult> {
-    const response = await deliveryPlanRequest<WirePreflightResult>(projectId, `/plans/${encodeURIComponent(planId)}/preflight`, { method: 'POST' })
-    return {
-      planId: response.plan_id,
-      planVersion: response.plan_version,
-      passed: response.passed,
-      blocked: response.blocked,
-      checks: response.checks.map(check => ({ ...check, repair: check.repair ?? undefined })),
-      source: response.source,
-      scenario: response.scenario,
-      checkedAt: response.checked_at,
-    }
-  },
   async listChangeSets(projectId: string): Promise<DeliveryControlChangeSet[]> {
     const response = await deliveryPlanRequest<{ items: WireDeliveryControlChangeSet[] }>(projectId, '/change-sets')
     return (response.items ?? []).map(toDeliveryControlChangeSet)
@@ -962,16 +911,6 @@ export const deliveryPlanApi = {
       projectId,
       `/change-sets/${encodeURIComponent(changeSetId)}`,
     ))
-  },
-  async createChangeSet(projectId: string, planId: string, expectedVersion: number): Promise<DeliveryControlChangeSet> {
-    return toDeliveryControlChangeSet(await deliveryPlanRequest<WireDeliveryControlChangeSet>(
-      projectId,
-      `/plans/${encodeURIComponent(planId)}:create-change-set`,
-      { method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }) },
-    ))
-  },
-  async preflightChangeSet(projectId: string, changeSetId: string, expectedVersion: number): Promise<DeliveryControlChangeSet> {
-    return deliveryChangeSetAction(projectId, changeSetId, 'preflight', expectedVersion)
   },
   async approveChangeSet(projectId: string, changeSetId: string, expectedVersion: number): Promise<DeliveryControlChangeSet> {
     return deliveryChangeSetAction(projectId, changeSetId, 'approve', expectedVersion)
@@ -1067,6 +1006,22 @@ export const deliveryOptimizationApi = {
 }
 
 export const deliveryExecutionApi = {
+  async executePlan(
+    projectId: string,
+    planId: string,
+    expectedVersion: number,
+    idempotencyKey: string,
+  ): Promise<DeliveryExecutionRecord> {
+    return toDeliveryExecutionRecord(await deliveryPlanRequest<WireDeliveryExecutionRecord>(
+      projectId,
+      `/plans/${encodeURIComponent(planId)}/execute`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ expected_version: expectedVersion }),
+      },
+    ))
+  },
   async execute(
     projectId: string,
     changeSetId: string,
@@ -1411,150 +1366,17 @@ export type DeliveryTourStep = {
   evidence: string[]
 }
 
-export type DeliveryTourRun = {
-  id: string
-  organizationId: string
-  projectId: string
-  ownerId: string
-  status: 'preparing' | 'prepared' | 'reset'
-  source: DeliverySource
-  scenario: 'delivery_tour'
-  preparedAt?: string
-  resetAt?: string
-  createdAt: string
-  updatedAt: string
-  cases: DeliveryTourCase[]
-  steps: DeliveryTourStep[]
-  currentStep: string
-  suggestedNextUrl: string
-}
-
-export type DeliveryTourResetResult = {
-  run: DeliveryTourRun
-  deleted: Record<string, number>
-  source: DeliverySource
-  scenario: 'delivery_tour_reset'
-  resetAt: string
-  isolationKey: string
-}
-
-type WireDeliveryTourCase = {
-  key: DeliveryTourCaseKey
-  title: string
-  plan_id: string
-  status: DeliveryTourCase['status']
-  expected_outcome: string
-  start_url: string
-  source: DeliverySource
-  scenario: DeliveryTourCaseKey
-  evidence?: string[] | null
-  observed_at: string
-}
-
-type WireDeliveryTourRun = {
-  id: string
-  organization_id: string
-  project_id: string
-  owner_id: string
-  status: DeliveryTourRun['status']
-  source: DeliverySource
-  scenario: 'delivery_tour'
-  prepared_at?: string | null
-  reset_at?: string | null
-  created_at: string
-  updated_at: string
-  cases?: WireDeliveryTourCase[] | null
-  steps?: Array<{
-    key: string
-    title: string
-    completion_condition: string
-    complete: boolean
-    url: string
-    explanation: string
-    evidence?: string[] | null
-  }> | null
-  current_step: string
-  suggested_next_url: string
-}
-
-type WireDeliveryTourResetResult = {
-  run: WireDeliveryTourRun
-  deleted?: Record<string, number> | null
-  source: DeliverySource
-  scenario: 'delivery_tour_reset'
-  reset_at: string
-  isolation_key: string
-}
-
-export const deliveryTourApi = {
-  async prepare(projectId: string, runId: string): Promise<DeliveryTourRun> {
-    return toDeliveryTourRun(await deliveryPlanRequest<WireDeliveryTourRun>(projectId, `/tour-runs/${encodeURIComponent(runId)}:prepare`, { method: 'POST' }))
-  },
-  async get(projectId: string, runId: string): Promise<DeliveryTourRun> {
-    return toDeliveryTourRun(await deliveryPlanRequest<WireDeliveryTourRun>(projectId, `/tour-runs/${encodeURIComponent(runId)}`))
-  },
-  async reset(projectId: string, runId: string): Promise<DeliveryTourResetResult> {
-    const value = await deliveryPlanRequest<WireDeliveryTourResetResult>(projectId, `/tour-runs/${encodeURIComponent(runId)}:reset`, { method: 'POST' })
-    return {
-      run: toDeliveryTourRun(value.run),
-      deleted: value.deleted ?? {},
-      source: value.source,
-      scenario: value.scenario,
-      resetAt: value.reset_at,
-      isolationKey: value.isolation_key,
-    }
-  },
-}
-
-function toDeliveryTourRun(value: WireDeliveryTourRun): DeliveryTourRun {
-  return {
-    id: value.id,
-    organizationId: value.organization_id,
-    projectId: value.project_id,
-    ownerId: value.owner_id,
-    status: value.status,
-    source: value.source,
-    scenario: value.scenario,
-    preparedAt: value.prepared_at ?? undefined,
-    resetAt: value.reset_at ?? undefined,
-    createdAt: value.created_at,
-    updatedAt: value.updated_at,
-    cases: (value.cases ?? []).map(tourCase => ({
-      key: tourCase.key,
-      title: tourCase.title,
-      planId: tourCase.plan_id,
-      status: tourCase.status,
-      expectedOutcome: tourCase.expected_outcome,
-      startUrl: tourCase.start_url,
-      source: tourCase.source,
-      scenario: tourCase.scenario,
-      evidence: tourCase.evidence ?? [],
-      observedAt: tourCase.observed_at,
-    })),
-    steps: (value.steps ?? []).map(step => ({
-      key: step.key,
-      title: step.title,
-      completionCondition: step.completion_condition,
-      complete: step.complete,
-      url: step.url,
-      explanation: step.explanation,
-      evidence: step.evidence ?? [],
-    })),
-    currentStep: value.current_step,
-    suggestedNextUrl: value.suggested_next_url,
-  }
-}
-
 async function deliveryPlanRequest<T>(projectId: string, path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body !== undefined) headers.set('Content-Type', 'application/json')
   const response = await fetch(`/api/delivery/v1/projects/${encodeURIComponent(projectId)}${path}`, { credentials: 'include', ...init, headers })
-  const payload = await response.json() as T | { error?: { code?: string; message?: string } }
+  const payload = await response.json() as T | { error?: { code?: string; message?: string; details?: Array<{ field?: string; reason?: string }> } }
   if (!response.ok) {
-    const problem = payload as { error?: { code?: string; message?: string } }
+    const problem = payload as { error?: { code?: string; message?: string; details?: Array<{ field?: string; reason?: string }> } }
+    const details = (problem.error?.details ?? []).map(item => ({ field: item.field ?? '', reason: item.reason ?? '' }))
     throw new DeliveryApiError(problem.error?.code, response.status, problem.error?.code === 'VERSION_CONFLICT'
       ? '计划已被其他版本更新，请刷新后再试。'
-      : problem.error?.message ?? 'Delivery API 请求失败')
+      : problem.error?.message ?? 'Delivery API 请求失败', details)
   }
   return payload as T
 }

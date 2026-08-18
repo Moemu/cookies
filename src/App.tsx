@@ -15,7 +15,6 @@ import {
   type StrategyWorkspaceLocation,
 } from './features/strategy/workspace/workspaceRoute'
 import type { SystemKey } from './types'
-import { getLatestDeliveryTourRunId } from './components/DeliveryTourPage'
 
 const loadPages = () => import('./components/Pages')
 const HomePage = lazy(() => loadPages().then(module => ({ default: module.HomePage })))
@@ -132,8 +131,7 @@ export default function App() {
       />
 
   const changeNavigation = (id: string) => {
-    const runId = system.key === 'delivery' ? route.tourRunId ?? getLatestDeliveryTourRunId(activeProjectId) : undefined
-    navigate(projectPath(activeProjectId, system.key, id, undefined, undefined, undefined, runId, runId ? route.tourCase : undefined))
+    navigate(projectPath(activeProjectId, system.key, id))
   }
 
   return <Shell system={system} activeNav={navItem.id} isHome={route.isHome} isProjectHome={route.isProjectHome} isProjectManagement={route.isProjectManagement} isGlobalSettings={route.isModelSettings} onHome={() => navigate('/')} onModelSettings={() => navigate('/settings')} onSystemChange={changeSystem} onProjectChange={openProject} onProjectManage={manageProject} onNavChange={changeNavigation}>

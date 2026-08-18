@@ -479,6 +479,10 @@ func (s *applicationStub) Execute(context.Context, contract.ActorContext, contra
 	now := time.Now()
 	return delivery.ExecutionResult{ChangeSet: s.changeSet, Execution: delivery.Execution{CompletedAt: &now}}, false, nil
 }
+func (s *applicationStub) ExecutePlan(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _, _ string, _ delivery.ExecutePlanRequest) (delivery.ExecutionResult, bool, error) {
+	now := time.Now()
+	return delivery.ExecutionResult{ChangeSet: s.changeSet, Execution: delivery.Execution{CompletedAt: &now}}, false, nil
+}
 func (s *applicationStub) Rollback(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error) {
 	return s.changeSet, nil
 }

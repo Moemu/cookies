@@ -25,6 +25,7 @@ type Application interface {
 	GetPlanVersion(context.Context, contract.ActorContext, contract.ProjectID, string, int) (delivery.DeliveryPlanVersion, error)
 	RunPlanPreflight(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PreflightResult, error)
 	GetPlanDetail(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PlanDetail, error)
+	ExecutePlan(context.Context, contract.ActorContext, contract.ProjectID, string, string, delivery.ExecutePlanRequest) (delivery.ExecutionResult, bool, error)
 	ListChangeSets(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.ChangeSet, error)
 	GetChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.ChangeSet, error)
 	CreateChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, int64) (delivery.ChangeSet, error)
@@ -104,6 +105,7 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}", server.getPlanVersion)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/preflight", server.planPreflight)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/plans/{plan_id}/detail", server.getPlanDetail)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/execute", server.executePlan)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/configuration:compile", server.compileConfiguration)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/configuration:override", server.overrideConfiguration)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/recommendations:generate", server.generateRecommendation)
@@ -629,6 +631,30 @@ func (s *Server) planPreflight(writer http.ResponseWriter, request *http.Request
 	writeJSON(writer, http.StatusOK, value)
 }
 
+func (s *Server) executePlan(writer http.ResponseWriter, request *http.Request) {
+	var body delivery.ExecutePlanRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	key := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
+	if key == "" {
+		writeError(writer, request, delivery.ErrInvalidRequest)
+		return
+	}
+	result, replay, err := s.app.ExecutePlan(
+		request.Context(), mustActor(request), projectID(request), request.PathValue("plan_id"), key, body,
+	)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	if replay {
+		writeJSON(writer, http.StatusOK, result)
+	} else {
+		writeJSON(writer, http.StatusCreated, result)
+	}
+}
+
 func (s *Server) createChangeSet(writer http.ResponseWriter, request *http.Request) {
 	action := request.PathValue("plan_action")
 	if !strings.HasSuffix(action, ":create-change-set") {
@@ -843,6 +869,36 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 func writeError(writer http.ResponseWriter, request *http.Request, err error) {
 	status, code, message := http.StatusInternalServerError, "INTERNAL", "服务暂时不可用，请稍后重试"
 	retryable := true
+	var validationFailed *delivery.ValidationFailedError
+	if errors.As(err, &validationFailed) {
+		status, code, message, retryable = http.StatusUnprocessableEntity, "VALIDATION_FAILED", "投放计划校验未通过，请检查表单字段", false
+		violations := make([]contract.FieldViolation, 0, len(validationFailed.Checks))
+		for _, check := range validationFailed.Checks {
+			if !check.Passed {
+				field := ""
+				if check.Repair != nil {
+					field = check.Repair.Field
+				}
+				violations = append(violations, contract.FieldViolation{
+					Field:  field,
+					Reason: check.Message,
+				})
+			}
+		}
+		requestContext, _ := contract.RequestContextFrom(request.Context())
+		writeJSON(writer, status, struct {
+			Error    contract.Error    `json:"error"`
+			Source   delivery.Source   `json:"source"`
+			Scenario delivery.Scenario `json:"scenario"`
+		}{
+			Error: contract.Error{
+				Code: code, Message: message, RequestID: requestContext.RequestID,
+				Retryable: retryable, Details: violations,
+			},
+			Source: delivery.SourceMock, Scenario: "validation_failed",
+		})
+		return
+	}
 	contractCode := delivery.DeliveryContractErrorCode(err)
 	switch {
 	case contractCode != "":

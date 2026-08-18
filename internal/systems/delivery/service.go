@@ -38,6 +38,17 @@ var (
 	ErrLegacyConfigurationUnsupported   = errors.New("legacy delivery configuration is read-only and unsupported by this operation")
 )
 
+// ValidationFailedError carries structured preflight checks that blocked a
+// save. The HTTP layer maps it to a 422 with per-field violations so the
+// frontend can show inline errors.
+type ValidationFailedError struct {
+	Checks []PreflightCheck
+}
+
+func (e *ValidationFailedError) Error() string {
+	return "投放计划校验未通过，请检查表单字段"
+}
+
 type DeliveryPlanStatus string
 
 const DeliveryPlanDraft DeliveryPlanStatus = "draft"
@@ -335,6 +346,7 @@ type Repository interface {
 	GetApproval(context.Context, contract.OrganizationID, contract.ProjectID, string) (DeliveryApproval, error)
 	CreateOrReplayExecution(context.Context, ChangeSet, DeliveryApproval, Execution, Evidence) (ExecutionResult, bool, error)
 	FindExecutionByIdempotency(context.Context, contract.OrganizationID, contract.ProjectID, string) (ExecutionResult, bool, error)
+	RecordDirectExecution(context.Context, ChangeSet, Execution, Evidence) (ExecutionResult, error)
 	AdvanceExecution(context.Context, Execution, ExecutionStatus, *time.Time, string, string, []string) (ExecutionResult, error)
 	AdvanceStep(context.Context, Execution, ExecutionStep, ExecutionStep) (ExecutionStep, error)
 	ListExecutions(context.Context, contract.OrganizationID, contract.ProjectID, int) ([]ExecutionResult, error)
@@ -420,6 +432,26 @@ func (s Service) UpdatePlan(ctx context.Context, actor contract.ActorContext, pr
 		return DeliveryPlan{}, err
 	}
 	return s.Repository.UpdatePlan(ctx, actor.OrganizationID, projectID, planID, request.ExpectedVersion, version)
+}
+
+// validateVersionBlocking runs the authoritative preflight rules against a
+// plan version that is about to be executed. If any error-level check fails,
+// it returns a ValidationFailedError with the full check list. This is
+// distinct from save-time validation: save accepts incomplete drafts (missing
+// references, capability_pending), while execute requires them resolved.
+func validateVersionBlocking(version DeliveryPlanVersion) error {
+	checks := RunPreflight(version)
+	blocked := false
+	for _, check := range checks {
+		if !check.Passed && check.Severity == CheckSeverityError {
+			blocked = true
+			break
+		}
+	}
+	if blocked {
+		return &ValidationFailedError{Checks: checks}
+	}
+	return nil
 }
 
 func (s Service) ListPlans(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]DeliveryPlan, error) {
@@ -1120,6 +1152,208 @@ func (s Service) Rollback(ctx context.Context, actor contract.ActorContext, proj
 		return ChangeSet{}, err
 	}
 	return s.hydrateChangeSet(ctx, actor.OrganizationID, projectID, transitioned)
+}
+
+// ExecutePlanRequest is the input for the simplified "confirm launch" action
+// that writes a plan directly to the platform without ChangeSet/Approval.
+type ExecutePlanRequest struct {
+	ExpectedVersion int64 `json:"expected_version"`
+}
+
+func (r ExecutePlanRequest) Validate() error {
+	if r.ExpectedVersion < 1 {
+		return ErrInvalidRequest
+	}
+	return nil
+}
+
+// ExecutePlan writes the current plan version directly to the platform
+// adapter. This is the simplified "confirm launch" action that replaces the
+// CreateChangeSet → Preflight → Approve → Execute chain for daily operations.
+func (s Service) ExecutePlan(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID, idempotencyKey string, request ExecutePlanRequest) (ExecutionResult, bool, error) {
+	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
+		return ExecutionResult{}, false, err
+	}
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if err := request.Validate(); err != nil || len(idempotencyKey) < 1 || len(idempotencyKey) > 255 {
+		return ExecutionResult{}, false, ErrInvalidRequest
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return ExecutionResult{}, false, err
+	}
+	plan, err := s.Repository.GetPlan(ctx, actor.OrganizationID, projectID, planID)
+	if err != nil {
+		return ExecutionResult{}, false, err
+	}
+	if plan.Version != request.ExpectedVersion {
+		return ExecutionResult{}, false, ErrVersionConflict
+	}
+	version := plan.CurrentVersion
+	if version.ReadOnly || !version.IsPlatformConfigurationV2() {
+		return ExecutionResult{}, false, ErrLegacyConfigurationUnsupported
+	}
+	// Run preflight inline before execution.
+	if err := validateVersionBlocking(version); err != nil {
+		return ExecutionResult{}, false, err
+	}
+	requestHash, err := contract.CanonicalJSONHash(struct {
+		OrganizationID  contract.OrganizationID `json:"organization_id"`
+		ProjectID       contract.ProjectID      `json:"project_id"`
+		PlanID          string                  `json:"plan_id"`
+		PlanVersion     int64                   `json:"plan_version"`
+		Operation       string                  `json:"operation"`
+		ExpectedVersion int64                   `json:"expected_version"`
+	}{actor.OrganizationID, projectID, plan.ID, plan.Version, "execute_plan", request.ExpectedVersion})
+	if err != nil {
+		return ExecutionResult{}, false, err
+	}
+	if existing, found, findErr := s.Repository.FindExecutionByIdempotency(ctx, actor.OrganizationID, projectID, idempotencyKey); findErr != nil {
+		return ExecutionResult{}, false, findErr
+	} else if found {
+		if existing.Execution.RequestHash != requestHash {
+			return ExecutionResult{}, false, ErrIdempotencyConflict
+		}
+		existing, err = s.hydrateExecutionResult(ctx, actor.OrganizationID, projectID, existing)
+		return existing, true, err
+	}
+	executionID, err := s.idGenerator()("deliveryexecution")
+	if err != nil {
+		return ExecutionResult{}, false, err
+	}
+	evidenceID, err := s.idGenerator()("deliveryevidence")
+	if err != nil {
+		return ExecutionResult{}, false, err
+	}
+	now := s.now()
+	actions := []string{"create_platform_project", "create_promotion", "verify_platform_state"}
+	steps := make([]ExecutionStep, len(actions))
+	for index, action := range actions {
+		steps[index].ID, err = s.idGenerator()("deliveryexecutionstep")
+		if err != nil {
+			return ExecutionResult{}, false, err
+		}
+		steps[index].Sequence = index + 1
+		steps[index].Action = action
+		steps[index].Status = StepPending
+		steps[index].Effect = "none"
+		steps[index].OutcomeSummary = "queued; no adapter call has occurred"
+		steps[index].Version = 1
+	}
+	adapter := s.platformAdapter()
+	if adapter.Source() != SourceMock {
+		return ExecutionResult{}, false, fmt.Errorf("%w: only the mock platform adapter is permitted", ErrInvalidRequest)
+	}
+	// Build an audit ChangeSet bound to this direct write. The ChangeSet is an
+	// operatation log only; daily direct writes do not create an Approval.
+	changeSetID, err := s.idGenerator()("deliverychangeset")
+	if err != nil {
+		return ExecutionResult{}, false, err
+	}
+	changeSet := ChangeSet{
+		ID: changeSetID, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		PlanID: plan.ID, PlanName: versionName(version), PlanVersion: plan.Version,
+		PlanCanonicalHash: version.CanonicalHash, BudgetLimit: versionBudget(version),
+		Status: ChangeSetExecuted, RiskLevel: "low", PreflightNotes: []string{},
+		Source: version.Source, Scenario: version.Scenario,
+		Version: 1, CreatedBy: actor.Principal.ID, CreatedAt: now, UpdatedAt: now,
+	}
+	changeSet.TargetSnapshot = cloneJSONPointer(version.PlatformConfiguration)
+	changeSet.TargetSnapshotHash = version.PlatformConfiguration.CanonicalHash
+	execution := Execution{
+		ID: executionID, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		ChangeSetID: changeSet.ID, Status: ExecutionQueued, Version: 1,
+		Mode: ExecutionModeLocalSimulation, Adapter: MockOceanEngineAdapter, Source: SourceMock,
+		Scenario: ExecutionScenarioSuccess, IdempotencyKey: idempotencyKey, RequestHash: requestHash,
+		ExecutedBy: actor.Principal.ID, StartedAt: now, RetryAllowed: false,
+		RecoveryAction: "none", RecoveryReason: "", CompensationCandidates: []string{}, Steps: steps,
+	}
+	evidence := Evidence{
+		ID: evidenceID, OrganizationID: actor.OrganizationID, ProjectID: projectID,
+		ExecutionID: execution.ID, Summary: "本地模拟执行记录，无真实广告平台写入。",
+		Mode: ExecutionModeLocalSimulation, Reversible: false,
+		Source: SourceMock, Scenario: ExecutionScenarioSuccess, References: []string{"mock://execution/" + string(ExecutionScenarioSuccess)}, CreatedAt: now,
+	}
+	created, err := s.Repository.RecordDirectExecution(ctx, changeSet, execution, evidence)
+	if err != nil {
+		return ExecutionResult{}, false, err
+	}
+	for _, state := range []ExecutionStatus{ExecutionValidatingApproval, ExecutionExecuting} {
+		created, err = s.Repository.AdvanceExecution(ctx, created.Execution, state, nil, "none", "", []string{})
+		if err != nil {
+			return ExecutionResult{}, false, err
+		}
+	}
+	adapterUnknown := false
+	for index := range created.Execution.Steps {
+		current := created.Execution.Steps[index]
+		if current.Action == "verify_platform_state" {
+			created, err = s.Repository.AdvanceExecution(ctx, created.Execution, ExecutionVerifying, nil, "none", "", []string{})
+			if err != nil {
+				return ExecutionResult{}, false, err
+			}
+			current = created.Execution.Steps[index]
+		}
+		if adapterUnknown {
+			skipped := current
+			skipped.Status = StepSkipped
+			skipped.Effect = "none"
+			skipped.OutcomeSummary = "not run after a prior terminal step outcome"
+			skipped.EvidenceRef = "mock://execution/skipped"
+			completedAt := s.now()
+			skipped.CompletedAt = &completedAt
+			created.Execution.Steps[index], err = s.Repository.AdvanceStep(ctx, created.Execution, current, skipped)
+			if err != nil {
+				return ExecutionResult{}, false, err
+			}
+			continue
+		}
+		running := current
+		running.Status = StepRunning
+		running.Attempt++
+		running.Effect = "none"
+		running.OutcomeSummary = "adapter call in progress"
+		startedAt := s.now()
+		running.StartedAt = &startedAt
+		running, err = s.Repository.AdvanceStep(ctx, created.Execution, current, running)
+		if err != nil {
+			return ExecutionResult{}, false, err
+		}
+		created.Execution.Steps[index] = running
+		stepResult, adapterErr := adapter.ExecuteStep(ctx, PlatformStepRequest{
+			ExecutionID: executionID, Scenario: ExecutionScenarioSuccess, Action: running.Action, Sequence: running.Sequence,
+		})
+		completedAt := s.now()
+		terminal := running
+		terminal.CompletedAt = &completedAt
+		if adapterErr != nil {
+			adapterUnknown = true
+			terminal.Status = StepResultUnknown
+			terminal.Effect = "unknown"
+			terminal.OutcomeSummary = "adapter returned an error after the step began; target effect is unknown"
+			terminal.EvidenceRef = "mock://execution/adapter-error"
+		} else {
+			terminal.Status = stepResult.Status
+			terminal.Effect = stepResult.Effect
+			terminal.OutcomeSummary = stepResult.Summary
+			terminal.EvidenceRef = stepResult.EvidenceRef
+		}
+		created.Execution.Steps[index], err = s.Repository.AdvanceStep(ctx, created.Execution, running, terminal)
+		if err != nil {
+			return ExecutionResult{}, false, err
+		}
+	}
+	status, recoveryAction, recoveryReason, compensation := executionOutcome(ExecutionScenarioSuccess)
+	if adapterUnknown {
+		status, recoveryAction = ExecutionResultUnknown, "query_and_reconcile"
+		recoveryReason, compensation = "adapter result is unknown; blind retry is prohibited", []string{}
+	}
+	completedAt := s.now()
+	created, err = s.Repository.AdvanceExecution(ctx, created.Execution, status, &completedAt, recoveryAction, recoveryReason, compensation)
+	if err != nil {
+		return ExecutionResult{}, false, err
+	}
+	created, err = s.hydrateExecutionResult(ctx, actor.OrganizationID, projectID, created)
+	return created, false, err
 }
 
 func (s Service) ListExecutions(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]ExecutionResult, error) {

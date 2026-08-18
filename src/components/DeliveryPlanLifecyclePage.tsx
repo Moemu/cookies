@@ -1,21 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CircleAlert, CircleCheck, FilePlus, History, Plus, Save, Send, Wrench } from 'lucide-react'
+import { Boxes, History, Plus, Save } from 'lucide-react'
 import {
   deliveryPlanApi,
   type DeliveryPlan,
   type DeliveryPlanDraft,
   type DeliveryScenario,
   type DeliveryPlanVersion,
-  type DeliveryPreflightResult,
   oceanEngineMarketingPurposes,
   type OceanEngineMarketingPurpose,
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
 import type { ApiAssetVersionPointer } from '../data/api'
+import { projectPath } from '../lib/router'
 import type { DataState, ProjectRecord } from '../types'
 import { StateBoundary } from './StateBoundary'
 
-const planSections = ['目标与账户', '预算与排期', '投放载体和监测', '素材引用', '投前检查'] as const
+const planSections = ['目标与账户', '预算与排期', '投放载体和监测', '素材引用'] as const
 const deliveryCarrierOptions = [
   { value: '', label: '请选择投放载体' },
   { value: 'orange_landing_page', label: '橙子落地页' },
@@ -50,17 +50,6 @@ const scenarioLabels: Partial<Record<DeliveryScenario | 'unsaved_draft', string>
   unsaved_draft: '未保存草稿',
 }
 
-const preflightCheckLabels: Record<DeliveryPreflightResult['checks'][number]['code'], string> = {
-  delivery_intent_valid: '业务意图有效',
-  platform_configuration_valid: '平台配置有效',
-  INVALID_STABLE_REFERENCE: '稳定引用无效',
-  CANONICAL_HASH_MISMATCH: '规范哈希不匹配',
-  CAPABILITY_PENDING: '平台能力待补',
-  platform_pending: '平台字段待补',
-  blocked_by_event_asset: '事件资产阻塞',
-  write_validation_pending: '真实写入待验证',
-}
-
 function scenarioMetadata(scenario: DeliveryScenario | 'unsaved_draft') {
   return `${scenarioLabels[scenario] ?? '历史记录'} · scenario=${scenario}`
 }
@@ -77,12 +66,14 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
-  const [preflight, setPreflight] = useState<DeliveryPreflightResult>()
   const [inspectedVersionNumber, setInspectedVersionNumber] = useState<number>()
-  const [repairField, setRepairField] = useState('')
   const preserveEditorState = useRef(false)
 
   const selectedPlan = useMemo(() => plans.find(plan => plan.id === selectedId), [plans, selectedId])
+  const configurationLaunchURL = useMemo(() => {
+    const base = projectPath(projectId, 'delivery', 'configuration', undefined, '配置映射')
+    return selectedPlan ? `${base}&plan_id=${encodeURIComponent(selectedPlan.id)}` : base
+  }, [projectId, selectedPlan])
   const inspectedVersion = useMemo(
     () => selectedPlan?.versions.find(version => version.versionNumber === inspectedVersionNumber),
     [inspectedVersionNumber, selectedPlan],
@@ -126,7 +117,6 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
         setNotice('当前 Project 尚无投放计划，可创建第一份计划草稿。')
       }
       setDirty(false)
-      setPreflight(undefined)
     }).catch(error => {
       if (active) setNotice(error instanceof Error ? error.message : '加载投放计划失败')
     }).finally(() => {
@@ -142,20 +132,10 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
     window.history.replaceState(window.history.state, '', url)
   }, [selectedId])
 
-  useEffect(() => {
-    if (!repairField) return
-    const target = document.getElementById(repairField)
-    if (!target) return
-    target.focus()
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    setRepairField('')
-  }, [repairField, section])
-
   const changeDraft = (update: (current: DeliveryPlanDraft) => DeliveryPlanDraft) => {
     preserveEditorState.current = true
     setDraft(update)
     setDirty(true)
-    setPreflight(undefined)
   }
 
   const beginNew = () => {
@@ -165,7 +145,6 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
     setSection('目标与账户')
     setIsNew(true)
     setDirty(true)
-    setPreflight(undefined)
     setInspectedVersionNumber(undefined)
     setNotice('已创建未保存的计划，请填写后保存草稿。')
   }
@@ -176,7 +155,6 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
     setDraft(draftFromVersion(plan.currentVersion))
     setIsNew(false)
     setDirty(false)
-    setPreflight(undefined)
     setInspectedVersionNumber(plan.currentVersionNumber)
     setNotice(`已加载 ${plan.id} 的 V${plan.currentVersionNumber}。`)
   }
@@ -192,7 +170,6 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
       setDraft(draftFromVersion(saved.currentVersion))
       setIsNew(false)
       setDirty(false)
-      setPreflight(undefined)
       setInspectedVersionNumber(saved.currentVersionNumber)
       setNotice(`${saved.id} 已保存为 V${saved.currentVersionNumber}；source=${saved.source} · scenario=${saved.scenario}。`)
     } catch (error) {
@@ -200,47 +177,6 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
     } finally {
       setBusy(false)
     }
-  }
-
-  const runPreflight = async () => {
-    if (!selectedPlan || dirty) return
-    setBusy(true)
-    try {
-      const result = await deliveryPlanApi.preflight(projectId, selectedPlan.id)
-      setPreflight(result)
-      setSection('投前检查')
-      const warningCount = result.checks.filter(check => !check.passed && check.severity === 'warning').length
-      setNotice(result.blocked
-        ? `服务端预检阻断：scenario=${result.scenario}。`
-        : `服务端预检通过${warningCount ? `，含 ${warningCount} 条 warning` : ''}；scenario=${result.scenario}。`)
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '运行服务端预检失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const createChangeSet = async () => {
-    if (!selectedPlan || dirty || !preflight?.passed) return
-    setBusy(true)
-    try {
-      const created = await deliveryPlanApi.createChangeSet(projectId, selectedPlan.id, selectedPlan.currentVersionNumber)
-      const checked = await deliveryPlanApi.preflightChangeSet(projectId, created.id, created.version)
-      setNotice(
-        checked.status === 'preflight_passed'
-          ? `${checked.id} 已冻结 Plan V${checked.planVersion} 并通过服务端预检，可前往审批中心。`
-          : `${checked.id} 的最终检查未通过，请修复计划后重新提交变更申请。`,
-      )
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : '提交变更申请失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const repair = (target: { field: string; section: string }) => {
-    if (isPlanSection(target.section)) setSection(target.section)
-    setRepairField(target.field)
   }
 
   return <StateBoundary
@@ -274,7 +210,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
           <div>
             <span className="section-label">{isNew ? '新计划' : `${selectedPlan?.id} · V${selectedPlan?.currentVersionNumber}`}</span>
             <h2>{draft.name || '未命名投放计划'}</h2>
-            <p>草稿只写入 cookies Delivery 服务；投前检查结果仅采用服务端返回。</p>
+            <p>保存只写入 cookies Delivery 草稿并触发服务端校验；平台配置页可查看编译结果并确认投放。</p>
           </div>
         </header>
 
@@ -287,20 +223,12 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
           {section === '预算与排期' ? <BudgetScheduleFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '投放载体和监测' ? <TrackingFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '素材引用' ? <CreativeFields draft={draft} changeDraft={changeDraft} confirmedAssets={confirmedAssets}/> : null}
-          {section === '投前检查' ? <PreflightPanel result={preflight} onRepair={repair}/> : null}
         </section>
 
         <footer className="delivery-editor-actions">
           <span>{dirty ? '有未保存修改' : selectedPlan ? `已保存 V${selectedPlan.currentVersionNumber}` : '等待创建'}</span>
-          <button
-            className="secondary-button"
-            title="创建空白草稿，不继承当前表单内容"
-            onClick={beginNew}
-            disabled={busy}
-          ><FilePlus size={15}/>新建空白草稿</button>
-          <button className="secondary-button" onClick={() => void save()} disabled={busy || !platformFieldsComplete || (!dirty && !isNew)}><Save size={15}/>{isNew ? '保存草稿' : '保存新版本'}</button>
-          <button className="primary-button" onClick={() => void runPreflight()} disabled={busy || !selectedPlan || dirty}><Send size={15}/>检查当前草稿</button>
-          <button className="primary-button" onClick={() => void createChangeSet()} disabled={busy || !selectedPlan || dirty || !preflight?.passed}><FilePlus size={15}/>提交变更申请</button>
+          <button className="secondary-button" onClick={() => void save()} disabled={busy || !platformFieldsComplete || (!dirty && !isNew)}><Save size={15}/>保存</button>
+          <a className="primary-button" href={configurationLaunchURL}><Boxes size={15}/>查看平台配置</a>
         </footer>
         {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
       </main>
@@ -427,25 +355,6 @@ function CreativeFields({ draft, changeDraft, confirmedAssets = [] }: FieldProps
   </div>
 }
 
-function PreflightPanel({ result, onRepair }: { result?: DeliveryPreflightResult; onRepair: (target: { field: string; section: string }) => void }) {
-  if (!result) return <div className="preflight-authority-empty"><Send size={22}/><h3>等待服务端预检</h3><p>先保存当前草稿，再运行预检。页面不会使用本地 helper 替代服务端结论。</p></div>
-  const failed = result.checks.filter(check => !check.passed)
-  return <div className="server-preflight-panel">
-    <header>
-      <div>{result.blocked ? <CircleAlert size={22}/> : <CircleCheck size={22}/>}<span><b>{result.blocked ? '服务端预检阻断' : '服务端预检通过'}</b><small>V{result.planVersion} · {new Date(result.checkedAt).toLocaleString('zh-CN')}</small></span></div>
-      <small>{scenarioMetadata(result.scenario)}</small>
-    </header>
-    <div className="preflight-checks" role="list" aria-label="服务端投前检查结果">
-      {result.checks.map(check => <article key={check.code} className={`preflight-check ${check.passed ? 'passed' : check.severity}`}>
-        <span className="preflight-severity">{check.passed ? 'pass' : check.severity}</span>
-        <div><b>{preflightCheckLabels[check.code]}</b><small>{check.code}</small><p>{check.message}</p></div>
-        {!check.passed && check.repair ? <button aria-label={`修复 ${check.code}`} onClick={() => onRepair(check.repair!)}><Wrench size={14}/>{check.repair.label}</button> : null}
-      </article>)}
-    </div>
-    {!failed.length ? <div className="preflight-golden"><CircleCheck size={16}/>黄金场景全部通过，可继续后续受控流程。</div> : null}
-  </div>
-}
-
 function VersionSnapshot({ version }: { version: DeliveryPlanVersion }) {
   return <div className="version-snapshot">
     <span>历史快照 · V{version.versionNumber}</span>
@@ -556,8 +465,4 @@ function fromDateTimeLocal(value: string) {
 
 function formatMinor(value: number) {
   return (value / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-function isPlanSection(value: string): value is PlanSection {
-  return planSections.includes(value as PlanSection)
 }
