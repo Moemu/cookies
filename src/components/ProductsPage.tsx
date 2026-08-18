@@ -19,15 +19,20 @@ function formatTime(value?: string) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
 }
 
-export function ProductsPage() {
+export function ProductsPage({ activeView }: { activeView: string }) {
   const [products, setProducts] = useState<PlatformProduct[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [form, setForm] = useState<ProductForm>(emptyForm)
-  const [showCreate, setShowCreate] = useState(false)
+  const [showCreate, setShowCreate] = useState(() => activeView === '新建产品')
   const [mappingInput, setMappingInput] = useState('')
   const [projectRefs, setProjectRefs] = useState<PlatformProductProjectRef[]>([])
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+
+  // 顶部视图 tabs（产品列表 / 新建产品 / 巨量映射）驱动表单与列表切换。
+  useEffect(() => {
+    setShowCreate(activeView === '新建产品')
+  }, [activeView])
 
   const selected = useMemo(() => products.find(product => product.id === selectedId), [products, selectedId])
 
@@ -76,7 +81,6 @@ export function ProductsPage() {
       setProducts(current => [...current, created])
       setSelectedId(created.id)
       setForm(emptyForm)
-      setShowCreate(false)
       setNotice(`${created.name} 已创建；巨量商品在录入后回绑。`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '创建产品失败')

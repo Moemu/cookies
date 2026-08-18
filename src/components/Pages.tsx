@@ -1625,7 +1625,7 @@ export function ModulePage({
     : system.key === 'delivery' && item.id === 'monitoring' ? <DeliveryMonitoringPage tourCase={tourCase}/>
     : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryOptimizationPage state={dataState} activeView={activeView} tourRunId={tourRunId} tourCase={tourCase}/>
     : system.key === 'delivery' && item.id === 'evidence' ? <AuditEvidenceSurface/>
-    : system.key === 'delivery' && item.id === 'products' ? <Suspense fallback={<div className="page-notice" role="status">正在加载产品目录…</div>}><ProductsPage/></Suspense>
+    : system.key === 'delivery' && item.id === 'products' ? <Suspense fallback={<div className="page-notice" role="status">正在加载产品目录…</div>}><ProductsPage activeView={activeView}/></Suspense>
     : null
   if (specialized) surface = specialized
   else {
@@ -1662,7 +1662,7 @@ export function ModulePage({
   const projectProgress = calculateProjectProgress(currentProject)
   const showObjectDetail = Boolean(objectId && !taskCenter && !(system.key === 'creative' && (item.id === 'reviews' || item.id === 'production')) && !(system.key === 'strategy' && item.id === 'workspaces') && !(system.key === 'delivery' && item.id === 'approvals'))
   const isStrategyWorkspace = system.key === 'strategy' && item.id === 'workspaces'
-  const hasImplementedHeaderViews = !(system.key === 'delivery' && (item.id === 'plans' || item.id === 'approvals' || item.id === 'monitoring' || item.id === 'products'))
+  const hasImplementedHeaderViews = !(system.key === 'delivery' && (item.id === 'plans' || item.id === 'approvals' || item.id === 'monitoring'))
   const changeView = (view: string) => {
     setActiveView(view)
     onOpenProject(currentProject.id, system.key, item.id, isStrategyWorkspace ? objectId : undefined, view, undefined, tourRunId, tourCase)
