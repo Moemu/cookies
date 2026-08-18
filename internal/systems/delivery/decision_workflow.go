@@ -607,7 +607,7 @@ func CompileDeliveryWorkflow(workflowID string, decision DeliveryDecision, candi
 }
 
 func workflowFieldFromProjection(projection calibrationmanifest.FieldProjection) WorkflowField {
-		control := projection.Field.PlaywrightRPA
+	control := projection.Field.PlaywrightRPA
 	return WorkflowField{
 		Key: projection.Field.Key, Value: nil, ExpectedReadback: nil, EvidenceRef: "manifest://" + projection.Field.Key, Treatment: string(projection.Mapping.Treatment),
 		Control: &WorkflowFieldControl{Operation: control.Operation, Scope: control.Scope, Target: control.Target, Readback: control.Readback, ExpectedTargetCount: control.ExpectedTargetCount, Unit: projection.Field.Unit, ObservedOptions: append([]string(nil), control.ObservedOptions...), InputConstraints: control.InputConstraints},
