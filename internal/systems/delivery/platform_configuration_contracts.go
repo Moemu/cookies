@@ -505,11 +505,11 @@ type OceanEngineProjectDraft struct {
 	ApplicationScenario         string                       `json:"application_scenario,omitempty"`
 	OperatingSystem             string                       `json:"operating_system,omitempty"`
 	ApplicationDownloadMode     string                       `json:"application_download_mode,omitempty"`
-	ProductSelectionMode        string                       `json:"product_selection_mode,omitempty"`
 	LeadCaptureMode             string                       `json:"lead_capture_mode,omitempty"`
 	Carrier                     string                       `json:"carrier"`
 	OptimizationTargetReference *StableReference             `json:"optimization_target_reference,omitempty"`
 	DeepOptimizationMode        string                       `json:"deep_optimization_mode,omitempty"`
+	AIGCDynamicCreative         *bool                        `json:"aigc_dynamic_creative,omitempty"`
 	DeliveryMode                string                       `json:"delivery_mode"`
 	Targeting                   OceanEngineTargeting         `json:"targeting"`
 	Schedule                    OceanEngineSchedule          `json:"schedule"`
@@ -518,6 +518,7 @@ type OceanEngineProjectDraft struct {
 	SearchBoost                 *OceanEngineSearchBoost      `json:"search_boost,omitempty"`
 	ProductCatalogReference     *StableReference             `json:"product_catalog_reference,omitempty"`
 	PlacementStrategy           string                       `json:"placement_strategy,omitempty"`
+	PlacementMedia              []string                     `json:"placement_media,omitempty"`
 	ProductTargeting            *OceanEngineProductTargeting `json:"product_targeting,omitempty"`
 	ApplicationLaunchMode       string                       `json:"application_launch_mode,omitempty"`
 	ProjectName                 string                       `json:"project_name"`
@@ -628,11 +629,11 @@ type canonicalOceanEngineProject struct {
 	ApplicationScenario         string                        `json:"application_scenario,omitempty"`
 	OperatingSystem             string                        `json:"operating_system,omitempty"`
 	ApplicationDownloadMode     string                        `json:"application_download_mode,omitempty"`
-	ProductSelectionMode        string                        `json:"product_selection_mode,omitempty"`
 	LeadCaptureMode             string                        `json:"lead_capture_mode,omitempty"`
 	Carrier                     string                        `json:"carrier"`
 	OptimizationTargetReference *canonicalStableReference     `json:"optimization_target_reference,omitempty"`
 	DeepOptimizationMode        string                        `json:"deep_optimization_mode,omitempty"`
+	AIGCDynamicCreative         *bool                         `json:"aigc_dynamic_creative,omitempty"`
 	DeliveryMode                string                        `json:"delivery_mode"`
 	Targeting                   canonicalOceanEngineTargeting `json:"targeting"`
 	Schedule                    OceanEngineSchedule           `json:"schedule"`
@@ -641,6 +642,7 @@ type canonicalOceanEngineProject struct {
 	SearchBoost                 *OceanEngineSearchBoost       `json:"search_boost,omitempty"`
 	ProductCatalogReference     *canonicalStableReference     `json:"product_catalog_reference,omitempty"`
 	PlacementStrategy           string                        `json:"placement_strategy,omitempty"`
+	PlacementMedia              []string                      `json:"placement_media,omitempty"`
 	ProductTargeting            *OceanEngineProductTargeting  `json:"product_targeting,omitempty"`
 	ApplicationLaunchMode       string                        `json:"application_launch_mode,omitempty"`
 	ProjectName                 string                        `json:"project_name"`
@@ -717,11 +719,11 @@ func canonicalOceanConfiguration(value *OceanEngineConfiguration) *canonicalOcea
 			MarketingScenario: strings.TrimSpace(project.MarketingScenario), MarketingProductReference: canonicalReferencePointer(project.MarketingProductReference),
 			ApplicationReference: canonicalReferencePointer(project.ApplicationReference), ApplicationScenario: strings.TrimSpace(project.ApplicationScenario),
 			OperatingSystem: strings.TrimSpace(project.OperatingSystem), ApplicationDownloadMode: strings.TrimSpace(project.ApplicationDownloadMode),
-			ProductSelectionMode: strings.TrimSpace(project.ProductSelectionMode), LeadCaptureMode: strings.TrimSpace(project.LeadCaptureMode), Carrier: strings.TrimSpace(project.Carrier),
+			LeadCaptureMode: strings.TrimSpace(project.LeadCaptureMode), Carrier: strings.TrimSpace(project.Carrier),
 			OptimizationTargetReference: canonicalReferencePointer(project.OptimizationTargetReference), DeepOptimizationMode: strings.TrimSpace(project.DeepOptimizationMode),
-			DeliveryMode: strings.TrimSpace(project.DeliveryMode), Schedule: project.Schedule, BudgetAndBidding: project.BudgetAndBidding,
+			AIGCDynamicCreative: project.AIGCDynamicCreative, DeliveryMode: strings.TrimSpace(project.DeliveryMode), Schedule: project.Schedule, BudgetAndBidding: project.BudgetAndBidding,
 			MonitoringReferences: canonicalReferences(project.MonitoringReferences), SearchBoost: project.SearchBoost,
-			ProductCatalogReference: canonicalReferencePointer(project.ProductCatalogReference), PlacementStrategy: strings.TrimSpace(project.PlacementStrategy),
+			ProductCatalogReference: canonicalReferencePointer(project.ProductCatalogReference), PlacementStrategy: strings.TrimSpace(project.PlacementStrategy), PlacementMedia: append([]string(nil), project.PlacementMedia...),
 			ProductTargeting: project.ProductTargeting, ApplicationLaunchMode: strings.TrimSpace(project.ApplicationLaunchMode), ProjectName: strings.TrimSpace(project.ProjectName),
 			Targeting: canonicalOceanEngineTargeting{
 				AudiencePackageReference: canonicalReferencePointer(project.Targeting.AudiencePackageReference),

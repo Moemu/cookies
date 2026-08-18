@@ -43,7 +43,7 @@ test('delivery plan client writes DeliveryIntent plus tagged PlatformConfigurati
   assert.equal(written.platform_configuration.hash_algorithm, 'RFC8785-JCS-SHA256(canonical_payload)')
   assert.equal(written.platform_configuration.payload.profile, 'ocean_engine')
   assert.equal(written.platform_configuration.payload.ocean_engine.project.marketing_purpose, 'lead_generation')
-  assert.equal(written.platform_configuration.payload.ocean_engine.project.product_selection_mode, 'manual')
+  assert.equal('product_selection_mode' in written.platform_configuration.payload.ocean_engine.project, false)
   assert.equal(written.platform_configuration.payload.ocean_engine.project.marketing_product_reference.id, 'product-1')
   assert.equal(written.platform_configuration.payload.ocean_engine.project.carrier, 'owned_landing_page')
   assert.equal(written.platform_configuration.payload.ocean_engine.project.optimization_target_reference.audit_attributes.event_asset_type, 'web')

@@ -517,40 +517,6 @@
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
     {
-      "key": "project.product_selection_mode",
-      "semantic_label": "营销产品选择方式",
-      "value_labels": { "manual": "手动选择", "automatic": "自动选择" },
-      "owner": "oceanengine_configuration",
-      "page_family": "project_create",
-      "value_type": "dynamic_enum",
-      "condition": "marketing_purpose not in [ecommerce]",
-      "condition_dimensions": ["marketing_purpose"],
-      "condition_state": "evaluable",
-      "condition_rule": {
-        "all": [
-          {
-            "dimension": "marketing_purpose",
-            "operator": "not_in",
-            "values": ["ecommerce"]
-          }
-        ]
-      },
-      "required_state": "unknown",
-      "editable_state": "observed_editable",
-      "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "营销产品" },
-      "playwright_rpa": {
-        "operation": "choose_exact_visible_option",
-        "scope": { "kind": "visible_text", "value": "营销产品" },
-        "target": { "kind": "visible_text", "value": "手动选择" },
-        "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "添加商品" },
-        "observed_options": ["手动选择", "智能识别"]
-      },
-      "evidence_state": "observed",
-      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
-    },
-    {
       "key": "project.lead_capture_mode",
       "semantic_label": "获取线索方式",
       "value_labels": { "smart_lead": "智能获客", "custom_lead": "自定义获客" },
@@ -746,6 +712,36 @@
         "CompiledDeliveryWorkflow",
         "PlatformSkill"
       ]
+    },
+    {
+      "key": "project.aigc_dynamic_creative",
+      "semantic_label": "AIGC 动态创意",
+      "value_labels": { "true": "启用", "false": "不启用" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "boolean",
+      "condition": "marketing_purpose in [lead_generation,ecommerce]",
+      "condition_dimensions": ["marketing_purpose"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          { "dimension": "marketing_purpose", "operator": "in", "values": ["lead_generation", "ecommerce"] }
+        ]
+      },
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "AIGC动态创意" },
+      "playwright_rpa": {
+        "operation": "toggle",
+        "scope": { "kind": "visible_text", "value": "AIGC动态创意" },
+        "target": { "kind": "role_name", "value": "switch" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "AIGC动态创意" },
+        "observed_options": ["开启", "关闭"]
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
     },
     {
       "key": "project.targeting",
@@ -1074,9 +1070,11 @@
     },
     {
       "key": "project.placement_strategy",
+      "semantic_label": "投放版位",
+      "property_labels": { "placement_strategy": "投放位置", "placement_media": "媒体" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
-      "value_type": "dynamic_enum",
+      "value_type": "object",
       "condition": "marketing_purpose == product_catalog",
       "condition_dimensions": ["marketing_purpose"],
       "condition_state": "evaluable",
@@ -1094,12 +1092,12 @@
       "enum_state": "observed_current_set",
       "locator": { "kind": "visible_text", "value": "版位" },
       "playwright_rpa": {
-        "operation": "choose_exact_visible_option",
+        "operation": "configure_object",
         "scope": { "kind": "visible_text", "value": "投放版位" },
         "target": { "kind": "visible_text", "value": "通投智选" },
         "expected_target_count": 1,
         "readback": { "kind": "visible_text", "value": "投放位置" },
-        "observed_options": ["通投智选", "首选媒体"]
+        "observed_options": ["通投智选", "首选媒体", "全选", "今日头条", "西瓜视频", "抖音", "番茄系媒体", "穿山甲"]
       },
       "evidence_state": "observed",
       "consumers": [
@@ -1876,6 +1874,7 @@
       ],
       "field_keys": [
         "project.deep_optimization_mode",
+        "project.aigc_dynamic_creative",
         "project.delivery_mode",
         "project.bidding_strategy",
         "project.charging_mode",
@@ -1897,8 +1896,8 @@
       "field_keys": [
         "project.marketing_purpose",
         "project.marketing_scenario",
-        "project.product_selection_mode",
         "project.lead_capture_mode",
+        "project.aigc_dynamic_creative",
         "project.carrier",
         "project.optimization_target_reference",
         "project.targeting",
@@ -2407,18 +2406,6 @@
       "contract_path": "SkillDefinition.calibration_manifest"
     },
     {
-      "field_key": "project.product_selection_mode",
-      "destination": "OceanEngineConfiguration",
-      "treatment": "modelled",
-      "contract_path": "OceanEngineConfiguration.Project.ProductSelectionMode"
-    },
-    {
-      "field_key": "project.product_selection_mode",
-      "destination": "PlatformSkill",
-      "treatment": "modelled",
-      "contract_path": "SkillDefinition.calibration_manifest"
-    },
-    {
       "field_key": "project.lead_capture_mode",
       "destination": "OceanEngineConfiguration",
       "treatment": "modelled",
@@ -2528,6 +2515,30 @@
     },
     {
       "field_key": "project.deep_optimization_mode",
+      "destination": "PlatformSkill",
+      "treatment": "modelled",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.aigc_dynamic_creative",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.AIGCDynamicCreative"
+    },
+    {
+      "field_key": "project.aigc_dynamic_creative",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.AIGCDynamicCreative"
+    },
+    {
+      "field_key": "project.aigc_dynamic_creative",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.aigc_dynamic_creative",
       "destination": "PlatformSkill",
       "treatment": "modelled",
       "contract_path": "SkillDefinition.calibration_manifest"

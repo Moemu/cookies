@@ -9,6 +9,7 @@ import {
   type StableReference,
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
+import type { ApiAssetVersionPointer } from '../data/api'
 import { oceanEngineCalibrationDispositions, visibleOceanEngineManifestFields, type CalibrationDisposition, type VisibleManifestField } from '../lib/oceanengineCalibrationManifest'
 import { projectPath } from '../lib/router'
 import type { DataState } from '../types'
@@ -116,15 +117,6 @@ function updateReference(current: StableReference | undefined, id: string, objec
   return { namespace: 'cookies', object_kind: objectKind, scope: current?.scope ?? 'current_project', state: 'resolved', ...current, id: value }
 }
 
-function referenceIDs(references: StableReference[] | undefined) {
-  return references?.map(reference => reference.id).filter(Boolean).join(', ') ?? ''
-}
-
-function updateReferenceList(value: string, objectKind: string, current: StableReference[] = []) {
-  const existing = new Map(current.map(reference => [reference.id, reference]))
-  return value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean).map(id => updateReference(existing.get(id), id, objectKind)!)
-}
-
 function toLocalDateTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
@@ -136,7 +128,16 @@ function fromLocalDateTime(value: string) {
   return value ? new Date(value).toISOString() : ''
 }
 
-function PlatformConfigurationEditor({ value, onChange }: { value: PlatformConfiguration; onChange: (value: PlatformConfiguration) => void }) {
+function MaterialObjectPicker({ label, assets, value, objectKind, onChange }: { label: string; assets: ApiAssetVersionPointer[]; value: StableReference[]; objectKind: string; onChange: (value: StableReference[]) => void }) {
+  const selected = new Set(value.map(reference => reference.id))
+  return <fieldset className="delivery-config-object-picker"><legend>{label}</legend><div>{assets.map(asset => <label key={asset.id} className={selected.has(asset.assetId) ? 'selected' : ''}>
+    <input type="checkbox" checked={selected.has(asset.assetId)} onChange={() => onChange(selected.has(asset.assetId) ? value.filter(reference => reference.id !== asset.assetId) : [...value, { namespace: 'cookies', object_kind: objectKind, scope: 'current_project', id: asset.assetId, version: String(asset.humanConfirmedVersion ?? asset.workingVersion), state: 'resolved', display_name_snapshot: asset.assetId, audit_attributes: { ocean_engine_material_id: asset.oceanEngineMaterialId ?? '' } }])}/>
+    <span className="delivery-config-object-preview">{asset.contentUrl ? asset.mediaKind === 'video' ? <video src={asset.contentUrl} controls preload="metadata"/> : <img src={asset.contentUrl} alt=""/> : <span>无预览</span>}</span>
+    <b>{asset.assetId}</b><small>{asset.oceanEngineMaterialId ? '已录入巨量' : '待 RPA 录入'}</small>
+  </label>)}</div>{!assets.length ? <p>当前项目没有已确认素材。</p> : null}</fieldset>
+}
+
+function PlatformConfigurationEditor({ value, onChange, products, assets }: { value: PlatformConfiguration; onChange: (value: PlatformConfiguration) => void; products: Array<{ id: string; name: string; oceanEngineProductId?: string }>; assets: ApiAssetVersionPointer[] }) {
   const ocean = value.payload.ocean_engine
   if (!ocean?.project) return null
   const updateOcean = (next: OceanConfiguration) => onChange({ ...value, payload: { ...value.payload, ocean_engine: next } })
@@ -161,8 +162,7 @@ function PlatformConfigurationEditor({ value, onChange }: { value: PlatformConfi
         <label><span>项目名称</span><input name="oceanengine_project_name" autoComplete="off" value={ocean.project.project_name} onChange={event => updateProject({ project_name: event.target.value })}/></label>
         <label><span>营销目的</span><select value={ocean.project.marketing_purpose} onChange={event => updateProject({ marketing_purpose: event.target.value })}><option value="ecommerce">电商</option><option value="lead_generation">销售线索</option><option value="application">应用</option><option value="product_catalog">商品</option><option value="content_marketing">内容营销</option></select></label>
         {ocean.project.marketing_purpose !== 'product_catalog' ? <label><span>营销场景</span><select value={ocean.project.marketing_scenario} onChange={event => updateProject({ marketing_scenario: event.target.value })}><option value="manual_delivery">短视频与图文</option><option value="live_stream" disabled>直播（平台暂不可用）</option></select></label> : null}
-        <label><span>cookies 产品 ID</span><input value={ocean.project.marketing_product_reference?.id ?? ''} placeholder="选择或输入 cookies 产品对象 ID" onChange={event => updateProject({ marketing_product_reference: updateReference(ocean.project.marketing_product_reference, event.target.value, 'product') })}/><small>{ocean.project.marketing_product_reference?.audit_attributes?.ocean_engine_product_id ? '该产品已有巨量商品 ID' : '未绑定巨量商品 ID时，RPA 将创建商品'}</small></label>
-        {ocean.project.marketing_purpose !== 'product_catalog' ? <label><span>营销产品选择方式</span><select value={ocean.project.product_selection_mode ?? 'manual'} onChange={event => updateProject({ product_selection_mode: event.target.value })}><option value="manual">手动选择 cookies 产品</option><option value="automatic">自动选择</option></select></label> : null}
+        <label><span>cookies 产品</span><select value={ocean.project.marketing_product_reference?.id ?? ''} onChange={event => { const product = products.find(item => item.id === event.target.value); updateProject({ marketing_product_reference: product ? { namespace: 'cookies', object_kind: 'product', scope: 'current_project', id: product.id, state: 'resolved', display_name_snapshot: product.name, audit_attributes: { ocean_engine_product_id: product.oceanEngineProductId ?? '' } } : undefined }) }}><option value="">请选择 cookies 产品</option>{products.map(product => <option key={product.id} value={product.id}>{product.name}{product.oceanEngineProductId ? ' · 已录入巨量' : ' · 待 RPA 录入'}</option>)}</select><small>Playwright 自动选择匹配商品。用户不设置选择方式。</small></label>
         {ocean.project.marketing_purpose === 'application' ? <>
           <label><span>应用引用</span><input value={ocean.project.application_reference?.id ?? ''} placeholder="应用链接或应用对象 ID" onChange={event => updateProject({ application_reference: updateReference(ocean.project.application_reference, event.target.value, 'application') })}/></label>
           <label><span>应用场景</span><input value={ocean.project.application_scenario ?? ''} onChange={event => updateProject({ application_scenario: event.target.value })}/></label>
@@ -170,9 +170,10 @@ function PlatformConfigurationEditor({ value, onChange }: { value: PlatformConfi
           <label><span>下载方式</span><select value={ocean.project.application_download_mode ?? ''} onChange={event => updateProject({ application_download_mode: event.target.value })}><option value="">请选择</option><option value="direct_download">直接下载</option><option value="reservation_download">预约下载</option></select></label>
           <label><span>调起方式</span><input value={ocean.project.application_launch_mode ?? ''} onChange={event => updateProject({ application_launch_mode: event.target.value })}/></label>
         </> : null}
-        {ocean.project.marketing_purpose === 'lead_generation' ? <label><span>获取线索方式</span><input value={ocean.project.lead_capture_mode ?? ''} onChange={event => updateProject({ lead_capture_mode: event.target.value })}/></label> : null}
+        {ocean.project.marketing_purpose === 'lead_generation' ? <label><span>获取线索方式</span><select value={ocean.project.lead_capture_mode ?? 'smart_lead'} onChange={event => updateProject({ lead_capture_mode: event.target.value, carrier: event.target.value === 'smart_lead' && ocean.project.carrier === 'owned_landing_page' ? 'orange_landing_page' : ocean.project.carrier })}><option value="smart_lead">智能优选</option><option value="custom_lead">自定义</option></select></label> : null}
         <label><span>投放模式</span><select value={ocean.project.delivery_mode} onChange={event => updateProject({ delivery_mode: event.target.value })}><option value="manual">手动投放</option><option value="ubmax">UBMax</option></select></label>
-        <label><span>深度优化方式</span><input value={ocean.project.deep_optimization_mode ?? ''} placeholder="按当前优化目标选择" onChange={event => updateProject({ deep_optimization_mode: event.target.value })}/></label>
+        <label><span>深度优化方式</span><select value={ocean.project.deep_optimization_mode ?? 'disabled'} onChange={event => updateProject({ deep_optimization_mode: event.target.value })}><option value="disabled">不启用</option><option value="conversion_roi">成交 ROI</option><option value="net_conversion_order">净成交下单</option><option value="net_conversion_roi">净成交 ROI</option></select><small>平台会按当前场景限制可用选项。</small></label>
+        {['lead_generation', 'ecommerce'].includes(ocean.project.marketing_purpose) ? <label className="delivery-config-switch"><span>AIGC 动态创意</span><input type="checkbox" role="switch" checked={ocean.project.aigc_dynamic_creative ?? false} onChange={event => updateProject({ aigc_dynamic_creative: event.target.checked })}/></label> : null}
         <label><span>竞价策略</span><select value={ocean.project.budget_and_bidding.bidding_strategy} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, bidding_strategy: event.target.value } })}><option value="manual_bid">手动出价</option><option value="stable_cost">稳定成本</option><option value="maximum_conversion">最大转化</option></select></label>
         <label><span>付费方式</span><select value={ocean.project.budget_and_bidding.charging_mode} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, charging_mode: event.target.value } })}><option value="CPC">按点击付费</option><option value="CPM">按展示付费</option><option value="OCPM">按目标转化出价</option></select></label>
         <label><span>项目日预算</span><div className="delivery-config-money-input"><input type="number" inputMode="decimal" min="0" value={ocean.project.budget_and_bidding.daily_budget_minor / 100} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, daily_budget_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元 / 天</small></div></label>
@@ -180,9 +181,9 @@ function PlatformConfigurationEditor({ value, onChange }: { value: PlatformConfi
         <label><span>投放周期</span><select value={ocean.project.schedule.mode ?? 'fixed_range'} onChange={event => updateProject({ schedule: { ...ocean.project.schedule, mode: event.target.value as 'long_term' | 'fixed_range' } })}><option value="long_term">从今天起长期投放</option><option value="fixed_range">设置开始和结束日期</option></select></label>
         <label><span>开始时间</span><input type="datetime-local" value={toLocalDateTime(ocean.project.schedule.start_at)} onChange={event => updateProject({ schedule: { ...ocean.project.schedule, start_at: fromLocalDateTime(event.target.value) } })}/></label>
         {ocean.project.schedule.mode !== 'long_term' ? <label><span>结束时间</span><input type="datetime-local" value={toLocalDateTime(ocean.project.schedule.end_at)} onChange={event => updateProject({ schedule: { ...ocean.project.schedule, end_at: fromLocalDateTime(event.target.value) } })}/></label> : null}
-        <label><span>投放版位</span><input value={ocean.project.placement_strategy ?? ''} onChange={event => updateProject({ placement_strategy: event.target.value })}/></label>
-        <label><span>地域</span><input value={ocean.project.targeting.regions?.join(', ') ?? ''} placeholder="多个地域用逗号分隔" onChange={event => updateProject({ targeting: { ...ocean.project.targeting, regions: event.target.value.split(/[,，]/).map(item => item.trim()).filter(Boolean) } })}/></label>
-        <label><span>年龄</span><input value={ocean.project.targeting.age_ranges?.join(', ') ?? ''} placeholder="例如 18-23, 24-30" onChange={event => updateProject({ targeting: { ...ocean.project.targeting, age_ranges: event.target.value.split(/[,，]/).map(item => item.trim()).filter(Boolean) } })}/></label>
+        {ocean.project.marketing_purpose === 'product_catalog' ? <fieldset className="delivery-config-inline-fieldset"><legend>投放版位</legend><label><span>投放位置</span><select value={ocean.project.placement_strategy ?? 'smart'} onChange={event => updateProject({ placement_strategy: event.target.value, placement_media: event.target.value === 'smart' ? undefined : ocean.project.placement_media })}><option value="smart">通投智选</option><option value="preferred_media">首选媒体</option></select></label>{ocean.project.placement_strategy === 'preferred_media' ? <div className="delivery-config-check-grid">{[{ key: 'all', label: '全选' }, { key: 'toutiao', label: '今日头条' }, { key: 'xigua', label: '西瓜视频' }, { key: 'douyin', label: '抖音' }, { key: 'fanqie', label: '番茄系媒体' }, { key: 'pangolin', label: '穿山甲' }].map(option => { const media = ['toutiao', 'xigua', 'douyin', 'fanqie', 'pangolin']; const checked = option.key === 'all' ? media.every(item => ocean.project.placement_media?.includes(item)) : ocean.project.placement_media?.includes(option.key) ?? false; return <label key={option.key}><input type="checkbox" checked={checked} onChange={event => updateProject({ placement_media: option.key === 'all' ? event.target.checked ? media : [] : event.target.checked ? [...new Set([...(ocean.project.placement_media ?? []), option.key])] : (ocean.project.placement_media ?? []).filter(item => item !== option.key) })}/><span>{option.label}</span></label> })}</div> : null}</fieldset> : null}
+        <label><span>地域</span><select multiple value={ocean.project.targeting.regions ?? []} onChange={event => updateProject({ targeting: { ...ocean.project.targeting, regions: Array.from(event.currentTarget.selectedOptions, option => option.value) } })}>{['不限', '北京市', '上海市', '广东省', '浙江省', '江苏省', '四川省'].map(region => <option key={region} value={region === '不限' ? 'all' : region}>{region}</option>)}</select><small>按住 Ctrl 可多选。</small></label>
+        <label><span>年龄</span><select multiple value={ocean.project.targeting.age_ranges ?? []} onChange={event => updateProject({ targeting: { ...ocean.project.targeting, age_ranges: Array.from(event.currentTarget.selectedOptions, option => option.value) } })}>{['18-23', '24-30', '31-40', '41-49', '50+'].map(age => <option key={age} value={age}>{age}</option>)}</select><small>按住 Ctrl 可多选。</small></label>
         <label><span>性别</span><select value={ocean.project.targeting.gender ?? ''} onChange={event => updateProject({ targeting: { ...ocean.project.targeting, gender: event.target.value } })}><option value="">不限</option><option value="male">男</option><option value="female">女</option></select></label>
         <label className="delivery-config-switch"><span>智能定向扩展</span><input type="checkbox" role="switch" checked={ocean.project.targeting.smart_expansion} onChange={event => updateProject({ targeting: { ...ocean.project.targeting, smart_expansion: event.target.checked } })}/></label>
       </div>
@@ -190,7 +191,7 @@ function PlatformConfigurationEditor({ value, onChange }: { value: PlatformConfi
     <div className="delivery-config-project-editor">
       <div className="delivery-config-subheading"><div><span>02</span><div><h4>投放载体和监测</h4><p>设置落地页、优化目标、搜索快投和第三方监测。</p></div></div></div>
       <div className="delivery-config-editor-fields delivery-config-editor-fields--wide">
-        <label><span>投放载体</span><select value={ocean.project.carrier} onChange={event => updateProject({ carrier: event.target.value })}><option value="orange_landing_page">橙子落地页</option><option value="owned_landing_page">自研落地页</option><option value="douyin_mini_program">字节小程序（暂不支持）</option><option value="wechat_mini_program">微信小程序（暂不支持）</option></select></label>
+        <label><span>投放载体</span><select value={ocean.project.carrier} onChange={event => updateProject({ carrier: event.target.value })}><option value="orange_landing_page">橙子落地页</option>{ocean.project.marketing_purpose === 'lead_generation' && ocean.project.lead_capture_mode === 'smart_lead' ? <option value="orange_landing_page_and_im">橙子落地页 + 抖音私信页</option> : null}{ocean.project.marketing_purpose !== 'lead_generation' || ocean.project.lead_capture_mode === 'custom_lead' ? <><option value="owned_landing_page">自研落地页</option><option value="im">抖音私信页（原抖音主页）</option><option value="byte_miniapp">字节小程序</option></> : null}</select></label>
         <label><span>优化目标 ID</span><input value={ocean.project.optimization_target_reference?.id ?? ''} placeholder={ocean.project.carrier === 'orange_landing_page' ? '选择平台内置优化目标' : '选择事件资产绑定目标'} onChange={event => updateProject({ optimization_target_reference: updateReference(ocean.project.optimization_target_reference, event.target.value, 'optimization_target') })}/></label>
         {ocean.project.carrier === 'owned_landing_page' ? <>
           <label><span>优化目标名称</span><input value={ocean.project.optimization_target_reference?.display_name_snapshot ?? ''} onChange={event => updateProject({ optimization_target_reference: { ...(updateReference(ocean.project.optimization_target_reference, ocean.project.optimization_target_reference?.id ?? 'unresolved', 'optimization_target')!), display_name_snapshot: event.target.value } })}/></label>
@@ -231,11 +232,10 @@ function PlatformConfigurationEditor({ value, onChange }: { value: PlatformConfi
           <label className="delivery-config-switch"><span>允许客户端下载</span><input type="checkbox" role="switch" checked={promotion.settings.client_download_enabled ?? false} onChange={event => updatePromotion(index, { settings: { ...promotion.settings, client_download_enabled: event.target.checked } })}/></label>
         </div>
         <section className="delivery-config-material-editor"><h5>04 素材与文案</h5><div className="delivery-config-unit-fields delivery-config-unit-fields--wide">
-          <label><span>基础素材 ID</span><textarea rows={2} value={referenceIDs(promotion.base_material_references)} placeholder="支持多选；用逗号分隔" onChange={event => updatePromotion(index, { base_material_references: updateReferenceList(event.target.value, 'material', promotion.base_material_references) })}/></label>
-          <label><span>产品主图 ID</span><textarea rows={2} value={referenceIDs(promotion.product_image_references)} placeholder="支持多选；默认使用产品主图" onChange={event => updatePromotion(index, { product_image_references: updateReferenceList(event.target.value, 'product_image', promotion.product_image_references) })}/></label>
+          <MaterialObjectPicker label="基础素材" assets={assets} value={promotion.base_material_references} objectKind="material" onChange={base_material_references => updatePromotion(index, { base_material_references })}/>
+          <MaterialObjectPicker label="产品主图" assets={assets.filter(asset => asset.mediaKind === 'image')} value={promotion.product_image_references ?? []} objectKind="product_image" onChange={product_image_references => updatePromotion(index, { product_image_references })}/>
           <label><span>广告文案</span><textarea rows={2} value={promotion.copy_items.map(item => item.text).join('\n')} placeholder="每行一条文案" onChange={event => updatePromotion(index, { copy_items: event.target.value.split('\n').map(text => text.trim()).filter(Boolean).map(text => ({ text })) })}/></label>
           <label><span>产品卖点</span><textarea rows={2} value={promotion.product_selling_points?.join('\n') ?? ''} placeholder="每行一个卖点" onChange={event => updatePromotion(index, { product_selling_points: event.target.value.split('\n').map(text => text.trim()).filter(Boolean) })}/></label>
-          <label><span>创意组件 ID</span><textarea rows={2} value={referenceIDs(promotion.creative_component_references)} placeholder="支持多个组件" onChange={event => updatePromotion(index, { creative_component_references: updateReferenceList(event.target.value, 'creative_component', promotion.creative_component_references) })}/></label>
         </div></section>
         <footer><span>{promotion.base_material_references.length} 个素材</span><small>{promotion.base_material_references.length ? '素材已关联' : '尚未关联素材'}</small></footer>
       </article>)}</div>
@@ -245,8 +245,9 @@ function PlatformConfigurationEditor({ value, onChange }: { value: PlatformConfi
 }
 
 export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCase }: { state: DataState; activeView: string; tourRunId?: string; tourCase?: string }) {
-  const { currentProject } = useProject()
+  const { currentProject, agencyWorkbench } = useProject()
   const projectId = currentProject.id
+  const confirmedAssets = useMemo(() => (agencyWorkbench?.assetVersionPointers ?? []).filter(asset => asset.projectId === projectId && asset.humanConfirmedVersion), [agencyWorkbench, projectId])
   const [plans, setPlans] = useState<DeliveryPlan[]>([])
   const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get('plan_id') ?? '')
   const [changeSet, setChangeSet] = useState<DeliveryControlChangeSet>()
@@ -339,7 +340,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
       {!selectedPlan ? <div className="panel-empty">当前 Project 暂无投放计划。<a href={planEditorURL}>前往创建</a></div> : legacyReadOnly ? <section className="delivery-config-config-card">
         <div className="delivery-config-empty-inline"><CircleAlert size={20}/><div><b>历史配置，仅供查看</b><p>这份计划不能继续修改、检查或提交。若要继续投放，请新建计划并选择目标广告平台。</p></div></div>
       </section> : <>
-        {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存新版本'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
+        {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存新版本'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration} products={currentProject.products ?? []} assets={confirmedAssets}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
         {showCalibration && platformConfiguration ? <CalibrationDispositionView value={platformConfiguration}/> : null}
         {showPreflight ? <section className="delivery-config-flow-grid delivery-config-flow-grid--preflight"><article className="delivery-config-preflight-card">
           <header><div><span className="section-label">提交前检查</span><h3>检查并提交变更申请</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `变更申请 ${changeSet.status}` : '尚未提交'}</strong></header>

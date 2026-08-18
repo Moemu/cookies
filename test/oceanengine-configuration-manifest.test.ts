@@ -31,7 +31,6 @@ test('the configuration page shows only usable Manifest fields', () => {
   assert.deepEqual(projectFields.map(field => field.key), [
     'project.marketing_purpose',
     'project.marketing_scenario',
-    'project.product_selection_mode',
     'project.lead_capture_mode',
     'project.carrier',
     'project.delivery_mode',
@@ -43,7 +42,6 @@ test('the configuration page shows only usable Manifest fields', () => {
     'project.project_name',
   ])
   assert.equal(projectFields.find(field => field.key === 'project.daily_budget_minor')?.unit, 'CNY_fen')
-  assert.equal(projectFields.find(field => field.key === 'project.product_selection_mode')?.label, '营销产品选择方式')
   assert.equal(projectFields.find(field => field.key === 'project.carrier')?.label, '投放载体')
   assert.equal(projectFields.find(field => field.key === 'project.carrier')?.valueLabels?.landing_page, '落地页（类型未细分）')
   assert.equal(projectFields.find(field => field.key === 'project.marketing_purpose')?.valueLabels?.lead_generation, '销售线索')

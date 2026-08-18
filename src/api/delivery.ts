@@ -114,11 +114,11 @@ export type PlatformConfiguration = {
         application_scenario?: string
         operating_system?: string
         application_download_mode?: string
-        product_selection_mode?: string
         lead_capture_mode?: string
         carrier: string
         optimization_target_reference?: StableReference
         deep_optimization_mode?: string
+        aigc_dynamic_creative?: boolean
         delivery_mode: string
         targeting: { regions?: string[]; age_ranges?: string[]; gender?: string; smart_expansion: boolean }
         schedule: { mode?: 'long_term' | 'fixed_range'; start_at: string; end_at: string; timezone: string }
@@ -127,6 +127,7 @@ export type PlatformConfiguration = {
         search_boost?: { keywords?: string[]; bid_coefficient?: number; targeting_expansion?: boolean }
         product_catalog_reference?: StableReference
         placement_strategy?: string
+        placement_media?: string[]
         product_targeting?: { rta_redirect?: boolean; region_match?: boolean; delivery_conditions?: string[] }
         application_launch_mode?: string
         project_name: string
@@ -1655,7 +1656,6 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
           draft_schema_version: 'oceanengine-configuration/v1', project_draft_id: `project-${identity}-${versionNumber}`,
           account_reference: { namespace: 'oceanengine', object_kind: 'advertiser_account', scope, id: draft.advertiser.id, state: 'resolved', display_name_snapshot: draft.advertiser.name },
           marketing_purpose: draft.marketingPurpose, marketing_scenario: 'short_video_image_text',
-          product_selection_mode: draft.marketingPurpose && draft.marketingPurpose !== 'ecommerce' ? 'manual' : undefined,
           marketing_product_reference: marketingProductReference,
           carrier: draft.tracking.deliveryCarrier, optimization_target_reference: optimizationTargetReference, delivery_mode: 'manual',
           targeting: { smart_expansion: false },
