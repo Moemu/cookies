@@ -97,6 +97,13 @@ type ProjectDetail struct {
 	ChangeSets []ChangeSet              `json:"change_sets"`
 }
 
+// ProductProjectRef is a lightweight project reference for the product
+// catalog's "used by projects" view.
+type ProductProjectRef struct {
+	ProjectID contract.ProjectID `json:"project_id"`
+	Name      string             `json:"name"`
+}
+
 type ProjectRuntime struct {
 	Code           string    `json:"code"`
 	Brand          string    `json:"brand"`
@@ -398,6 +405,44 @@ type Brand struct {
 	Status         string                  `json:"status"`
 	CreatedAt      time.Time               `json:"created_at"`
 	UpdatedAt      time.Time               `json:"updated_at"`
+}
+
+// Product is the organization-level catalog object. OceanEngineProductID is
+// a platform mapping that is bound after the product is created on the
+// platform by the launch pipeline; until then the product is treated as not
+// present on OceanEngine.
+type Product struct {
+	ID                   contract.ProductID      `json:"id"`
+	OrganizationID       contract.OrganizationID `json:"organization_id"`
+	Name                 string                  `json:"name"`
+	Status               string                  `json:"status"`
+	ActivityType         string                  `json:"activity_type,omitempty"`
+	ActivityName         string                  `json:"activity_name,omitempty"`
+	BrandName            string                  `json:"brand_name,omitempty"`
+	OceanEngineProductID string                  `json:"ocean_engine_product_id,omitempty"`
+	CreatedAt            time.Time               `json:"created_at"`
+	UpdatedAt            time.Time               `json:"updated_at"`
+}
+
+// CreateProductRequest is the input for creating an organization-level
+// product object. The OceanEngine mapping is intentionally absent: it is
+// bound later by the launch pipeline after the product exists on the platform.
+type CreateProductRequest struct {
+	Name         string `json:"name"`
+	ActivityType string `json:"activity_type,omitempty"`
+	ActivityName string `json:"activity_name,omitempty"`
+	BrandName    string `json:"brand_name,omitempty"`
+}
+
+// UpdateProductRequest carries optional field updates. A nil pointer keeps
+// the existing value; an empty string clears the field.
+type UpdateProductRequest struct {
+	Name                 *string `json:"name,omitempty"`
+	Status               *string `json:"status,omitempty"`
+	ActivityType         *string `json:"activity_type,omitempty"`
+	ActivityName         *string `json:"activity_name,omitempty"`
+	BrandName            *string `json:"brand_name,omitempty"`
+	OceanEngineProductID *string `json:"ocean_engine_product_id,omitempty"`
 }
 
 type CreateProjectRequest struct {

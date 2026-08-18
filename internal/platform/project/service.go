@@ -22,6 +22,11 @@ var ErrLastOwner = errors.New("project must keep an active owner")
 
 type Store interface {
 	CreateBrand(context.Context, Brand) error
+	CreateProduct(context.Context, Product) error
+	ListProducts(context.Context, contract.OrganizationID) ([]Product, error)
+	GetProduct(context.Context, contract.OrganizationID, contract.ProductID) (Product, error)
+	UpdateProduct(context.Context, Product) error
+	ListProductProjects(context.Context, contract.OrganizationID, contract.ProductID) ([]ProductProjectRef, error)
 	CreateProject(context.Context, Project, contract.Principal, []contract.ProductID) error
 	UpdateProject(context.Context, Project, ProjectRuntime, int64) error
 	CreateProjectArtifact(context.Context, ProjectArtifact) error
@@ -83,6 +88,134 @@ func (s Service) CreateBrand(ctx context.Context, actor contract.ActorContext, n
 		return Brand{}, err
 	}
 	return brand, nil
+}
+
+// CreateProduct creates an organization-level product object. The product is
+// the cookies source of truth; its OceanEngine mapping is bound later by the
+// launch pipeline, so a new product always starts without a platform ID.
+func (s Service) CreateProduct(ctx context.Context, actor contract.ActorContext, request CreateProductRequest) (Product, error) {
+	if s.Store == nil {
+		return Product{}, fmt.Errorf("project store is required")
+	}
+	if err := actor.Validate(); err != nil {
+		return Product{}, err
+	}
+	name := strings.TrimSpace(request.Name)
+	if name == "" || len(name) > 255 {
+		return Product{}, fmt.Errorf("product name must be between 1 and 255 characters")
+	}
+	for field, value := range map[string]string{
+		"activity_type": request.ActivityType,
+		"activity_name": request.ActivityName,
+		"brand_name":    request.BrandName,
+	} {
+		if len(value) > 255 {
+			return Product{}, fmt.Errorf("%s must not exceed 255 characters", field)
+		}
+	}
+	newID := s.NewID
+	if newID == nil {
+		newID = ids.New
+	}
+	id, err := newID("product")
+	if err != nil {
+		return Product{}, err
+	}
+	product := Product{
+		ID: contract.ProductID(id), OrganizationID: actor.OrganizationID, Name: name, Status: "active",
+		ActivityType: strings.TrimSpace(request.ActivityType), ActivityName: strings.TrimSpace(request.ActivityName), BrandName: strings.TrimSpace(request.BrandName),
+	}
+	if err := s.Store.CreateProduct(ctx, product); err != nil {
+		return Product{}, err
+	}
+	created, err := s.Store.GetProduct(ctx, actor.OrganizationID, product.ID)
+	if err != nil {
+		return Product{}, err
+	}
+	return created, nil
+}
+
+func (s Service) ListProducts(ctx context.Context, actor contract.ActorContext) ([]Product, error) {
+	if s.Store == nil {
+		return nil, fmt.Errorf("project store is required")
+	}
+	if err := actor.Validate(); err != nil {
+		return nil, err
+	}
+	return s.Store.ListProducts(ctx, actor.OrganizationID)
+}
+
+func (s Service) GetProduct(ctx context.Context, actor contract.ActorContext, productID contract.ProductID) (Product, error) {
+	if s.Store == nil {
+		return Product{}, fmt.Errorf("project store is required")
+	}
+	if err := actor.Validate(); err != nil {
+		return Product{}, err
+	}
+	if productID == "" {
+		return Product{}, fmt.Errorf("product id must not be empty")
+	}
+	return s.Store.GetProduct(ctx, actor.OrganizationID, productID)
+}
+
+// UpdateProduct applies optional field updates. Empty strings clear the
+// corresponding optional column; nil pointers keep the existing value.
+func (s Service) UpdateProduct(ctx context.Context, actor contract.ActorContext, productID contract.ProductID, request UpdateProductRequest) (Product, error) {
+	if s.Store == nil {
+		return Product{}, fmt.Errorf("project store is required")
+	}
+	if err := actor.Validate(); err != nil {
+		return Product{}, err
+	}
+	if productID == "" {
+		return Product{}, fmt.Errorf("product id must not be empty")
+	}
+	product, err := s.Store.GetProduct(ctx, actor.OrganizationID, productID)
+	if err != nil {
+		return Product{}, err
+	}
+	if request.Name != nil {
+		product.Name = strings.TrimSpace(*request.Name)
+	}
+	if request.Status != nil {
+		status := strings.TrimSpace(*request.Status)
+		if status != "active" && status != "archived" {
+			return Product{}, fmt.Errorf("product status must be active or archived")
+		}
+		product.Status = status
+	}
+	if request.ActivityType != nil {
+		product.ActivityType = strings.TrimSpace(*request.ActivityType)
+	}
+	if request.ActivityName != nil {
+		product.ActivityName = strings.TrimSpace(*request.ActivityName)
+	}
+	if request.BrandName != nil {
+		product.BrandName = strings.TrimSpace(*request.BrandName)
+	}
+	if request.OceanEngineProductID != nil {
+		product.OceanEngineProductID = strings.TrimSpace(*request.OceanEngineProductID)
+	}
+	if product.Name == "" {
+		return Product{}, fmt.Errorf("product name must not be empty")
+	}
+	if err := s.Store.UpdateProduct(ctx, product); err != nil {
+		return Product{}, err
+	}
+	return product, nil
+}
+
+func (s Service) ListProductProjects(ctx context.Context, actor contract.ActorContext, productID contract.ProductID) ([]ProductProjectRef, error) {
+	if s.Store == nil {
+		return nil, fmt.Errorf("project store is required")
+	}
+	if err := actor.Validate(); err != nil {
+		return nil, err
+	}
+	if productID == "" {
+		return nil, fmt.Errorf("product id must not be empty")
+	}
+	return s.Store.ListProductProjects(ctx, actor.OrganizationID, productID)
 }
 
 func (s Service) CreateProject(ctx context.Context, actor contract.ActorContext, request CreateProjectRequest) (Project, error) {

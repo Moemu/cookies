@@ -70,6 +70,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   const preserveEditorState = useRef(false)
 
   const selectedPlan = useMemo(() => plans.find(plan => plan.id === selectedId), [plans, selectedId])
+  const productsCatalogURL = projectPath(projectId, 'delivery', 'products')
   const configurationLaunchURL = useMemo(() => {
     const base = projectPath(projectId, 'delivery', 'configuration', undefined, '配置映射')
     return selectedPlan ? `${base}&plan_id=${encodeURIComponent(selectedPlan.id)}` : base
@@ -219,7 +220,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
         </nav>
 
         <section className="delivery-plan-form" aria-label={`${section}编辑区`}>
-          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft} strategyTasks={strategyTasks} products={currentProject.products} marketingPurposeSuggestion={marketingPurposeSuggestion}/> : null}
+          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft} strategyTasks={strategyTasks} products={currentProject.products} marketingPurposeSuggestion={marketingPurposeSuggestion} productsCatalogURL={productsCatalogURL}/> : null}
           {section === '预算与排期' ? <BudgetScheduleFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '投放载体和监测' ? <TrackingFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '素材引用' ? <CreativeFields draft={draft} changeDraft={changeDraft} confirmedAssets={confirmedAssets}/> : null}
@@ -253,7 +254,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   </StateBoundary>
 }
 
-function TargetAccountFields({ draft, changeDraft, strategyTasks = [], products = [], marketingPurposeSuggestion }: FieldProps) {
+function TargetAccountFields({ draft, changeDraft, strategyTasks = [], products = [], marketingPurposeSuggestion, productsCatalogURL }: FieldProps) {
   const hasPlanAdvertiserOption = Boolean(draft.advertiser.id && draft.advertiser.id !== 'mock-advertiser-001')
   return <div className="delivery-field-grid">
     <label>计划名称<input id="plan_name" aria-label="计划名称" value={draft.name} onChange={event => changeDraft(current => ({ ...current, name: event.target.value }))}/></label>
@@ -279,7 +280,7 @@ function TargetAccountFields({ draft, changeDraft, strategyTasks = [], products 
       <label>活动类型<input id="marketing_product_activity_type" aria-label="活动类型" value={draft.marketingProduct.activityType} onChange={event => changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, activityType: event.target.value } }))}/></label>
       <label>活动名称<input id="marketing_product_activity_name" aria-label="活动名称" value={draft.marketingProduct.activityName} onChange={event => changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, activityName: event.target.value } }))}/></label>
       <label>品牌名称<input id="marketing_product_brand_name" aria-label="品牌名称" value={draft.marketingProduct.brandName} onChange={event => changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, brandName: event.target.value } }))}/></label>
-      {draft.marketingProduct.id ? <div className="field-provenance"><b>{draft.marketingProduct.oceanEngineProductId ? '巨量商品已存在' : '待 Playwright RPA 批量录入'}</b><span>cookies 产品是事实源。巨量商品 ID 只保存平台映射。</span></div> : <div className="field-provenance"><b>当前项目没有可选产品</b><span>请先在 cookies 产品对象中关联产品。</span></div>}
+      {draft.marketingProduct.id ? <div className="field-provenance"><b>{draft.marketingProduct.oceanEngineProductId ? '巨量商品已存在' : '待 Playwright RPA 批量录入'}</b><span>cookies 产品是事实源。巨量商品 ID 只保存平台映射。</span></div> : <div className="field-provenance"><b>当前项目没有可选产品</b><span>请先到<a href={productsCatalogURL}>产品目录</a>创建产品并关联到当前项目。</span></div>}
     </> : null}
     <div className="field-provenance"><b>可追溯来源</b><span>保存时由服务端解析策略任务版本并写入内容哈希与返回入口。</span></div>
     <div className="field-provenance"><b>{marketingPurposeSuggestion ? `策略建议：${marketingPurposeLabel(marketingPurposeSuggestion.value)}` : '暂无可靠策略建议'}</b><span>{marketingPurposeSuggestion?.reason ?? '项目和策略内容没有平台枚举的可靠映射。请由投手选择。'} 保存后会冻结选择值及策略版本。</span></div>
@@ -380,6 +381,7 @@ type FieldProps = {
   products?: ProjectRecord['products']
   confirmedAssets?: ApiAssetVersionPointer[]
   marketingPurposeSuggestion?: MarketingPurposeSuggestion
+  productsCatalogURL?: string
 }
 
 type MarketingPurposeSuggestion = { value: OceanEngineMarketingPurpose; reason: string }

@@ -107,6 +107,11 @@ type SessionManager interface {
 }
 type ProjectManager interface {
 	CreateBrand(context.Context, contract.ActorContext, string) (project.Brand, error)
+	CreateProduct(context.Context, contract.ActorContext, project.CreateProductRequest) (project.Product, error)
+	ListProducts(context.Context, contract.ActorContext) ([]project.Product, error)
+	GetProduct(context.Context, contract.ActorContext, contract.ProductID) (project.Product, error)
+	UpdateProduct(context.Context, contract.ActorContext, contract.ProductID, project.UpdateProductRequest) (project.Product, error)
+	ListProductProjects(context.Context, contract.ActorContext, contract.ProductID) ([]project.ProductProjectRef, error)
 	CreateProject(context.Context, contract.ActorContext, project.CreateProjectRequest) (project.Project, error)
 	UpdateProject(context.Context, contract.ActorContext, contract.ProjectID, project.UpdateProjectRequest) (project.Project, error)
 	GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error)
@@ -358,6 +363,11 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("PATCH /platform/v1/organizations/{organization_id}/members/{user_id}", server.requireAuthentication(server.requireScope("organization.members.manage", http.HandlerFunc(server.updateOrganizationMember))))
 	server.mux.Handle("GET /platform/v1/provider/capabilities", server.requireAuthentication(http.HandlerFunc(server.providerCapabilities)))
 	server.mux.Handle("POST /platform/v1/brands", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createBrand))))
+	server.mux.Handle("GET /platform/v1/products", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.listProducts))))
+	server.mux.Handle("POST /platform/v1/products", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createProduct))))
+	server.mux.Handle("GET /platform/v1/products/{product_id}", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.getProduct))))
+	server.mux.Handle("PATCH /platform/v1/products/{product_id}", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.updateProduct))))
+	server.mux.Handle("GET /platform/v1/products/{product_id}/projects", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.listProductProjects))))
 	server.mux.Handle("POST /platform/v1/projects", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createProject))))
 	server.mux.Handle("GET /platform/v1/projects", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.listProjects))))
 	server.mux.Handle("GET /platform/v1/projects/{project_id}", server.requireProject(server.requireScope("project.read", http.HandlerFunc(server.projectDetail))))

@@ -8,6 +8,24 @@ import (
 type BrandID string
 type ProductID string
 
+// Product is the organization-level business product object. It is the source
+// of truth referenced by strategy briefs, insight crawling, and delivery
+// marketing_product references. OceanEngineProductID is a platform mapping:
+// a product without a bound OceanEngine object is treated as not yet created
+// on the platform.
+type Product struct {
+	ID                   ProductID      `json:"id"`
+	OrganizationID       OrganizationID `json:"organization_id"`
+	Name                 string         `json:"name"`
+	Status               string         `json:"status"`
+	ActivityType         string         `json:"activity_type,omitempty"`
+	ActivityName         string         `json:"activity_name,omitempty"`
+	BrandName            string         `json:"brand_name,omitempty"`
+	OceanEngineProductID string         `json:"ocean_engine_product_id,omitempty"`
+	CreatedAt            string         `json:"created_at"`
+	UpdatedAt            string         `json:"updated_at"`
+}
+
 // ProjectRef is the stable cross-module pointer to an authorized project
 // context snapshot.
 type ProjectRef struct {
@@ -55,6 +73,9 @@ type ProjectBusinessContext struct {
 type ProjectBusinessProduct struct {
 	ID                   ProductID `json:"id"`
 	Name                 string    `json:"name"`
+	ActivityType         string    `json:"activity_type,omitempty"`
+	ActivityName         string    `json:"activity_name,omitempty"`
+	BrandName            string    `json:"brand_name,omitempty"`
 	OceanEngineProductID string    `json:"ocean_engine_product_id,omitempty"`
 }
 

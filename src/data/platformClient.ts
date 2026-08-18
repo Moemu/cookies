@@ -34,6 +34,40 @@ export type PlatformBrand = {
   updated_at: string;
 };
 
+export type PlatformProduct = {
+  id: string;
+  organization_id: string;
+  name: string;
+  status: "active" | "archived";
+  activity_type?: string;
+  activity_name?: string;
+  brand_name?: string;
+  ocean_engine_product_id?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PlatformProductProjectRef = {
+  project_id: string;
+  name: string;
+};
+
+export type PlatformCreateProductInput = {
+  name: string;
+  activity_type?: string;
+  activity_name?: string;
+  brand_name?: string;
+};
+
+export type PlatformUpdateProductInput = {
+  name?: string;
+  status?: "active" | "archived";
+  activity_type?: string;
+  activity_name?: string;
+  brand_name?: string;
+  ocean_engine_product_id?: string;
+};
+
 export type PlatformProjectRuntime = {
   code: string;
   brand: string;
@@ -252,6 +286,19 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
   }
 
   return {
+    listProducts: async () => {
+      const products = asArray((await request<ItemsResponse<PlatformProduct>>("/products")).items);
+      return products;
+    },
+    createProduct: async (input: PlatformCreateProductInput) =>
+      request<PlatformProduct>("/products", { method: "POST", body: JSON.stringify(input) }),
+    getProduct: async (productId: string) => request<PlatformProduct>(`/products/${encodeURIComponent(productId)}`),
+    updateProduct: async (productId: string, input: PlatformUpdateProductInput) =>
+      request<PlatformProduct>(`/products/${encodeURIComponent(productId)}`, { method: "PATCH", body: JSON.stringify(input) }),
+    listProductProjects: async (productId: string) => {
+      const refs = asArray((await request<ItemsResponse<PlatformProductProjectRef>>(`/products/${encodeURIComponent(productId)}/projects`)).items);
+      return refs;
+    },
     listProjects: async () => {
       const projects = asArray((await request<ItemsResponse<PlatformProject>>("/projects")).items);
       // The application workbench can only operate on active, brand-bound
