@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Archive, Check, Package, Plus, RefreshCw, Save } from 'lucide-react'
+import { Archive, Check, Package, Pencil, Plus, RefreshCw, Save, X } from 'lucide-react'
 import {
   platformClient,
   type PlatformProduct,
@@ -15,14 +15,23 @@ type ProductForm = {
 
 const emptyForm: ProductForm = { name: '', activityType: '', activityName: '', brandName: '' }
 
+type ProductDialog = { mode: 'create' } | { mode: 'edit'; product: PlatformProduct }
+
 function formatTime(value?: string) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
 }
 
+function mappingStatus(product: PlatformProduct) {
+  return product.ocean_engine_product_id
+    ? <span className="status success"><span/>已录入 · {product.ocean_engine_product_id}</span>
+    : <span className="status warning"><span/>待录入</span>
+}
+
 export function ProductsPage({ activeView }: { activeView: string }) {
-  const view = activeView === '新建产品' ? 'create' : activeView === '巨量映射' ? 'mapping' : 'list'
+  const isMapping = activeView === '巨量映射'
   const [products, setProducts] = useState<PlatformProduct[]>([])
   const [selectedId, setSelectedId] = useState('')
+  const [dialog, setDialog] = useState<ProductDialog | null>(null)
   const [form, setForm] = useState<ProductForm>(emptyForm)
   const [mappingInput, setMappingInput] = useState('')
   const [projectRefs, setProjectRefs] = useState<PlatformProductProjectRef[]>([])
@@ -60,24 +69,51 @@ export function ProductsPage({ activeView }: { activeView: string }) {
     return () => { active = false }
   }, [selectedId])
 
-  const createProduct = async () => {
+  const openCreate = () => {
+    setForm(emptyForm)
+    setDialog({ mode: 'create' })
+  }
+
+  const openEdit = (product: PlatformProduct) => {
+    setForm({
+      name: product.name,
+      activityType: product.activity_type ?? '',
+      activityName: product.activity_name ?? '',
+      brandName: product.brand_name ?? '',
+    })
+    setDialog({ mode: 'edit', product })
+  }
+
+  const submitDialog = async () => {
     if (!form.name.trim()) {
       setNotice('产品名称不能为空。')
       return
     }
     setBusy(true)
     try {
-      const created = await platformClient.createProduct({
-        name: form.name.trim(),
-        activity_type: form.activityType.trim() || undefined,
-        activity_name: form.activityName.trim() || undefined,
-        brand_name: form.brandName.trim() || undefined,
-      })
-      setProducts(current => [...current, created])
-      setForm(emptyForm)
-      setNotice(`${created.name} 已创建，可在「产品列表」查看并回绑巨量商品。`)
+      if (dialog?.mode === 'edit') {
+        const updated = await platformClient.updateProduct(dialog.product.id, {
+          name: form.name.trim(),
+          activity_type: form.activityType.trim() || undefined,
+          activity_name: form.activityName.trim() || undefined,
+          brand_name: form.brandName.trim() || undefined,
+        })
+        setProducts(current => current.map(item => item.id === updated.id ? updated : item))
+        setNotice(`${updated.name} 已更新。`)
+      } else {
+        const created = await platformClient.createProduct({
+          name: form.name.trim(),
+          activity_type: form.activityType.trim() || undefined,
+          activity_name: form.activityName.trim() || undefined,
+          brand_name: form.brandName.trim() || undefined,
+        })
+        setProducts(current => [...current, created])
+        setSelectedId(created.id)
+        setNotice(`${created.name} 已创建。`)
+      }
+      setDialog(null)
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '创建产品失败')
+      setNotice(error instanceof Error ? error.message : dialog?.mode === 'edit' ? '更新产品失败' : '创建产品失败')
     } finally {
       setBusy(false)
     }
@@ -125,78 +161,51 @@ export function ProductsPage({ activeView }: { activeView: string }) {
     }
   }
 
-  const mappingStatus = (product: PlatformProduct) => product.ocean_engine_product_id
-    ? <span className="status success"><span/>已录入 · {product.ocean_engine_product_id}</span>
-    : <span className="status warning"><span/>待录入</span>
-
-  const toolbar = (title: string, sub: string) => <div className="surface-toolbar">
-    <div><span className="section-label">PRODUCT CATALOG</span><h3>{title}</h3><span>{sub}</span></div>
-    <button aria-label="刷新产品列表" onClick={() => void load()} disabled={busy}><RefreshCw size={15}/></button>
-  </div>
-
-  if (view === 'create') {
-    return <div className="products-view">
-      <div className="table-surface">
-        {toolbar('新建产品', '创建组织级业务产品对象；巨量映射在录入后回绑。')}
-        <form className="products-create-form" onSubmit={event => { event.preventDefault(); void createProduct() }}>
-          <label>产品名称 <em>必填</em><input autoFocus required placeholder="如 双十一主推款礼盒" value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))}/></label>
-          <label>活动类型<input placeholder="如 promotion / 新品上市" value={form.activityType} onChange={event => setForm(current => ({ ...current, activityType: event.target.value }))}/></label>
-          <label>活动名称<input placeholder="如 双十一大促" value={form.activityName} onChange={event => setForm(current => ({ ...current, activityName: event.target.value }))}/></label>
-          <label>品牌名称<input placeholder="如 娇兰" value={form.brandName} onChange={event => setForm(current => ({ ...current, brandName: event.target.value }))}/></label>
-          <footer><button className="primary-button" type="submit" disabled={busy}><Save size={14}/>{busy ? '创建中…' : '创建产品'}</button></footer>
-        </form>
-        <div className="products-create-note"><Package size={16}/><span>cookies 产品是事实源：投放下拉、策略 Brief 与米云素材都引用这里的对象。创建后进入「巨量映射」完成平台录入与回绑。</span></div>
-      </div>
-      {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
-    </div>
-  }
-
-  if (view === 'mapping') {
-    return <div className="products-view">
-      <div className="table-surface">
-        {toolbar('巨量映射', '商品在巨量平台录入后回绑商品 ID；未回绑视为尚未在巨量创建。')}
-        <table>
-          <thead><tr><th>产品</th><th>活动</th><th>映射状态</th><th>巨量商品 ID</th></tr></thead>
-          <tbody>
-            {products.map(product => <tr key={product.id}>
-              <td><b>{product.name}</b><small>{product.id}</small></td>
-              <td><b>{[product.activity_name, product.brand_name].filter(Boolean).join(' · ') || '—'}</b><small>{product.activity_type || '未设置活动类型'}</small></td>
-              <td>{mappingStatus(product)}</td>
-              <td>{product.ocean_engine_product_id
-                ? <span className="products-mapping-value"><code>{product.ocean_engine_product_id}</code><button className="text-button" onClick={() => void clearMapping(product)} disabled={busy}>清空</button></span>
-                : <form className="products-mapping-form" onSubmit={event => { event.preventDefault(); void bindMapping(product) }}>
-                    <input placeholder="粘贴巨量商品 ID" value={mappingInput} onChange={event => setMappingInput(event.target.value)}/>
-                    <button className="primary-button" type="submit" disabled={busy || !mappingInput.trim()}><Check size={14}/>回绑</button>
-                  </form>}
-              </td>
-            </tr>)}
-          </tbody>
-        </table>
-        {!products.length && !busy ? <div className="panel-empty">当前组织还没有产品，先去「新建产品」创建一个。</div> : null}
-      </div>
-      {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
-    </div>
-  }
-
   return <div className="products-view">
     <div className="table-surface">
-      {toolbar('产品列表', `${products.length} 个产品`) }
-      <table>
-        <thead><tr><th>产品</th><th>活动 / 品牌</th><th>巨量映射</th><th>状态</th><th>项目关联</th></tr></thead>
+      <div className="surface-toolbar">
+        <div><span className="section-label">PRODUCT CATALOG</span><h3>{isMapping ? '巨量映射' : '产品列表'}</h3><span className="products-count">{products.length} 个产品</span></div>
+        <div className="products-toolbar-actions">
+          <button aria-label="刷新" onClick={() => void load()} disabled={busy}><RefreshCw size={15}/></button>
+          <button className="primary-button" onClick={openCreate} disabled={busy}><Plus size={15}/>新建产品</button>
+        </div>
+      </div>
+
+      {isMapping ? <table>
+        <thead><tr><th>产品</th><th>活动</th><th>映射状态</th><th>巨量商品 ID</th></tr></thead>
         <tbody>
-          {products.map(product => <tr key={product.id} className={product.id === selectedId ? 'products-row-selected' : undefined} onClick={() => setSelectedId(product.id)}>
+          {products.map(product => <tr key={product.id}>
             <td><b>{product.name}</b><small>{product.id}</small></td>
             <td><b>{[product.activity_name, product.brand_name].filter(Boolean).join(' · ') || '—'}</b><small>{product.activity_type || '未设置活动类型'}</small></td>
             <td>{mappingStatus(product)}</td>
-            <td><span className={`status ${product.status === 'archived' ? 'warning' : 'success'}`}><span/>{product.status === 'archived' ? '已归档' : '启用'}</span></td>
-            <td><button className="text-button" onClick={event => { event.stopPropagation(); void toggleArchive(product) }} disabled={busy}><Archive size={14}/>{product.status === 'archived' ? '恢复' : '归档'}</button></td>
+            <td>{product.ocean_engine_product_id
+              ? <span className="products-mapping-value"><code>{product.ocean_engine_product_id}</code><button className="text-button" onClick={() => void clearMapping(product)} disabled={busy}>清空</button></span>
+              : <form className="products-mapping-form" onSubmit={event => { event.preventDefault(); void bindMapping(product) }}>
+                  <input placeholder="粘贴巨量商品 ID" value={mappingInput} onChange={event => setMappingInput(event.target.value)}/>
+                  <button className="primary-button" type="submit" disabled={busy || !mappingInput.trim()}><Check size={14}/>回绑</button>
+                </form>}
+            </td>
           </tr>)}
         </tbody>
-      </table>
-      {!products.length && !busy ? <div className="panel-empty">当前组织还没有产品，先去「新建产品」创建第一个产品对象。</div> : null}
+      </table> : <table>
+        <thead><tr><th>产品</th><th>活动 / 品牌</th><th>巨量映射</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+          {products.map(product => <tr key={product.id} className={product.id === selectedId ? 'products-row-selected' : undefined} onClick={() => setSelectedId(product.id)}>
+            <td><b>{product.name}</b><small className="products-id">{product.id}</small></td>
+            <td><b>{[product.activity_name, product.brand_name].filter(Boolean).join(' · ') || '—'}</b><small>{product.activity_type || '未设置活动类型'}</small></td>
+            <td>{mappingStatus(product)}</td>
+            <td><span className={`status ${product.status === 'archived' ? 'warning' : 'success'}`}><span/>{product.status === 'archived' ? '已归档' : '启用'}</span></td>
+            <td><span className="products-row-actions">
+              <button className="text-button" onClick={event => { event.stopPropagation(); openEdit(product) }} disabled={busy}><Pencil size={14}/>编辑</button>
+              <button className="text-button" onClick={event => { event.stopPropagation(); void toggleArchive(product) }} disabled={busy}><Archive size={14}/>{product.status === 'archived' ? '恢复' : '归档'}</button>
+            </span></td>
+          </tr>)}
+        </tbody>
+      </table>}
+      {!products.length && !busy ? <div className="panel-empty"><Package size={22}/><h3>当前组织还没有产品</h3><p>点击右上角「新建产品」创建第一个产品对象。</p></div> : null}
     </div>
 
-    {selected ? <div className="products-detail">
+    {!isMapping && selected ? <div className="products-detail">
       <header>
         <div><span className="section-label">产品对象</span><h2>{selected.name}</h2><p>cookies 产品是事实源；巨量商品 ID 只是平台映射。</p></div>
         <span className="products-detail-id">{selected.id}</span>
@@ -210,8 +219,25 @@ export function ProductsPage({ activeView }: { activeView: string }) {
       </dl>
       <footer>
         <div><span>巨量映射</span>{mappingStatus(selected)}</div>
-        <div><span>项目关联</span>{projectRefs.length ? <em>{projectRefs.map(ref => ref.name).join('、')}</em> : <em>尚未关联项目</em>}</div>
+        <div><span>项目关联</span><em>{projectRefs.length ? projectRefs.map(ref => ref.name).join('、') : '尚未关联项目'}</em></div>
       </footer>
+    </div> : null}
+
+    {dialog ? <div className="task-dialog-backdrop" role="dialog" aria-modal="true" onClick={() => { if (!busy) setDialog(null) }}>
+      <form className="products-dialog" onSubmit={event => { event.preventDefault(); void submitDialog() }} onClick={event => event.stopPropagation()}>
+        <header>
+          <div><span className="section-label">{dialog.mode === 'edit' ? 'EDIT PRODUCT' : 'NEW PRODUCT'}</span><h3>{dialog.mode === 'edit' ? `编辑 ${dialog.product.name}` : '新建产品'}</h3></div>
+          <button type="button" aria-label="关闭" onClick={() => setDialog(null)} disabled={busy}><X size={16}/></button>
+        </header>
+        <label>产品名称 <em>必填</em><input autoFocus required placeholder="如 双十一主推款礼盒" value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))}/></label>
+        <label>活动类型<input placeholder="如 promotion / 新品上市" value={form.activityType} onChange={event => setForm(current => ({ ...current, activityType: event.target.value }))}/></label>
+        <label>活动名称<input placeholder="如 双十一大促" value={form.activityName} onChange={event => setForm(current => ({ ...current, activityName: event.target.value }))}/></label>
+        <label>品牌名称<input placeholder="如 娇兰" value={form.brandName} onChange={event => setForm(current => ({ ...current, brandName: event.target.value }))}/></label>
+        <footer>
+          <button type="button" className="secondary-button" onClick={() => setDialog(null)} disabled={busy}>取消</button>
+          <button type="submit" className="primary-button" disabled={busy}><Save size={14}/>{busy ? '保存中…' : dialog.mode === 'edit' ? '保存修改' : '创建产品'}</button>
+        </footer>
+      </form>
     </div> : null}
 
     {notice ? <div className="inline-notice" role="status">{notice}</div> : null}
