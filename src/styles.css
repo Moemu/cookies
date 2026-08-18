@@ -9034,18 +9034,26 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   line-height: 1.45;
 }
 
-.delivery-config-switch {
-  grid-template-columns: 1fr auto !important;
-  align-items: center;
-  align-self: end;
+.delivery-config-toggle-field {
+  align-self: start;
+}
+
+.delivery-config-toggle-control {
+  display: flex;
   min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 9px 11px;
+  color: var(--muted);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 7px;
+  font-size: 9px;
+  font-weight: 600;
 }
 
-.delivery-config-switch input {
+.delivery-config-toggle-control input {
   width: 18px;
   min-height: 18px;
 }
