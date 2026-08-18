@@ -611,6 +611,11 @@ func (s MySQLStore) GetWorkbench(ctx context.Context, organizationID contract.Or
 	value.Client.OrganizationID, value.Client.Owner, value.Client.HealthStatus, value.Client.UpdatedAt = string(organizationID), value.Organization.Owner, "healthy", value.Project.UpdatedAt
 	value.Brand.OrganizationID, value.Brand.ClientID, value.Brand.Owner, value.Brand.UpdatedAt = string(organizationID), value.Client.ID, value.Organization.Owner, value.Project.UpdatedAt
 	value.Project.ProjectID, value.Project.OrganizationID, value.Project.ClientID, value.Project.BrandID = string(projectID), string(organizationID), value.Client.ID, value.Brand.ID
+	businessContext, err := s.GetBusinessContext(ctx, organizationID, projectID)
+	if err != nil {
+		return Workbench{}, err
+	}
+	value.Products = businessContext.Products
 
 	accounts, err := s.listWorkbenchAdAccounts(ctx, organizationID, projectID)
 	if err != nil {
