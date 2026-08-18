@@ -7,13 +7,28 @@ import {
   type DeliveryScenario,
   type DeliveryPlanVersion,
   type DeliveryPreflightResult,
+  oceanEngineMarketingPurposes,
+  type OceanEngineMarketingPurpose,
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
 import type { ApiAssetVersionPointer } from '../data/api'
 import type { DataState, ProjectRecord } from '../types'
 import { StateBoundary } from './StateBoundary'
 
-const planSections = ['目标与账户', '预算与排期', '追踪', '素材引用', '投前检查'] as const
+const planSections = ['目标与账户', '预算与排期', '投放载体和监测', '素材引用', '投前检查'] as const
+const deliveryCarrierOptions = [
+  { value: '', label: '请选择投放载体' },
+  { value: 'orange_landing_page', label: '橙子落地页' },
+  { value: 'owned_landing_page', label: '自研落地页' },
+] as const
+const orangeOptimizationTargetOptions = [
+  { value: 'button_redirect', label: '按钮跳转' },
+  { value: 'in_app_order', label: 'app内下单' },
+  { value: 'click', label: '点击量' },
+  { value: 'impression', label: '展示量' },
+  { value: 'shop_launch', label: '调起店铺' },
+  { value: 'shop_stay', label: '店铺停留' },
+] as const
 type PlanSection = typeof planSections[number]
 
 const scenarioLabels: Partial<Record<DeliveryScenario | 'unsaved_draft', string>> = {
@@ -73,7 +88,19 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
     [inspectedVersionNumber, selectedPlan],
   )
   const strategyTasks = useMemo(() => currentProject.tasks.filter(task => task.type === 'strategy' && (task.status === 'ready' || task.status === 'completed')), [currentProject.tasks])
+  const marketingPurposeSuggestion = useMemo(
+    () => suggestMarketingPurpose(currentProject.goal, strategyTasks.find(task => task.id === draft.strategyReference.taskId)?.objective),
+    [currentProject.goal, draft.strategyReference.taskId, strategyTasks],
+  )
   const confirmedAssets = useMemo(() => (agencyWorkbench?.assetVersionPointers ?? []).filter(pointer => pointer.projectId === projectId && pointer.humanConfirmedVersion), [agencyWorkbench, projectId])
+  const platformFieldsComplete = Boolean(
+    draft.marketingPurpose
+    && draft.tracking.deliveryCarrier
+    && draft.tracking.optimizationTargetId
+    && draft.tracking.searchBidCoefficient > 0
+    && (draft.marketingPurpose === 'ecommerce' || draft.marketingProduct.id)
+    && (draft.tracking.deliveryCarrier !== 'owned_landing_page' || (draft.tracking.landingPage && draft.tracking.eventAssetName && draft.tracking.eventAssetType)),
+  )
 
   useEffect(() => {
     let active = true
@@ -256,9 +283,9 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
         </nav>
 
         <section className="delivery-plan-form" aria-label={`${section}编辑区`}>
-          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft} strategyTasks={strategyTasks}/> : null}
+          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft} strategyTasks={strategyTasks} products={currentProject.products} marketingPurposeSuggestion={marketingPurposeSuggestion}/> : null}
           {section === '预算与排期' ? <BudgetScheduleFields draft={draft} changeDraft={changeDraft}/> : null}
-          {section === '追踪' ? <TrackingFields draft={draft} changeDraft={changeDraft}/> : null}
+          {section === '投放载体和监测' ? <TrackingFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '素材引用' ? <CreativeFields draft={draft} changeDraft={changeDraft} confirmedAssets={confirmedAssets}/> : null}
           {section === '投前检查' ? <PreflightPanel result={preflight} onRepair={repair}/> : null}
         </section>
@@ -271,7 +298,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
             onClick={beginNew}
             disabled={busy}
           ><FilePlus size={15}/>新建空白草稿</button>
-          <button className="secondary-button" onClick={() => void save()} disabled={busy || (!dirty && !isNew)}><Save size={15}/>{isNew ? '保存草稿' : '保存新版本'}</button>
+          <button className="secondary-button" onClick={() => void save()} disabled={busy || !platformFieldsComplete || (!dirty && !isNew)}><Save size={15}/>{isNew ? '保存草稿' : '保存新版本'}</button>
           <button className="primary-button" onClick={() => void runPreflight()} disabled={busy || !selectedPlan || dirty}><Send size={15}/>检查当前草稿</button>
           <button className="primary-button" onClick={() => void createChangeSet()} disabled={busy || !selectedPlan || dirty || !preflight?.passed}><FilePlus size={15}/>提交变更申请</button>
         </footer>
@@ -298,7 +325,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   </StateBoundary>
 }
 
-function TargetAccountFields({ draft, changeDraft, strategyTasks = [] }: FieldProps) {
+function TargetAccountFields({ draft, changeDraft, strategyTasks = [], products = [], marketingPurposeSuggestion }: FieldProps) {
   const hasPlanAdvertiserOption = Boolean(draft.advertiser.id && draft.advertiser.id !== 'mock-advertiser-001')
   return <div className="delivery-field-grid">
     <label>计划名称<input id="plan_name" aria-label="计划名称" value={draft.name} onChange={event => changeDraft(current => ({ ...current, name: event.target.value }))}/></label>
@@ -312,61 +339,91 @@ function TargetAccountFields({ draft, changeDraft, strategyTasks = [] }: FieldPr
     }))}><option value="">请选择账户边界</option>{hasPlanAdvertiserOption ? <option value={draft.advertiser.id}>{draft.advertiser.name || '当前计划账户边界'}</option> : null}<option value="mock-advertiser-001">当前演示账户边界</option></select></label>
     <label><span className="delivery-field-label">策略来源{!draft.strategyReference.taskId ? <em>必填</em> : null}</span><select id="strategy_reference" aria-label="策略来源" aria-required="true" required className={!draft.strategyReference.taskId ? 'field-missing' : undefined} value={draft.strategyReference.taskId} onChange={event => {
       const task = strategyTasks.find(candidate => candidate.id === event.target.value)
-      changeDraft(current => ({ ...current, strategyReference: { taskId: task?.id ?? '', version: task?.version ?? 0 }, sourceStrategyVersion: task ? `${task.id}@v${task.version}` : '' }))
+      changeDraft(current => ({ ...current, marketingPurpose: '', strategyReference: { taskId: task?.id ?? '', version: task?.version ?? 0 }, sourceStrategyVersion: task ? `${task.id}@v${task.version}` : '' }))
     }}><option value="">请选择已就绪策略任务</option>{strategyTasks.map(task => <option key={task.id} value={task.id}>{task.name} · V{task.version}</option>)}</select></label>
+    <label><span className="delivery-field-label">巨量营销目的{!draft.marketingPurpose ? <em>必填</em> : null}</span><select id="marketing_purpose" aria-label="巨量营销目的" aria-required="true" required className={!draft.marketingPurpose ? 'field-missing' : undefined} value={draft.marketingPurpose} onChange={event => changeDraft(current => ({ ...current, marketingPurpose: event.target.value as OceanEngineMarketingPurpose }))}><option value="">请选择巨量营销目的</option>{oceanEngineMarketingPurposes.map(value => <option key={value} value={value}>{marketingPurposeLabel(value)}{marketingPurposeSuggestion?.value === value ? '（策略建议）' : ''}</option>)}</select></label>
+    {draft.marketingPurpose && draft.marketingPurpose !== 'ecommerce' ? <>
+      <label><span className="delivery-field-label">cookies 产品{!draft.marketingProduct.id ? <em>必填</em> : null}</span><select id="marketing_product_id" aria-label="cookies 产品" value={draft.marketingProduct.id} onChange={event => {
+        const product = products.find(candidate => candidate.id === event.target.value)
+        changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, id: product?.id ?? '', name: product?.name ?? '', oceanEngineProductId: product?.oceanEngineProductId ?? '' } }))
+      }}><option value="">请选择 cookies 产品</option>{products.map(product => <option key={product.id} value={product.id}>{product.name}{product.oceanEngineProductId ? ' · 已录入巨量' : ' · 待 RPA 录入'}</option>)}</select></label>
+      <label>商品名称<input id="marketing_product_name" aria-label="商品名称" readOnly value={draft.marketingProduct.name}/></label>
+      <label>活动类型<input id="marketing_product_activity_type" aria-label="活动类型" value={draft.marketingProduct.activityType} onChange={event => changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, activityType: event.target.value } }))}/></label>
+      <label>活动名称<input id="marketing_product_activity_name" aria-label="活动名称" value={draft.marketingProduct.activityName} onChange={event => changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, activityName: event.target.value } }))}/></label>
+      <label>品牌名称<input id="marketing_product_brand_name" aria-label="品牌名称" value={draft.marketingProduct.brandName} onChange={event => changeDraft(current => ({ ...current, marketingProduct: { ...current.marketingProduct, brandName: event.target.value } }))}/></label>
+      {draft.marketingProduct.id ? <div className="field-provenance"><b>{draft.marketingProduct.oceanEngineProductId ? '巨量商品已存在' : '待 Playwright RPA 批量录入'}</b><span>cookies 产品是事实源。巨量商品 ID 只保存平台映射。</span></div> : <div className="field-provenance"><b>当前项目没有可选产品</b><span>请先在 cookies 产品对象中关联产品。</span></div>}
+    </> : null}
     <div className="field-provenance"><b>可追溯来源</b><span>保存时由服务端解析策略任务版本并写入内容哈希与返回入口。</span></div>
+    <div className="field-provenance"><b>{marketingPurposeSuggestion ? `策略建议：${marketingPurposeLabel(marketingPurposeSuggestion.value)}` : '暂无可靠策略建议'}</b><span>{marketingPurposeSuggestion?.reason ?? '项目和策略内容没有平台枚举的可靠映射。请由投手选择。'} 保存后会冻结选择值及策略版本。</span></div>
   </div>
 }
 
 function BudgetScheduleFields({ draft, changeDraft }: FieldProps) {
   return <div className="delivery-field-grid">
-    <label>总预算（CNY）<input id="budget_total" aria-label="总预算" type="number" min="0" step="100" value={draft.budget.totalMinor / 100} onChange={event => changeDraft(current => ({
+    <label>{draft.schedule.mode === 'long_term' ? '日预算（CNY）' : '总预算（CNY）'}<input id="budget_total" aria-label={draft.schedule.mode === 'long_term' ? '日预算' : '总预算'} type="number" min="0" step="100" value={draft.budget.totalMinor / 100} onChange={event => changeDraft(current => ({
       ...current,
       budget: { ...current.budget, totalMinor: Math.max(0, Math.round(Number(event.target.value) * 100)) },
     }))}/></label>
     <label>币种<input aria-label="币种" readOnly value={draft.budget.currency}/></label>
+    <label>投放周期<select id="schedule_mode" aria-label="投放周期" value={draft.schedule.mode} onChange={event => changeDraft(current => ({ ...current, schedule: { ...current.schedule, mode: event.target.value as DeliveryPlanDraft['schedule']['mode'] } }))}><option value="long_term">从今天起长期投放</option><option value="fixed_range">设置开始和结束日期</option></select></label>
     <label>开始时间<input id="schedule_start" aria-label="开始时间" type="datetime-local" value={toDateTimeLocal(draft.schedule.startAt)} onChange={event => changeDraft(current => ({
       ...current,
       schedule: { ...current.schedule, startAt: fromDateTimeLocal(event.target.value) },
     }))}/></label>
-    <label>结束时间<input id="schedule_end" aria-label="结束时间" type="datetime-local" value={toDateTimeLocal(draft.schedule.endAt)} onChange={event => changeDraft(current => ({
+    {draft.schedule.mode === 'fixed_range' ? <label>结束时间<input id="schedule_end" aria-label="结束时间" type="datetime-local" value={toDateTimeLocal(draft.schedule.endAt)} onChange={event => changeDraft(current => ({
       ...current,
       schedule: { ...current.schedule, endAt: fromDateTimeLocal(event.target.value) },
-    }))}/></label>
+    }))}/></label> : null}
     <label>时区<input aria-label="投放时区" readOnly value={draft.schedule.timezone}/></label>
   </div>
 }
 
 function TrackingFields({ draft, changeDraft }: FieldProps) {
   return <div className="delivery-field-grid">
-    <label>落地页<input id="tracking_landing_page" aria-label="追踪落地页" value={draft.tracking.landingPage} onChange={event => changeDraft(current => ({
+    <label>投放载体<select id="tracking_delivery_carrier" aria-label="投放载体" value={draft.tracking.deliveryCarrier} onChange={event => changeDraft(current => ({
+      ...current,
+      tracking: { ...current.tracking, deliveryCarrier: event.target.value as DeliveryPlanDraft['tracking']['deliveryCarrier'] },
+    }))}>{deliveryCarrierOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+    {draft.tracking.deliveryCarrier === 'owned_landing_page' ? <label>自研落地页链接<input id="tracking_landing_page" aria-label="自研落地页链接" type="url" required value={draft.tracking.landingPage} onChange={event => changeDraft(current => ({
       ...current,
       tracking: { ...current.tracking, landingPage: event.target.value },
-    }))}/></label>
-    <label>像素 ID<input id="tracking_pixel_id" aria-label="追踪像素 ID" value={draft.tracking.pixelId} onChange={event => changeDraft(current => ({
-      ...current,
-      tracking: { ...current.tracking, pixelId: event.target.value },
-    }))}/></label>
-    <label>转化事件<input id="tracking_conversion_event" aria-label="转化事件" value={draft.tracking.conversionEvent} onChange={event => changeDraft(current => ({
-      ...current,
-      tracking: { ...current.tracking, conversionEvent: event.target.value },
-    }))}/></label>
+    }))}/></label> : null}
+    {draft.tracking.deliveryCarrier === 'orange_landing_page' ? <label>优化目标<select id="tracking_optimization_target" aria-label="优化目标" value={draft.tracking.optimizationTargetSemanticKey} onChange={event => {
+      const option = orangeOptimizationTargetOptions.find(candidate => candidate.value === event.target.value)
+      changeDraft(current => ({ ...current, tracking: { ...current.tracking, optimizationTargetSemanticKey: option?.value ?? '', optimizationTargetId: option ? `builtin:${option.value}` : '', optimizationTargetName: option?.label ?? '', eventAssetName: '', eventAssetType: '' } }))
+    }}><option value="">请选择优化目标</option>{orangeOptimizationTargetOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label> : null}
+    {draft.tracking.deliveryCarrier === 'owned_landing_page' ? <fieldset className="delivery-composite-field"><legend>优化目标与事件资产</legend>
+      <label>优化目标名称<input id="tracking_optimization_target_name" aria-label="优化目标名称" value={draft.tracking.optimizationTargetName} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, optimizationTargetName: event.target.value } }))}/></label>
+      <label>优化目标 ID<input id="tracking_optimization_target_id" aria-label="优化目标 ID" value={draft.tracking.optimizationTargetId} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, optimizationTargetId: event.target.value, optimizationTargetSemanticKey: '' } }))}/></label>
+      <label>事件资产名称<input id="tracking_event_asset_name" aria-label="事件资产名称" value={draft.tracking.eventAssetName} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, eventAssetName: event.target.value } }))}/></label>
+      <label>事件资产类型<input id="tracking_event_asset_type" aria-label="事件资产类型" value={draft.tracking.eventAssetType} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, eventAssetType: event.target.value } }))}/></label>
+    </fieldset> : null}
+    <label>搜索关键词<input id="tracking_search_keywords" aria-label="搜索关键词" placeholder="使用逗号分隔" value={draft.tracking.searchKeywords} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, searchKeywords: event.target.value } }))}/></label>
+    <label>搜索出价系数<input id="tracking_search_bid_coefficient" aria-label="搜索出价系数" type="number" min="1" step="0.1" required value={draft.tracking.searchBidCoefficient} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, searchBidCoefficient: Number(event.target.value) } }))}/></label>
+    <label className="delivery-toggle-field"><span><b>定向扩展</b><small>允许平台扩大搜索流量的定向范围。</small></span><input id="tracking_search_expansion" aria-label="定向扩展" type="checkbox" role="switch" checked={draft.tracking.searchTargetingExpansion} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, searchTargetingExpansion: event.target.checked } }))}/></label>
+    <label>展示监测链接<input aria-label="展示监测链接" type="url" value={draft.tracking.monitoringImpression} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, monitoringImpression: event.target.value } }))}/></label>
+    <label>有效触点监测链接<input aria-label="有效触点监测链接" type="url" value={draft.tracking.monitoringValidTouch} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, monitoringValidTouch: event.target.value } }))}/></label>
+    <label>视频播放监测链接<input aria-label="视频播放监测链接" type="url" value={draft.tracking.monitoringVideoPlay} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, monitoringVideoPlay: event.target.value } }))}/></label>
+    <label>视频播完监测链接<input aria-label="视频播完监测链接" type="url" value={draft.tracking.monitoringVideoComplete} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, monitoringVideoComplete: event.target.value } }))}/></label>
+    <label>视频有效播放监测链接<input aria-label="视频有效播放监测链接" type="url" value={draft.tracking.monitoringValidVideoPlay} onChange={event => changeDraft(current => ({ ...current, tracking: { ...current.tracking, monitoringValidVideoPlay: event.target.value } }))}/></label>
   </div>
 }
 
 function CreativeFields({ draft, changeDraft, confirmedAssets = [] }: FieldProps) {
-  const reference = draft.creativeReferences[0] ?? { assetId: '', version: 1, confirmed: true }
-  const updateReference = (patch: Partial<typeof reference>) => changeDraft(current => ({
+  const selected = new Set(draft.creativeReferences.map(reference => reference.assetId))
+  const toggle = (pointer: ApiAssetVersionPointer) => changeDraft(current => ({
     ...current,
-    creativeReferences: [{ ...(current.creativeReferences[0] ?? reference), ...patch }],
+    creativeReferences: selected.has(pointer.assetId)
+      ? current.creativeReferences.filter(reference => reference.assetId !== pointer.assetId)
+      : [...current.creativeReferences, { assetId: pointer.assetId, version: pointer.humanConfirmedVersion ?? 0, confirmed: true, oceanEngineMaterialId: pointer.oceanEngineMaterialId }],
   }))
-  return <div className="delivery-field-grid">
-    <label><span className="delivery-field-label">已确认素材{!reference.assetId ? <em>必填</em> : null}</span><select id="creative_asset_id" aria-label="已确认素材" aria-required="true" required className={!reference.assetId ? 'field-missing' : undefined} value={reference.assetId} onChange={event => {
-      const pointer = confirmedAssets.find(candidate => candidate.assetId === event.target.value)
-      updateReference({ assetId: pointer?.assetId ?? '', version: pointer?.humanConfirmedVersion ?? 0, confirmed: Boolean(pointer) })
-    }}><option value="">请选择已人工确认素材</option>{confirmedAssets.map(pointer => <option key={pointer.id} value={pointer.assetId}>{pointer.assetId} · V{pointer.humanConfirmedVersion}</option>)}</select></label>
-    <label>引用版本<input id="creative_version" aria-label="素材版本" readOnly value={reference.version || '—'}/></label>
-    <div className="field-provenance"><b>{reference.confirmed ? '已人工确认' : '尚未选择'}</b><span>保存时由服务端校验 Workbench 指针并冻结内容哈希。</span></div>
+  return <div className="delivery-material-picker" role="group" aria-label="已确认素材多选">
+    {confirmedAssets.map(pointer => <label key={pointer.id} className={selected.has(pointer.assetId) ? 'selected' : ''}>
+      <input type="checkbox" checked={selected.has(pointer.assetId)} onChange={() => toggle(pointer)}/>
+      <span className="delivery-material-preview">{pointer.contentUrl ? (pointer.mediaKind === 'video' ? <video src={pointer.contentUrl} controls preload="metadata"/> : <img src={pointer.contentUrl} alt={pointer.assetId}/>) : <span>无预览</span>}</span>
+      <b>{pointer.assetId}</b><small>V{pointer.humanConfirmedVersion} · {pointer.oceanEngineMaterialId ? '已录入巨量' : '待 RPA 录入'}</small>
+    </label>)}
+    {!confirmedAssets.length ? <div className="field-provenance"><b>没有已确认素材</b><span>先在素材库完成人工确认。</span></div> : null}
   </div>
 }
 
@@ -394,6 +451,7 @@ function VersionSnapshot({ version }: { version: DeliveryPlanVersion }) {
     <span>历史快照 · V{version.versionNumber}</span>
     <dl>
       <div><dt>目标</dt><dd>{version.objective}</dd></div>
+      <div><dt>巨量营销目的</dt><dd>{version.marketingPurpose ? marketingPurposeLabel(version.marketingPurpose) : '历史版本未记录'}</dd></div>
       <div><dt>广告主</dt><dd>{version.advertiser.name}</dd></div>
       <div><dt>预算</dt><dd>¥{formatMinor(version.budget.totalMinor)}</dd></div>
       <div><dt>排期</dt><dd>{new Date(version.schedule.startAt).toLocaleDateString('zh-CN')} → {new Date(version.schedule.endAt).toLocaleDateString('zh-CN')}</dd></div>
@@ -410,7 +468,24 @@ type FieldProps = {
   draft: DeliveryPlanDraft
   changeDraft: (update: (current: DeliveryPlanDraft) => DeliveryPlanDraft) => void
   strategyTasks?: ProjectRecord['tasks']
+  products?: ProjectRecord['products']
   confirmedAssets?: ApiAssetVersionPointer[]
+  marketingPurposeSuggestion?: MarketingPurposeSuggestion
+}
+
+type MarketingPurposeSuggestion = { value: OceanEngineMarketingPurpose; reason: string }
+
+function suggestMarketingPurpose(projectGoal: string, strategyObjective?: string): MarketingPurposeSuggestion | undefined {
+  const source = `${projectGoal} ${strategyObjective ?? ''}`.toLowerCase()
+  if (/(应用|安装|下载|app)/.test(source)) return { value: 'application', reason: '项目或策略目标包含应用下载或安装语义。' }
+  if (/(商品目录|商品库|catalog)/.test(source)) return { value: 'product_catalog', reason: '项目或策略目标包含商品目录语义。' }
+  if (/(线索|留资|获客|lead)/.test(source)) return { value: 'lead_generation', reason: '项目或策略目标包含销售线索语义。' }
+  if (/(下单|成交|销售|购买|商品转化|ecommerce)/.test(source)) return { value: 'ecommerce', reason: '项目或策略目标包含商品转化语义。' }
+  return undefined
+}
+
+function marketingPurposeLabel(value: OceanEngineMarketingPurpose) {
+  return ({ ecommerce: '电商', lead_generation: '销售线索', application: '应用', product_catalog: '商品', content_marketing: '内容营销' } as const)[value]
 }
 
 function newMockDraft(project: ProjectRecord, workbench: ReturnType<typeof useProject>['agencyWorkbench']): DeliveryPlanDraft {
@@ -420,23 +495,30 @@ function newMockDraft(project: ProjectRecord, workbench: ReturnType<typeof usePr
   return {
     name: `${project.brand && project.brand !== '—' ? project.brand : 'Cookies'} 销售线索增长计划`,
     objective: project.goal && !project.goal.startsWith('请启动') ? project.goal : '获取高质量销售线索',
+    marketingPurpose: '',
+    marketingProduct: { id: '', name: '', activityType: '', activityName: '', brandName: '' },
     advertiser: { id: 'mock-advertiser-001', name: '当前演示账户边界', platform: 'ocean_engine' },
     budget: { totalMinor: Math.max(project.budget || 3000, 0) * 100, currency: 'CNY' },
     schedule: {
-      startAt: '2026-08-01T00:00:00.000Z',
-      endAt: '2026-08-31T00:00:00.000Z',
+      mode: 'long_term',
+      startAt: todayInShanghaiISO(),
+      endAt: '2099-12-31T23:59:59+08:00',
       timezone: project.timezone || 'Asia/Shanghai',
     },
     tracking: {
+      deliveryCarrier: '',
       landingPage: `https://demo.cookies.local/lead/${code.toLowerCase()}`,
       pixelId: `PX-${code}-LEAD`,
       conversionEvent: 'lead_submit',
+      optimizationTargetId: '', optimizationTargetName: '', optimizationTargetSemanticKey: '', eventAssetName: '', eventAssetType: '',
+      searchKeywords: '', searchBidCoefficient: 1.1, searchTargetingExpansion: false,
+      monitoringImpression: '', monitoringValidTouch: '', monitoringVideoPlay: '', monitoringVideoComplete: '', monitoringValidVideoPlay: '',
     },
-    creativeReferences: [{
+    creativeReferences: creative ? [{
       assetId: creative?.assetId ?? '',
       version: creative?.humanConfirmedVersion ?? 0,
       confirmed: Boolean(creative),
-    }],
+    }] : [],
     strategyReference: { taskId: strategy?.id ?? '', version: strategy?.version ?? 0 },
     sourceStrategyVersion: strategy ? `${strategy.id}@v${strategy.version}` : '',
   }
@@ -446,6 +528,8 @@ function draftFromVersion(version: DeliveryPlanVersion): DeliveryPlanDraft {
   return {
     name: version.name,
     objective: version.objective,
+    marketingPurpose: version.marketingPurpose,
+    marketingProduct: version.marketingProduct ?? { id: '', name: '', activityType: '', activityName: '', brandName: '' },
     advertiser: { id: version.advertiser.id, name: version.advertiser.name, platform: version.advertiser.platform },
     budget: { ...version.budget },
     schedule: { ...version.schedule },
@@ -458,6 +542,12 @@ function draftFromVersion(version: DeliveryPlanVersion): DeliveryPlanDraft {
 
 function toDateTimeLocal(value: string) {
   return value ? new Date(value).toISOString().slice(0, 16) : ''
+}
+
+function todayInShanghaiISO() {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
+  const value = Object.fromEntries(parts.map(part => [part.type, part.value]))
+  return `${value.year}-${value.month}-${value.day}T00:00:00+08:00`
 }
 
 function fromDateTimeLocal(value: string) {

@@ -611,6 +611,11 @@ func (s MySQLStore) GetWorkbench(ctx context.Context, organizationID contract.Or
 	value.Client.OrganizationID, value.Client.Owner, value.Client.HealthStatus, value.Client.UpdatedAt = string(organizationID), value.Organization.Owner, "healthy", value.Project.UpdatedAt
 	value.Brand.OrganizationID, value.Brand.ClientID, value.Brand.Owner, value.Brand.UpdatedAt = string(organizationID), value.Client.ID, value.Organization.Owner, value.Project.UpdatedAt
 	value.Project.ProjectID, value.Project.OrganizationID, value.Project.ClientID, value.Project.BrandID = string(projectID), string(organizationID), value.Client.ID, value.Brand.ID
+	businessContext, err := s.GetBusinessContext(ctx, organizationID, projectID)
+	if err != nil {
+		return Workbench{}, err
+	}
+	value.Products = businessContext.Products
 
 	accounts, err := s.listWorkbenchAdAccounts(ctx, organizationID, projectID)
 	if err != nil {
@@ -681,11 +686,30 @@ func (s MySQLStore) defaultWorkbench(ctx context.Context, organizationID contrac
 	if updatedAt.IsZero() {
 		updatedAt = projectValue.UpdatedAt
 	}
+	products := make([]contract.ProjectBusinessProduct, 0)
+	productRows, err := s.DB.QueryContext(ctx, `SELECT pr.id, pr.name, COALESCE(pr.ocean_engine_product_id, '')
+		FROM project_products pp JOIN products pr ON pr.organization_id=pp.organization_id AND pr.id=pp.product_id
+		WHERE pp.organization_id=? AND pp.project_id=? ORDER BY pr.name, pr.id`, organizationID, projectID)
+	if err != nil {
+		return Workbench{}, err
+	}
+	for productRows.Next() {
+		var product contract.ProjectBusinessProduct
+		if err := productRows.Scan(&product.ID, &product.Name, &product.OceanEngineProductID); err != nil {
+			productRows.Close()
+			return Workbench{}, err
+		}
+		products = append(products, product)
+	}
+	if err := productRows.Close(); err != nil {
+		return Workbench{}, err
+	}
 	return Workbench{
 		Organization:      WorkbenchOrganization{ID: string(organizationID), Code: string(organizationID), Name: organizationName, Owner: runtime.Owner, Currency: "CNY", Timezone: "Asia/Shanghai", UpdatedAt: updatedAt},
 		Client:            WorkbenchClient{ID: clientID, OrganizationID: string(organizationID), Code: clientID, Name: "客户未分配", Industry: string(projectValue.Industry), Owner: runtime.Owner, HealthStatus: "healthy", UpdatedAt: updatedAt},
 		Brand:             WorkbenchBrand{ID: brandID, OrganizationID: string(organizationID), ClientID: clientID, Code: brandID, Name: runtime.Brand, Category: string(projectValue.Industry), ProductLines: productLines, Owner: runtime.Owner, GuidelineStatus: "missing", UpdatedAt: updatedAt},
 		Project:           WorkbenchProject{ProjectID: string(projectID), OrganizationID: string(organizationID), ClientID: clientID, BrandID: brandID, Stage: stage, StageLabel: runtime.Stage, StagePercent: runtime.Progress, TaskPercent: runtime.Progress, RiskStatus: risk, UpdatedAt: updatedAt},
+		Products:          products,
 		AdAccountBindings: []WorkbenchAdAccountBinding{}, QualityCheckRuns: []WorkbenchQualityCheckRun{},
 		MaterialConfirmations: []WorkbenchMaterialConfirmation{}, AssetVersionPointers: []WorkbenchAssetVersionPointer{},
 	}, nil
@@ -693,7 +717,7 @@ func (s MySQLStore) defaultWorkbench(ctx context.Context, organizationID contrac
 
 func (s MySQLStore) listProjectAssetPointers(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) ([]WorkbenchAssetVersionPointer, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT pa.asset_id, pa.asset_version, a.owner_system, av.source_type,
-		COALESCE(av.provider_job_id, ''), COALESCE(av.render_job_id, ''), av.created_at, a.updated_at
+		COALESCE(av.provider_job_id, ''), COALESCE(av.render_job_id, ''), COALESCE(av.ocean_engine_material_id, ''), av.created_at, a.updated_at
 		FROM project_assets pa
 		JOIN assets a ON a.organization_id=pa.organization_id AND a.id=pa.asset_id
 		JOIN asset_versions av ON av.organization_id=pa.organization_id AND av.asset_id=pa.asset_id AND av.version=pa.asset_version
@@ -706,17 +730,17 @@ func (s MySQLStore) listProjectAssetPointers(ctx context.Context, organizationID
 	byAsset := map[string]*WorkbenchAssetVersionPointer{}
 	order := []string{}
 	for rows.Next() {
-		var assetID, owner, sourceType, providerJobID, renderJobID string
+		var assetID, owner, sourceType, providerJobID, renderJobID, oceanEngineMaterialID string
 		var version int
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&assetID, &version, &owner, &sourceType, &providerJobID, &renderJobID, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&assetID, &version, &owner, &sourceType, &providerJobID, &renderJobID, &oceanEngineMaterialID, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		pointer := byAsset[assetID]
 		if pointer == nil {
 			pointer = &WorkbenchAssetVersionPointer{
 				ID: assetID, OrganizationID: string(organizationID), ProjectID: string(projectID), AssetID: assetID,
-				WorkingVersion: version, Versions: []WorkbenchAssetVersion{},
+				WorkingVersion: version, OceanEngineMaterialID: oceanEngineMaterialID, Versions: []WorkbenchAssetVersion{},
 				Authorization:  WorkbenchAssetAuthorization{Platforms: []string{}, Regions: []string{}},
 				DeliveryTarget: WorkbenchDeliveryTarget{}, Owner: owner, UpdatedAt: updatedAt,
 			}
@@ -1061,7 +1085,7 @@ func (s MySQLStore) GetBusinessContext(ctx context.Context, organizationID contr
 		value.BrandID = &id
 	}
 	value.BrandName = brandName.String
-	rows, err := s.DB.QueryContext(ctx, `SELECT pr.id, pr.name
+	rows, err := s.DB.QueryContext(ctx, `SELECT pr.id, pr.name, COALESCE(pr.ocean_engine_product_id, '')
 		FROM project_products pp
 		JOIN products pr ON pr.organization_id = pp.organization_id AND pr.id = pp.product_id
 		WHERE pp.organization_id = ? AND pp.project_id = ?
@@ -1073,7 +1097,7 @@ func (s MySQLStore) GetBusinessContext(ctx context.Context, organizationID contr
 	value.Products = make([]contract.ProjectBusinessProduct, 0)
 	for rows.Next() {
 		var product contract.ProjectBusinessProduct
-		if err := rows.Scan(&product.ID, &product.Name); err != nil {
+		if err := rows.Scan(&product.ID, &product.Name, &product.OceanEngineProductID); err != nil {
 			return contract.ProjectBusinessContext{}, err
 		}
 		value.Products = append(value.Products, product)

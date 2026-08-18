@@ -1,17 +1,62 @@
 ---
 name: oceanengine-ecommerce-manual
-description: Prepare, calibrate, or perform a controlled Ocean Engine ecommerce manual promotion workflow in a visible authenticated browser. Use for 巨量引擎电商手动投放 account/project identification, promotion form fill and readback, safe draft discard, or one explicitly authorized final promotion submission with fenced ComputerUseRun evidence and Mapping reconciliation.
+description: Compile and run deterministic Ocean Engine operations with Playwright in an external authenticated Edge session. Use for 巨量引擎 project, promotion, cookies product, and cookies material ingestion, editing, state changes, readback, and reconciliation.
 ---
 
-# Ocean Engine ecommerce manual promotion
+# Ocean Engine Playwright RPA
+
+Run `scripts/oceanengine-playwright-rpa.ts`. Do not operate the page through
+free-form Computer Use. Compile each action from the frozen configuration and
+Manifest. Require one semantic locator to match exactly one element.
+
+Treat cookies products and assets as facts. Use their optional Ocean Engine ID
+as the platform mapping. If the ID is empty, compile a product or material
+ingestion step before the delivery step. Write the returned platform ID back to
+the cookies object only after an independent list readback confirms it.
 
 Treat the machine-readable [SkillDefinition](../../definitions/oceanengine-ecommerce-manual-v0.1.json) as the capability boundary. Read the relevant evidence and locator references it names before interacting with a page. Never infer a selector or permission from business semantics alone.
+
+The frozen `OceanEngineCalibrationManifest` is the observation source for project-create/edit and promotion-create/edit path dimensions, field ownership, units, dynamic conditions and semantic locators. It is never a ChangeSet, Approval, Confirmation or execution authorization. Page observation and unsubmitted form calibration never authorize a save; every remote-write boundary still requires the Stage D authority chain and action-time confirmation.
+
+For promotion forms, scope every action to its section before resolving the target. Prefer placeholders, role/name pairs, and stable platform attributes such as `data-auto-id=oc-create-product-img-add-button` or `data-e2e=createad_yuntuCategory`; never persist coordinates or DOM order. Reference pickers select the first currently available semantic item only when policy permits. Wait for the picker's loaded total and selectable results before interpreting its inventory; a transient zero during asynchronous loading is neither `blocked_by_missing_material` nor page drift. For product images, keep the selected product's main image as the default when present; otherwise select the first loaded item from 我的图片 (one item in the current account), and use local upload only with explicit upload authority. Product selling points are committed with Enter and must contain 6–9 Chinese characters per item, at most 10 items.
+
+Bid bounds are path-dependent and must be read from the current page validation after all upstream selections settle. Observed paths include a CNY 0.01 minimum and a 展示量/CPM path with a CNY 4–100 range. Fill the current page minimum only when it is within the calibration authority cap; otherwise stop before save and record `blocked_by_input_constraint`. Never reuse the CNY 4 minimum as a global rule or silently exceed the cap. Promotion edit exposes identity, materials, copy, native anchor, landing page/deep-link, product information, creative components, settings, and name, while the save button remains the final write boundary.
+
+## Fill a project-create field from the Manifest
+
+For a no-write project-create calibration, use only a field carrying a
+`playwright_rpa` specification in the frozen Manifest. Reidentify the matching
+page fingerprint first, then apply this sequence:
+
+1. Resolve the `scope`, then resolve the `target` inside that scope; require the
+   declared `expected_target_count` before interacting.
+2. Use the declared operation only (`choose_exact_visible_option`,
+   `open_reference_picker`, `fill_text`, `fill_money`, `toggle`, or
+   `configure_object`). Do not substitute a coordinate, DOM index, or a
+   same-labelled control from elsewhere on the page.
+3. For a choice, accept only an `observed_options` value. For money, convert
+   only according to `input_constraints` (for example CNY yuan in the page to
+   CNY fen in the domain model), and never type a business value outside the
+   current no-write calibration case.
+4. Read the value back through the declared `readback`. Do not use a fallback
+   selector if a locator is missing, non-unique, disabled unexpectedly, or the
+   readback differs. Record an explicit current-page restriction as its stable
+   blocked reason (for example `blocked_by_platform_capability` for a page that
+   states an application platform is unsupported). Use `page_drift` only when
+   the current page contradicts the frozen Manifest record; otherwise stop the
+   case as incomplete calibration.
+
+A field without `playwright_rpa` remains observation-only. It must not be
+presented as an executable form action until a later calibration adds a unique
+scope, target and readback. This rule applies equally to fields marked
+`evidence_only`: the Manifest may document them without granting a modelled
+platform write.
 
 ## Choose the gate
 
 - Use gate one for page identification, form fill, field readback, and draft discard. Do not save or create an object.
 - Use gate two only for one final submission explicitly authorized in the current user turn. A generic continuation, an earlier approval, a zero account balance, or this Skill never grants write authority.
-- Keep `executable=false` and `real_browser_driver=false`: operate only through a visible authenticated browser takeover and the persisted control-plane APIs. Do not claim an unattended Browser Driver.
+- Use `execution_driver=playwright-rpa/edge/v1`. Connect only to the declared external Edge CDP session. Do not use the in-app browser.
 
 ## Require exact gate-two authority
 
@@ -45,7 +90,7 @@ If the submission result is unclear, record `result_unknown`; permit only query,
 
 ## Calibrate finite actions as one ordered batch
 
-Use one visible-browser session, one shared promotion-form fixture, and one
+Use one external Edge Playwright session, one shared promotion-form fixture, and one
 machine-readable batch evidence record for `update_promotion_budget`,
 `update_promotion_materials`, `pause_promotion`, and `resume_promotion`. Do not
 split these paths into separate calibration narratives. Resolve the exact object
@@ -65,13 +110,13 @@ promotion Mapping because schedule remains parent-project owned.
 snapshot, not a live status feed. Ocean Engine can expose delivery, pause, and
 review dimensions simultaneously. Compare live dimensions explicitly without
 rewriting the Mapping merely because asynchronous review completed. If no
-authorized mapped object is already `delivering`, mark pause and restart
+authorized mapped object is already `delivering`, mark pause and enable
 `blocked_by_eligible_test_object`; never enable an object to manufacture a test.
 
 Each real action still requires its own ChangeSet, Approval,
 ControlledExecution, ComputerUseRun, one-time confirmation, Attempt, and exact
 Mapping revision. Execute budget before materials so the material authority can
-bind the post-budget revision. Execute restart only after a successful pause
+bind the post-budget revision. Execute enable only after a successful pause
 revision. Immediately before each remote-write click, require an unexpired
 fenced Lease and zero unexpected field differences. Click at most once. Any
 page drift, lease expiry, or `result_unknown` stops all dependent actions without
@@ -79,13 +124,36 @@ retry.
 
 The 2026-08-14 batch passed no-write calibration for the CNY 300 to CNY 310
 budget path and one same-account existing-material replacement. Both drafts were
-discarded and the fresh form returned to the shared baseline. Pause and restart
+discarded and the fresh form returned to the shared baseline. Pause and enable
 were blocked because no eligible delivering mapped test object existed. The
 authorized real batch then stopped when its Lease expired before final
 confirmation: no confirmation, Attempt, save click, or remote write occurred,
 and the abandoned calibration authority was invalidated while its Approval
 history remained immutable. Read the batch evidence before claiming any live
 modification capability.
+
+The 2026-08-16 action-surface pass additionally calibrated the unit-list budget
+editor from CNY 300 to an unsubmitted CNY 299 readback, then cancelled and
+confirmed the list remained CNY 300. The authorized project switch was paused,
+so only its enable boundary was reachable; the authorized unit switch was
+enabled while effective delivery was blocked by the paused parent, so only its
+pause boundary was reachable. Neither switch was clicked. After asynchronous
+loading completed, the unit's replacement pickers exposed 3255 videos, 1722
+images, and 284 image-text assets. No asset was selected and no upload, save, or
+other remote write was performed.
+
+The subsequent 2026-08-16 Phase D field-calibration pass had explicit,
+session-scoped authority for reversible writes on one test project and unit.
+Field calibration does not create production `ChangeSet`, `Approval`,
+`Confirmation`, or `ControlledActionAttempt` records; those objects govern
+post-launch Computer Use execution. The batch budget editor rejected CNY 299
+with `预算不小于300元`; because both the baseline and the authorized maximum were
+CNY 300, the budget mutation was `blocked_by_input_constraint`. A different
+existing video was saved and read back, then the original audit-rejected video
+was restored by enabling the `审核不通过` picker filter and saved again. Project
+enable/pause and unit pause/enable were each saved and read back. Final
+verification showed project paused, unit switch enabled, unit budget CNY 300,
+and the original video restored.
 
 ## Read the verified baseline
 

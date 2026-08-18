@@ -53,7 +53,7 @@ test("promotion mutation contracts reject project-owned schedule changes", () =>
   assert.equal(validateRun(runFixture), false);
 });
 
-test("emergency pause fixtures bind one operator and a delivering-to-paused state transition", () => {
+test("promotion pause fixtures bind one operator and a delivering-to-paused state transition", () => {
   for (const fixtureName of [
     "delivery-controlled-change-set-v1-emergency-pause.json",
     "platform-computer-use-run-v1-emergency-pause.json",
@@ -69,7 +69,7 @@ test("emergency pause fixtures bind one operator and a delivering-to-paused stat
   }
 });
 
-test("controlled restart fixtures bind strict paused-object rechecks without reusing pause authority", () => {
+test("promotion enable fixtures bind strict paused-object rechecks without reusing pause authority", () => {
   for (const fixtureName of [
     "delivery-controlled-change-set-v1-restart.json",
     "platform-computer-use-run-v1-restart.json",
@@ -111,15 +111,17 @@ test("stage B Skill calibration is bound and partial Skill identity is rejected"
   }
 });
 
-test("OceanEngine SkillDefinition records controlled gate-two submit without claiming an unattended driver", () => {
+test("OceanEngine SkillDefinition binds the deterministic Edge Playwright driver", () => {
   const definitionPath = join(root, "internal", "systems", "delivery", "platformskills", "definitions", "oceanengine-ecommerce-manual-v0.1.json");
   const definition = readJSON(definitionPath);
   const schema = readJSON(join(contracts, "delivery-platform-skill-definition-v1.schema.json"));
   const validate = ajv.getSchema(String(schema.$id));
   assert.ok(validate);
   assert.equal(validate(definition), true, ajv.errorsText(validate.errors));
-  assert.equal(definition.executable, false);
-  assert.equal(definition.real_browser_driver, false);
+  assert.equal(definition.executable, true);
+  assert.equal(definition.real_browser_driver, true);
+  assert.equal(definition.execution_driver, "playwright-rpa/edge/v1");
+  assert.equal(definition.script_ref, "scripts/oceanengine-playwright-rpa.ts");
   assert.equal(definition.submit_allowed, true);
   assert.equal(definition.status, "gate_two_passed_takeover_submit_calibration");
   assert.equal((definition.gate_one as Record<string, unknown>).ready, true);

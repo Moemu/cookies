@@ -54,15 +54,40 @@ type Budget struct {
 }
 
 type Schedule struct {
+	Mode     string    `json:"mode,omitempty"`
 	StartAt  time.Time `json:"start_at"`
 	EndAt    time.Time `json:"end_at"`
 	Timezone string    `json:"timezone"`
 }
 
 type Tracking struct {
-	LandingPage     string `json:"landing_page"`
-	PixelID         string `json:"pixel_id"`
-	ConversionEvent string `json:"conversion_event"`
+	DeliveryCarrier          string  `json:"delivery_carrier,omitempty"`
+	LandingPage              string  `json:"landing_page"`
+	PixelID                  string  `json:"pixel_id"`
+	ConversionEvent          string  `json:"conversion_event"`
+	OptimizationTargetID     string  `json:"optimization_target_id,omitempty"`
+	OptimizationTargetName   string  `json:"optimization_target_name,omitempty"`
+	EventAssetName           string  `json:"event_asset_name,omitempty"`
+	EventAssetType           string  `json:"event_asset_type,omitempty"`
+	SearchKeywords           string  `json:"search_keywords,omitempty"`
+	SearchBidCoefficient     float64 `json:"search_bid_coefficient,omitempty"`
+	SearchTargetingExpansion bool    `json:"search_targeting_expansion,omitempty"`
+	MonitoringImpression     string  `json:"monitoring_impression,omitempty"`
+	MonitoringValidTouch     string  `json:"monitoring_valid_touch,omitempty"`
+	MonitoringVideoPlay      string  `json:"monitoring_video_play,omitempty"`
+	MonitoringVideoComplete  string  `json:"monitoring_video_complete,omitempty"`
+	MonitoringValidVideoPlay string  `json:"monitoring_valid_video_play,omitempty"`
+}
+
+type MarketingProduct struct {
+	// ID is the cookies product ID. OceanEngineProductID is an optional
+	// deterministic RPA mapping. An empty mapping requires product ingestion.
+	ID                   string `json:"id,omitempty"`
+	OceanEngineProductID string `json:"ocean_engine_product_id,omitempty"`
+	Name                 string `json:"name,omitempty"`
+	ActivityType         string `json:"activity_type,omitempty"`
+	ActivityName         string `json:"activity_name,omitempty"`
+	BrandName            string `json:"brand_name,omitempty"`
 }
 
 type CreativeReference struct {
@@ -71,6 +96,8 @@ type CreativeReference struct {
 	ContentHash string `json:"content_hash,omitempty"`
 	Route       string `json:"route,omitempty"`
 	Confirmed   bool   `json:"confirmed"`
+	// OceanEngineMaterialID is empty until deterministic RPA ingestion succeeds.
+	OceanEngineMaterialID string `json:"ocean_engine_material_id,omitempty"`
 }
 
 // StrategyReference is a resolvable forward reference to the immutable
@@ -85,6 +112,7 @@ type StrategyReference struct {
 type PlanDraft struct {
 	Name                  string              `json:"name"`
 	Objective             string              `json:"objective"`
+	MarketingProduct      MarketingProduct    `json:"marketing_product,omitempty"`
 	Advertiser            AdvertiserInput     `json:"advertiser"`
 	Budget                Budget              `json:"budget"`
 	Schedule              Schedule            `json:"schedule"`
@@ -107,6 +135,7 @@ type DeliveryPlanVersion struct {
 	PlatformConfiguration  *PlatformConfiguration  `json:"platform_configuration,omitempty"`
 	Name                   string                  `json:"name,omitempty"`
 	Objective              string                  `json:"objective,omitempty"`
+	MarketingProduct       MarketingProduct        `json:"marketing_product,omitempty"`
 	Advertiser             MockAdvertiser          `json:"advertiser,omitempty"`
 	Budget                 Budget                  `json:"budget,omitempty"`
 	Schedule               Schedule                `json:"schedule,omitempty"`

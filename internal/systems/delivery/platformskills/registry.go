@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+
+	"github.com/shikanon/cookies/internal/systems/delivery/calibrationmanifest"
 )
 
 const (
 	OceanEngineEcommerceManualID      = "oceanengine-ecommerce-manual"
 	OceanEngineEcommerceManualVersion = "v0.1-calibration"
+	OceanEngineExecutionDriverV1      = "playwright-rpa/edge/v1"
 )
 
 var ErrInvalidDefinition = errors.New("invalid delivery Platform Skill definition")
@@ -34,22 +37,29 @@ type ControlledActionCapability struct {
 var definitions embed.FS
 
 type Definition struct {
-	SchemaVersion     string   `json:"schema_version"`
-	ID                string   `json:"id"`
-	Version           string   `json:"version"`
-	DisplayName       string   `json:"display_name"`
-	Platform          string   `json:"platform"`
-	Capability        string   `json:"capability"`
-	Status            string   `json:"status"`
-	Owner             string   `json:"owner"`
-	Executable        bool     `json:"executable"`
-	RealBrowserDriver bool     `json:"real_browser_driver"`
-	SubmitAllowed     bool     `json:"submit_allowed"`
-	EvidenceObserved  string   `json:"evidence_observed_at"`
-	LastReviewedAt    string   `json:"last_reviewed_at"`
-	SchemaRef         string   `json:"schema_ref"`
-	EvidenceRefs      []string `json:"evidence_refs"`
-	PageTypes         []struct {
+	SchemaVersion       string `json:"schema_version"`
+	ID                  string `json:"id"`
+	Version             string `json:"version"`
+	DisplayName         string `json:"display_name"`
+	Platform            string `json:"platform"`
+	Capability          string `json:"capability"`
+	Status              string `json:"status"`
+	Owner               string `json:"owner"`
+	Executable          bool   `json:"executable"`
+	RealBrowserDriver   bool   `json:"real_browser_driver"`
+	ExecutionDriver     string `json:"execution_driver"`
+	ScriptRef           string `json:"script_ref"`
+	SubmitAllowed       bool   `json:"submit_allowed"`
+	EvidenceObserved    string `json:"evidence_observed_at"`
+	LastReviewedAt      string `json:"last_reviewed_at"`
+	SchemaRef           string `json:"schema_ref"`
+	CalibrationManifest struct {
+		SchemaVersion string `json:"schema_version"`
+		ManifestID    string `json:"manifest_id"`
+		FixtureRef    string `json:"fixture_ref"`
+	} `json:"calibration_manifest"`
+	EvidenceRefs []string `json:"evidence_refs"`
+	PageTypes    []struct {
 		Kind          string `json:"kind"`
 		EvidenceState string `json:"evidence_state"`
 	} `json:"page_types"`
@@ -166,17 +176,20 @@ func Get(id, version string) (Definition, error) {
 }
 
 func (d Definition) Validate() error {
+	manifest, manifestErr := calibrationmanifest.Current()
 	if d.SchemaVersion != "delivery-platform-skill-definition/v1" ||
 		d.ID != OceanEngineEcommerceManualID ||
 		d.Version != OceanEngineEcommerceManualVersion ||
-		d.DisplayName != "巨量引擎·电商手动投放" ||
+		d.DisplayName != "巨量引擎·Playwright RPA 投放" ||
 		d.Platform != "ocean_engine" ||
 		d.Capability != "ecommerce_manual_delivery" ||
 		d.Status != "gate_two_passed_takeover_submit_calibration" ||
 		d.Owner != "delivery" ||
-		d.Executable || d.RealBrowserDriver || !d.SubmitAllowed ||
+		!d.Executable || !d.RealBrowserDriver || d.ExecutionDriver != OceanEngineExecutionDriverV1 || d.ScriptRef != "scripts/oceanengine-playwright-rpa.ts" || !d.SubmitAllowed ||
 		d.EvidenceObserved != "2026-08-06" ||
 		d.UIBaseline.RevalidatedAt != "2026-08-14" ||
+		d.CalibrationManifest.SchemaVersion != "oceanengine-calibration-manifest/v1" ||
+		d.CalibrationManifest.FixtureRef != "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json" ||
 		d.UIBaseline.LocatorContract != "project_and_promotion_forms_live_dom" ||
 		d.UIBaseline.DriftCheck != "existing_object_edit_surfaces_revalidated_with_brand_locator_drift" ||
 		!d.RuntimePolicy.ProjectFormLiveCalibrated ||
@@ -245,8 +258,24 @@ func (d Definition) Validate() error {
 		d.SafetyExit.RequiredProof != "return_to_known_readonly_page_and_confirm_no_platform_write_or_approved_field_change" ||
 		len(d.WriteValidationPending) < 6 ||
 		len(d.GateOne.Scope) != 4 ||
-		len(d.GateOne.Checklist) < 7 {
+		len(d.GateOne.Checklist) < 7 ||
+		manifestErr != nil ||
+		manifest.ValidateBinding(d.CalibrationManifest.SchemaVersion, d.CalibrationManifest.ManifestID) != nil {
 		return ErrInvalidDefinition
 	}
 	return nil
+}
+
+// ManifestFields is the only Platform Skill field/control lookup. It reads the
+// same validated projection used by Delivery. Markdown describes safety rules;
+// it does not provide a second field mapping.
+func (d Definition) ManifestFields(facts map[string]string) ([]calibrationmanifest.FieldProjection, error) {
+	manifest, err := calibrationmanifest.Current()
+	if err != nil {
+		return nil, err
+	}
+	if err := manifest.ValidateBinding(d.CalibrationManifest.SchemaVersion, d.CalibrationManifest.ManifestID); err != nil {
+		return nil, err
+	}
+	return manifest.Project(calibrationmanifest.PlatformSkill, facts), nil
 }

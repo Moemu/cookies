@@ -116,14 +116,15 @@ type ProjectRuntime struct {
 // Workbench is the typed, project-scoped read model used by the agency
 // workbench. It intentionally does not reuse OperationalRecord.Fields.
 type Workbench struct {
-	Organization          WorkbenchOrganization           `json:"organization"`
-	Client                WorkbenchClient                 `json:"client"`
-	Brand                 WorkbenchBrand                  `json:"brand"`
-	Project               WorkbenchProject                `json:"project"`
-	AdAccountBindings     []WorkbenchAdAccountBinding     `json:"ad_account_bindings"`
-	QualityCheckRuns      []WorkbenchQualityCheckRun      `json:"quality_check_runs"`
-	MaterialConfirmations []WorkbenchMaterialConfirmation `json:"material_confirmations"`
-	AssetVersionPointers  []WorkbenchAssetVersionPointer  `json:"asset_version_pointers"`
+	Organization          WorkbenchOrganization             `json:"organization"`
+	Client                WorkbenchClient                   `json:"client"`
+	Brand                 WorkbenchBrand                    `json:"brand"`
+	Project               WorkbenchProject                  `json:"project"`
+	Products              []contract.ProjectBusinessProduct `json:"products"`
+	AdAccountBindings     []WorkbenchAdAccountBinding       `json:"ad_account_bindings"`
+	QualityCheckRuns      []WorkbenchQualityCheckRun        `json:"quality_check_runs"`
+	MaterialConfirmations []WorkbenchMaterialConfirmation   `json:"material_confirmations"`
+	AssetVersionPointers  []WorkbenchAssetVersionPointer    `json:"asset_version_pointers"`
 }
 
 type WorkbenchOrganization struct {
@@ -227,6 +228,7 @@ type WorkbenchAssetVersionPointer struct {
 	OrganizationID        string                      `json:"organization_id"`
 	ProjectID             string                      `json:"project_id"`
 	AssetID               string                      `json:"asset_id"`
+	OceanEngineMaterialID string                      `json:"ocean_engine_material_id,omitempty"`
 	WorkingVersion        int                         `json:"working_version"`
 	QualityCheckedVersion *int                        `json:"quality_checked_version"`
 	HumanConfirmedVersion *int                        `json:"human_confirmed_version"`

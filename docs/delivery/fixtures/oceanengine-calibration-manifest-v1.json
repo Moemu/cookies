@@ -1,0 +1,3170 @@
+{
+  "schema_version": "oceanengine-calibration-manifest/v1",
+  "manifest_id": "oceanengine-calibration-current-test-account-2026-08-16",
+  "platform": "ocean_engine",
+  "session_evidence_ref": "docs/delivery/evidence/oceanengine-calibration-session-2026-08-16.json",
+  "observation_boundary": {
+    "account_scope": "redacted_current_test_account",
+    "platform_build": "unknown",
+    "complete_coverage_definition": "All currently accessible project-create, project-edit, promotion-create and promotion-edit entries and dynamic branches are represented; inaccessible branches retain a stable blocking case. This does not claim other accounts or future rollouts.",
+    "local_calibration_allowed": true,
+    "remote_write_authorized": false
+  },
+  "compatibility_policy": {
+    "manifest_is_observation_only": true,
+    "unknown_platform_values": "retain_as_open_set",
+    "page_drift": "stop_case_and_record_page_drift",
+    "future_account_or_rollout": "not_covered"
+  },
+  "path_dimensions": [
+    {
+      "key": "marketing_purpose",
+      "observed_values": [
+        "ecommerce",
+        "lead_generation",
+        "application",
+        "product_catalog",
+        "content_marketing"
+      ]
+    },
+    {
+      "key": "marketing_scenario",
+      "observed_values": ["short_video_image_text", "live"]
+    },
+    {
+      "key": "lead_capture_mode",
+      "observed_values": ["smart_lead", "custom_lead"]
+    },
+    {
+      "key": "application_scenario",
+      "observed_values": [
+        "app_download",
+        "app_launch",
+        "app_appointment_download"
+      ]
+    },
+    {
+      "key": "operating_system",
+      "observed_values": ["android", "ios", "harmony"]
+    },
+    { "key": "delivery_mode", "observed_values": ["ubmax", "manual"] }
+  ],
+  "condition_vocabulary": [
+    {
+      "key": "marketing_purpose",
+      "source_kind": "configuration_path",
+      "source": "OceanEngineConfiguration.Project.MarketingPurpose",
+      "value_kind": "enum",
+      "known_values": [
+        "ecommerce",
+        "lead_generation",
+        "application",
+        "product_catalog",
+        "content_marketing"
+      ],
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "marketing_scenario",
+      "source_kind": "configuration_path",
+      "source": "OceanEngineConfiguration.Project.MarketingScenario",
+      "value_kind": "enum",
+      "known_values": ["short_video_image_text"],
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "lead_capture_mode",
+      "source_kind": "configuration_path",
+      "source": "OceanEngineConfiguration.Project.LeadCaptureMode",
+      "value_kind": "enum",
+      "known_values": ["smart_lead", "custom_lead"],
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "application_scenario",
+      "source_kind": "configuration_path",
+      "source": "OceanEngineConfiguration.Project.ApplicationScenario",
+      "value_kind": "enum",
+      "known_values": [
+        "app_download",
+        "app_launch",
+        "app_appointment_download"
+      ],
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "operating_system",
+      "source_kind": "configuration_path",
+      "source": "OceanEngineConfiguration.Project.OperatingSystem",
+      "value_kind": "enum",
+      "known_values": ["android", "ios", "harmony"],
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "delivery_mode",
+      "source_kind": "configuration_path",
+      "source": "OceanEngineConfiguration.Project.DeliveryMode",
+      "value_kind": "enum",
+      "known_values": ["ubmax", "manual"],
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "carrier",
+      "source_kind": "configuration_path",
+      "source": "OceanEngineConfiguration.Project.Carrier",
+      "value_kind": "enum",
+      "known_values": [
+        "orange_landing_page_and_im",
+        "orange_landing_page",
+        "owned_landing_page",
+        "im",
+        "byte_miniapp",
+        "wechat_miniapp"
+      ],
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "deep_optimization_mode",
+      "source_kind": "configuration_path",
+      "source": "OceanEngineConfiguration.Project.DeepOptimizationMode",
+      "value_kind": "enum",
+      "known_values": [
+        "disabled",
+        "conversion_roi",
+        "net_conversion_order",
+        "net_conversion_roi"
+      ],
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "bidding_strategy",
+      "source_kind": "configuration_path",
+      "source": "OceanEngineConfiguration.Project.BudgetAndBidding.BiddingStrategy",
+      "value_kind": "enum",
+      "known_values": ["stable_cost", "optimal_cost", "maximum_conversion"],
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "marketing_product_reference",
+      "source_kind": "stable_reference",
+      "source": "OceanEngineConfiguration.Project.MarketingProductReference",
+      "value_kind": "reference",
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "application_reference",
+      "source_kind": "stable_reference",
+      "source": "OceanEngineConfiguration.Project.ApplicationReference",
+      "value_kind": "reference",
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "optimization_target_reference",
+      "source_kind": "stable_reference",
+      "source": "OceanEngineConfiguration.Project.OptimizationTargetReference",
+      "value_kind": "reference",
+      "unknown_value_treatment": "platform_pending"
+    },
+    {
+      "key": "optimization_target_semantic_key",
+      "source_kind": "configuration_path",
+      "source": "OceanEngineConfiguration.Project.OptimizationTargetReference.SemanticKey",
+      "value_kind": "enum",
+      "known_values": ["in_app_order"],
+      "unknown_value_treatment": "platform_pending"
+    }
+  ],
+  "page_families": [
+    {
+      "id": "project_list",
+      "page_kind": "project_list",
+      "entry_locator": { "kind": "visible_text", "value": "项目" },
+      "page_fingerprint": [{ "kind": "visible_text", "value": "新建项目" }],
+      "safety_exit": "return_to_readonly_list",
+      "final_write_boundary": "new_project",
+      "evidence_state": "observed"
+    },
+    {
+      "id": "project_create",
+      "page_kind": "project_create",
+      "entry_locator": { "kind": "visible_text", "value": "新建项目" },
+      "page_fingerprint": [
+        { "kind": "visible_text", "value": "营销目的" },
+        { "kind": "visible_text", "value": "项目名称" },
+        { "kind": "role_name", "value": "button:保存并关闭" }
+      ],
+      "safety_exit": "cancel_local_draft",
+      "final_write_boundary": "save_project",
+      "evidence_state": "observed"
+    },
+    {
+      "id": "project_edit",
+      "page_kind": "project_edit",
+      "entry_locator": { "kind": "visible_text", "value": "编辑" },
+      "page_fingerprint": [
+        { "kind": "visible_text", "value": "编辑项目" },
+        { "kind": "role_name", "value": "button:保存并关闭" }
+      ],
+      "safety_exit": "discard_unsaved_edit",
+      "final_write_boundary": "save_project",
+      "evidence_state": "observed"
+    },
+    {
+      "id": "promotion_list",
+      "page_kind": "promotion_list",
+      "entry_locator": { "kind": "visible_text", "value": "单元" },
+      "page_fingerprint": [
+        { "kind": "visible_text", "value": "新建单元" },
+        { "kind": "visible_text", "value": "单元预算" }
+      ],
+      "safety_exit": "return_to_readonly_list",
+      "final_write_boundary": "inline_save_or_operational_switch",
+      "evidence_state": "observed"
+    },
+    {
+      "id": "promotion_create",
+      "page_kind": "promotion_create",
+      "entry_locator": { "kind": "domain_key", "value": "promotion_create" },
+      "page_fingerprint": [
+        { "kind": "domain_key", "value": "promotion_create" }
+      ],
+      "safety_exit": "cancel_local_draft",
+      "final_write_boundary": "save_promotion",
+      "evidence_state": "observed"
+    },
+    {
+      "id": "promotion_edit",
+      "page_kind": "promotion_edit",
+      "entry_locator": { "kind": "domain_key", "value": "promotion_edit" },
+      "page_fingerprint": [{ "kind": "domain_key", "value": "promotion_edit" }],
+      "safety_exit": "discard_unsaved_edit",
+      "final_write_boundary": "save_promotion",
+      "evidence_state": "observed"
+    }
+  ],
+  "fields": [
+    {
+      "key": "project.marketing_purpose",
+      "semantic_label": "营销目的",
+      "value_labels": { "ecommerce": "电商", "lead_generation": "销售线索", "application": "应用", "product_catalog": "商品", "content_marketing": "内容营销" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "required_state": "unknown",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "营销目的" },
+      "playwright_rpa": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "营销目的" },
+        "target": {
+          "kind": "visible_text",
+          "value": "提升线上商品或店铺的营销效果"
+        },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "营销场景" },
+        "observed_options": ["应用", "销售线索", "电商", "商品", "内容营销"]
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.marketing_scenario",
+      "semantic_label": "营销场景",
+      "value_labels": { "short_video_image_text": "短视频和图文", "manual_delivery": "短视频和图文", "live": "直播" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose != product_catalog",
+      "condition_dimensions": ["marketing_purpose"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "not_in",
+            "values": ["product_catalog"]
+          }
+        ]
+      },
+      "required_state": "unknown",
+      "editable_state": "conditional",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "营销场景" },
+      "playwright_rpa": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "营销场景" },
+        "target": { "kind": "visible_text", "value": "短视频+图文" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "营销产品" },
+        "observed_options": ["短视频+图文"],
+        "input_constraints": {
+          "live": "blocked_by_platform_capability"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "project.marketing_product_reference",
+      "semantic_label": "巨量商品",
+      "configuration_requirement": "投放计划必须提供已解析的巨量商品引用。引用 ID 是巨量商品 ID。活动类型、活动名称和品牌名称只作为选择审计信息。",
+      "owner": "platform_dynamic_reference",
+      "page_family": "project_create",
+      "value_type": "dynamic_reference",
+      "condition": "marketing_purpose not in [ecommerce]",
+      "condition_dimensions": ["marketing_purpose"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "not_in",
+            "values": ["ecommerce"]
+          }
+        ]
+      },
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "营销产品" },
+      "playwright_rpa": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "营销产品" },
+        "target": { "kind": "visible_text", "value": "点击选择商品" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "优化目标" },
+        "input_constraints": {
+          "reference_kind": "existing_product",
+          "required_reference_fields": "namespace,object_kind,scope,id,state",
+          "platform_object_kind": "product",
+          "platform_id_source": "OceanEngine product ID",
+          "persistence": "unsubmitted_local_only"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.application_reference",
+      "semantic_label": "应用",
+      "configuration_requirement": "应用营销目的必须提供已解析的巨量应用或应用分包引用。",
+      "owner": "platform_dynamic_reference",
+      "page_family": "project_create",
+      "value_type": "dynamic_reference",
+      "condition": "marketing_purpose == application",
+      "condition_dimensions": ["marketing_purpose"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "equals",
+            "values": ["application"]
+          }
+        ]
+      },
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "role_name", "value": "button:选择" },
+      "playwright_rpa": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "投放载体" },
+        "target": {
+          "kind": "role_name",
+          "value": "textbox:请输入应用下载链接或选择已有应用"
+        },
+        "expected_target_count": 1,
+        "readback": {
+          "kind": "role_name",
+          "value": "textbox:请输入应用下载链接或选择已有应用"
+        },
+        "input_constraints": {
+          "reference_kind": "existing_application",
+          "persistence": "unsubmitted_local_only"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.application_scenario",
+      "semantic_label": "应用场景",
+      "value_labels": { "app_download": "应用下载", "app_launch": "应用调起", "app_appointment_download": "预约下载" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose == application",
+      "condition_dimensions": ["marketing_purpose"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "equals",
+            "values": ["application"]
+          }
+        ]
+      },
+      "required_state": "unknown",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "应用下载" },
+      "playwright_rpa": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "营销目的" },
+        "target": { "kind": "visible_text", "value": "应用下载" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "投放载体" },
+        "observed_options": ["应用下载", "应用调起", "预约下载"]
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "project.operating_system",
+      "semantic_label": "操作系统",
+      "value_labels": { "android": "安卓", "ios": "iOS", "harmony": "鸿蒙" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose == application",
+      "condition_dimensions": ["marketing_purpose", "application_scenario"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "equals",
+            "values": ["application"]
+          }
+        ]
+      },
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "安卓" },
+      "playwright_rpa": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "投放载体" },
+        "target": { "kind": "visible_text", "value": "安卓" },
+        "expected_target_count": 1,
+        "readback": {
+          "kind": "role_name",
+          "value": "textbox:请输入应用下载链接或选择已有应用"
+        },
+        "observed_options": ["安卓", "iOS", "鸿蒙"],
+        "input_constraints": {
+          "app_download_and_launch_options": "安卓,iOS,鸿蒙",
+          "app_appointment_download_options": "安卓,iOS",
+          "app_appointment_download_harmony": "blocked_by_platform_capability"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "project.application_download_mode",
+      "semantic_label": "应用下载方式",
+      "value_labels": { "direct_download": "直接下载", "landing_page_download": "落地页下载" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose == application and application_scenario == app_download",
+      "condition_dimensions": ["marketing_purpose", "application_scenario"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "equals",
+            "values": ["application"]
+          },
+          {
+            "dimension": "application_scenario",
+            "operator": "equals",
+            "values": ["app_download"]
+          }
+        ]
+      },
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "下载方式" },
+      "playwright_rpa": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "下载方式" },
+        "target": { "kind": "visible_text", "value": "直接下载" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "优化目标" },
+        "observed_options": ["直接下载", "落地页下载"]
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "project.lead_capture_mode",
+      "semantic_label": "获取线索方式",
+      "value_labels": { "smart_lead": "智能获客", "custom_lead": "自定义获客" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose == lead_generation",
+      "condition_dimensions": ["marketing_purpose"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "equals",
+            "values": ["lead_generation"]
+          }
+        ]
+      },
+      "required_state": "unknown",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "获取线索方式" },
+      "playwright_rpa": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "获取线索方式" },
+        "target": { "kind": "visible_text", "value": "智能优选" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "投放载体" },
+        "observed_options": ["智能优选", "自定义"]
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "project.carrier",
+      "semantic_label": "投放载体",
+      "value_labels": { "landing_page": "落地页（类型未细分）", "orange_landing_page_and_im": "橙子落地页和私信", "orange_landing_page": "橙子落地页", "owned_landing_page": "自研落地页", "im": "私信", "byte_miniapp": "字节小程序", "wechat_miniapp": "微信小程序" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose in [ecommerce,lead_generation]",
+      "condition_dimensions": [
+        "marketing_purpose",
+        "marketing_scenario",
+        "lead_capture_mode"
+      ],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "in",
+            "values": ["ecommerce", "lead_generation"]
+          }
+        ]
+      },
+      "required_state": "conditional",
+      "editable_state": "conditional",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "投放载体" },
+      "playwright_rpa": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "投放载体" },
+        "target": { "kind": "visible_text", "value": "橙子落地页" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "优化目标" },
+        "observed_options": [
+          "橙子落地页",
+          "自研落地页",
+          "抖音私信页",
+          "字节小程序",
+          "微信小程序"
+        ],
+        "input_constraints": {
+          "currently_supported": "orange_landing_page,owned_landing_page",
+          "deferred": "byte_miniapp,wechat_miniapp"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.optimization_target_reference",
+      "semantic_label": "优化目标",
+      "configuration_requirement": "投放计划必须提供当前前置选择可用的优化目标引用。自研落地页引用还必须保留事件资产名称和事件资产类型审计信息。",
+      "owner": "platform_dynamic_reference",
+      "page_family": "project_create",
+      "value_type": "dynamic_reference",
+      "condition": "marketing_purpose",
+      "condition_dimensions": [
+        "marketing_purpose",
+        "carrier",
+        "marketing_product_reference",
+        "application_reference"
+      ],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "present"
+          }
+        ]
+      },
+      "required_state": "observed_required",
+      "editable_state": "conditional",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "label", "value": "优化目标" },
+      "playwright_rpa": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "优化目标" },
+        "target": { "kind": "role_name", "value": "textbox:请选择" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "textbox:请选择" },
+        "input_constraints": {
+          "orange_landing_page_picker": "optimization_target_name",
+          "owned_landing_page_picker": "optimization_target_name,event_asset_name,event_asset_type",
+          "reference_kind": "optimization_target",
+          "persistence": "unsubmitted_local_only"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.delivery_mode",
+      "semantic_label": "投放模式",
+      "value_labels": { "ubmax": "自动投放（UBMax）", "manual": "手动投放", "manual_delivery": "手动投放" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "required_state": "unknown",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "投放模式" },
+      "playwright_rpa": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "投放模式" },
+        "target": { "kind": "visible_text", "value": "手动投放" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "投放版位" },
+        "observed_options": ["自动投放(UBMax)", "手动投放"]
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.deep_optimization_mode",
+      "semantic_label": "深度优化方式",
+      "value_labels": { "disabled": "不启用", "conversion_roi": "成交 ROI", "net_conversion_order": "净成交下单", "net_conversion_roi": "净成交 ROI" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose == ecommerce and carrier in [orange_landing_page,owned_landing_page] and optimization_target_semantic_key == in_app_order",
+      "condition_dimensions": [
+        "marketing_purpose",
+        "carrier",
+        "optimization_target_semantic_key"
+      ],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          { "dimension": "marketing_purpose", "operator": "equals", "values": ["ecommerce"] },
+          { "dimension": "carrier", "operator": "in", "values": ["orange_landing_page", "owned_landing_page"] },
+          { "dimension": "optimization_target_semantic_key", "operator": "equals", "values": ["in_app_order"] }
+        ]
+      },
+      "required_state": "conditional",
+      "editable_state": "conditional",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "深度优化方式" },
+      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "深度优化方式" }, "target": { "kind": "visible_text", "value": "不启用" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "深度优化方式" }, "observed_options": ["不启用", "成交ROI", "净成交下单", "净成交ROI"] },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.aigc_dynamic_creative",
+      "semantic_label": "AIGC 动态创意",
+      "value_labels": { "true": "启用", "false": "不启用" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "boolean",
+      "condition": "marketing_purpose in [lead_generation,ecommerce]",
+      "condition_dimensions": ["marketing_purpose"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          { "dimension": "marketing_purpose", "operator": "in", "values": ["lead_generation", "ecommerce"] }
+        ]
+      },
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "AIGC动态创意" },
+      "playwright_rpa": {
+        "operation": "toggle",
+        "scope": { "kind": "visible_text", "value": "AIGC动态创意" },
+        "target": { "kind": "role_name", "value": "switch" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "AIGC动态创意" },
+        "observed_options": ["开启", "关闭"]
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "DeliveryDecisionCandidate", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "project.targeting",
+      "property_labels": { "regions": "地域", "age_ranges": "年龄", "gender": "性别", "smart_expansion": "智能拓量" },
+      "owner": "delivery_intent",
+      "page_family": "project_create",
+      "value_type": "object",
+      "required_state": "unknown",
+      "editable_state": "conditional",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "visible_text", "value": "受众倾向与过滤" },
+      "playwright_rpa": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "受众倾向与过滤" },
+        "target": { "kind": "visible_text", "value": "新建定向" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "地域" },
+        "observed_options": ["地域", "性别", "年龄", "自定义人群", "已安装用户", "过滤已转化用户"],
+        "input_constraints": { "persistence": "unsubmitted_local_only" }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.schedule",
+      "owner": "delivery_intent",
+      "page_family": "project_create",
+      "value_type": "schedule",
+      "unit": "Asia/Shanghai",
+      "required_state": "unknown",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "投放时间" },
+      "playwright_rpa": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "投放时间" },
+        "target": { "kind": "visible_text", "value": "从今天起长期投放" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "投放时段" },
+        "observed_options": [
+          "从今天起长期投放",
+          "设置开始和结束日期",
+          "不限",
+          "指定时间段"
+        ],
+        "input_constraints": {
+          "timezone": "Asia/Shanghai",
+          "persistence": "unsubmitted_local_only"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.daily_budget_minor",
+      "owner": "delivery_intent",
+      "page_family": "project_create",
+      "value_type": "money_minor",
+      "unit": "CNY_fen",
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "visible_text", "value": "日预算" },
+      "playwright_rpa": {
+        "operation": "fill_money",
+        "scope": { "kind": "visible_text", "value": "日预算" },
+        "target": { "kind": "role_name", "value": "spinbutton" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "spinbutton" },
+        "input_constraints": {
+          "input_unit": "CNY_yuan",
+          "model_unit": "CNY_fen",
+          "minor_per_input_unit": 100,
+          "persistence": "unsubmitted_local_only"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.bidding_strategy",
+      "semantic_label": "竞价策略",
+      "value_labels": { "manual_bid": "手动出价", "stable_cost": "稳定成本", "optimal_cost": "最优成本", "maximum_conversion": "最大转化" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "required_state": "conditional",
+      "editable_state": "conditional",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "竞价策略" },
+      "playwright_rpa": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "竞价策略" },
+        "target": { "kind": "visible_text", "value": "稳定成本" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "日预算" },
+        "observed_options": ["稳定成本", "最大转化"]
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.charging_mode",
+      "semantic_label": "付费方式",
+      "value_labels": { "CPC": "按点击付费（CPC）", "CPM": "按展示付费（CPM）", "OCPM": "按优化展示付费（OCPM）" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "required_state": "conditional",
+      "editable_state": "conditional",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "付费方式" },
+      "playwright_rpa": {
+        "operation": "no_action",
+        "blocked_state": "platform_pending",
+        "reason": "Some charging-mode branches require an optimization-target semantic key that the model does not contain."
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.bid_minor",
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "money_minor",
+      "unit": "CNY_fen",
+      "condition": "bidding_strategy == stable_cost and deep_optimization_mode not in [conversion_roi,net_conversion_roi]",
+      "condition_dimensions": ["bidding_strategy", "deep_optimization_mode"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "bidding_strategy",
+            "operator": "equals",
+            "values": ["stable_cost"]
+          },
+          {
+            "dimension": "deep_optimization_mode",
+            "operator": "not_in",
+            "values": ["conversion_roi", "net_conversion_roi"]
+          }
+        ]
+      },
+      "required_state": "conditional",
+      "editable_state": "conditional",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "visible_text", "value": "出价" },
+      "playwright_rpa": {
+        "operation": "fill_money",
+        "scope": { "kind": "visible_text", "value": "出价" },
+        "target": { "kind": "role_name", "value": "spinbutton" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "spinbutton" },
+        "input_constraints": {
+          "input_unit": "CNY_yuan",
+          "model_unit": "CNY_fen",
+          "minor_per_input_unit": 100,
+          "persistence": "unsubmitted_local_only"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.search_boost",
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "object",
+      "configuration_requirement": "搜索快投包含关键词、必填出价系数和定向扩展。出价系数建议默认值为 1.1。",
+      "condition": "marketing_purpose == ecommerce and delivery_mode == manual",
+      "condition_dimensions": ["marketing_purpose", "delivery_mode"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "equals",
+            "values": ["ecommerce"]
+          },
+          {
+            "dimension": "delivery_mode",
+            "operator": "equals",
+            "values": ["manual"]
+          }
+        ]
+      },
+      "required_state": "observed_optional",
+      "editable_state": "conditional",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "搜索快投" },
+      "playwright_rpa": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "搜索快投" },
+        "target": { "kind": "visible_text", "value": "关键词" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "出价系数" },
+        "observed_options": ["关键词", "出价系数", "定向拓展"],
+        "input_constraints": { "persistence": "unsubmitted_local_only" }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "project.monitoring_references",
+      "owner": "platform_dynamic_reference",
+      "page_family": "project_create",
+      "value_type": "dynamic_reference",
+      "configuration_requirement": "第三方监测链接按展示、有效触点、视频播放、视频播完和视频有效播放分别配置。",
+      "required_state": "conditional",
+      "editable_state": "conditional",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "第三方监测链接" },
+      "playwright_rpa": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "第三方监测链接" },
+        "target": { "kind": "role_name", "value": "textbox:请输入链接地址" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "展示" },
+        "observed_options": ["展示", "有效触点", "视频播放", "视频播完", "视频有效播放"],
+        "input_constraints": { "format": "URL", "persistence": "unsubmitted_local_only" }
+      },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "project.project_name",
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "text",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "label", "value": "项目名称" },
+      "playwright_rpa": {
+        "operation": "fill_text",
+        "scope": { "kind": "visible_text", "value": "项目名称" },
+        "target": { "kind": "role_name", "value": "textbox:请输入项目名称" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "textbox:请输入项目名称" },
+        "input_constraints": {
+          "max_length": 50,
+          "persistence": "unsubmitted_local_only"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.product_catalog_reference",
+      "owner": "platform_dynamic_reference",
+      "page_family": "project_create",
+      "value_type": "dynamic_reference",
+      "condition": "marketing_purpose == product_catalog",
+      "condition_dimensions": ["marketing_purpose"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "equals",
+            "values": ["product_catalog"]
+          }
+        ]
+      },
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "label", "value": "商品目录" },
+      "playwright_rpa": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "商品目录" },
+        "target": {
+          "kind": "role_name",
+          "value": "textbox:请选择或输入搜索商品目录"
+        },
+        "expected_target_count": 1,
+        "readback": {
+          "kind": "role_name",
+          "value": "textbox:请选择或输入搜索商品目录"
+        },
+        "input_constraints": {
+          "reference_kind": "existing_product_catalog",
+          "persistence": "unsubmitted_local_only"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.placement_strategy",
+      "semantic_label": "投放版位",
+      "property_labels": { "placement_strategy": "投放位置", "placement_media": "媒体" },
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "object",
+      "condition": "marketing_purpose == product_catalog",
+      "condition_dimensions": ["marketing_purpose"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "equals",
+            "values": ["product_catalog"]
+          }
+        ]
+      },
+      "required_state": "unknown",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "版位" },
+      "playwright_rpa": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "投放版位" },
+        "target": { "kind": "visible_text", "value": "通投智选" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "投放位置" },
+        "observed_options": ["通投智选", "首选媒体", "全选", "今日头条", "西瓜视频", "抖音", "番茄系媒体", "穿山甲"]
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.product_targeting",
+      "owner": "delivery_intent",
+      "page_family": "project_create",
+      "value_type": "object",
+      "condition": "marketing_purpose == product_catalog",
+      "condition_dimensions": ["marketing_purpose"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "equals",
+            "values": ["product_catalog"]
+          }
+        ]
+      },
+      "required_state": "unknown",
+      "editable_state": "conditional",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "visible_text", "value": "商品定向" },
+      "playwright_rpa": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "商品定向" },
+        "target": { "kind": "visible_text", "value": "RTA重定向" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "商品投放条件" },
+        "observed_options": ["RTA重定向", "地域匹配", "商品投放条件"],
+        "input_constraints": { "persistence": "unsubmitted_local_only" }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.application_launch_mode",
+      "owner": "oceanengine_configuration",
+      "page_family": "project_create",
+      "value_type": "dynamic_enum",
+      "condition": "marketing_purpose == application and application_scenario == app_launch",
+      "condition_dimensions": ["marketing_purpose", "application_scenario"],
+      "condition_state": "evaluable",
+      "condition_rule": {
+        "all": [
+          {
+            "dimension": "marketing_purpose",
+            "operator": "equals",
+            "values": ["application"]
+          },
+          {
+            "dimension": "application_scenario",
+            "operator": "equals",
+            "values": ["app_launch"]
+          }
+        ]
+      },
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "拉起方式" },
+      "playwright_rpa": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "调起方式" },
+        "target": { "kind": "visible_text", "value": "直接调起" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "优化目标" },
+        "observed_options": ["直接调起", "落地页调起"]
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.editable_surface",
+      "owner": "oceanengine_configuration",
+      "page_family": "project_edit",
+      "value_type": "object",
+      "required_state": "unknown",
+      "editable_state": "conditional",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "visible_text", "value": "编辑项目" },
+      "playwright_rpa": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "编辑项目" },
+        "target": { "kind": "visible_text", "value": "排期与预算" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "button:保存并关闭" },
+        "observed_options": [
+          "营销产品与目标",
+          "投放模式",
+          "投放版位",
+          "用户定向",
+          "排期与预算",
+          "搜索快投",
+          "监测链接",
+          "项目名称"
+        ],
+        "input_constraints": {
+          "marketing_product_reference": "readonly",
+          "optimization_target_reference": "readonly",
+          "start_date": "readonly_after_creation",
+          "end_date": "editable"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.delivery_identity",
+      "semantic_label": "投放身份",
+      "value_labels": { "account_info": "账户信息", "douyin_account": "抖音号" },
+      "property_labels": { "mode": "身份方式" },
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "投放身份" },
+      "playwright_rpa": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "投放身份" },
+        "target": { "kind": "placeholder", "value": "请选择投放抖音号" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "抖音号授权" },
+        "input_constraints": { "selection": "first_available_semantic_option" }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.base_materials",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "基础素材" },
+      "playwright_rpa": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "基础素材" },
+        "target": { "kind": "role_name", "value": "button:添加视频" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "视频(1/10)" },
+        "observed_options": ["添加视频", "添加图片", "添加图文"],
+        "input_constraints": {
+          "video_max": 10,
+          "image_max": 10,
+          "image_library_observed_count": 0
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.landing_page_reference",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "placeholder", "value": "请选择橙子落地页链接" },
+      "playwright_rpa": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "落地页" },
+        "target": { "kind": "placeholder", "value": "请选择橙子落地页链接" },
+        "expected_target_count": 1,
+        "readback": { "kind": "placeholder", "value": "请选择橙子落地页链接" },
+        "input_constraints": { "selection": "first_available_semantic_card" }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.product_image_references",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": {
+        "kind": "attribute",
+        "value": "data-auto-id=oc-create-product-img-add-button"
+      },
+      "playwright_rpa": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "产品主图" },
+        "target": {
+          "kind": "attribute",
+          "value": "data-auto-id=oc-create-product-img-add-button"
+        },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "已添加：1/10" },
+        "input_constraints": {
+          "max_items": 10,
+          "selection_precedence": "selected_product_main_image>first_available_my_image>local_upload_when_authorized",
+          "current_my_image_items": 1,
+          "wait_for_loaded_total_before_decision": true,
+          "upload_forbidden_without_explicit_upload_authority": true
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.product_selling_points",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "text",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": {
+        "kind": "placeholder",
+        "value": "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交"
+      },
+      "playwright_rpa": {
+        "operation": "fill_text",
+        "scope": { "kind": "visible_text", "value": "产品卖点" },
+        "target": {
+          "kind": "placeholder",
+          "value": "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交"
+        },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "1/10" },
+        "input_constraints": {
+          "min_chinese_characters": 6,
+          "max_chinese_characters": 9,
+          "max_items": 10,
+          "commit_key": "Enter"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.category",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_enum",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": {
+        "kind": "attribute",
+        "value": "data-e2e=createad_yuntuCategory"
+      },
+      "playwright_rpa": {
+        "operation": "choose_exact_visible_option",
+        "scope": { "kind": "visible_text", "value": "所属类别" },
+        "target": {
+          "kind": "attribute",
+          "value": "data-e2e=createad_yuntuCategory"
+        },
+        "expected_target_count": 1,
+        "readback": { "kind": "placeholder", "value": "请选择" },
+        "observed_options": ["其他", "零售"],
+        "input_constraints": { "selection": "first_available_cascader_path" }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.daily_budget",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "money_minor",
+      "unit": "CNY_fen",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "sample_only",
+      "locator": { "kind": "visible_text", "value": "单元预算" },
+      "playwright_rpa": {
+        "operation": "fill_money",
+        "scope": { "kind": "visible_text", "value": "单元预算" },
+        "target": { "kind": "role_name", "value": "spinbutton:单元预算" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "spinbutton:300" },
+        "input_constraints": {
+          "input_unit": "CNY_yuan",
+          "model_unit": "CNY_fen",
+          "minor_per_input_unit": 100,
+          "calibration_cap_cny": 300
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.bid",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "money_minor",
+      "unit": "CNY_fen",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "sample_only",
+      "locator": { "kind": "visible_text", "value": "单元出价" },
+      "playwright_rpa": {
+        "operation": "fill_money",
+        "scope": { "kind": "visible_text", "value": "单元出价" },
+        "target": { "kind": "role_name", "value": "spinbutton:单元出价" },
+        "expected_target_count": 1,
+        "readback": {
+          "kind": "visible_text",
+          "value": "current_page_bid_validation"
+        },
+        "input_constraints": {
+          "input_unit": "CNY_yuan",
+          "model_unit": "CNY_fen",
+          "minor_per_input_unit": 100,
+          "minimum_source": "current_page_validation",
+          "observed_minimums_cny": "0.01,4",
+          "observed_cpm_path_minimum_cny": 4,
+          "observed_cpm_path_maximum_cny": 100,
+          "calibration_value_rule": "use_current_page_minimum"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.native_anchor_reference",
+      "semantic_label": "原生锚点",
+      "owner": "platform_dynamic_reference",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "原生锚点" },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "原生锚点" }, "target": { "kind": "visible_text", "value": "手动选择" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "原生锚点" }, "observed_options": ["不启用", "自动选择", "手动选择"] },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.direct_link_mode",
+      "semantic_label": "直达链接模式",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_enum",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "直达链接" },
+      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "直达链接" }, "target": { "kind": "visible_text", "value": "自动" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "直达链接" }, "observed_options": ["自动", "手动"] },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.direct_link_reference",
+      "semantic_label": "直达链接内容",
+      "owner": "platform_dynamic_reference",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "conditional",
+      "editable_state": "conditional",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "直达链接内容" },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "直达链接内容" }, "target": { "kind": "visible_text", "value": "添加直达链接" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "备用链接" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.product_reference",
+      "semantic_label": "产品名称",
+      "owner": "platform_dynamic_reference",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "conditional",
+      "editable_state": "conditional",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "产品名称" },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "产品名称" }, "target": { "kind": "visible_text", "value": "产品名称" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "产品主图" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.creative_component_references",
+      "semantic_label": "创意组件",
+      "owner": "platform_dynamic_reference",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "创意组件" },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "创意组件" }, "target": { "kind": "visible_text", "value": "添加组件" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "创意组件" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.call_to_action",
+      "semantic_label": "行动号召",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_enum",
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "行动号召" },
+      "playwright_rpa": { "operation": "configure_object", "scope": { "kind": "visible_text", "value": "行动号召" }, "target": { "kind": "role_name", "value": "combobox:行动号召" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "combobox:行动号召" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.source_label",
+      "semantic_label": "来源",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "text",
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "label", "value": "来源" },
+      "playwright_rpa": { "operation": "fill_text", "scope": { "kind": "visible_text", "value": "来源" }, "target": { "kind": "role_name", "value": "textbox:来源" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "textbox:来源" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.comments_enabled",
+      "semantic_label": "评论",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "boolean",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "评论" },
+      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "评论" }, "target": { "kind": "visible_text", "value": "开启" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "评论" }, "observed_options": ["开启", "关闭"] },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.smart_generation_enabled",
+      "semantic_label": "智能生成",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "boolean",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_current_set",
+      "locator": { "kind": "visible_text", "value": "智能生成" },
+      "playwright_rpa": { "operation": "configure_object", "scope": { "kind": "visible_text", "value": "智能生成" }, "target": { "kind": "role_name", "value": "checkbox:智能生成" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "checkbox:智能生成" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.brand_reference",
+      "semantic_label": "品牌名称",
+      "owner": "platform_dynamic_reference",
+      "page_family": "promotion_create",
+      "value_type": "dynamic_reference",
+      "required_state": "observed_optional",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "visible_text", "value": "品牌名称" },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "品牌名称" }, "target": { "kind": "role_name", "value": "combobox:品牌名称" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "combobox:品牌名称" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.promotion_name",
+      "semantic_label": "单元名称",
+      "owner": "promotion_draft",
+      "page_family": "promotion_create",
+      "value_type": "text",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "label", "value": "单元名称" },
+      "playwright_rpa": { "operation": "fill_text", "scope": { "kind": "visible_text", "value": "单元名称" }, "target": { "kind": "role_name", "value": "textbox:请输入单元名称" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "textbox:请输入单元名称" } },
+      "evidence_state": "observed",
+      "consumers": ["OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
+    },
+    {
+      "key": "promotion.editable_surface",
+      "owner": "promotion_draft",
+      "page_family": "promotion_edit",
+      "value_type": "object",
+      "required_state": "unknown",
+      "editable_state": "conditional",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "visible_text", "value": "编辑单元" },
+      "playwright_rpa": {
+        "operation": "configure_object",
+        "scope": { "kind": "visible_text", "value": "编辑单元" },
+        "target": { "kind": "visible_text", "value": "单元素材" },
+        "expected_target_count": 1,
+        "readback": { "kind": "role_name", "value": "button:保存并关闭" },
+        "observed_options": [
+          "投放身份",
+          "基础素材",
+          "文案素材",
+          "原生锚点",
+          "落地页",
+          "产品信息",
+          "创意组件",
+          "单元设置",
+          "单元名称"
+        ],
+        "input_constraints": {
+          "material_capacity_depends_on_dynamic_creative": true,
+          "save_requires_remote_write_authority": true
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.daily_budget_edit",
+      "owner": "promotion_draft",
+      "page_family": "promotion_list",
+      "value_type": "money_minor",
+      "unit": "CNY_fen",
+      "required_state": "observed_required",
+      "editable_state": "observed_editable",
+      "enum_state": "observed_open_set",
+      "locator": { "kind": "visible_text", "value": "单元预算" },
+      "playwright_rpa": {
+        "operation": "fill_money",
+        "scope": { "kind": "visible_text", "value": "单元预算" },
+        "target": { "kind": "role_name", "value": "spinbutton:单元日预算" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "预算不小于300元" },
+        "input_constraints": {
+          "input_unit": "CNY_yuan",
+          "model_unit": "CNY_fen",
+          "minor_per_input_unit": 100,
+          "baseline_cny": 300,
+          "platform_minimum_cny": 300,
+          "calibration_authority_maximum_cny": 300,
+          "distinct_authorized_target_exists": false,
+          "final_write_boundary": "button:确定修改"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.material_replacement_edit",
+      "owner": "promotion_draft",
+      "page_family": "promotion_edit",
+      "value_type": "dynamic_reference",
+      "required_state": "conditional",
+      "editable_state": "observed_editable",
+      "enum_state": "dynamic_reference",
+      "locator": { "kind": "role_name", "value": "button:换视频" },
+      "playwright_rpa": {
+        "operation": "open_reference_picker",
+        "scope": { "kind": "visible_text", "value": "基础素材" },
+        "target": { "kind": "role_name", "value": "button:换视频" },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "共3255个视频" },
+        "observed_options": ["换视频", "添加图片", "添加图文"],
+        "input_constraints": {
+          "wait_for_loaded_total_before_decision": true,
+          "video_library_items": 3255,
+          "image_library_items": 1722,
+          "image_text_library_items": 284,
+          "selection_policy": "first_available_semantic_item",
+          "upload_forbidden_in_calibration": true,
+          "final_write_boundary": "button:保存并关闭"
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "DeliveryIntent",
+        "OceanEngineConfiguration",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "project.operational_state",
+      "owner": "runtime_only",
+      "page_family": "project_list",
+      "value_type": "boolean",
+      "required_state": "observed_required",
+      "editable_state": "conditional",
+      "enum_state": "observed_current_set",
+      "locator": {
+        "kind": "attribute",
+        "value": "data-e2e=promotion_project_on-off"
+      },
+      "playwright_rpa": {
+        "operation": "toggle",
+        "scope": { "kind": "visible_text", "value": "项目" },
+        "target": {
+          "kind": "attribute",
+          "value": "data-e2e=promotion_project_on-off"
+        },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "已暂停" },
+        "observed_options": ["启用", "暂停"],
+        "input_constraints": {
+          "observed_model_value": false,
+          "calibration_mode": "observe_boundary_only",
+          "click_forbidden_without_action_authority": true
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    },
+    {
+      "key": "promotion.operational_state",
+      "owner": "runtime_only",
+      "page_family": "promotion_list",
+      "value_type": "boolean",
+      "required_state": "observed_required",
+      "editable_state": "conditional",
+      "enum_state": "observed_current_set",
+      "locator": {
+        "kind": "attribute",
+        "value": "data-e2e=promotion_promotion_on-off"
+      },
+      "playwright_rpa": {
+        "operation": "toggle",
+        "scope": { "kind": "visible_text", "value": "单元" },
+        "target": {
+          "kind": "attribute",
+          "value": "data-e2e=promotion_promotion_on-off"
+        },
+        "expected_target_count": 1,
+        "readback": { "kind": "visible_text", "value": "项目已暂停" },
+        "observed_options": ["启用", "暂停"],
+        "input_constraints": {
+          "observed_model_value": true,
+          "effective_delivery_blocked_by_parent_project": true,
+          "calibration_mode": "observe_boundary_only",
+          "click_forbidden_without_action_authority": true
+        }
+      },
+      "evidence_state": "observed",
+      "consumers": [
+        "OceanEngineConfiguration",
+        "DeliveryDecisionCandidate",
+        "CompiledDeliveryWorkflow",
+        "PlatformSkill"
+      ]
+    }
+  ],
+  "coverage_cases": [
+    {
+      "id": "OE-PROJECT-E-COMMERCE-DEFAULT",
+      "path": [
+        "project_create",
+        "ecommerce",
+        "short_video_image_text",
+        "ubmax"
+      ],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.marketing_scenario",
+        "project.marketing_product_reference",
+        "project.carrier",
+        "project.optimization_target_reference",
+        "project.delivery_mode",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-E-COMMERCE-LIVE",
+      "path": ["project_create", "ecommerce", "live", "ubmax"],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.marketing_scenario",
+        "project.carrier",
+        "project.optimization_target_reference",
+        "project.delivery_mode",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
+      "status": "blocked_by_platform_capability",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "the live marketing scenario is currently unavailable on the platform"
+    },
+    {
+      "id": "OE-PROJECT-E-COMMERCE-MANUAL",
+      "path": [
+        "project_create",
+        "ecommerce",
+        "short_video_image_text",
+        "manual"
+      ],
+      "field_keys": [
+        "project.deep_optimization_mode",
+        "project.aigc_dynamic_creative",
+        "project.delivery_mode",
+        "project.bidding_strategy",
+        "project.charging_mode",
+        "project.bid_minor",
+        "project.search_boost"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-LEADS-SMART",
+      "path": [
+        "project_create",
+        "lead_generation",
+        "smart_lead",
+        "orange_landing_page_and_im"
+      ],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.marketing_scenario",
+        "project.lead_capture_mode",
+        "project.aigc_dynamic_creative",
+        "project.carrier",
+        "project.optimization_target_reference",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.bid_minor",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-LEADS-CUSTOM",
+      "path": [
+        "project_create",
+        "lead_generation",
+        "custom_lead",
+        "orange_landing_page|owned_landing_page|im|byte_miniapp"
+      ],
+      "field_keys": [
+        "project.lead_capture_mode",
+        "project.carrier",
+        "project.optimization_target_reference"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-APP-DOWNLOAD-ANDROID",
+      "path": [
+        "project_create",
+        "application",
+        "app_download",
+        "android",
+        "existing_application"
+      ],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.application_scenario",
+        "project.operating_system",
+        "project.application_reference",
+        "project.application_download_mode",
+        "project.optimization_target_reference",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.charging_mode",
+        "project.bid_minor",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
+      "status": "blocked_by_event_asset",
+      "evidence_state": "blocked_by_event_asset",
+      "exit_verified": true,
+      "reason": "current chain returned no available optimization target after an existing application was selected"
+    },
+    {
+      "id": "OE-PROJECT-APP-DOWNLOAD-IOS-HARMONY-PACKAGE",
+      "path": [
+        "project_create",
+        "application",
+        "app_download",
+        "ios|harmony",
+        "application_package",
+        "maximum_conversion",
+        "manual_delivery"
+      ],
+      "field_keys": [
+        "project.application_scenario",
+        "project.operating_system",
+        "project.application_reference",
+        "project.application_download_mode",
+        "project.optimization_target_reference",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.charging_mode",
+        "project.bid_minor",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "each platform used one visible application-package action, read back maximum conversion and manual delivery, then exposed the calibrated money, bidding, charging, schedule, monitoring and project-name fields; no account-specific application identity was persisted"
+    },
+    {
+      "id": "OE-PROJECT-CATALOG-DEFAULT",
+      "path": [
+        "project_create",
+        "product_catalog",
+        "landing_page",
+        "auto_delivery"
+      ],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.product_catalog_reference",
+        "project.placement_strategy",
+        "project.product_targeting",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.charging_mode",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-CONTENT-MARKETING",
+      "path": [
+        "project_create",
+        "content_marketing",
+        "short_video_image_text",
+        "account_or_landing_page"
+      ],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.marketing_scenario",
+        "project.carrier",
+        "project.optimization_target_reference",
+        "project.delivery_mode",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-CONTENT-MARKETING-LIVE",
+      "path": [
+        "project_create",
+        "content_marketing",
+        "live",
+        "account_or_landing_page"
+      ],
+      "field_keys": [
+        "project.marketing_scenario",
+        "project.carrier",
+        "project.optimization_target_reference",
+        "project.delivery_mode",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.monitoring_references",
+        "project.project_name"
+      ],
+      "status": "blocked_by_platform_capability",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "the live marketing scenario is currently unavailable on the platform"
+    },
+    {
+      "id": "OE-PROJECT-APP-LAUNCH",
+      "path": [
+        "project_create",
+        "application",
+        "app_launch",
+        "android|ios|harmony"
+      ],
+      "field_keys": [
+        "project.application_scenario",
+        "project.operating_system",
+        "project.application_reference",
+        "project.application_launch_mode",
+        "project.optimization_target_reference"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-APP-LAUNCH-ANDROID",
+      "path": ["project_create", "application", "app_launch", "android"],
+      "field_keys": [
+        "project.application_scenario",
+        "project.operating_system",
+        "project.application_reference",
+        "project.application_launch_mode",
+        "project.optimization_target_reference"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-APP-LAUNCH-IOS",
+      "path": ["project_create", "application", "app_launch", "ios"],
+      "field_keys": [
+        "project.application_scenario",
+        "project.operating_system",
+        "project.application_reference",
+        "project.application_launch_mode",
+        "project.optimization_target_reference"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-APP-LAUNCH-HARMONY",
+      "path": ["project_create", "application", "app_launch", "harmony"],
+      "field_keys": [
+        "project.application_scenario",
+        "project.operating_system",
+        "project.application_reference",
+        "project.application_launch_mode",
+        "project.optimization_target_reference"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true
+    },
+    {
+      "id": "OE-PROJECT-APP-APPOINTMENT-ANDROID-IOS",
+      "path": [
+        "project_create",
+        "application",
+        "app_appointment_download",
+        "android|ios"
+      ],
+      "field_keys": [
+        "project.application_scenario",
+        "project.operating_system",
+        "project.application_reference",
+        "project.optimization_target_reference"
+      ],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "安卓 and iOS each exposed one semantic platform control and retained one application-reference readback"
+    },
+    {
+      "id": "OE-PROJECT-APP-APPOINTMENT-HARMONY",
+      "path": [
+        "project_create",
+        "application",
+        "app_appointment_download",
+        "harmony"
+      ],
+      "field_keys": [
+        "project.application_scenario",
+        "project.operating_system"
+      ],
+      "status": "blocked_by_platform_capability",
+      "evidence_state": "blocked_by_platform_capability",
+      "exit_verified": true,
+      "reason": "the current appointment-download page explicitly makes Harmony unavailable"
+    },
+    {
+      "id": "OE-PROJECT-OTHER-MARKETING-PURPOSES",
+      "path": ["project_create", "other_marketing_purposes"],
+      "field_keys": ["project.marketing_purpose"],
+      "status": "blocked_by_account_capability",
+      "evidence_state": "platform_pending",
+      "exit_verified": true,
+      "reason": "the current form explicitly marks these purposes as gradually opening"
+    },
+    {
+      "id": "OE-PROJECT-EDIT",
+      "path": ["project_edit", "existing_project"],
+      "field_keys": ["project.editable_surface"],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "existing project edit exposed readonly product/optimization/start-date state and editable targeting, budget, end-date, monitoring and name controls"
+    },
+    {
+      "id": "OE-PROMOTION-CREATE",
+      "path": ["promotion_create"],
+      "field_keys": [
+        "promotion.delivery_identity",
+        "promotion.base_materials",
+        "promotion.landing_page_reference",
+        "promotion.product_image_references",
+        "promotion.product_selling_points",
+      "promotion.category",
+      "promotion.daily_budget",
+      "promotion.bid",
+      "promotion.native_anchor_reference",
+      "promotion.direct_link_mode",
+      "promotion.direct_link_reference",
+      "promotion.product_reference",
+      "promotion.creative_component_references",
+      "promotion.call_to_action",
+      "promotion.source_label",
+      "promotion.comments_enabled",
+      "promotion.smart_generation_enabled",
+      "promotion.brand_reference",
+      "promotion.promotion_name"
+    ],
+    "status": "covered",
+    "evidence_state": "observed",
+    "exit_verified": true,
+    "reason": "all accessible local branches were traversed; each bid input uses its current page minimum, including observed CNY 0.01 and CNY 4 paths"
+    },
+    {
+      "id": "OE-PROMOTION-EDIT",
+      "path": ["promotion_edit"],
+      "field_keys": ["promotion.editable_surface"],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "an existing unit exposed identity, materials, copy, native anchor, landing page, deep links, product information, creative components, settings and name without crossing save"
+    },
+    {
+      "id": "OE-D3-PROMOTION-BUDGET-EDIT",
+      "path": [
+        "promotion_list",
+        "daily_budget_edit",
+        "300_to_299_rejected",
+        "cancel"
+      ],
+      "field_keys": ["promotion.daily_budget_edit"],
+      "status": "blocked_by_input_constraint",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "the platform rejected CNY 299 because unit budget must be at least CNY 300; the baseline and calibration authority maximum were both CNY 300, so no distinct authorized write target existed"
+    },
+    {
+      "id": "OE-D3-PROMOTION-MATERIAL-REPLACEMENT",
+      "path": [
+        "promotion_edit",
+        "material_replacement",
+        "existing_asset_picker"
+      ],
+      "field_keys": ["promotion.material_replacement_edit"],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "after asynchronous loading completed, a different existing video was selected and saved, then the original video was found by enabling the audit-rejected-material filter, restored, saved and verified"
+    },
+    {
+      "id": "OE-D3-PROJECT-ENABLE",
+      "path": [
+        "project_list",
+        "operational_state",
+        "paused_to_enabled_boundary"
+      ],
+      "field_keys": ["project.operational_state"],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "the authorized project was enabled, verified, then paused again and verified at its original state"
+    },
+    {
+      "id": "OE-D3-PROJECT-PAUSE",
+      "path": [
+        "project_list",
+        "operational_state",
+        "enabled_to_paused_boundary"
+      ],
+      "field_keys": ["project.operational_state"],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "after the project enable calibration, the project was paused and verified at its original state"
+    },
+    {
+      "id": "OE-D3-PROMOTION-PAUSE",
+      "path": [
+        "promotion_list",
+        "operational_state",
+        "enabled_to_paused_boundary"
+      ],
+      "field_keys": ["promotion.operational_state"],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "the authorized unit was paused and verified, then enabled again and verified at its original state"
+    },
+    {
+      "id": "OE-D3-PROMOTION-ENABLE",
+      "path": [
+        "promotion_list",
+        "operational_state",
+        "paused_to_enabled_boundary"
+      ],
+      "field_keys": ["promotion.operational_state"],
+      "status": "covered",
+      "evidence_state": "observed",
+      "exit_verified": true,
+      "reason": "after the unit pause calibration, the unit was enabled and verified before the parent project was restored to paused"
+    }
+  ],
+  "consumer_mappings": [
+    {
+      "field_key": "project.marketing_purpose",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.MarketingPurpose"
+    },
+    {
+      "field_key": "project.marketing_purpose",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.MarketingPurpose"
+    },
+    {
+      "field_key": "project.marketing_purpose",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.marketing_purpose",
+      "destination": "PlatformSkill",
+      "treatment": "modelled",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.marketing_scenario",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.MarketingScenario"
+    },
+    {
+      "field_key": "project.marketing_scenario",
+      "destination": "PlatformSkill",
+      "treatment": "modelled",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.marketing_product_reference",
+      "destination": "DeliveryIntent",
+      "treatment": "modelled",
+      "contract_path": "DeliveryIntent.Payload.ProductReferences"
+    },
+    {
+      "field_key": "project.marketing_product_reference",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "dynamic_reference",
+      "contract_path": "OceanEngineConfiguration.Project.MarketingProductReference"
+    },
+    {
+      "field_key": "project.marketing_product_reference",
+      "destination": "PlatformSkill",
+      "treatment": "dynamic_reference",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.application_reference",
+      "destination": "DeliveryIntent",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryIntent.Payload.CalibrationManifest"
+    },
+    {
+      "field_key": "project.application_reference",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "dynamic_reference",
+      "contract_path": "OceanEngineConfiguration.Project.ApplicationReference"
+    },
+    {
+      "field_key": "project.application_reference",
+      "destination": "PlatformSkill",
+      "treatment": "dynamic_reference",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.application_scenario",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.ApplicationScenario"
+    },
+    {
+      "field_key": "project.application_scenario",
+      "destination": "PlatformSkill",
+      "treatment": "modelled",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.operating_system",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.OperatingSystem"
+    },
+    {
+      "field_key": "project.operating_system",
+      "destination": "PlatformSkill",
+      "treatment": "modelled",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.application_download_mode",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.ApplicationDownloadMode"
+    },
+    {
+      "field_key": "project.application_download_mode",
+      "destination": "PlatformSkill",
+      "treatment": "modelled",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.lead_capture_mode",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.LeadCaptureMode"
+    },
+    {
+      "field_key": "project.lead_capture_mode",
+      "destination": "PlatformSkill",
+      "treatment": "modelled",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.carrier",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.Carrier"
+    },
+    {
+      "field_key": "project.carrier",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.Carrier"
+    },
+    {
+      "field_key": "project.carrier",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.carrier",
+      "destination": "PlatformSkill",
+      "treatment": "modelled",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.optimization_target_reference",
+      "destination": "DeliveryIntent",
+      "treatment": "dynamic_reference",
+      "contract_path": "DeliveryIntent.Payload.OptimizationPreferences"
+    },
+    {
+      "field_key": "project.optimization_target_reference",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "dynamic_reference",
+      "contract_path": "OceanEngineConfiguration.Project.OptimizationTargetReference"
+    },
+    {
+      "field_key": "project.optimization_target_reference",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "dynamic_reference",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.OptimizationTargetReference"
+    },
+    {
+      "field_key": "project.optimization_target_reference",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.optimization_target_reference",
+      "destination": "PlatformSkill",
+      "treatment": "dynamic_reference",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.delivery_mode",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.DeliveryMode"
+    },
+    {
+      "field_key": "project.delivery_mode",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.DeliveryMode"
+    },
+    {
+      "field_key": "project.delivery_mode",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.delivery_mode",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.deep_optimization_mode",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.DeepOptimizationMode"
+    },
+    {
+      "field_key": "project.deep_optimization_mode",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.DeepOptimizationMode"
+    },
+    {
+      "field_key": "project.deep_optimization_mode",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.deep_optimization_mode",
+      "destination": "PlatformSkill",
+      "treatment": "modelled",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.aigc_dynamic_creative",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.AIGCDynamicCreative"
+    },
+    {
+      "field_key": "project.aigc_dynamic_creative",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.AIGCDynamicCreative"
+    },
+    {
+      "field_key": "project.aigc_dynamic_creative",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.aigc_dynamic_creative",
+      "destination": "PlatformSkill",
+      "treatment": "modelled",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.targeting",
+      "destination": "DeliveryIntent",
+      "treatment": "modelled",
+      "contract_path": "DeliveryIntent.Payload.AudienceConstraints"
+    },
+    {
+      "field_key": "project.targeting",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.Targeting"
+    },
+    {
+      "field_key": "project.targeting",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.schedule",
+      "destination": "DeliveryIntent",
+      "treatment": "modelled",
+      "contract_path": "DeliveryIntent.Payload.ScheduleBoundary"
+    },
+    {
+      "field_key": "project.schedule",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.Schedule"
+    },
+    {
+      "field_key": "project.schedule",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.schedule",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.daily_budget_minor",
+      "destination": "DeliveryIntent",
+      "treatment": "modelled",
+      "contract_path": "DeliveryIntent.Payload.BudgetBoundary"
+    },
+    {
+      "field_key": "project.daily_budget_minor",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.BudgetAndBidding.DailyBudgetMinor"
+    },
+    {
+      "field_key": "project.daily_budget_minor",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.BudgetAndBidding.DailyBudgetMinor"
+    },
+    {
+      "field_key": "project.daily_budget_minor",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.daily_budget_minor",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.bidding_strategy",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.BudgetAndBidding.BiddingStrategy"
+    },
+    {
+      "field_key": "project.bidding_strategy",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.BudgetAndBidding.BiddingStrategy"
+    },
+    {
+      "field_key": "project.bidding_strategy",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.bidding_strategy",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.charging_mode",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.BudgetAndBidding.ChargingMode"
+    },
+    {
+      "field_key": "project.charging_mode",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.BudgetAndBidding.ChargingMode"
+    },
+    {
+      "field_key": "project.charging_mode",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.charging_mode",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.bid_minor",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.BudgetAndBidding.BidMinor"
+    },
+    {
+      "field_key": "project.bid_minor",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "modelled",
+      "contract_path": "DeliveryDecisionCandidate.TargetConfiguration.Payload.OceanEngine.Project.BudgetAndBidding.BidMinor"
+    },
+    {
+      "field_key": "project.bid_minor",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.bid_minor",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.search_boost",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.SearchBoost"
+    },
+    {
+      "field_key": "project.search_boost",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.monitoring_references",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "dynamic_reference",
+      "contract_path": "OceanEngineConfiguration.Project.MonitoringReferences"
+    },
+    {
+      "field_key": "project.monitoring_references",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.project_name",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.ProjectName"
+    },
+    {
+      "field_key": "project.project_name",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.project_name",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.product_catalog_reference",
+      "destination": "DeliveryIntent",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryIntent.Payload.CalibrationManifest"
+    },
+    {
+      "field_key": "project.product_catalog_reference",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "dynamic_reference",
+      "contract_path": "OceanEngineConfiguration.Project.ProductCatalogReference"
+    },
+    {
+      "field_key": "project.product_catalog_reference",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.placement_strategy",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.PlacementStrategy"
+    },
+    {
+      "field_key": "project.placement_strategy",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryDecisionCandidate.CalibrationManifest"
+    },
+    {
+      "field_key": "project.placement_strategy",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.product_targeting",
+      "destination": "DeliveryIntent",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryIntent.Payload.CalibrationManifest"
+    },
+    {
+      "field_key": "project.product_targeting",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.ProductTargeting"
+    },
+    {
+      "field_key": "project.product_targeting",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.application_launch_mode",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Project.ApplicationLaunchMode"
+    },
+    {
+      "field_key": "project.application_launch_mode",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryDecisionCandidate.CalibrationManifest"
+    },
+    {
+      "field_key": "project.application_launch_mode",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.application_launch_mode",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.editable_surface",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "evidence_only",
+      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+    },
+    {
+      "field_key": "project.editable_surface",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryDecisionCandidate.CalibrationManifest"
+    },
+    {
+      "field_key": "project.editable_surface",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.editable_surface",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "promotion.delivery_identity",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Promotions[].DeliveryIdentity"
+    },
+    {
+      "field_key": "promotion.delivery_identity",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryDecisionCandidate.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.delivery_identity",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.delivery_identity",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "promotion.base_materials",
+      "destination": "DeliveryIntent",
+      "treatment": "modelled",
+      "contract_path": "DeliveryIntent.Payload.MaterialReferences"
+    },
+    {
+      "field_key": "promotion.base_materials",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Promotions[].BaseMaterialReferences"
+    },
+    {
+      "field_key": "promotion.base_materials",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.base_materials",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "promotion.landing_page_reference",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Promotions[].LandingPageReference"
+    },
+    {
+      "field_key": "promotion.landing_page_reference",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.landing_page_reference",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "promotion.product_image_references",
+      "destination": "DeliveryIntent",
+      "treatment": "dynamic_reference",
+      "contract_path": "DeliveryIntent.Payload.MaterialReferences"
+    },
+    {
+      "field_key": "promotion.product_image_references",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "dynamic_reference",
+      "contract_path": "OceanEngineConfiguration.Promotions[].ProductImageReferences"
+    },
+    {
+      "field_key": "promotion.product_image_references",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "dynamic_reference",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.product_image_references",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "promotion.product_selling_points",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Promotions[].ProductSellingPoints"
+    },
+    {
+      "field_key": "promotion.product_selling_points",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.product_selling_points",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "promotion.category",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "dynamic_reference",
+      "contract_path": "OceanEngineConfiguration.Promotions[].Settings.CategoryReference"
+    },
+    {
+      "field_key": "promotion.category",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.category",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "promotion.daily_budget",
+      "destination": "DeliveryIntent",
+      "treatment": "modelled",
+      "contract_path": "DeliveryIntent.Payload.BudgetBoundary"
+    },
+    {
+      "field_key": "promotion.daily_budget",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Promotions[].BudgetAndBidding"
+    },
+    {
+      "field_key": "promotion.daily_budget",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryDecisionCandidate.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.daily_budget",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.daily_budget",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "promotion.bid",
+      "destination": "DeliveryIntent",
+      "treatment": "blocked",
+      "contract_path": "DeliveryIntent.Payload.BudgetBoundary"
+    },
+    {
+      "field_key": "promotion.bid",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Promotions[].BudgetAndBidding"
+    },
+    {
+      "field_key": "promotion.bid",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "blocked",
+      "contract_path": "DeliveryDecisionCandidate.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.bid",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "blocked",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.bid",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    { "field_key": "promotion.native_anchor_reference", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].NativeAnchorReference" },
+    { "field_key": "promotion.native_anchor_reference", "destination": "PlatformSkill", "treatment": "dynamic_reference", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.direct_link_mode", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.DirectLinkMode" },
+    { "field_key": "promotion.direct_link_mode", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.direct_link_reference", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].DirectLinkReference" },
+    { "field_key": "promotion.direct_link_reference", "destination": "PlatformSkill", "treatment": "dynamic_reference", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.product_reference", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].ProductReference" },
+    { "field_key": "promotion.product_reference", "destination": "PlatformSkill", "treatment": "dynamic_reference", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.creative_component_references", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].CreativeComponentReferences" },
+    { "field_key": "promotion.creative_component_references", "destination": "PlatformSkill", "treatment": "dynamic_reference", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.call_to_action", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.CallToAction" },
+    { "field_key": "promotion.call_to_action", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.source_label", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.SourceLabel" },
+    { "field_key": "promotion.source_label", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.comments_enabled", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.CommentsEnabled" },
+    { "field_key": "promotion.comments_enabled", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.smart_generation_enabled", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.SmartGenerationEnabled" },
+    { "field_key": "promotion.smart_generation_enabled", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.brand_reference", "destination": "OceanEngineConfiguration", "treatment": "dynamic_reference", "contract_path": "OceanEngineConfiguration.Promotions[].Settings.BrandReference" },
+    { "field_key": "promotion.brand_reference", "destination": "PlatformSkill", "treatment": "dynamic_reference", "contract_path": "SkillDefinition.calibration_manifest" },
+    { "field_key": "promotion.promotion_name", "destination": "OceanEngineConfiguration", "treatment": "modelled", "contract_path": "OceanEngineConfiguration.Promotions[].PromotionName" },
+    { "field_key": "promotion.promotion_name", "destination": "CompiledDeliveryWorkflow", "treatment": "evidence_only", "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest" },
+    { "field_key": "promotion.promotion_name", "destination": "PlatformSkill", "treatment": "modelled", "contract_path": "SkillDefinition.calibration_manifest" },
+    {
+      "field_key": "promotion.editable_surface",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "evidence_only",
+      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+    },
+    {
+      "field_key": "promotion.editable_surface",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryDecisionCandidate.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.editable_surface",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.editable_surface",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "promotion.daily_budget_edit",
+      "destination": "DeliveryIntent",
+      "treatment": "modelled",
+      "contract_path": "DeliveryIntent.Payload.BudgetBoundary"
+    },
+    {
+      "field_key": "promotion.daily_budget_edit",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "modelled",
+      "contract_path": "OceanEngineConfiguration.Promotions[].BudgetAndBidding"
+    },
+    {
+      "field_key": "promotion.daily_budget_edit",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryDecisionCandidate.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.daily_budget_edit",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.daily_budget_edit",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "promotion.material_replacement_edit",
+      "destination": "DeliveryIntent",
+      "treatment": "dynamic_reference",
+      "contract_path": "DeliveryIntent.Payload.MaterialReferences"
+    },
+    {
+      "field_key": "promotion.material_replacement_edit",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "dynamic_reference",
+      "contract_path": "OceanEngineConfiguration.Promotions[].BaseMaterialReferences"
+    },
+    {
+      "field_key": "promotion.material_replacement_edit",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "dynamic_reference",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.material_replacement_edit",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "project.operational_state",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "evidence_only",
+      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+    },
+    {
+      "field_key": "project.operational_state",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryDecisionCandidate.CalibrationManifest"
+    },
+    {
+      "field_key": "project.operational_state",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "project.operational_state",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    },
+    {
+      "field_key": "promotion.operational_state",
+      "destination": "OceanEngineConfiguration",
+      "treatment": "evidence_only",
+      "contract_path": "OceanEngineConfiguration.CompilationMetadata.FieldEvidence"
+    },
+    {
+      "field_key": "promotion.operational_state",
+      "destination": "DeliveryDecisionCandidate",
+      "treatment": "evidence_only",
+      "contract_path": "DeliveryDecisionCandidate.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.operational_state",
+      "destination": "CompiledDeliveryWorkflow",
+      "treatment": "evidence_only",
+      "contract_path": "CompiledDeliveryWorkflow.CalibrationManifest"
+    },
+    {
+      "field_key": "promotion.operational_state",
+      "destination": "PlatformSkill",
+      "treatment": "evidence_only",
+      "contract_path": "SkillDefinition.calibration_manifest"
+    }
+  ]
+}

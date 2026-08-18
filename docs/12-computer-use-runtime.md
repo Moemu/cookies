@@ -53,14 +53,20 @@ Control Plane 不理解抖音/快手业务字段；平台页面流程由 Deliver
 7. 结果未知进入人工/对账，不自动重复点击。
 8. 结束后释放租约，保存脱敏证据和结构化审计。
 
-既有推广单元的有限修改不得复用创建时的审批。预算或授权素材每次变化都必须从已确认的推广单元 `PlatformEntityMapping` 读取精确对象，创建新的 ChangeSet、Approval、Execution 和 ComputerUseRun；提交前同时核对对象 ID、当前状态哈希和目标状态哈希。写后结果页与列表页均匹配后，Mapping 才递增版本并追加不可变修订记录。真实页面校准已确认排期属于父项目而不是推广单元；项目排期必须使用独立的项目 Mapping 和项目变更契约，不能借用推广单元 Mapping。
+### 5.1 生产 Authority 验收边界
+
+上述流程是生产目标，不是仅凭数据模型、fake Worker 或浏览器校准即可完成的验收。当前没有真实 Computer Use Agent 和可独立识别的执行身份；由同一 Codex 主体创建 ChangeSet、批准并点击，只能证明控制面状态机和页面接缝可工作，不能证明职责分离、授权真实性、会话归属或生产执行可信度。
+
+生产 Authority 端到端验收必须等真实 Computer Use 会话上线，并同时满足：审批主体独立于执行 Agent；Agent、会话和操作者身份可审计；SessionLease、站点与账户识别来自真实执行环境；最终确认绑定具体对象、动作、预算、配置 hash 和有效期；结果证据由该会话回传。上线前，自动化只能声明“控制面契约通过”，真实页面操作只能声明 `validated_for_field_calibration`，两者不得合并描述为“生产受控执行已验证”。
+
+上线后的既有推广单元有限修改不得复用创建时的审批。预算或授权素材每次生产变化都必须从已确认的推广单元 `PlatformEntityMapping` 读取精确对象，创建新的 ChangeSet、Approval、Execution 和 ComputerUseRun；提交前同时核对对象 ID、当前状态哈希和目标状态哈希。写后结果页与列表页均匹配后，Mapping 才递增版本并追加不可变修订记录。Phase D 字段校准使用独立的会话级授权，在授权测试对象上执行可逆写入并恢复原状，不为每个校准字段创建这些生产权限对象。真实页面校准已确认排期属于父项目而不是推广单元；项目排期必须使用独立的项目 Mapping 和项目变更契约，不能借用推广单元 Mapping。
 
 ## 6. 风险和动作策略
 
 - 只读：允许在站点白名单和数据范围内自动执行。
 - 草稿写入：可执行，但不能跨越提交、启用或支付动作。
 - 高风险写入：审批必须绑定账户、对象、内容哈希、预算、Skill 版本和有效期。
-- 紧急暂停：独立权限和操作入口，执行后必须验证最终状态。
+- 暂停：独立权限和操作入口，执行后必须验证最终状态。
 - 禁止：密码/验证码输入、权限提升、绕过风控、未知程序下载、访问未允许站点。
 
 网页、弹窗、私信、下载和素材文本均为不可信输入，不得改变系统策略或工具权限。
@@ -98,25 +104,27 @@ Control Plane 不理解抖音/快手业务字段；平台页面流程由 Deliver
 - `/platform/v1/computer-use/environments/*`、`devices/*`、`profiles/*`。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-change-sets`：从已确认推广单元 Mapping 创建一次预算或授权素材变更。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}:confirm-mutation`：以同一 Run 的结果页和列表页证据递增 Mapping 版本。
-- `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/emergency-pause-change-sets`：只对状态为 `delivering` 的已确认推广单元创建独立紧急暂停 ChangeSet；目标状态由服务端固定为 `paused`。
-- `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-restart-change-sets`：只允许从本系统确认的紧急暂停修订创建全新重启 ChangeSet；预算、有效排期、授权素材和授权落地页必须重新核对。
+- `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/emergency-pause-change-sets`：只对状态为 `delivering` 的已确认推广单元创建独立暂停 ChangeSet；路径名为兼容性机器标识，目标状态由服务端固定为 `paused`。
+- `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-restart-change-sets`：只允许从本系统确认的暂停修订创建全新启用 ChangeSet；路径名为兼容性机器标识，预算、有效排期、授权素材和授权落地页必须重新核对。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}:confirm-change`：以结果页和列表页的同对象、同状态、同目标状态哈希证据推进暂停或其他既有对象变更后的 Mapping 版本。
 
 所有写接口使用幂等键；确认令牌只能消费一次，且只匹配完全一致的动作哈希。
 
 ComputerUseRun 的 `pause/resume` 只控制执行流程，不改变广告平台对象状态。
-平台推广单元的紧急暂停使用独立 `pause_promotion` 权威链，绑定账户、父项目、
-推广单元、Mapping 版本、当前日预算和唯一操作人。Run 创建人、最终确认签发人
-与点击操作人必须是该绑定操作人；写后恢复租约可以由其他操作人接管查询，
-但不能签发或执行第二次点击。当前 Skill 尚未完成真实暂停页面校准，生产能力
-保持关闭；fake Worker 和无写预演不得被描述为真实平台暂停成功。
+平台推广单元的暂停使用独立 `pause_promotion` 权威链，绑定账户、父项目、
+推广单元、Mapping 版本、当前日预算和唯一执行操作人。Run 与最终点击必须绑定该
+执行操作人，但生产 Approval 必须由独立审批主体签发；执行 Agent 不能代替审批人。
+写后恢复租约可以由其他操作人接管查询，但不能签发或执行第二次点击。当前 Skill
+已在授权测试对象完成暂停与恢复原状的
+字段校准；这不等于生产权限已签发，fake Worker 和无写预演仍不得被描述为真实平台暂停成功。
 
-受控重启不是暂停的自动补偿，也不能复用暂停 Approval。Mapping 的最新权威动作必须
+启用不是暂停的自动补偿，也不能复用暂停 Approval。Mapping 的最新权威动作必须
 是 `pause_promotion` 且平台状态仍为 `paused`；当前日预算必须等于暂停时冻结值。
 新的 `resume_promotion` ChangeSet/Approval 绑定有效排期、素材与落地页授权证据和
 唯一操作人。最终点击前必须重新读取账户、父项目、对象、状态、日预算、排期哈希、
 素材集合与落地页，并证明素材和落地页仍可用；排期过期、页面漂移或任一级 Kill
-Switch 激活都会阻断。当前 Skill 尚未校准真实重启控制，仍只开放 fake/no-write 路径。
+Switch 激活都会阻断。当前 Skill 已在授权测试对象完成启用与恢复原状的字段校准；
+上线后的启用仍必须通过上述全量重检和独立生产权限链。
 
 ## 11. MVP 验收
 
@@ -134,5 +142,5 @@ Switch 激活都会阻断。当前 Skill 尚未校准真实重启控制，仍只
 | --- | --- | --- |
 | v0.1 | 2026-07-20 | 确定受控远程设备模式，定义会话隔离、接管、证据、恢复和发布门禁 |
 | v0.2 | 2026-08-14 | 增加指定推广单元的预算、授权素材有限变更和 Mapping 修订链；真实页面确认排期属于父项目，项目排期需独立 Mapping 与变更契约；真实最终点击仍需执行当轮单独授权 |
-| v0.3 | 2026-08-14 | 增加操作人绑定的独立紧急暂停权威链与 fake/no-write 路径；真实暂停仍需单独页面校准和当轮授权 |
-| v0.4 | 2026-08-14 | 增加从受控暂停出发、严格重检预算/排期/素材/落地页/身份/Kill Switch 的独立重启权威链；不作为自动补偿 |
+| v0.3 | 2026-08-14 | 增加操作人绑定的独立暂停权威链与 fake/no-write 路径；生产暂停仍需当轮授权 |
+| v0.4 | 2026-08-14 | 增加从暂停出发、严格重检预算/排期/素材/落地页/身份/Kill Switch 的独立启用权威链；不作为自动补偿 |

@@ -28,6 +28,9 @@ func TestBuildDeliveryDecisionIsDeterministicAndExplainable(t *testing.T) {
 		if candidate.TargetConfiguration.ConfigurationProvenance.Kind != ConfigurationGeneratedByDecisionEngine || candidate.TargetConfiguration.CanonicalHash == "" {
 			t.Fatalf("candidate is not an immutable decision-engine configuration: %#v", candidate)
 		}
+		if candidate.CalibrationManifest != candidate.TargetConfiguration.Payload.OceanEngine.CalibrationManifest {
+			t.Fatalf("candidate must retain the configuration calibration manifest: %#v", candidate)
+		}
 		for _, constraint := range candidate.Constraints {
 			if !constraint.Passed {
 				t.Fatalf("candidate %s violates %s", candidate.ID, constraint.Code)
@@ -74,6 +77,28 @@ func TestCompileDeliveryWorkflowHardStopsRemoteWrite(t *testing.T) {
 	}
 	if workflow.CanonicalHash == "" || workflow.ConfigurationCanonicalHash != candidate.TargetConfiguration.CanonicalHash {
 		t.Fatal("workflow must bind the selected immutable configuration")
+	}
+	if workflow.CalibrationManifest != candidate.CalibrationManifest {
+		t.Fatalf("workflow must retain the selected candidate calibration manifest: %#v", workflow)
+	}
+	var typedControl, evidenceOnly, blocked bool
+	for _, step := range workflow.Steps {
+		for _, field := range step.Fields {
+			if field.Control != nil {
+				typedControl = field.Control.Operation != "" && field.Control.ExpectedTargetCount == 1 && field.Control.Scope.Value != "" && field.Control.Target.Value != "" && field.Control.Readback.Value != ""
+			}
+		}
+	}
+	for _, diagnostic := range workflow.ManifestDiagnostics {
+		if diagnostic.FieldKey == "project.project_name" && diagnostic.State == "evidence_only" {
+			evidenceOnly = true
+		}
+		if diagnostic.FieldKey == "promotion.bid" && diagnostic.State == "blocked" && diagnostic.Reason != "" {
+			blocked = true
+		}
+	}
+	if !typedControl || !evidenceOnly || !blocked {
+		t.Fatalf("workflow must preserve typed controls and Manifest treatment diagnostics: control=%t evidence=%t blocked=%t", typedControl, evidenceOnly, blocked)
 	}
 	duplicate, err := CompileDeliveryWorkflow("workflow-1", decision, candidate, "operator-1", now)
 	if err != nil {

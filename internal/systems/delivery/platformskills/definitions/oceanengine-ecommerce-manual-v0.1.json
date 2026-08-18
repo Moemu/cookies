@@ -2,13 +2,15 @@
   "schema_version": "delivery-platform-skill-definition/v1",
   "id": "oceanengine-ecommerce-manual",
   "version": "v0.1-calibration",
-  "display_name": "巨量引擎·电商手动投放",
+  "display_name": "巨量引擎·Playwright RPA 投放",
   "platform": "ocean_engine",
   "capability": "ecommerce_manual_delivery",
   "status": "gate_two_passed_takeover_submit_calibration",
   "owner": "delivery",
-  "executable": false,
-  "real_browser_driver": false,
+  "executable": true,
+  "real_browser_driver": true,
+  "execution_driver": "playwright-rpa/edge/v1",
+  "script_ref": "scripts/oceanengine-playwright-rpa.ts",
   "submit_allowed": true,
   "evidence_observed_at": "2026-08-06",
   "last_reviewed_at": "2026-08-14",
@@ -20,7 +22,15 @@
     "drift_check": "existing_object_edit_surfaces_revalidated_with_brand_locator_drift"
   },
   "schema_ref": "docs/delivery/schemas/oceanengine-bidding-schema-v0.1.json",
+  "calibration_manifest": {
+    "schema_version": "oceanengine-calibration-manifest/v1",
+    "manifest_id": "oceanengine-calibration-current-test-account-2026-08-16",
+    "fixture_ref": "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json"
+  },
   "evidence_refs": [
+    "docs/delivery/fixtures/oceanengine-calibration-manifest-v1.json",
+    "docs/delivery/evidence/oceanengine-calibration-session-2026-08-16.json",
+    "docs/delivery/evidence/oceanengine-d3-write-calibration-2026-08-16.json",
     "docs/delivery/oceanengine-readonly-calibration.md",
     "docs/delivery/read-only-calibration-closeout.md",
     "docs/delivery/oceanengine-schema-calibration.md",
@@ -56,9 +66,9 @@
   ],
   "capabilities": {
     "allowed": ["navigate", "identify_page", "identify_account", "identify_project", "fill_unsubmitted_form", "readback_field", "discard_local_draft", "verify_no_write", "controlled_final_submit_once", "record_post_write_result", "confirm_platform_mapping"],
-    "forbidden": ["unattended_submit", "submit_without_current_turn_authorization", "resubmit_after_click", "enable", "pause_remote_object", "modify_remote_object", "delete", "upload"]
+    "forbidden": ["submit_without_current_turn_authorization", "resubmit_after_click", "delete_without_authority", "coordinate_locator", "display_name_as_reference_key"]
   },
-  "dynamic_condition_keys": ["marketing_purpose", "marketing_scenario", "marketing_product_ref", "optimization_target_reference", "deep_optimization_mode", "delivery_mode", "schedule", "daily_budget", "bidding_strategy", "charging_mode", "bid", "roi_coefficient"],
+  "dynamic_condition_keys": ["marketing_purpose", "marketing_scenario", "marketing_product_reference", "application_reference", "application_scenario", "operating_system", "application_download_mode", "lead_capture_mode", "carrier", "optimization_target_reference", "deep_optimization_mode", "aigc_dynamic_creative", "delivery_mode", "schedule", "daily_budget", "bidding_strategy", "charging_mode", "bid", "roi_coefficient"],
   "safety_exit": {
     "method": "discard_unsubmitted_local_form",
     "required_proof": "return_to_known_readonly_page_and_confirm_no_platform_write_or_approved_field_change"

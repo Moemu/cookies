@@ -82,7 +82,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 - 账户业务映射由本系统维护；设备、允许应用/站点等全局策略跳转 `/admin/computer-use/*`。
 - 审批中心展示投放差异与风险，底层审批人和签名能力来自共享基座。
 - 平台能力运营只维护抖音/快手业务流程，不重复实现全局 Skill Registry。
-- 权限使用 `delivery.*` 动作，查看、编辑、审批、执行、紧急暂停相互独立。
+- 权限使用 `delivery.*` 动作，查看、编辑、审批、执行、暂停相互独立。
 
 ## 3. 使用前提
 
@@ -248,7 +248,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 | DL-013 | P0 | 暂停/取消/接管 | 用户可随时暂停、取消或接管；恢复前重新识别页面。 |
 | DL-014 | P0 | 人工验证节点 | 验证码、登录、2FA、权限申请和未知页面必须转人工。 |
 | DL-015 | P0 | 证据与审计 | 保存计划、步骤、关键截图、批准、页面结果和操作者。 |
-| DL-016 | P0 | 紧急暂停 | 独立权限执行计划暂停，并验证平台最终状态。 |
+| DL-016 | P0 | 暂停 | 独立权限执行计划暂停，并验证平台最终状态。 |
 | DL-017 | P0 | 状态/数据读取 | 通过 Computer Use 或已批准的结构化方式读取状态和关键数据。 |
 | DL-018 | P0 | 异常告警 | 发现拒审、会话失效、追踪中断、消耗/成本异常和素材疲劳。 |
 | DL-019 | P1 | 优化建议 | Codex 结合策略、素材经验和数据生成建议、风险与观察期。 |
@@ -300,7 +300,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 - 管理员配置可访问平台、账户、允许应用/站点、Skills 和预算政策。
 - 投手可创建计划并执行其授权账户内的已批准动作。
 - 审批人按账户、动作和金额设置额度，不能批准超出自身权限的变更。
-- 紧急暂停权限独立，不自动包含启用或调预算权限。
+- 暂停权限独立，不自动包含启用或调预算权限。
 - 查看页面截图不代表可以访问账户凭据；截图按敏感数据权限控制。
 
 ## 12. 数据与接口建议
@@ -317,7 +317,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 | `POST /platform/v1/computer-use-runs/{id}/confirm` | 确认当前敏感动作，绑定投放审批令牌 |
 | `POST /platform/v1/computer-use-runs/{id}/takeover` | 暂停 Agent 并交给用户接管 |
 | `POST /platform/v1/computer-use-runs/{id}/resume` | 用户完成接管后重新识别并继续 |
-| `POST /api/delivery/v1/plans/{id}/pause` | 执行紧急暂停流程 |
+| `POST /api/delivery/v1/plans/{id}/pause` | 执行暂停流程 |
 | `GET /api/delivery/v1/plans/{id}/evidence` | 查看步骤、页面证据、审批和结果 |
 | `GET /api/delivery/v1/plans/{id}/metrics` | 返回指标、口径和新鲜度 |
 
@@ -341,7 +341,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 - 结果未知率、重复对象数（目标为 0）和部分成功率。
 - 高风险动作人工确认覆盖率（目标 100%）。
 - 页面变化导致 Skill 停用次数和恢复时间。
-- 异常告警有效率、确认时间和紧急暂停成功率。
+- 异常告警有效率、确认时间和暂停成功率。
 - 优化建议查看、采纳、执行及执行后相对效果。
 
 关键事件：`delivery_plan_created`、`preflight_completed`、`computer_use_environment_checked`、`platform_page_identified`、`computer_use_step_completed`、`delivery_difference_detected`、`sensitive_action_requested`、`sensitive_action_approved`、`user_takeover_started`、`delivery_submitted`、`delivery_result_verified`、`delivery_result_unknown`、`emergency_pause_completed`。
@@ -374,7 +374,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 9. 提交结果未知时不会自动重复点击，先检查平台已有对象。
 10. 用户可以随时暂停、取消或接管；恢复时从重新识别页面开始。
 11. 部分创建成功时，系统列出成功与失败对象，不重复创建成功项。
-12. 紧急暂停由独立权限触发，执行后验证平台状态并通知负责人。
+12. 暂停由独立权限触发，执行后验证平台状态并通知负责人。
 13. 页面中的未知指令无法改变预算、审批或允许站点范围。
 14. 每个关键动作可追溯计划、Skill、审批人、页面证据和结果。
 15. `/delivery/*` 独立提供账户、计划、执行、监控、优化、审批和证据导航；共享 Computer Use 管理台只负责设备与安全策略。

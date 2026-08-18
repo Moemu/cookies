@@ -43,6 +43,8 @@ export type DeliverySource = 'mock'
 export type DeliveryScenario = 'golden_path' | 'budget_zero' | 'creative_unconfirmed' | 'tracking_missing' | 'incomplete_draft' | 'project_plan_list' | 'approval_queue' | 'missing_required_field' | 'orphan_dependency' | 'missing_confirmation' | 'platform_fields_pending' | 'platform_configuration' | 'capability_pending' | 'preflight_failure' | 'approval_expired' | 'plan_stale' | 'partial_execution' | 'result_unknown' | 'review_rejected_alert'
 
 export type DeliveryPlatform = 'ocean_engine' | 'magnetic_engine'
+export const oceanEngineMarketingPurposes = ['ecommerce', 'lead_generation', 'application', 'product_catalog', 'content_marketing'] as const
+export type OceanEngineMarketingPurpose = typeof oceanEngineMarketingPurposes[number]
 export type StableReference = {
   namespace: string
   object_kind: string
@@ -50,10 +52,17 @@ export type StableReference = {
   id?: string
   version?: string
   content_hash?: string
+  semantic_key?: string
+  audit_attributes?: Record<string, string>
   state: 'resolved' | 'unresolved' | 'blocked' | 'redacted'
   reason?: string
   display_name_snapshot?: string
   evidence_version?: string
+}
+
+export type OceanEngineCalibrationManifestBinding = {
+  schema_version: 'oceanengine-calibration-manifest/v1'
+  manifest_id: string
 }
 
 export type DeliveryIntent = {
@@ -73,6 +82,7 @@ export type DeliveryIntent = {
     material_references: StableReference[]
     audience_constraints: { include_references?: StableReference[]; exclude_references?: StableReference[]; constraints?: string[] }
     strategy_reference: StableReference
+    calibration_manifest: OceanEngineCalibrationManifestBinding
   }
   configuration_provenance: { kind: 'manual' | 'rule' | 'decision_engine' | 'import'; generator_ref?: string; policy_version?: string }
   fact_provenance: { source: 'mock' | 'replay' | 'connector' | 'page_evidence'; snapshot_ref?: string; evidence_refs?: string[]; observed_at?: string }
@@ -92,17 +102,34 @@ export type PlatformConfiguration = {
     profile: DeliveryPlatform
     ocean_engine?: {
       profile: 'ocean_engine'
+      calibration_manifest: OceanEngineCalibrationManifestBinding
       project: {
         draft_schema_version: 'oceanengine-configuration/v1'
         project_draft_id: string
         account_reference: StableReference
         marketing_purpose: string
         marketing_scenario: string
+        marketing_product_reference?: StableReference
+        application_reference?: StableReference
+        application_scenario?: string
+        operating_system?: string
+        application_download_mode?: string
+        lead_capture_mode?: string
         carrier: string
+        optimization_target_reference?: StableReference
+        deep_optimization_mode?: string
+        aigc_dynamic_creative?: boolean
         delivery_mode: string
         targeting: { regions?: string[]; age_ranges?: string[]; gender?: string; smart_expansion: boolean }
-        schedule: { start_at: string; end_at: string; timezone: string }
+        schedule: { mode?: 'long_term' | 'fixed_range'; start_at: string; end_at: string; timezone: string }
         budget_and_bidding: { currency: 'CNY'; daily_budget_minor: number; bidding_strategy: string; charging_mode: string; bid_minor?: number }
+        monitoring_references?: StableReference[]
+        search_boost?: { keywords?: string[]; bid_coefficient?: number; targeting_expansion?: boolean }
+        product_catalog_reference?: StableReference
+        placement_strategy?: string
+        placement_media?: string[]
+        product_targeting?: { rta_redirect?: boolean; region_match?: boolean; delivery_conditions?: string[] }
+        application_launch_mode?: string
         project_name: string
       }
       promotions: Array<{
@@ -111,8 +138,15 @@ export type PlatformConfiguration = {
         delivery_identity: { mode: string; authorized_identity?: StableReference }
         base_material_references: StableReference[]
         copy_items: Array<{ text: string }>
+        product_image_references?: StableReference[]
+        product_selling_points?: string[]
+        native_anchor_reference?: StableReference
         landing_page_reference?: StableReference
-        settings: { call_to_action?: string; source_label?: string; comments_enabled?: boolean }
+        direct_link_reference?: StableReference
+        product_reference?: StableReference
+        creative_component_references?: StableReference[]
+        budget_and_bidding?: { currency: 'CNY'; daily_budget_minor: number; bidding_strategy: string; charging_mode: string; bid_minor?: number }
+        settings: { call_to_action?: string; source_label?: string; comments_enabled?: boolean; smart_generation_enabled?: boolean; client_download_enabled?: boolean; direct_link_mode?: 'automatic' | 'manual'; category_reference?: StableReference; brand_reference?: StableReference }
         promotion_name: string
       }>
     }
@@ -127,6 +161,16 @@ export type PlatformConfiguration = {
 export type DeliveryPlanDraft = {
   name: string
   objective: string
+  /** A confirmed platform enum. It is separate from the free-text business objective. */
+  marketingPurpose: OceanEngineMarketingPurpose | ''
+  marketingProduct: {
+    id: string
+    oceanEngineProductId?: string
+    name: string
+    activityType: string
+    activityName: string
+    brandName: string
+  }
   advertiser: {
     id: string
     name: string
@@ -137,14 +181,29 @@ export type DeliveryPlanDraft = {
     currency: 'CNY'
   }
   schedule: {
+    mode: 'long_term' | 'fixed_range'
     startAt: string
     endAt: string
     timezone: string
   }
   tracking: {
+    deliveryCarrier: '' | 'orange_landing_page' | 'owned_landing_page'
     landingPage: string
     pixelId: string
     conversionEvent: string
+    optimizationTargetId: string
+    optimizationTargetName: string
+    optimizationTargetSemanticKey: string
+    eventAssetName: string
+    eventAssetType: string
+    searchKeywords: string
+    searchBidCoefficient: number
+    searchTargetingExpansion: boolean
+    monitoringImpression: string
+    monitoringValidTouch: string
+    monitoringVideoPlay: string
+    monitoringVideoComplete: string
+    monitoringValidVideoPlay: string
   }
   creativeReferences: Array<{
     assetId: string
@@ -152,6 +211,7 @@ export type DeliveryPlanDraft = {
     contentHash?: string
     route?: string
     confirmed: boolean
+    oceanEngineMaterialId?: string
   }>
   strategyReference: {
     taskId: string
@@ -220,6 +280,7 @@ export type DeliveryDecisionCandidate = {
   constraints: Array<{ code: string; passed: boolean; explanation: string }>
   risks: string[]
   uncertainty: 'low' | 'medium' | 'high'
+  calibrationManifest: OceanEngineCalibrationManifestBinding
 }
 
 export type DeliveryDecision = {
@@ -253,6 +314,8 @@ export type CompiledDeliveryWorkflow = {
   capabilityContractVersion: 'oceanengine-capability/v0.1'
   selectorContractVersion: 'oceanengine-selector-contract/v0.1'
   actionContractVersion: 'oceanengine-action-contract/v0.1'
+  executionDriver: 'playwright-rpa/edge/v1'
+  calibrationManifest: OceanEngineCalibrationManifestBinding
   compilerVersion: 'oceanengine-workflow-compiler/v1'
   status: 'ready_for_final_approval'
   remoteWriteEnabled: false
@@ -476,11 +539,18 @@ export type DeliveryExecutionRecord = {
 type WireDeliveryPlanDraft = {
   name: string
   objective: string
+  marketing_purpose?: OceanEngineMarketingPurpose
   advertiser: { id: string; name: string; platform: 'ocean_engine'; source?: DeliverySource; scenario?: DeliveryScenario }
   budget: { total_minor: number; currency: 'CNY' }
-  schedule: { start_at: string; end_at: string; timezone: string }
-  tracking: { landing_page: string; pixel_id: string; conversion_event: string }
-  creative_references: Array<{ asset_id: string; version: number; content_hash?: string; route?: string; confirmed: boolean }>
+  schedule: { mode?: 'long_term' | 'fixed_range'; start_at: string; end_at: string; timezone: string }
+  marketing_product?: { id?: string; ocean_engine_product_id?: string; name?: string; activity_type?: string; activity_name?: string; brand_name?: string }
+  tracking: {
+    delivery_carrier?: '' | 'orange_landing_page' | 'owned_landing_page'; landing_page: string; pixel_id: string; conversion_event: string
+    optimization_target_id?: string; optimization_target_name?: string; event_asset_name?: string; event_asset_type?: string
+    search_keywords?: string; search_bid_coefficient?: number; search_targeting_expansion?: boolean
+    monitoring_impression?: string; monitoring_valid_touch?: string; monitoring_video_play?: string; monitoring_video_complete?: string; monitoring_valid_video_play?: string
+  }
+  creative_references: Array<{ asset_id: string; version: number; content_hash?: string; route?: string; confirmed: boolean; ocean_engine_material_id?: string }>
   strategy_reference?: { task_id: string; version: number; content_hash?: string; route?: string }
   source_strategy_version: string
 }
@@ -643,7 +713,7 @@ type WireDeliveryDecision = {
   policy_version: 'delivery-decision-policy/v1'
   diagnostic: { code: DeliveryDecision['diagnostic']['code']; explanation: string; next_action: string }
   inputs: { plan_id: string; plan_version: number; plan_canonical_hash: string; intent_canonical_hash: string; configuration_canonical_hash: string; fact_snapshot_ref: string; simulation_run_id?: string; simulation_input_hash?: string }
-  candidates: Array<{ id: string; kind: DeliveryDecisionCandidate['kind']; target_configuration: PlatformConfiguration; budget_change_percent: number; rationale: string[]; constraints: DeliveryDecisionCandidate['constraints']; risks: string[]; uncertainty: DeliveryDecisionCandidate['uncertainty'] }>
+  candidates: Array<{ id: string; kind: DeliveryDecisionCandidate['kind']; target_configuration: PlatformConfiguration; budget_change_percent: number; rationale: string[]; constraints: DeliveryDecisionCandidate['constraints']; risks: string[]; uncertainty: DeliveryDecisionCandidate['uncertainty']; calibration_manifest: OceanEngineCalibrationManifestBinding }>
   recommended_candidate_id: string
   evidence: string[]
   canonical_hash: string
@@ -658,7 +728,7 @@ type WireDecisionSelection = {
   candidate_id: string
   configuration: PlatformConfiguration
   workflow: {
-    schema_version: 'compiled-delivery-workflow/v1'; id: string; decision_id: string; decision_canonical_hash: string; selected_candidate_id: string; configuration_canonical_hash: string; configuration_id: string; configuration_version: number; platform: 'ocean_engine'; profile_version: 'oceanengine-configuration/v1'; account_reference: StableReference; capability_contract_version: 'oceanengine-capability/v0.1'; selector_contract_version: 'oceanengine-selector-contract/v0.1'; action_contract_version: 'oceanengine-action-contract/v0.1'; compiler_version: 'oceanengine-workflow-compiler/v1'; status: 'ready_for_final_approval'; remote_write_enabled: false
+    schema_version: 'compiled-delivery-workflow/v1'; id: string; decision_id: string; decision_canonical_hash: string; selected_candidate_id: string; configuration_canonical_hash: string; configuration_id: string; configuration_version: number; platform: 'ocean_engine'; profile_version: 'oceanengine-configuration/v1'; account_reference: StableReference; capability_contract_version: 'oceanengine-capability/v0.1'; selector_contract_version: 'oceanengine-selector-contract/v0.1'; action_contract_version: 'oceanengine-action-contract/v0.1'; execution_driver: 'playwright-rpa/edge/v1'; calibration_manifest: OceanEngineCalibrationManifestBinding; compiler_version: 'oceanengine-workflow-compiler/v1'; status: 'ready_for_final_approval'; remote_write_enabled: false
     steps: Array<{ id: string; sequence: number; page: string; action: string; risk: 'observe' | 'prepare_local_form' | 'remote_write'; preconditions: string[]; fields: Array<{ key: string; value: unknown; expected_readback: unknown; evidence_ref: string }>; timeout_seconds: number; recovery: string; blocked: boolean; block_reason?: 'PHASE_C_REMOTE_WRITE_PROHIBITED' }>
     canonical_hash: string; created_at: string
   }
@@ -853,6 +923,22 @@ export const deliveryPlanApi = {
       body: JSON.stringify({ expected_version: expectedVersion, ...toPlatformRuntimeDraft(projectId, planId, expectedVersion + 1, draft) }),
     })
     return toDeliveryPlan(response)
+  },
+  async updatePlatformConfiguration(projectId: string, plan: DeliveryPlan, configuration: PlatformConfiguration): Promise<DeliveryPlan> {
+    const intent = plan.currentVersion.deliveryIntent
+    if (!intent) throw new DeliveryApiError('LEGACY_CONFIGURATION_UNSUPPORTED', 409, '当前计划没有可编辑的业务意图。')
+    const nextVersion = plan.currentVersionNumber + 1
+    const nextIntent = { ...intent, version_number: nextVersion, canonical_hash: undefined }
+    const nextConfiguration = {
+      ...configuration,
+      version_number: nextVersion,
+      canonical_hash: undefined,
+      intent: { schema_version: 'delivery-intent/v1' as const, intent_id: nextIntent.intent_id, version_number: nextVersion },
+    }
+    return toDeliveryPlan(await deliveryPlanRequest<WireDeliveryPlan>(projectId, `/plans/${encodeURIComponent(plan.id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ expected_version: plan.currentVersionNumber, intent: nextIntent, platform_configuration: nextConfiguration }),
+    }))
   },
   async preflight(projectId: string, planId: string): Promise<DeliveryPreflightResult> {
     const response = await deliveryPlanRequest<WirePreflightResult>(projectId, `/plans/${encodeURIComponent(planId)}/preflight`, { method: 'POST' })
@@ -1477,9 +1563,15 @@ function toWireDraft(draft: DeliveryPlanDraft): WireDeliveryPlanDraft {
   return {
     name: draft.name,
     objective: draft.objective,
+    marketing_purpose: draft.marketingPurpose || undefined,
     advertiser: draft.advertiser,
     budget: { total_minor: draft.budget.totalMinor, currency: draft.budget.currency },
     schedule: { start_at: draft.schedule.startAt, end_at: draft.schedule.endAt, timezone: draft.schedule.timezone },
+    marketing_product: draft.marketingProduct.id ? {
+      id: draft.marketingProduct.id, ocean_engine_product_id: draft.marketingProduct.oceanEngineProductId,
+      name: draft.marketingProduct.name, activity_type: draft.marketingProduct.activityType,
+      activity_name: draft.marketingProduct.activityName, brand_name: draft.marketingProduct.brandName,
+    } : undefined,
     tracking: {
       landing_page: draft.tracking.landingPage,
       pixel_id: draft.tracking.pixelId,
@@ -1491,6 +1583,7 @@ function toWireDraft(draft: DeliveryPlanDraft): WireDeliveryPlanDraft {
       content_hash: reference.contentHash,
       route: reference.route,
       confirmed: reference.confirmed,
+      ocean_engine_material_id: reference.oceanEngineMaterialId,
     })),
     strategy_reference: {
       task_id: draft.strategyReference.taskId,
@@ -1504,10 +1597,30 @@ function toWireDraft(draft: DeliveryPlanDraft): WireDeliveryPlanDraft {
 
 function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumber: number, draft: DeliveryPlanDraft) {
   const scope = `project:${projectId}`
+  const marketingProductReference: StableReference | undefined = draft.marketingProduct.id ? {
+    namespace: 'cookies', object_kind: 'product', scope, id: draft.marketingProduct.id, state: 'resolved',
+    display_name_snapshot: draft.marketingProduct.name,
+    audit_attributes: { ocean_engine_product_id: draft.marketingProduct.oceanEngineProductId ?? '', activity_type: draft.marketingProduct.activityType, activity_name: draft.marketingProduct.activityName, brand_name: draft.marketingProduct.brandName },
+  } : undefined
+  const optimizationTargetReference: StableReference | undefined = draft.tracking.optimizationTargetId ? {
+    namespace: 'oceanengine', object_kind: 'optimization_target', scope, id: draft.tracking.optimizationTargetId, state: 'resolved',
+    semantic_key: draft.tracking.optimizationTargetSemanticKey || undefined,
+    display_name_snapshot: draft.tracking.optimizationTargetName,
+    audit_attributes: { event_asset_name: draft.tracking.eventAssetName, event_asset_type: draft.tracking.eventAssetType },
+  } : undefined
+  const monitoringReferences = [
+    ['impression', draft.tracking.monitoringImpression], ['valid_touch', draft.tracking.monitoringValidTouch],
+    ['video_play', draft.tracking.monitoringVideoPlay], ['video_complete', draft.tracking.monitoringVideoComplete],
+    ['valid_video_play', draft.tracking.monitoringValidVideoPlay],
+  ].flatMap(([kind, url]) => url ? [{ namespace: 'oceanengine', object_kind: `monitoring_link_${kind}`, scope, id: url, state: 'resolved' as const }] : [])
+  const landingPageReference: StableReference | undefined = draft.tracking.deliveryCarrier === 'owned_landing_page' && draft.tracking.landingPage ? {
+    namespace: 'cookies', object_kind: 'landing_page', scope, id: draft.tracking.landingPage, state: 'resolved',
+  } : undefined
   const materialReferences: StableReference[] = draft.creativeReferences.map(reference => ({
     namespace: 'cookies', object_kind: 'asset_version', scope,
     id: reference.assetId, version: String(reference.version), content_hash: reference.contentHash,
     state: 'resolved', display_name_snapshot: reference.assetId,
+    audit_attributes: { ocean_engine_material_id: reference.oceanEngineMaterialId ?? '' },
   }))
   const strategyReference: StableReference = {
     namespace: 'cookies', object_kind: 'strategy_version', scope,
@@ -1522,34 +1635,41 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
       budget_boundary: { currency: 'CNY', minimum_total_minor: 0, maximum_total_minor: draft.budget.totalMinor },
       schedule_boundary: { earliest_start: draft.schedule.startAt, latest_end: draft.schedule.endAt, timezone: draft.schedule.timezone },
       optimization_preferences: [], material_references: materialReferences,
-      landing_page_references: [{ namespace: 'cookies', object_kind: 'landing_page', scope, id: draft.tracking.landingPage, state: 'resolved' }],
+      landing_page_references: landingPageReference ? [landingPageReference] : [],
       audience_constraints: { constraints: [] }, strategy_reference: strategyReference,
+      calibration_manifest: { schema_version: 'oceanengine-calibration-manifest/v1', manifest_id: 'oceanengine-calibration-current-test-account-2026-08-16' },
     },
     configuration_provenance: { kind: 'manual', generator_ref: 'delivery-plan-editor' },
     fact_provenance: { source: 'mock', snapshot_ref: `mock://delivery-intent/${identity}/${versionNumber}` },
   }
-  const dailyBudget = Math.max(0, Math.floor(draft.budget.totalMinor / Math.max(1, Math.ceil((Date.parse(draft.schedule.endAt) - Date.parse(draft.schedule.startAt)) / 86_400_000))))
+  const dailyBudget = draft.schedule.mode === 'long_term'
+    ? draft.budget.totalMinor
+    : Math.max(0, Math.floor(draft.budget.totalMinor / Math.max(1, Math.ceil((Date.parse(draft.schedule.endAt) - Date.parse(draft.schedule.startAt)) / 86_400_000))))
   const configuration: PlatformConfiguration = {
     schema_version: 'delivery-platform-configuration/v2', configuration_id: `configuration-${identity}`, version_number: versionNumber,
     platform: 'ocean_engine', profile_version: 'oceanengine-configuration/v1', hash_algorithm: 'RFC8785-JCS-SHA256(canonical_payload)',
     payload: {
       profile: 'ocean_engine',
       ocean_engine: {
-        profile: 'ocean_engine',
+        profile: 'ocean_engine', calibration_manifest: { schema_version: 'oceanengine-calibration-manifest/v1', manifest_id: 'oceanengine-calibration-current-test-account-2026-08-16' },
         project: {
           draft_schema_version: 'oceanengine-configuration/v1', project_draft_id: `project-${identity}-${versionNumber}`,
           account_reference: { namespace: 'oceanengine', object_kind: 'advertiser_account', scope, id: draft.advertiser.id, state: 'resolved', display_name_snapshot: draft.advertiser.name },
-          marketing_purpose: draft.objective, marketing_scenario: 'manual_delivery', carrier: 'landing_page', delivery_mode: 'manual',
+          marketing_purpose: draft.marketingPurpose, marketing_scenario: 'short_video_image_text',
+          marketing_product_reference: marketingProductReference,
+          carrier: draft.tracking.deliveryCarrier, optimization_target_reference: optimizationTargetReference, delivery_mode: 'manual',
           targeting: { smart_expansion: false },
-          schedule: { start_at: draft.schedule.startAt, end_at: draft.schedule.endAt, timezone: draft.schedule.timezone },
-          budget_and_bidding: { currency: 'CNY', daily_budget_minor: dailyBudget, bidding_strategy: 'manual_bid', charging_mode: 'CPC', bid_minor: 0 },
+          schedule: { mode: draft.schedule.mode, start_at: draft.schedule.startAt, end_at: draft.schedule.endAt, timezone: draft.schedule.timezone },
+          budget_and_bidding: { currency: 'CNY', daily_budget_minor: dailyBudget, bidding_strategy: 'stable_cost', charging_mode: 'CPC', bid_minor: 0 },
+          search_boost: { keywords: draft.tracking.searchKeywords.split(/[,，]/).map(value => value.trim()).filter(Boolean), bid_coefficient: draft.tracking.searchBidCoefficient, targeting_expansion: draft.tracking.searchTargetingExpansion },
+          monitoring_references: monitoringReferences,
           project_name: draft.name,
         },
         promotions: materialReferences.map((reference, index) => ({
           draft_schema_version: 'oceanengine-configuration/v1', promotion_draft_id: `promotion-${identity}-${index + 1}`,
           delivery_identity: { mode: 'account_info' }, base_material_references: [reference], copy_items: [],
-          landing_page_reference: { namespace: 'cookies', object_kind: 'landing_page', scope, id: draft.tracking.landingPage, state: 'resolved' },
-          settings: { call_to_action: draft.tracking.conversionEvent }, promotion_name: `${draft.name}-${index + 1}`,
+          landing_page_reference: landingPageReference,
+          settings: {}, promotion_name: `${draft.name}-${index + 1}`,
         })),
       },
     },
@@ -1588,6 +1708,9 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
   const firstPromotion = configuration?.payload.ocean_engine?.promotions[0]
   const materialReferences = intent?.payload.material_references ?? []
   const typedRuntime = Boolean(intent && configuration)
+  const productAudit = project?.marketing_product_reference?.audit_attributes ?? {}
+  const optimizationAudit = project?.optimization_target_reference?.audit_attributes ?? {}
+  const monitoringValue = (kind: string) => project?.monitoring_references?.find(reference => reference.object_kind === `monitoring_link_${kind}`)?.id ?? ''
   const fallbackAdvertiser = { id: project?.account_reference.id ?? '', name: project?.account_reference.display_name_snapshot ?? '平台账户', platform: 'ocean_engine' as const, source: version.source, scenario: version.scenario }
   return {
     planId: version.plan_id,
@@ -1601,6 +1724,15 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
     readOnly: version.read_only,
     name: typedRuntime ? project?.project_name ?? '平台投放配置' : version.name ?? '平台投放配置',
     objective: typedRuntime ? intent?.payload.marketing_objective ?? '' : version.objective ?? '',
+    marketingPurpose: marketingPurposeValue(typedRuntime ? project?.marketing_purpose : version.marketing_purpose),
+    marketingProduct: typedRuntime ? {
+      id: project?.marketing_product_reference?.id ?? '', name: project?.marketing_product_reference?.display_name_snapshot ?? '',
+      oceanEngineProductId: productAudit.ocean_engine_product_id ?? '',
+      activityType: productAudit.activity_type ?? '', activityName: productAudit.activity_name ?? '', brandName: productAudit.brand_name ?? '',
+    } : {
+      id: version.marketing_product?.id ?? '', name: version.marketing_product?.name ?? '', activityType: version.marketing_product?.activity_type ?? '',
+      activityName: version.marketing_product?.activity_name ?? '', brandName: version.marketing_product?.brand_name ?? '',
+    },
     advertiser: {
       id: typedRuntime ? fallbackAdvertiser.id : version.advertiser?.id ?? '',
       name: typedRuntime ? fallbackAdvertiser.name : version.advertiser?.name ?? '',
@@ -1612,19 +1744,34 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
       ? { totalMinor: intent?.payload.budget_boundary.maximum_total_minor ?? 0, currency: intent?.payload.budget_boundary.currency ?? 'CNY' }
       : { totalMinor: version.budget?.total_minor ?? 0, currency: version.budget?.currency ?? 'CNY' },
     schedule: typedRuntime
-      ? { startAt: intent?.payload.schedule_boundary.earliest_start ?? '', endAt: intent?.payload.schedule_boundary.latest_end ?? '', timezone: intent?.payload.schedule_boundary.timezone ?? 'Asia/Shanghai' }
-      : { startAt: version.schedule?.start_at ?? '', endAt: version.schedule?.end_at ?? '', timezone: version.schedule?.timezone ?? 'Asia/Shanghai' },
+      ? { mode: project?.schedule.mode ?? 'fixed_range', startAt: intent?.payload.schedule_boundary.earliest_start ?? '', endAt: intent?.payload.schedule_boundary.latest_end ?? '', timezone: intent?.payload.schedule_boundary.timezone ?? 'Asia/Shanghai' }
+      : { mode: version.schedule?.mode ?? 'fixed_range', startAt: version.schedule?.start_at ?? '', endAt: version.schedule?.end_at ?? '', timezone: version.schedule?.timezone ?? 'Asia/Shanghai' },
     tracking: {
+      deliveryCarrier: typedRuntime ? (project?.carrier === 'orange_landing_page' || project?.carrier === 'owned_landing_page' ? project.carrier : '') : version.tracking?.delivery_carrier ?? '',
       landingPage: typedRuntime ? intent?.payload.landing_page_references?.[0]?.id ?? '' : version.tracking?.landing_page ?? '',
       pixelId: typedRuntime ? '' : version.tracking?.pixel_id ?? '',
       conversionEvent: typedRuntime ? firstPromotion?.settings.call_to_action ?? '' : version.tracking?.conversion_event ?? '',
+      optimizationTargetId: typedRuntime ? project?.optimization_target_reference?.id ?? '' : version.tracking?.optimization_target_id ?? '',
+      optimizationTargetName: typedRuntime ? project?.optimization_target_reference?.display_name_snapshot ?? '' : version.tracking?.optimization_target_name ?? '',
+      optimizationTargetSemanticKey: typedRuntime ? project?.optimization_target_reference?.semantic_key ?? '' : '',
+      eventAssetName: typedRuntime ? optimizationAudit.event_asset_name ?? '' : version.tracking?.event_asset_name ?? '',
+      eventAssetType: typedRuntime ? optimizationAudit.event_asset_type ?? '' : version.tracking?.event_asset_type ?? '',
+      searchKeywords: typedRuntime ? project?.search_boost?.keywords?.join('，') ?? '' : version.tracking?.search_keywords ?? '',
+      searchBidCoefficient: typedRuntime ? project?.search_boost?.bid_coefficient ?? 1.1 : version.tracking?.search_bid_coefficient ?? 1.1,
+      searchTargetingExpansion: typedRuntime ? project?.search_boost?.targeting_expansion ?? false : version.tracking?.search_targeting_expansion ?? false,
+      monitoringImpression: typedRuntime ? monitoringValue('impression') : version.tracking?.monitoring_impression ?? '',
+      monitoringValidTouch: typedRuntime ? monitoringValue('valid_touch') : version.tracking?.monitoring_valid_touch ?? '',
+      monitoringVideoPlay: typedRuntime ? monitoringValue('video_play') : version.tracking?.monitoring_video_play ?? '',
+      monitoringVideoComplete: typedRuntime ? monitoringValue('video_complete') : version.tracking?.monitoring_video_complete ?? '',
+      monitoringValidVideoPlay: typedRuntime ? monitoringValue('valid_video_play') : version.tracking?.monitoring_valid_video_play ?? '',
     },
-    creativeReferences: (typedRuntime ? materialReferences.map(reference => ({ asset_id: reference.id ?? '', version: Number(reference.version ?? 1), content_hash: reference.content_hash, route: undefined, confirmed: reference.state === 'resolved' })) : version.creative_references ?? []).map(reference => ({
+    creativeReferences: (typedRuntime ? materialReferences.map(reference => ({ asset_id: reference.id ?? '', version: Number(reference.version ?? 1), content_hash: reference.content_hash, route: undefined, confirmed: reference.state === 'resolved', ocean_engine_material_id: reference.audit_attributes?.ocean_engine_material_id })) : version.creative_references ?? []).map(reference => ({
       assetId: reference.asset_id,
       version: reference.version,
       contentHash: reference.content_hash,
       route: reference.route,
       confirmed: reference.confirmed,
+      oceanEngineMaterialId: reference.ocean_engine_material_id,
     })),
     strategyReference: !typedRuntime && version.strategy_reference ? {
       taskId: version.strategy_reference.task_id,
@@ -1649,6 +1796,12 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
   }
 }
 
+function marketingPurposeValue(value: unknown): OceanEngineMarketingPurpose | '' {
+  return typeof value === 'string' && (oceanEngineMarketingPurposes as readonly string[]).includes(value)
+    ? value as OceanEngineMarketingPurpose
+    : ''
+}
+
 function toDeliveryDecision(value: WireDeliveryDecision): DeliveryDecision {
   return {
     schemaVersion: value.schema_version, id: value.id, organizationId: value.organization_id, projectId: value.project_id, policyVersion: value.policy_version,
@@ -1660,7 +1813,7 @@ function toDeliveryDecision(value: WireDeliveryDecision): DeliveryDecision {
     },
     candidates: value.candidates.map(candidate => ({
       id: candidate.id, kind: candidate.kind, targetConfiguration: candidate.target_configuration, budgetChangePercent: candidate.budget_change_percent,
-      rationale: candidate.rationale ?? [], constraints: candidate.constraints ?? [], risks: candidate.risks ?? [], uncertainty: candidate.uncertainty,
+      rationale: candidate.rationale ?? [], constraints: candidate.constraints ?? [], risks: candidate.risks ?? [], uncertainty: candidate.uncertainty, calibrationManifest: candidate.calibration_manifest,
     })),
     recommendedCandidateId: value.recommended_candidate_id, evidence: value.evidence ?? [], canonicalHash: value.canonical_hash, createdBy: value.created_by, createdAt: value.created_at,
   }
@@ -1673,7 +1826,7 @@ function toDecisionSelection(value: WireDecisionSelection): DeliveryDecisionSele
       schemaVersion: value.workflow.schema_version, id: value.workflow.id, decisionId: value.workflow.decision_id, decisionCanonicalHash: value.workflow.decision_canonical_hash,
       selectedCandidateId: value.workflow.selected_candidate_id, configurationCanonicalHash: value.workflow.configuration_canonical_hash, compilerVersion: value.workflow.compiler_version,
       configurationId: value.workflow.configuration_id, configurationVersion: value.workflow.configuration_version, platform: value.workflow.platform, profileVersion: value.workflow.profile_version,
-      accountReference: value.workflow.account_reference, capabilityContractVersion: value.workflow.capability_contract_version, selectorContractVersion: value.workflow.selector_contract_version, actionContractVersion: value.workflow.action_contract_version,
+      accountReference: value.workflow.account_reference, capabilityContractVersion: value.workflow.capability_contract_version, selectorContractVersion: value.workflow.selector_contract_version, actionContractVersion: value.workflow.action_contract_version, executionDriver: value.workflow.execution_driver, calibrationManifest: value.workflow.calibration_manifest,
       status: value.workflow.status, remoteWriteEnabled: value.workflow.remote_write_enabled,
       steps: value.workflow.steps.map(step => ({ id: step.id, sequence: step.sequence, page: step.page, action: step.action, risk: step.risk, preconditions: step.preconditions ?? [], fields: step.fields.map(field => ({ key: field.key, value: field.value, expectedReadback: field.expected_readback, evidenceRef: field.evidence_ref })), timeoutSeconds: step.timeout_seconds, recovery: step.recovery, blocked: step.blocked, blockReason: step.block_reason })),
       canonicalHash: value.workflow.canonical_hash, createdAt: value.workflow.created_at,

@@ -34,8 +34,8 @@ This contract is additive. It does not reinterpret, rewrite, or migrate any hist
 | 18 | Production control-plane assembly | The API host mounts the persisted takeover-only Computer Use surface. Environment, BrowserProfile and SitePolicy registration, Run/Lease/Event/Evidence control, and Kill Switch administration therefore survive process restarts. A client creates a Run by naming a formal Delivery `ControlledExecution`; the server resolves and revalidates the immutable ChangeSet/Approval binding and attaches the resulting Run back to that Execution. Clients cannot supply authority JSON. The production mount has no deterministic fake adapter, no unattended page driver, and no `prepare` or `submit` worker command. |
 | 19 | Finite promotion modifications | Budget and authorized-material modifications always start from one confirmed promotion `PlatformEntityMapping`. The server, not the client, resolves the exact platform object ID and original creation provenance. Each modification freezes the current/target values and their canonical hashes in a new ChangeSet, receives a new Approval and Execution, and binds the target Mapping ID/version. The live edit inventory proves that schedule is owned by the parent project, so a promotion Mapping cannot authorize `update_promotion_schedule`; project schedule changes require a separately confirmed project Mapping and a dedicated project-mutation contract. Creation Approval reuse and in-place edits of an already confirmed Mapping are invalid. |
 | 20 | Mutation readback and Mapping revisions | Before the one permitted save click, takeover evidence must match the exact platform object ID plus current and target state hashes with zero diff keys. Result and independent list evidence must both match the same object ID, platform status and target state hash. Only then may one transaction increment the Mapping version, set its current-state hash, append an immutable `delivery_platform_entity_mapping_revisions` row, and close the new Execution and ChangeSet. The original creation revision and evidence remain queryable. |
-| 21 | Emergency pause | `pause_promotion` is an independent high-priority action, not a budget mutation and not the ComputerUseRun pause control. It starts only from a confirmed promotion Mapping whose normalized status is exactly `delivering`, binds the account, parent project, exact object, Mapping version, unchanged daily budget and one operator, and server-forces the target status to `paused`. A fresh ChangeSet, Approval, Execution, Run and one-time confirmation are mandatory. Result and list readbacks must both prove the same object is `paused`; uncertainty permits query or takeover only, never another click. |
-| 22 | Controlled restart | `resume_promotion` is a fresh action after, and only after, an authoritative `pause_promotion` Mapping revision. It is neither automatic compensation nor Approval reuse. The current budget must equal the paused authority; the new ChangeSet binds an active `Asia/Shanghai` schedule, authorized available materials, an authorized available landing page, the exact account/project/object/Mapping and one operator. Approval validation and the final click recheck schedule validity; pre-click evidence must also prove no account/project/object drift. Any active Kill Switch wins the authorization transaction. Result and list readbacks must both normalize to `delivering`. |
+| 21 | Promotion pause | `pause_promotion` is a normal day-to-day operation action, not a budget mutation and not the ComputerUseRun pause control. It starts only from a confirmed promotion Mapping whose normalized status is exactly `delivering`, binds the account, parent project, exact object, Mapping version, unchanged daily budget and one operator, and server-forces the target status to `paused`. A fresh ChangeSet, Approval, Execution, Run and one-time confirmation are mandatory because the action writes platform state, not because the business operation is exceptional. Result and list readbacks must both prove the same object is `paused`; uncertainty permits query or takeover only, never another click. |
+| 22 | Promotion enable | `resume_promotion` is a normal day-to-day enable action after an authoritative `pause_promotion` Mapping revision. It is neither automatic compensation nor Approval reuse. The current budget must equal the paused authority; the new ChangeSet binds an active `Asia/Shanghai` schedule, authorized available materials, an authorized available landing page, the exact account/project/object/Mapping and one operator. Approval validation and the final click recheck schedule validity; pre-click evidence must also prove no account/project/object drift. Any active Kill Switch wins the authorization transaction. Result and list readbacks must both normalize to `delivering`. |
 | 23 | Cancelled calibration authority | A visible-browser calibration that reaches an executing ChangeSet but stops before a write can be explicitly invalidated only when its bound Run is `cancelled`, its Lease is detached, takeover is inactive, no `ControlledActionAttempt` exists, and no final confirmation was consumed. The transaction cancels the business Execution, invalidates the ChangeSet, invalidates any unconsumed confirmation, and preserves the immutable Approval and evidence history. A replacement with identical current/target state must name the invalidated ChangeSet in `supersedes_controlled_change_set_id`; the server verifies exact operator, action, Mapping revision, object, account, and state hashes before producing a distinct canonical authority. |
 
 ## Stable blocking reasons
@@ -113,12 +113,12 @@ business Execution and two server-loaded Evidence IDs.
 This implementation does not itself authorize a real edit. The current Skill
 still marks remote-object modification as pending. One 2026-08-14 batch
 calibrated budget and same-account existing-material drafts without saving;
-pause and restart remained blocked because no eligible delivering mapped test
+pause and enable remained blocked because no eligible delivering mapped test
 object existed. The subsequently authorized real batch stopped when its fenced
 Lease expired before final confirmation, so no Attempt or remote click was
 created and every dependent action remained unstarted.
 
-## Emergency pause readiness
+## Promotion pause readiness
 
 The control plane and deterministic fake path support `pause_promotion` without
 calling a Connector. The dedicated endpoint is
@@ -138,7 +138,7 @@ state may be rewritten merely to manufacture a pause test. If the page, status,
 account, object or operator is uncertain, record the blocker or `PAGE_DRIFT`
 and stop without clicking.
 
-## Controlled restart readiness
+## Promotion enable readiness
 
 The control plane and deterministic fake path support `resume_promotion` only
 when the confirmed Mapping's latest state action is `pause_promotion`, its
@@ -157,8 +157,18 @@ authorization. Global, platform or organization Kill Switch state is checked
 transactionally and blocks the click. Successful result and list evidence must
 both show the same object as `delivering` before the Mapping advances.
 
-This remains a fake/no-write readiness claim. The batch marks restart
+This remains a fake/no-write readiness claim. The batch marks enable
 `blocked_by_eligible_test_object` because no successful authoritative pause
-revision exists. The current Skill forbids live remote-object restart until that
+revision exists. The current Skill forbids live remote-object enable until that
 precondition and a current-turn exact authority both exist. No Connector, mock
 metric or recovery routine may trigger a restart.
+
+Production-authority acceptance is explicitly deferred until a real Computer
+Use agent and auditable session identity exist. A single Codex identity creating
+the ChangeSet, approving it, and performing the click is useful only as a state-
+machine or page-integration check; it does not prove separation of duties,
+approval authenticity, session ownership, or executor trust. End-to-end
+acceptance requires an approver distinct from the execution agent, a real leased
+session, account/site attestation, and evidence emitted by that session. Until
+then, the contract may claim control-plane readiness and field calibration, but
+must not claim validated production authority.

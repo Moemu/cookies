@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"github.com/shikanon/cookies/internal/systems/delivery/calibrationmanifest"
 )
 
 func TestDeliveryContractFixturesMatchGoDomainValidation(t *testing.T) {
@@ -36,6 +37,36 @@ func TestDeliveryContractFixturesMatchGoDomainValidation(t *testing.T) {
 	if code := DeliveryContractErrorCode(magnetic.Validate()); code != ContractErrorCapabilityPending {
 		t.Fatalf("Magnetic fixture result code = %q", code)
 	}
+}
+
+func TestOceanEngineMarketingPurposeMustBeAllowedByTheFrozenManifest(t *testing.T) {
+	intent := validDeliveryIntent(t)
+	configuration := validOceanEnginePlatformConfiguration(t, intent, 1)
+	configuration.Payload.OceanEngine.Project.MarketingPurpose = "free_text_business_goal"
+	if code := DeliveryContractErrorCode(configuration.Validate()); code != ContractErrorInvalidConfiguration {
+		t.Fatalf("marketing purpose code = %q", code)
+	}
+}
+
+func TestManifestNonEvidenceMappingsReachTheirDeclaredDomainFields(t *testing.T) {
+	manifest, err := calibrationmanifest.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateManifestContractOwnership(manifest); err != nil {
+		t.Fatal(err)
+	}
+	for index := range manifest.ConsumerMappings {
+		if manifest.ConsumerMappings[index].Treatment == calibrationmanifest.EvidenceOnly {
+			continue
+		}
+		manifest.ConsumerMappings[index].ContractPath += ".MissingField"
+		if err := validateManifestContractOwnership(manifest); err == nil {
+			t.Fatal("a non-evidence mapping to a missing domain field must fail closed")
+		}
+		return
+	}
+	t.Fatal("fixture must contain a non-evidence consumer mapping")
 }
 
 func TestCanonicalProjectionsContainEveryBusinessFieldAndEveryLeafIsHashSensitive(t *testing.T) {
@@ -408,6 +439,7 @@ func validDeliveryIntent(t *testing.T) DeliveryIntent {
 			MaterialReferences:      []StableReference{resolvedReference("cookies", "asset_version", "project:project-1", "asset-1:v1")},
 			AudienceConstraints:     IntentAudienceConstraints{IncludeReferences: []StableReference{{Namespace: "oceanengine", ObjectKind: "audience_package", Scope: "account:6391", State: ReferenceUnresolved, Reason: "audience package is optional"}}, Constraints: []string{"exclude existing purchasers"}},
 			StrategyReference:       resolvedReference("cookies", "strategy_version", "project:project-1", "strategy-task-1:v3"),
+			CalibrationManifest:     CalibrationManifestBinding{SchemaVersion: OceanEngineCalibrationManifestV1, ManifestID: "oceanengine-calibration-current-test-account-2026-08-16"},
 		},
 		ConfigurationProvenance: ConfigurationProvenance{Kind: ConfigurationGeneratedManually, GeneratorRef: "operator-brief"},
 		FactProvenance:          FactProvenance{Source: FactSourceReplay, SnapshotRef: "replay://intent-1", EvidenceRefs: []string{"evidence://intent-1"}},
@@ -446,7 +478,7 @@ func validOceanEnginePlatformConfiguration(t *testing.T, intent DeliveryIntent, 
 		Payload: PlatformConfigurationPayload{
 			Profile: DeliveryPlatformOceanEngine,
 			OceanEngine: &OceanEngineConfiguration{
-				Profile: DeliveryPlatformOceanEngine,
+				Profile: DeliveryPlatformOceanEngine, CalibrationManifest: CalibrationManifestBinding{SchemaVersion: OceanEngineCalibrationManifestV1, ManifestID: "oceanengine-calibration-current-test-account-2026-08-16"},
 				Project: &OceanEngineProjectDraft{
 					DraftSchemaVersion: OceanEngineConfigurationProfileV1, ProjectDraftID: "project-draft-1",
 					AccountReference: resolvedReference("oceanengine", "account", "account:6391", "account-6391"),

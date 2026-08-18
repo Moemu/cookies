@@ -45,6 +45,7 @@ export type ApiProject = {
   version: number
   createdAt: string
   updatedAt: string
+  products?: Array<{ id: string; name: string; oceanEngineProductId?: string }>
 }
 
 export type ApiPublicInsightIndustryStat = {
@@ -286,6 +287,7 @@ export type ApiAssetVersionPointer = {
   }
   owner: string
   updatedAt: string
+  oceanEngineMaterialId?: string
 }
 
 export type ApiAgencyWorkbench = {
@@ -3914,7 +3916,7 @@ function workbenchFromResponse(
     organizations: [{ id: organization.id, code: organization.code, name: organization.name, owner: organization.owner, currency: organization.currency as 'CNY', timezone: organization.timezone as 'Asia/Shanghai', updatedAt: organization.updated_at }],
     clients: [{ id: client.id, organizationId: client.organization_id, code: client.code, name: client.name, industry: client.industry, owner: client.owner, healthStatus: client.health_status as ApiAgencyHealthStatus, updatedAt: client.updated_at }],
     brands: [{ id: brand.id, organizationId: brand.organization_id, clientId: brand.client_id, code: brand.code, name: brand.name, category: brand.category, productLines: brand.product_lines, owner: brand.owner, guidelineStatus: brand.guideline_status as ApiBrand['guidelineStatus'], updatedAt: brand.updated_at }],
-    projects: [{ ...project, organizationId: progress.organization_id, clientId: progress.client_id, brandId: progress.brand_id, progressDetail: { stage: progress.stage as ApiProjectProgressStage, stageLabel: progress.stage_label, stagePercent: progress.stage_percent, taskPercent: progress.task_percent, riskStatus: progress.risk_status as ApiAgencyHealthStatus, blocker: progress.blocker || undefined, updatedAt: progress.updated_at } }],
+    projects: [{ ...project, products: (response.products ?? []).map(product => ({ id: product.id, name: product.name, oceanEngineProductId: product.ocean_engine_product_id })), organizationId: progress.organization_id, clientId: progress.client_id, brandId: progress.brand_id, progressDetail: { stage: progress.stage as ApiProjectProgressStage, stageLabel: progress.stage_label, stagePercent: progress.stage_percent, taskPercent: progress.task_percent, riskStatus: progress.risk_status as ApiAgencyHealthStatus, blocker: progress.blocker || undefined, updatedAt: progress.updated_at } }],
     adAccountBindings: response.ad_account_bindings.map(item => ({ id: item.id, organizationId: item.organization_id, clientId: item.client_id, brandId: item.brand_id, projectIds: [project.id], platform: item.platform as ApiAdPlatform, accountName: item.account_name, accountDisplayId: item.account_display_id, currency: item.currency as 'CNY', timezone: item.timezone as 'Asia/Shanghai', permissionStatus: item.permission_status as ApiBindingHealthStatus, loginStatus: item.login_status as ApiBindingHealthStatus, trackingStatus: item.tracking_status as ApiBindingHealthStatus, owner: item.owner, boundAssetIds: item.bound_asset_ids, lastSyncedAt: item.last_synced_at })),
     qualityCheckRuns: response.quality_check_runs.map(item => ({ id: item.id, organizationId: item.organization_id, projectId: item.project_id, assetId: item.asset_id, assetVersion: item.asset_version, status: item.status as ApiQualityCheckStatus, model: item.model, ruleVersion: item.rule_version, promptVersion: item.prompt_version, summary: item.summary, issues: item.issues.map(issue => ({ id: issue.id, severity: issue.severity as ApiQualityIssueSeverity, rule: issue.rule, evidence: issue.evidence, suggestion: issue.suggestion })), createdAt: item.created_at, completedAt: item.completed_at ?? undefined })),
     materialConfirmations: response.material_confirmations.map(item => ({ id: item.id, organizationId: item.organization_id, projectId: item.project_id, qualityCheckRunId: item.quality_check_run_id, assetId: item.asset_id, assetVersion: item.asset_version, status: item.status as ApiMaterialConfirmationStatus, scope: item.scope, confirmedBy: item.confirmed_by, note: item.note, createdAt: item.created_at })),
@@ -3925,6 +3927,7 @@ function workbenchFromResponse(
         organizationId: item.organization_id,
         projectId: item.project_id,
         assetId: item.asset_id,
+        oceanEngineMaterialId: item.ocean_engine_material_id,
         mediaKind: media?.kind === 'document' ? undefined : media?.kind,
         contentUrl: media?.contentUrl,
         workingVersion: item.working_version,

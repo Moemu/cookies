@@ -42,24 +42,60 @@ test('delivery plan client writes DeliveryIntent plus tagged PlatformConfigurati
   assert.equal(written.platform_configuration.schema_version, 'delivery-platform-configuration/v2')
   assert.equal(written.platform_configuration.hash_algorithm, 'RFC8785-JCS-SHA256(canonical_payload)')
   assert.equal(written.platform_configuration.payload.profile, 'ocean_engine')
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.marketing_purpose, 'lead_generation')
+  assert.equal('product_selection_mode' in written.platform_configuration.payload.ocean_engine.project, false)
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.marketing_product_reference.id, 'product-1')
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.carrier, 'owned_landing_page')
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.optimization_target_reference.audit_attributes.event_asset_type, 'web')
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.schedule.mode, 'fixed_range')
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.search_boost.bid_coefficient, 1.1)
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.monitoring_references.length, 5)
   assert.equal(written.platform_configuration.payload.ocean_engine.promotions.length, 1)
   assert.equal(written.three_tier_configuration, undefined)
   assert.equal(plan.currentVersion.canonicalHash, plan.currentVersion.platformConfiguration?.canonical_hash)
   assert.equal(plan.currentVersion.deliveryIntent?.payload.marketing_objective, 'qualified conversions')
+  assert.equal(plan.currentVersion.marketingPurpose, 'lead_generation')
+  assert.equal(plan.currentVersion.marketingProduct.id, 'product-1')
+  assert.equal(plan.currentVersion.tracking.deliveryCarrier, 'owned_landing_page')
+  assert.equal(plan.currentVersion.tracking.monitoringValidVideoPlay, 'https://monitor.example.test/valid-video-play')
   assert.deepEqual(plan.currentVersion.schedule, {
+    mode: 'fixed_range',
     startAt: '2026-08-11T00:00:00+08:00',
     endAt: '2026-08-15T00:00:00+08:00',
     timezone: 'Asia/Shanghai',
   })
+
+  const longTerm = draft()
+  longTerm.schedule.mode = 'long_term'
+  longTerm.tracking.deliveryCarrier = 'orange_landing_page'
+  longTerm.tracking.landingPage = ''
+  longTerm.tracking.optimizationTargetId = 'builtin:in_app_order'
+  longTerm.tracking.optimizationTargetName = 'app内下单'
+  longTerm.tracking.optimizationTargetSemanticKey = 'in_app_order'
+  longTerm.tracking.eventAssetName = ''
+  longTerm.tracking.eventAssetType = ''
+  await deliveryPlanApi.create('project_1', longTerm)
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.schedule.mode, 'long_term')
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.budget_and_bidding.daily_budget_minor, longTerm.budget.totalMinor)
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.optimization_target_reference.semantic_key, 'in_app_order')
+  assert.equal(written.platform_configuration.payload.ocean_engine.promotions[0].settings.call_to_action, undefined)
 })
 
 function draft(): DeliveryPlanDraft {
   return {
-    name: 'Ocean launch', objective: 'qualified conversions',
+    name: 'Ocean launch', objective: 'qualified conversions', marketingPurpose: 'lead_generation',
+    marketingProduct: { id: 'product-1', name: '测试商品', activityType: '常规', activityName: '测试活动', brandName: '测试品牌' },
     advertiser: { id: 'account-1', name: 'Account one', platform: 'ocean_engine' },
     budget: { totalMinor: 100000, currency: 'CNY' },
-    schedule: { startAt: '2026-08-11T00:00:00+08:00', endAt: '2026-08-15T00:00:00+08:00', timezone: 'Asia/Shanghai' },
-    tracking: { landingPage: 'https://example.test/landing', pixelId: 'pixel-1', conversionEvent: 'purchase' },
+    schedule: { mode: 'fixed_range', startAt: '2026-08-11T00:00:00+08:00', endAt: '2026-08-15T00:00:00+08:00', timezone: 'Asia/Shanghai' },
+    tracking: {
+      deliveryCarrier: 'owned_landing_page', landingPage: 'https://example.test/landing', pixelId: 'pixel-1', conversionEvent: 'purchase',
+      optimizationTargetId: 'target-1', optimizationTargetName: '表单提交', optimizationTargetSemanticKey: '', eventAssetName: '测试网页事件', eventAssetType: 'web',
+      searchKeywords: '品牌词，商品词', searchBidCoefficient: 1.1, searchTargetingExpansion: true,
+      monitoringImpression: 'https://monitor.example.test/impression', monitoringValidTouch: 'https://monitor.example.test/valid-touch',
+      monitoringVideoPlay: 'https://monitor.example.test/video-play', monitoringVideoComplete: 'https://monitor.example.test/video-complete',
+      monitoringValidVideoPlay: 'https://monitor.example.test/valid-video-play',
+    },
     creativeReferences: [{ assetId: 'asset-1', version: 1, contentHash: 'b'.repeat(64), confirmed: true }],
     strategyReference: { taskId: 'strategy-1', version: 2, contentHash: 'c'.repeat(64) },
     sourceStrategyVersion: 'strategy-1@v2',

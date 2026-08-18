@@ -24,6 +24,11 @@
         "id": { "type": "string", "minLength": 1 },
         "version": { "type": "string", "minLength": 1 },
         "content_hash": { "type": "string", "minLength": 1 },
+        "semantic_key": { "type": "string", "minLength": 1 },
+        "audit_attributes": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
         "state": { "$ref": "#/$defs/ReferenceState" },
         "reason": { "type": "string", "minLength": 1 },
         "display_name_snapshot": { "type": "string" },
@@ -146,6 +151,7 @@
         "material_references",
         "audience_constraints",
         "strategy_reference"
+        ,"calibration_manifest"
       ],
       "properties": {
         "payload_schema_version": { "const": "delivery-intent/v1" },
@@ -171,6 +177,16 @@
         },
         "audience_constraints": { "$ref": "#/$defs/AudienceConstraints" },
         "strategy_reference": { "$ref": "#/$defs/StableReference" }
+        ,"calibration_manifest": { "$ref": "#/$defs/CalibrationManifestBinding" }
+      }
+    },
+    "CalibrationManifestBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "manifest_id"],
+      "properties": {
+        "schema_version": { "const": "oceanengine-calibration-manifest/v1" },
+        "manifest_id": { "type": "string", "minLength": 1 }
       }
     },
     "DeliveryIntent": {
