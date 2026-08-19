@@ -5,7 +5,7 @@
 | 定位 | 四大业务系统共用的非业务基础平台 |
 | 文档版本 | v0.5 |
 | 文档状态 | 草案 |
-| 技术方向 | Golang 平台服务、React 全局壳层、Codex/Skills/Computer Use 运行时 |
+| 技术方向 | Golang 平台服务、React 全局壳层、Codex/Skills/Browser RPA 运行时 |
 
 ## 1. 基座定位
 
@@ -21,7 +21,7 @@ cookies 由四个独立的垂直业务系统组成：需求与策略、创意创
 ## 2. 设计目标
 
 1. 四个业务系统可独立设计导航、模型、权限、API、版本和发布节奏。
-2. Provider、知识库、用户组织、Codex/Skills、Computer Use 等能力只配置一次。
+2. Provider、知识库、用户组织、Codex/Skills、Browser RPA 等能力只配置一次。
 3. 跨系统数据通过稳定 ID、契约 API 和领域事件传递。
 4. 统一控制多租户隔离、凭据、配额、成本、审批、审计和可观测性。
 5. 共享技术能力，不共享模糊的“万能业务表”或巨型公共服务。
@@ -39,7 +39,7 @@ cookies 由四个独立的垂直业务系统组成：需求与策略、创意创
 | --- | --- | --- |
 | 产品壳层 | 登录、组织/项目切换、系统切换器、全局任务、通知、个人菜单 | 提供统一入口，不承载系统内导航 |
 | 垂直系统 | Strategy、Creative、Insights、Delivery | 拥有独立导航、领域模型、API 和权限 |
-| Agent 基座 | Codex Task、Skill Registry、Tool Registry、Computer Use Runtime | 统一运行与治理智能体能力 |
+| Agent 基座 | Codex Task、Skill Registry、Tool Registry、Browser RPA Runtime | 统一运行与治理智能体能力 |
 | 数据与知识基座 | Provider、Knowledge、对象存储、搜索/向量、事件总线 | 提供业务无关的数据能力 |
 | 治理基座 | IAM、审批引擎、审计、通知、配额、计量、密钥 | 统一安全、成本与组织治理 |
 
@@ -70,7 +70,7 @@ L0 全局壳层、四个系统的 L1 至 L3 导航结构和路由规则统一见
 | Provider 中心 | 统一模型 Provider：LLM、VLM、图片、视频、音频、3D、Embedding/Rerank | `/admin/providers/*` | 火山默认实现、凭据、模型目录、路由、任务、配额、健康和成本 |
 | 知识库 | 知识空间、资料、索引、版本、权限、质量 | `/admin/knowledge/*` | 统一知识摄取、检索、引用和治理 |
 | Agent 能力 | Codex Runtime、Skills、Tools、MCP、评测 | `/admin/agents/*` | 智能体能力注册、发布、依赖和质量 |
-| Computer Use | 执行环境、允许应用/站点、设备、会话策略 | `/admin/computer-use/*` | UI 执行环境、安全边界和健康状态 |
+| Browser RPA | 执行环境、允许应用/站点、设备、会话策略 | `/admin/browser-rpa/*` | UI 执行环境、安全边界和健康状态 |
 | 工作流 | 任务队列、审批模板、通知规则、Webhook | `/admin/workflows/*` | 通用异步任务和跨系统流程 |
 | 安全与审计 | 审计日志、密钥、数据策略、风险事件 | `/admin/security/*` | 访问、凭据、留存、导出和安全事件 |
 | 用量与成本 | 配额、模型用量、存储、任务成本、账单 | `/admin/usage/*` | 资源计量、预算和成本归属 |
@@ -198,7 +198,7 @@ Codex Worker、Agent Task、上下文、Skill 包、隔离和恢复的完整约�
 - 工具调用审批模式、超时、重试、限流、审计和返回脱敏。
 - MCP 或外部工具依赖的安装、健康、授权和组织策略。
 
-## 10. Computer Use 基座
+## 10. Browser RPA 基座
 
 - 注册受控设备/执行环境、操作系统、浏览器和健康状态。
 - 管理允许/拒绝的应用、站点、敏感动作和组织级策略。
@@ -206,7 +206,7 @@ Codex Worker、Agent Task、上下文、Skill 包、隔离和恢复的完整约�
 - 对截图、剪贴板、窗口标题和页面内容进行敏感数据治理。
 - 为业务系统提供通用“等待审批、等待接管、结果未知”状态。
 - 具体抖音/快手页面流程归智能投放系统的 Platform Skills 所有。
-- 生产默认使用受控远程设备/虚拟机和任务独占浏览器会话，见 [Computer Use 运行时](./12-computer-use-runtime.md)。
+- 生产默认使用受控远程设备/虚拟机和任务独占浏览器会话，见 [Browser RPA 运行时](./12-browser-rpa-runtime.md)。
 
 ## 11. 任务、审批、通知与审计
 
@@ -300,7 +300,7 @@ MVP 可部署为模块化单体，但包、数据库 Schema、迁移、API 和�
 
 - 共享基座月可用性目标不低于 99.9%，关键队列和审计具备恢复能力。
 - Provider、知识和 Agent 调用均可按组织、系统、项目和任务计量。
-- 单一 Provider、知识索引或 Computer Use 环境故障不能拖垮其他系统的基础读写。
+- 单一 Provider、知识索引或 Browser RPA 环境故障不能拖垮其他系统的基础读写。
 - ORAG、PostgreSQL 或 Qdrant 不可用时，Knowledge Gateway 必须返回统一的可恢复状态，不能让业务系统直接处理 ORAG 内部错误。
 - 所有凭据加密存储且不返回业务前端，日志和错误统一脱敏。
 - 事件至少一次投递，消费者以幂等方式处理。
@@ -315,9 +315,9 @@ MVP 可部署为模块化单体，但包、数据库 Schema、迁移、API 和�
 4. 四个系统分别注册自己的 Skills，基座能限制 Skill 可用系统和工具范围。
 5. 一个系统无法直接读写另一个系统的数据库表。
 6. 策略批准事件能幂等触发创意系统创建待处理入口，失败可重放。
-7. Computer Use 设备、允许站点和敏感动作策略由基座管理，具体投放步骤由投放系统定义。
+7. Browser RPA 设备、允许站点和敏感动作策略由基座管理，具体投放步骤由投放系统定义。
 8. 审批和审计组件可服务四个系统，但审批内容与业务差异由各系统提供。
-9. Provider、Agent、任务、存储和 Computer Use 用量能按系统和组织归集。
+9. Provider、Agent、任务、存储和 Browser RPA 用量能按系统和组织归集。
 10. 停用一个 Provider 或 Skill 时，受影响系统获得明确错误和降级路径。
 11. ORAG submodule 未初始化时，开发/构建检查给出明确命令；初始化后可运行摄取、查询、citation 和 trace 主路径。
 12. ORAG 升级需通过 OpenAPI 契约、多租户隔离和固定广告知识评测集，生产构建不使用浮动 main。
@@ -327,8 +327,8 @@ MVP 可部署为模块化单体，但包、数据库 Schema、迁移、API 和�
 
 | 版本 | 日期 | 变更内容 |
 | --- | --- | --- |
-| v0.1 | 2026-07-20 | 建立四个独立业务系统共用的 Provider、知识、用户、Agent、Computer Use 和治理基座 |
+| v0.1 | 2026-07-20 | 建立四个独立业务系统共用的 Provider、知识、用户、Agent、Browser RPA 和治理基座 |
 | v0.2 | 2026-07-20 | 指定 ORAG 为知识库实现，补充 submodule、Knowledge Gateway、服务边界和升级门禁 |
 | v0.3 | 2026-07-20 | 将模型调用统一到 Provider Gateway，默认火山引擎并覆盖 LLM、VLM、图片、视频、音频和 3D |
-| v0.4 | 2026-07-20 | 补充项目品牌域、Agent/Computer Use、媒体与数据平台、API 事件及工程安全基线 |
+| v0.4 | 2026-07-20 | 补充项目品牌域、Agent/Browser RPA、媒体与数据平台、API 事件及工程安全基线 |
 | v0.5 | 2026-07-21 | 将 Project 升级为跨四系统上下文根，增加 ProjectResourceIndex 和强制 project_id 边界 |

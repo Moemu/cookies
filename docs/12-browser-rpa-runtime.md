@@ -1,10 +1,10 @@
-# cookies Computer Use 运行时与安全规格
+# cookies Browser RPA 运行时与安全规格
 
 | 属性 | 内容 |
 | --- | --- |
 | 定位 | 智能投放系统受控操作广告平台 UI 的共享执行基座 |
 | 默认生产模式 | 企业受控远程设备/虚拟机，任务独占浏览器会话 |
-| 文档版本 | v0.1 |
+| 文档版本 | v0.5 |
 | 文档状态 | 草案 |
 
 ## 1. 设计结论
@@ -18,8 +18,8 @@ MVP 生产默认使用企业受控远程设备或虚拟机。用户本机仅用�
 | 组件 | 责任 |
 | --- | --- |
 | Delivery System | DeliveryPlan、ChangeSet、平台 Skill、业务校验、审批内容和结果解释 |
-| Computer Use Control Plane | 设备、会话、站点策略、租赁、事件、截图、接管和紧急停止 |
-| Computer Use Worker | 在租赁设备执行受控 UI 步骤并返回页面证据 |
+| Browser RPA Control Plane | 设备、会话、站点策略、租赁、事件、截图、接管和紧急停止 |
+| Browser RPA Worker | 通过 Playwright-over-CDP 在已认证浏览器会话执行受控 UI 步骤并返回页面证据 |
 | 用户 | 登录、验证码、2FA、最终高风险确认和无法自动处理的页面 |
 
 Control Plane 不理解抖音/快手业务字段；平台页面流程由 Delivery 的版本化 Skills 定义。
@@ -30,7 +30,7 @@ Control Plane 不理解抖音/快手业务字段；平台页面流程由 Deliver
 - `Device`：受控设备实例、补丁/镜像版本和当前租赁状态。
 - `BrowserProfile`：组织/平台/账户隔离的加密浏览器资料，不跨组织共享。
 - `SessionLease`：任务对设备和 Profile 的有时限独占租约。
-- `ComputerUseRun`：一次执行，关联 ChangeSet、Skill 版本和审批。
+- `BrowserRpaRun`：一次执行，关联 ChangeSet、Skill 版本和审批。
 
 同一浏览器 Profile 同时只允许一个写任务。租约过期、Worker 心跳丢失或用户接管时停止自动动作。
 
@@ -55,11 +55,11 @@ Control Plane 不理解抖音/快手业务字段；平台页面流程由 Deliver
 
 ### 5.1 生产 Authority 验收边界
 
-上述流程是生产目标，不是仅凭数据模型、fake Worker 或浏览器校准即可完成的验收。当前没有真实 Computer Use Agent 和可独立识别的执行身份；由同一 Codex 主体创建 ChangeSet、批准并点击，只能证明控制面状态机和页面接缝可工作，不能证明职责分离、授权真实性、会话归属或生产执行可信度。
+上述流程是生产目标，不是仅凭数据模型、fake Worker 或浏览器校准即可完成的验收。执行传输已由确定性 Playwright RPA（`rparunner.PlaywrightRPAAdapter`，经 `COOKIES_BROWSER_RPA_ENABLED` 门控）承担，但尚无独立可审计的生产执行身份；由同一 Codex 主体创建 ChangeSet、批准并点击，只能证明控制面状态机和页面接缝可工作，不能证明职责分离、授权真实性、会话归属或生产执行可信度。
 
-生产 Authority 端到端验收必须等真实 Computer Use 会话上线，并同时满足：审批主体独立于执行 Agent；Agent、会话和操作者身份可审计；SessionLease、站点与账户识别来自真实执行环境；最终确认绑定具体对象、动作、预算、配置 hash 和有效期；结果证据由该会话回传。上线前，自动化只能声明“控制面契约通过”，真实页面操作只能声明 `validated_for_field_calibration`，两者不得合并描述为“生产受控执行已验证”。
+生产 Authority 端到端验收必须等真实受控浏览器会话上线，并同时满足：审批主体独立于执行 Agent；Agent、会话和操作者身份可审计；SessionLease、站点与账户识别来自真实执行环境；最终确认绑定具体对象、动作、预算、配置 hash 和有效期；结果证据由该会话回传。上线前，自动化只能声明“控制面契约通过”，真实页面操作只能声明 `validated_for_field_calibration`，两者不得合并描述为“生产受控执行已验证”。
 
-上线后的既有推广单元有限修改不得复用创建时的审批。预算或授权素材每次生产变化都必须从已确认的推广单元 `PlatformEntityMapping` 读取精确对象，创建新的 ChangeSet、Approval、Execution 和 ComputerUseRun；提交前同时核对对象 ID、当前状态哈希和目标状态哈希。写后结果页与列表页均匹配后，Mapping 才递增版本并追加不可变修订记录。Phase D 字段校准使用独立的会话级授权，在授权测试对象上执行可逆写入并恢复原状，不为每个校准字段创建这些生产权限对象。真实页面校准已确认排期属于父项目而不是推广单元；项目排期必须使用独立的项目 Mapping 和项目变更契约，不能借用推广单元 Mapping。
+上线后的既有推广单元有限修改不得复用创建时的审批。预算或授权素材每次生产变化都必须从已确认的推广单元 `PlatformEntityMapping` 读取精确对象，创建新的 ChangeSet、Approval、Execution 和 BrowserRpaRun；提交前同时核对对象 ID、当前状态哈希和目标状态哈希。写后结果页与列表页均匹配后，Mapping 才递增版本并追加不可变修订记录。Phase D 字段校准使用独立的会话级授权，在授权测试对象上执行可逆写入并恢复原状，不为每个校准字段创建这些生产权限对象。真实页面校准已确认排期属于父项目而不是推广单元；项目排期必须使用独立的项目 Mapping 和项目变更契约，不能借用推广单元 Mapping。
 
 ## 6. 风险和动作策略
 
@@ -97,11 +97,11 @@ Control Plane 不理解抖音/快手业务字段；平台页面流程由 Deliver
 
 ## 10. API
 
-- `POST /platform/v1/computer-use/runs`。
-- `GET /platform/v1/computer-use/runs/{id}`、`/events`、`/evidence`。
-- `POST /platform/v1/computer-use/runs/{id}:pause|resume|cancel|takeover`。
-- `POST /platform/v1/computer-use/runs/{id}/confirmations`。
-- `/platform/v1/computer-use/environments/*`、`devices/*`、`profiles/*`。
+- `POST /platform/v1/browser-rpa/runs`。
+- `GET /platform/v1/browser-rpa/runs/{id}`、`/events`、`/evidence`。
+- `POST /platform/v1/browser-rpa/runs/{id}:pause|resume|cancel|takeover`。
+- `POST /platform/v1/browser-rpa/runs/{id}/confirmations`。
+- `/platform/v1/browser-rpa/environments/*`、`devices/*`、`profiles/*`。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-change-sets`：从已确认推广单元 Mapping 创建一次预算或授权素材变更。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}:confirm-mutation`：以同一 Run 的结果页和列表页证据递增 Mapping 版本。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/emergency-pause-change-sets`：只对状态为 `delivering` 的已确认推广单元创建独立暂停 ChangeSet；路径名为兼容性机器标识，目标状态由服务端固定为 `paused`。
@@ -110,7 +110,7 @@ Control Plane 不理解抖音/快手业务字段；平台页面流程由 Deliver
 
 所有写接口使用幂等键；确认令牌只能消费一次，且只匹配完全一致的动作哈希。
 
-ComputerUseRun 的 `pause/resume` 只控制执行流程，不改变广告平台对象状态。
+BrowserRpaRun 的 `pause/resume` 只控制执行流程，不改变广告平台对象状态。
 平台推广单元的暂停使用独立 `pause_promotion` 权威链，绑定账户、父项目、
 推广单元、Mapping 版本、当前日预算和唯一执行操作人。Run 与最终点击必须绑定该
 执行操作人，但生产 Approval 必须由独立审批主体签发；执行 Agent 不能代替审批人。
@@ -144,3 +144,4 @@ Switch 激活都会阻断。当前 Skill 已在授权测试对象完成启用与
 | v0.2 | 2026-08-14 | 增加指定推广单元的预算、授权素材有限变更和 Mapping 修订链；真实页面确认排期属于父项目，项目排期需独立 Mapping 与变更契约；真实最终点击仍需执行当轮单独授权 |
 | v0.3 | 2026-08-14 | 增加操作人绑定的独立暂停权威链与 fake/no-write 路径；生产暂停仍需当轮授权 |
 | v0.4 | 2026-08-14 | 增加从暂停出发、严格重检预算/排期/素材/落地页/身份/Kill Switch 的独立启用权威链；不作为自动补偿 |
+| v0.5 | 2026-08-19 | 执行传输从 Computer Use 迁移到 Playwright RPA（Go 子进程 + CDP 附加已登录 Edge）；控制面改名 browser-rpa，表与 API 前缀元数据级改名；见 docs/delivery/browser-rpa-migration-amendment.md |
