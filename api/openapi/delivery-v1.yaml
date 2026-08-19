@@ -347,7 +347,7 @@ paths:
       summary: Create the business execution aggregate for one unexpired formal approval
       responses:
         '201':
-          description: Controlled business execution awaiting its Platform ComputerUseRun.
+          description: Controlled business execution awaiting its Platform BrowserRpaRun.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ControlledExecution' }
@@ -1697,7 +1697,7 @@ components:
         project_id: { type: string }
         controlled_change_set_id: { type: string }
         remote_write_approval_id: { type: string }
-        computer_use_run_id: { type: string }
+        browser_rpa_run_id: { type: string }
         status: { type: string, enum: [pending, running, succeeded, failed, partial, result_unknown, cancelled] }
         version: { type: integer, minimum: 1 }
         created_by: { type: string }
@@ -1706,21 +1706,21 @@ components:
     CreatePlatformEntityMappingRequest:
       type: object
       additionalProperties: false
-      required: [id, account_reference_id, plan_id, configuration_id, business_execution_id, computer_use_run_id, internal_object_kind, internal_object_id, platform_object_kind]
+      required: [id, account_reference_id, plan_id, configuration_id, business_execution_id, browser_rpa_run_id, internal_object_kind, internal_object_id, platform_object_kind]
       properties:
         id: { type: string, minLength: 1 }
         account_reference_id: { type: string, minLength: 1 }
         plan_id: { type: string, minLength: 1 }
         configuration_id: { type: string, minLength: 1 }
         business_execution_id: { type: string, minLength: 1 }
-        computer_use_run_id: { type: string, minLength: 1 }
+        browser_rpa_run_id: { type: string, minLength: 1 }
         internal_object_kind: { type: string, minLength: 1 }
         internal_object_id: { type: string, minLength: 1 }
         platform_object_kind: { type: string, minLength: 1 }
     PlatformEntityMapping:
       type: object
       additionalProperties: false
-      required: [schema_version, id, organization_id, project_id, account_reference_id, plan_id, configuration_id, business_execution_id, computer_use_run_id, internal_object_kind, internal_object_id, platform_object_kind, status, version, created_at, updated_at]
+      required: [schema_version, id, organization_id, project_id, account_reference_id, plan_id, configuration_id, business_execution_id, browser_rpa_run_id, internal_object_kind, internal_object_id, platform_object_kind, status, version, created_at, updated_at]
       properties:
         schema_version: { type: string, const: delivery-platform-entity-mapping/v1 }
         id: { type: string }
@@ -1730,7 +1730,7 @@ components:
         plan_id: { type: string }
         configuration_id: { type: string }
         business_execution_id: { type: string }
-        computer_use_run_id: { type: string }
+        browser_rpa_run_id: { type: string }
         internal_object_kind: { type: string }
         internal_object_id: { type: string }
         platform_object_kind: { type: string }
@@ -1747,7 +1747,7 @@ components:
     PlatformEntityMappingRevision:
       type: object
       additionalProperties: false
-      required: [mapping_id, organization_id, project_id, version, action, business_execution_id, computer_use_run_id, platform_object_id, platform_status, result_evidence_id, list_evidence_id, created_at]
+      required: [mapping_id, organization_id, project_id, version, action, business_execution_id, browser_rpa_run_id, platform_object_id, platform_status, result_evidence_id, list_evidence_id, created_at]
       properties:
         mapping_id: { type: string }
         organization_id: { type: string }
@@ -1755,7 +1755,7 @@ components:
         version: { type: integer, minimum: 1 }
         action: { type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_materials, pause_promotion, resume_promotion] }
         business_execution_id: { type: string }
-        computer_use_run_id: { type: string }
+        browser_rpa_run_id: { type: string }
         platform_object_id: { type: string }
         platform_status: { type: string }
         previous_state_action: { type: string, enum: [update_promotion_budget, update_promotion_materials, pause_promotion, resume_promotion] }

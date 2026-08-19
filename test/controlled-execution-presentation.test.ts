@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type { ComputerUseRun } from '../src/features/delivery-controlled-execution/model.ts'
-import { presentControlledExecution } from '../src/features/delivery-controlled-execution/presentation.ts'
+import type { BrowserRpaRun } from '../src/features/browser-rpa-execution/model.ts'
+import { presentControlledExecution } from '../src/features/browser-rpa-execution/presentation.ts'
 
 const hash = 'a'.repeat(64)
 
 test('controlled execution presentation keeps approval, confirmation, and result recovery distinct', () => {
-  const cases: Array<{ name: string; run: Partial<ComputerUseRun>; kind: string; retry: boolean }> = [
+  const cases: Array<{ name: string; run: Partial<BrowserRpaRun>; kind: string; retry: boolean }> = [
     { name: 'approval invalid', run: { state: 'awaiting_confirmation', blocking_reason: 'APPROVAL_INVALID' }, kind: 'approval_expired', retry: false },
     { name: 'confirmation invalid', run: { state: 'awaiting_confirmation', blocking_reason: 'FINAL_CONFIRMATION_INVALID' }, kind: 'confirmation_expired', retry: false },
     { name: 'partial', run: { state: 'partial' }, kind: 'partial', retry: false },
@@ -23,7 +23,7 @@ test('controlled execution presentation keeps approval, confirmation, and result
   }
 })
 
-function run(patch: Partial<ComputerUseRun>): ComputerUseRun {
+function run(patch: Partial<BrowserRpaRun>): BrowserRpaRun {
   return {
     schema_version: 'computer-use-run/v1', id: 'run_1', organization_id: 'org_1', project_id: 'project_1', platform: 'ocean_engine', account_id: 'account_1',
     authority: {

@@ -15,16 +15,30 @@ function readJSON(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
 }
 
-for (const schemaName of ["platform-computer-use-run-v1.schema.json", "delivery-controlled-change-set-v1.schema.json", "delivery-platform-skill-definition-v1.schema.json"]) {
+for (const schemaName of ["platform-browser-rpa-run-v1.schema.json", "platform-computer-use-run-v1.schema.json", "delivery-controlled-change-set-v1.schema.json", "delivery-platform-skill-definition-v1.schema.json"]) {
   ajv.addSchema(readJSON(join(contracts, schemaName)));
 }
 
-test("controlled Computer Use fixtures satisfy the frozen contracts", () => {
+test("historical Computer Use fixtures remain valid against the frozen legacy contract", () => {
+  const schema = readJSON(join(contracts, "platform-computer-use-run-v1.schema.json"));
+  const validate = ajv.getSchema(String(schema.$id));
+  assert.ok(validate, "missing validator for the legacy run contract");
+  for (const fixtureName of [
+    "platform-computer-use-run-v1-awaiting-confirmation.json",
+    "platform-computer-use-run-v1-budget-mutation.json",
+    "platform-computer-use-run-v1-emergency-pause.json",
+    "platform-computer-use-run-v1-restart.json",
+  ]) {
+    assert.equal(validate(readJSON(join(fixtures, fixtureName))), true, ajv.errorsText(validate.errors));
+  }
+});
+
+test("controlled Browser RPA fixtures satisfy the frozen contracts", () => {
   for (const [schemaName, fixtureName] of [
-    ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-awaiting-confirmation.json"],
-    ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-budget-mutation.json"],
-    ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-emergency-pause.json"],
-    ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-restart.json"],
+    ["platform-browser-rpa-run-v1.schema.json", "platform-browser-rpa-run-v1-awaiting-confirmation.json"],
+    ["platform-browser-rpa-run-v1.schema.json", "platform-browser-rpa-run-v1-budget-mutation.json"],
+    ["platform-browser-rpa-run-v1.schema.json", "platform-browser-rpa-run-v1-emergency-pause.json"],
+    ["platform-browser-rpa-run-v1.schema.json", "platform-browser-rpa-run-v1-restart.json"],
     ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-ready.json"],
     ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-budget-mutation.json"],
     ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-emergency-pause.json"],
@@ -45,10 +59,10 @@ test("promotion mutation contracts reject project-owned schedule changes", () =>
   deliveryFixture.action = "update_promotion_schedule";
   assert.equal(validateDelivery(deliveryFixture), false);
 
-  const runSchema = readJSON(join(contracts, "platform-computer-use-run-v1.schema.json"));
+  const runSchema = readJSON(join(contracts, "platform-browser-rpa-run-v1.schema.json"));
   const validateRun = ajv.getSchema(String(runSchema.$id));
   assert.ok(validateRun);
-  const runFixture = readJSON(join(fixtures, "platform-computer-use-run-v1-budget-mutation.json"));
+  const runFixture = readJSON(join(fixtures, "platform-browser-rpa-run-v1-budget-mutation.json"));
   (runFixture.authority as Record<string, unknown>).action = "update_promotion_schedule";
   assert.equal(validateRun(runFixture), false);
 });
@@ -56,7 +70,7 @@ test("promotion mutation contracts reject project-owned schedule changes", () =>
 test("promotion pause fixtures bind one operator and a delivering-to-paused state transition", () => {
   for (const fixtureName of [
     "delivery-controlled-change-set-v1-emergency-pause.json",
-    "platform-computer-use-run-v1-emergency-pause.json",
+    "platform-browser-rpa-run-v1-emergency-pause.json",
   ]) {
     const fixture = readJSON(join(fixtures, fixtureName));
     const binding = (fixture.binding ?? fixture.authority) as Record<string, unknown>;
@@ -72,7 +86,7 @@ test("promotion pause fixtures bind one operator and a delivering-to-paused stat
 test("promotion enable fixtures bind strict paused-object rechecks without reusing pause authority", () => {
   for (const fixtureName of [
     "delivery-controlled-change-set-v1-restart.json",
-    "platform-computer-use-run-v1-restart.json",
+    "platform-browser-rpa-run-v1-restart.json",
   ]) {
     const fixture = readJSON(join(fixtures, fixtureName));
     const binding = (fixture.binding ?? fixture.authority) as Record<string, unknown>;
@@ -96,7 +110,7 @@ test("promotion enable fixtures bind strict paused-object rechecks without reusi
 
 test("stage B Skill calibration is bound and partial Skill identity is rejected", () => {
   for (const [schemaName, fixtureName] of [
-    ["platform-computer-use-run-v1.schema.json", "platform-computer-use-run-v1-awaiting-confirmation.json"],
+    ["platform-browser-rpa-run-v1.schema.json", "platform-browser-rpa-run-v1-awaiting-confirmation.json"],
     ["delivery-controlled-change-set-v1.schema.json", "delivery-controlled-change-set-v1-ready.json"],
   ] as const) {
     const schema = readJSON(join(contracts, schemaName));
@@ -495,10 +509,10 @@ test("gate-two evidence proves one click, two server-owned readbacks, and no del
 });
 
 test("run-time blocks cannot reuse the Phase C compile-time prohibition", () => {
-  const schema = readJSON(join(contracts, "platform-computer-use-run-v1.schema.json"));
+  const schema = readJSON(join(contracts, "platform-browser-rpa-run-v1.schema.json"));
   const validate = ajv.getSchema(String(schema.$id));
   assert.ok(validate);
-  const fixture = readJSON(join(fixtures, "platform-computer-use-run-v1-awaiting-confirmation.json"));
+  const fixture = readJSON(join(fixtures, "platform-browser-rpa-run-v1-awaiting-confirmation.json"));
   fixture.blocking_reason = "PHASE_C_REMOTE_WRITE_PROHIBITED";
   assert.equal(validate(fixture), false);
 });
