@@ -154,6 +154,9 @@ async function executeStep(page: Page, plan: RpaPlan, step: RpaStep, results: St
     if (observedAccount && observedAccount !== plan.accountId) {
       throw new RpaError('account_mismatch', `observed account ${observedAccount} does not match the authorized account ${plan.accountId}`)
     }
+    if (!observedAccount && plan.mode === 'submit') {
+      throw new RpaError('account_mismatch', `page URL does not expose the ${accountKey} account identifier; refusing to enter the write path`)
+    }
     const objectKey = plan.objectIdQueryKey ?? ''
     if (objectKey) {
       const observedObject = url.searchParams.get(objectKey) ?? ''
@@ -179,13 +182,23 @@ async function executeStep(page: Page, plan: RpaPlan, step: RpaStep, results: St
       throw new RpaError('write_blocked', `${step.id}: remote write is not authorized`)
     }
     if (!step.locator) throw new RpaError('page_drift', `${step.id}: final click needs a locator`)
+    const currentHost = new URL(page.url()).hostname.toLowerCase()
+    const allowedHosts = (plan.allowedHosts ?? []).map(host => host.toLowerCase())
+    if (allowedHosts.length > 0 && !allowedHosts.includes(currentHost)) {
+      throw new RpaError('page_drift', `${step.id}: page drifted to ${currentHost} before the write boundary`)
+    }
     const target = semanticLocator(page, step.locator)
     if ((await target.count()) !== 1) {
       throw new RpaError('locator_not_unique', `${step.id}: final write boundary did not match exactly one element`)
     }
-    // Exactly one click, never retried: a timeout after this point is result
-    // uncertainty, not a retryable failure.
-    await target.click({ timeout: 15000 })
+    // Exactly one click, never retried. Once the click is attempted, any
+    // error (including timeout) is result uncertainty: the dispatch may have
+    // reached the platform even though the acknowledgment was lost.
+    try {
+      await target.click({ timeout: 15000 })
+    } catch (error) {
+      throw new RpaError('click_uncertain', `${step.id}: click outcome is uncertain: ${error instanceof Error ? error.message : error}`)
+    }
     result.readback!['final_click'] = 'performed'
     await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => undefined)
     const after = new URL(page.url())
@@ -220,10 +233,13 @@ async function executePlan(plan: RpaPlan, cdpURL: string): Promise<RpaResult> {
     return { schema_version: 'oceanengine-playwright-rpa-result/v1', outcome: 'success', error_code: 'ok', final_click_performed: finalClickPerformed, steps }
   } catch (error) {
     const code = error instanceof RpaError ? error.code : 'internal'
-    const outcome = finalClickPerformed ? 'result_unknown' : 'failed'
-    return { schema_version: 'oceanengine-playwright-rpa-result/v1', outcome, error_code: code, error_message: String(error instanceof Error ? error.message : error), final_click_performed: finalClickPerformed, steps }
+    const clickUncertain = error instanceof RpaError && error.code === 'click_uncertain'
+    const performed = finalClickPerformed || clickUncertain
+    const outcome = performed ? 'result_unknown' : 'failed'
+    return { schema_version: 'oceanengine-playwright-rpa-result/v1', outcome, error_code: code, error_message: String(error instanceof Error ? error.message : error), final_click_performed: performed, steps }
   } finally {
-    // Detach without closing: the browser session belongs to the operator.
+    // close() on a CDP connection only detaches; the browser session belongs
+    // to the operator and keeps running.
     await browser.close().catch(() => undefined)
   }
 }
@@ -250,7 +266,7 @@ async function main() {
 
 if (import.meta.url === `file://${process.argv[1]?.replaceAll('\\', '/')}`) {
   main().catch(error => {
-    const result: RpaResult = { schema_version: 'oceanengine-playwright-rpa-result/v1', outcome: 'result_unknown', error_code: 'internal', error_message: String(error), final_click_performed: false, steps: [] }
+    const result: RpaResult = { schema_version: 'oceanengine-playwright-rpa-result/v1', outcome: 'failed', error_code: 'internal', error_message: String(error), final_click_performed: false, steps: [] }
     process.stdout.write(JSON.stringify(result))
     process.exitCode = 1
   })

@@ -80,6 +80,17 @@ func TestRunnerRejectsUnknownResultSchema(t *testing.T) {
 	}
 }
 
+func TestRunnerRecoversResultFromPollutedStdout(t *testing.T) {
+	runner := testRunner(t, "noisy")
+	result, err := runner.Run(context.Background(), basePlan("prepare"))
+	if err != nil {
+		t.Fatalf("polluted stdout must not fail the run: %v", err)
+	}
+	if result.Outcome != OutcomeSuccess {
+		t.Fatalf("unexpected result %+v", result)
+	}
+}
+
 func TestRunnerMissingCommandIsInfrastructureFailure(t *testing.T) {
 	runner := Runner{ScriptPath: "x"}
 	_, err := runner.Run(context.Background(), basePlan("prepare"))

@@ -584,7 +584,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		},
 		BrowserRPA: BrowserRPA{
 			Enabled:               browserRpaEnabled,
-			Command:               valueOr(lookup, "COOKIES_BROWSER_RPA_TSX_COMMAND", "npx tsx"),
+			Command:               valueOr(lookup, "COOKIES_BROWSER_RPA_TSX_COMMAND", "node node_modules/tsx/dist/cli.mjs"),
 			ScriptPath:            valueOr(lookup, "COOKIES_BROWSER_RPA_SCRIPT", "scripts/browser-rpa-runner.ts"),
 			EvidenceRoot:          valueOr(lookup, "COOKIES_BROWSER_RPA_EVIDENCE_ROOT", ".data/browser-rpa-evidence"),
 			PrepareTimeoutSeconds: intValueOr(lookup, "COOKIES_BROWSER_RPA_PREPARE_TIMEOUT_SECONDS", 180),

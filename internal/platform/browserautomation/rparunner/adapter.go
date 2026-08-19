@@ -197,10 +197,10 @@ func (a PlaywrightRPAAdapter) resolveSession(ctx context.Context, run browseraut
 	return env, policy, nil
 }
 
-// keepLeaseAlive heartbeats the run lease every 30 seconds (the lease TTL is
-// one minute). A failed heartbeat cancels the subprocess context; if the
-// final click has not happened yet, the runner stops before crossing the
-// write boundary.
+// keepLeaseAlive heartbeats the run lease every 30 seconds (the heartbeat
+// deadline is one minute). A failed heartbeat cancels the subprocess
+// context; if the final click has not happened yet, the runner stops before
+// crossing the write boundary.
 func (a PlaywrightRPAAdapter) keepLeaseAlive(ctx context.Context, cancel context.CancelFunc, run browserautomation.BrowserRpaRun, attempt browserautomation.ControlledActionAttempt) context.CancelFunc {
 	if a.Heartbeat == nil || run.LeaseID == "" {
 		return func() {}
@@ -216,6 +216,7 @@ func (a PlaywrightRPAAdapter) keepLeaseAlive(ctx context.Context, cancel context
 			return
 		}
 		leaseVersion := lease.Version
+		missed := false
 		for {
 			select {
 			case <-ctx.Done():
@@ -223,9 +224,20 @@ func (a PlaywrightRPAAdapter) keepLeaseAlive(ctx context.Context, cancel context
 			case <-ticker.C:
 				updated, err := a.Heartbeat.HeartbeatRunLease(ctx, run.OrganizationID, run.ProjectID, run.ID, run.LeaseID, leaseVersion, attempt.FencingToken)
 				if err != nil {
-					cancel()
-					return
+					// One immediate retry absorbs transient database blips;
+					// a second consecutive failure cancels the run.
+					if missed {
+						cancel()
+						return
+					}
+					missed = true
+					updated, err = a.Heartbeat.HeartbeatRunLease(ctx, run.OrganizationID, run.ProjectID, run.ID, run.LeaseID, leaseVersion, attempt.FencingToken)
+					if err != nil {
+						cancel()
+						return
+					}
 				}
+				missed = false
 				leaseVersion = updated.Version
 			}
 		}
@@ -240,7 +252,7 @@ func classifyResult(result RpaResult) error {
 	switch result.ErrorCode {
 	case CodeAccountMismatch:
 		return fmt.Errorf("%w: %s", browserautomation.ErrAccountMismatch, result.ErrorMessage)
-	case CodeCDPUnavailable, CodeEnvironmentUnavailable:
+	case CodeCDPUnavailable, CodeEnvironmentUnavailable, CodeTimeout, CodeInternal:
 		return fmt.Errorf("%w: %s", browserautomation.ErrEnvironmentUnavailable, result.ErrorMessage)
 	default:
 		return fmt.Errorf("%w: %s: %s", browserautomation.ErrPageDrift, result.ErrorCode, result.ErrorMessage)

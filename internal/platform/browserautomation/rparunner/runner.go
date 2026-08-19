@@ -85,14 +85,25 @@ func parseResult(payload []byte) (RpaResult, error) {
 		return RpaResult{}, errors.New("empty result")
 	}
 	var result RpaResult
-	if err := json.Unmarshal(trimmed, &result); err != nil {
-		return RpaResult{}, err
+	if err := json.Unmarshal(trimmed, &result); err == nil {
+		if result.SchemaVersion != ResultSchemaV1 {
+			return RpaResult{}, fmt.Errorf("unexpected result schema %q", result.SchemaVersion)
+		}
+		return result, nil
 	}
-	if result.SchemaVersion != ResultSchemaV1 {
-		return RpaResult{}, fmt.Errorf("unexpected result schema %q", result.SchemaVersion)
+	// Tolerate third-party noise on stdout: recover the last line that looks
+	// like the result document.
+	marker := []byte(`{"schema_version":"` + ResultSchemaV1)
+	if start := bytes.LastIndex(trimmed, marker); start >= 0 {
+		var recovered RpaResult
+		if err := json.Unmarshal(trimmed[start:], &recovered); err == nil {
+			return recovered, nil
+		}
 	}
-	return result, nil
+	return RpaResult{}, fmt.Errorf("unparseable result document: %w", errJSON)
 }
+
+var errJSON = errors.New("result JSON did not parse")
 
 func tailMessage(value string) string {
 	const cap = 512

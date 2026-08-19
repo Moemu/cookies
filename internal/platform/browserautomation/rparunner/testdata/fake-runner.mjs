@@ -28,6 +28,9 @@ stdin.on('close', () => {
     }))
     return
   }
+  if (mode === 'noisy') {
+    process.stdout.write('warning: third-party library noise on stdout\n')
+  }
   process.stdout.write(JSON.stringify({
     schema_version: 'oceanengine-playwright-rpa-result/v1',
     outcome: 'success',

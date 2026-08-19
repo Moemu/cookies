@@ -74,6 +74,23 @@ func TestRunEndpointsRequireScopeAndProjectIsolation(t *testing.T) {
 	}
 }
 
+func TestLegacyComputerUsePrefixRemainsMountedAsTransitionalAlias(t *testing.T) {
+	repo := browserautomation.NewMemoryRepository()
+	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+	run := validHTTPRun(now)
+	_, _, _ = repo.CreateRun(context.Background(), run)
+	service := browserautomation.Service{Repository: repo, Now: func() time.Time { return now }}
+	server := NewTakeoverOnly(service, projectAuthorizer{})
+	server.MountLegacyAlias()
+	request := httptest.NewRequest(http.MethodGet, "/api/platform/v1/computer-use/projects/project_1/runs/run_1", nil)
+	request = request.WithContext(contract.WithRequestContext(request.Context(), contract.RequestContext{RequestID: "req", TraceID: "trace", Actor: contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user"}, Scopes: []contract.Scope{"delivery.read"}}}))
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("legacy prefix status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestTakeoverOnlyServerRegistersScopedResourcesWithoutMountingFakeWorker(t *testing.T) {
 	repo := browserautomation.NewMemoryRepository()
 	service := browserautomation.Service{Repository: repo}
