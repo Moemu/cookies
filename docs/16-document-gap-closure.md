@@ -12,9 +12,9 @@
 | --- | --- | --- |
 | 品牌、产品、项目无数据 Owner | [项目、品牌与产品域](./08-project-brand-domain.md) | 由共享 Project & Brand 服务拥有，ProjectContext 为最小投影 |
 | Codex/Skills 只有概念描述 | [Codex 与 Skills 运行时](./09-codex-skills-runtime.md) | 生产采用 Agent Gateway + 受控远程 Worker |
-| 投放数据回流和归因无技术方案 | [广告数据 Connector](./10-ad-data-connectors.md) | API 优先、文件导入次之、Computer Use 只读补充 |
+| 投放数据回流和归因无技术方案 | [广告数据 Connector](./10-ad-data-connectors.md) | API 优先、文件导入次之、Browser RPA 只读补充 |
 | 对象存储和素材处理边界不清 | [媒体资产平台](./11-media-asset-platform.md) | 统一 Asset ID/Version、处理、授权和删除生命周期 |
-| Computer Use 部署、安全和恢复未定 | [Computer Use 运行时](./12-computer-use-runtime.md) | 生产使用企业受控远程设备/虚拟机和独占浏览器会话 |
+| Browser RPA 部署、安全和恢复未定 | [Browser RPA 运行时](./12-browser-rpa-runtime.md) | 生产使用企业受控远程设备/虚拟机和独占浏览器会话 |
 | API 前缀、错误、事件目录不统一 | [API 与领域事件契约](./13-api-event-contracts.md) | 业务 `/api/{system}/v1`，基座 `/platform/v1` |
 | CI/CD、SLO、RPO/RTO、安全基线缺失 | [工程、运维与安全基线](./14-engineering-operations-security.md) | 建立 MVP 初始目标和上线门禁 |
 | PRD 缺少通用页面状态和追踪规则 | [PRD 通用交互与质量要求](./15-prd-cross-cutting-requirements.md) | 四系统共用，不在每份 PRD 重复 |
@@ -24,7 +24,7 @@
 - 项目总纲不再同时使用 `/api/v1` 与 `/api/{system}/v1` 两套约定。
 - 总纲和共享基座事件目录补充各 PRD 已声明的替代、交付、停用、反证和状态事件。
 - 四份 PRD 升级至 v0.4，并链接各自依赖的运行时、数据、媒体和通用要求。
-- Codex 和 Computer Use 的生产部署方向不再完全开放：默认受控远程环境，本地模式只用于开发或人工接管。
+- Codex 和 Browser RPA 的生产部署方向不再完全开放：默认受控远程环境，本地模式只用于开发或人工接管。
 
 ## 3. 仍需在 M0 确认的产品决策
 
@@ -45,7 +45,7 @@
 | Golang HTTP/配置/数据库迁移框架 | 服务骨架、错误和测试规范 |
 | Redis/消息队列具体产品 | Agent、Provider、媒体、事件和 Connector 的可靠任务 |
 | 对象存储/CDN/媒体处理实现 | 上传、转码、成本、区域和删除能力 |
-| 受控 Computer Use 云资源与浏览器镜像 | 会话隔离、并发、网络和运维成本 |
+| 受控 Browser RPA 云资源与浏览器镜像 | 会话隔离、并发、网络和运维成本 |
 | 火山音频、3D、Rerank 的具体 API/模型 | Provider Adapter、评测和计费 |
 | 身份提供方和企业 SSO 优先级 | 用户、组织、服务身份与审计 |
 | 部署形态：SaaS、私有化或混合优先级 | 租户隔离、网络、KMS 和运维架构 |
@@ -59,7 +59,7 @@
 3. 核心实体拥有 ERD、索引、租户约束和迁移方案。
 4. 首发平台 Skill、数据 Connector 和指标字典完成契约评审。
 5. 火山 Provider 模型目录、限额、成本和固定评测集完成确认。
-6. Computer Use、上传、Agent 和跨租户访问通过威胁建模。
+6. Browser RPA、上传、Agent 和跨租户访问通过威胁建模。
 7. 端到端演示环境能跑通需求、创意、投放、数据回流和洞察。
 
 ## 6. 仓库说明

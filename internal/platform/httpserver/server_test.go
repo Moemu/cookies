@@ -2433,6 +2433,34 @@ func (staticProjectManager) CreateBrand(context.Context, contract.ActorContext, 
 	return project.Brand{}, nil
 }
 
+func (staticProjectManager) CreateProduct(context.Context, contract.ActorContext, project.CreateProductRequest) (project.Product, error) {
+	return project.Product{}, nil
+}
+
+func (staticProjectManager) ListProducts(context.Context, contract.ActorContext) ([]project.Product, error) {
+	return nil, nil
+}
+
+func (staticProjectManager) GetProduct(context.Context, contract.ActorContext, contract.ProductID) (project.Product, error) {
+	return project.Product{}, nil
+}
+
+func (staticProjectManager) UpdateProduct(context.Context, contract.ActorContext, contract.ProductID, project.UpdateProductRequest) (project.Product, error) {
+	return project.Product{}, nil
+}
+
+func (staticProjectManager) ListProductProjects(context.Context, contract.ActorContext, contract.ProductID) ([]project.ProductProjectRef, error) {
+	return nil, nil
+}
+
+func (staticProjectManager) LinkProductToProject(context.Context, contract.ActorContext, contract.ProductID, contract.ProjectID) error {
+	return nil
+}
+
+func (staticProjectManager) DeleteProduct(context.Context, contract.ActorContext, contract.ProductID) error {
+	return nil
+}
+
 func (staticProjectManager) CreateProject(context.Context, contract.ActorContext, project.CreateProjectRequest) (project.Project, error) {
 	return project.Project{}, nil
 }

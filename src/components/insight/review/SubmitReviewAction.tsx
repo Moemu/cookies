@@ -64,7 +64,7 @@ export function SubmitReviewAction({ window, busy, onSubmit }: {
       : !executions.length ? <div className="prelaunch-boundary">
           <CircleAlert size={16}/><span><small>这个 Project 还没有投放执行</small>
             复盘要挂在一次投放上，否则「这次复盘的是哪一轮」谁也答不上来。
-            去「智能投放 → 上线后优化闭环」，那条 9 步的路走完就会有一条执行记录，再回来提交。
+            去「智能投放 → 投放计划」保存配置后，在平台配置页「确认投放」生成一条执行记录，再回来提交。
           </span></div>
       : <label className="freeze-pick">
           <small>这份复盘算哪次投放？</small>

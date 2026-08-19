@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/ids"
@@ -342,6 +343,144 @@ func (s MySQLStore) CreateBrand(ctx context.Context, brand Brand) error {
 	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO brands (id, organization_id, name, status) VALUES (?, ?, ?, ?)`,
 		brand.ID, brand.OrganizationID, brand.Name, brand.Status)
+	return err
+}
+
+func (s MySQLStore) CreateProduct(ctx context.Context, product Product) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO products (id, organization_id, name, category, status, product_image, price_band, activity_type, activity_name, brand_type, brand_name, description, ocean_engine_product_id)
+		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
+		product.ID, product.OrganizationID, product.Name, product.Category, product.Status,
+		product.ProductImage, product.PriceBand, product.ActivityType, product.ActivityName, product.BrandType, product.BrandName, product.Description, product.OceanEngineProductID)
+	if isProductMappingConflict(err) {
+		return ErrProductMappingConflict
+	}
+	return err
+}
+
+func isProductMappingConflict(err error) bool {
+	var mysqlError *mysqlDriver.MySQLError
+	return errors.As(err, &mysqlError) && mysqlError.Number == 1062 && strings.Contains(mysqlError.Message, "uq_products_org_ocean_engine_id")
+}
+
+func (s MySQLStore) DeleteProduct(ctx context.Context, organizationID contract.OrganizationID, productID contract.ProductID) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM project_products WHERE organization_id=? AND product_id=?`, organizationID, productID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM products WHERE organization_id=? AND id=?`, organizationID, productID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrProductNotFound
+	}
+	return tx.Commit()
+}
+
+func (s MySQLStore) ListProducts(ctx context.Context, organizationID contract.OrganizationID) ([]Product, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("project database is required")
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, organization_id, name, category, status,
+		COALESCE(product_image, ''), COALESCE(price_band, ''), COALESCE(activity_type, ''), COALESCE(activity_name, ''), COALESCE(brand_type, ''), COALESCE(brand_name, ''), COALESCE(description, ''), COALESCE(ocean_engine_product_id, ''),
+		created_at, updated_at
+		FROM products WHERE organization_id = ? ORDER BY status, name, id`, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	products := make([]Product, 0)
+	for rows.Next() {
+		var product Product
+		if err := rows.Scan(&product.ID, &product.OrganizationID, &product.Name, &product.Category, &product.Status,
+			&product.ProductImage, &product.PriceBand, &product.ActivityType, &product.ActivityName, &product.BrandType, &product.BrandName, &product.Description, &product.OceanEngineProductID,
+			&product.CreatedAt, &product.UpdatedAt); err != nil {
+			return nil, err
+		}
+		products = append(products, product)
+	}
+	return products, rows.Err()
+}
+
+func (s MySQLStore) GetProduct(ctx context.Context, organizationID contract.OrganizationID, productID contract.ProductID) (Product, error) {
+	if s.DB == nil {
+		return Product{}, fmt.Errorf("project database is required")
+	}
+	var product Product
+	err := s.DB.QueryRowContext(ctx, `SELECT id, organization_id, name, category, status,
+		COALESCE(product_image, ''), COALESCE(price_band, ''), COALESCE(activity_type, ''), COALESCE(activity_name, ''), COALESCE(brand_type, ''), COALESCE(brand_name, ''), COALESCE(description, ''), COALESCE(ocean_engine_product_id, ''),
+		created_at, updated_at
+		FROM products WHERE organization_id = ? AND id = ?`, organizationID, productID).Scan(
+		&product.ID, &product.OrganizationID, &product.Name, &product.Category, &product.Status,
+		&product.ProductImage, &product.PriceBand, &product.ActivityType, &product.ActivityName, &product.BrandType, &product.BrandName, &product.Description, &product.OceanEngineProductID,
+		&product.CreatedAt, &product.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Product{}, ErrProductNotFound
+	}
+	return product, err
+}
+
+func (s MySQLStore) UpdateProduct(ctx context.Context, product Product) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	_, err := s.DB.ExecContext(ctx, `UPDATE products SET name = ?, category = ?, status = ?,
+		product_image = NULLIF(?, ''), price_band = NULLIF(?, ''), activity_type = NULLIF(?, ''), activity_name = NULLIF(?, ''), brand_type = NULLIF(?, ''), brand_name = NULLIF(?, ''), description = NULLIF(?, ''),
+		ocean_engine_product_id = NULLIF(?, '')
+		WHERE organization_id = ? AND id = ?`,
+		product.Name, product.Category, product.Status,
+		product.ProductImage, product.PriceBand, product.ActivityType, product.ActivityName, product.BrandType, product.BrandName, product.Description, product.OceanEngineProductID,
+		product.OrganizationID, product.ID)
+	if isProductMappingConflict(err) {
+		return ErrProductMappingConflict
+	}
+	return err
+}
+
+func (s MySQLStore) ListProductProjects(ctx context.Context, organizationID contract.OrganizationID, productID contract.ProductID) ([]ProductProjectRef, error) {
+	if s.DB == nil {
+		return nil, fmt.Errorf("project database is required")
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT p.id, p.name
+		FROM project_products pp JOIN projects p
+		  ON p.organization_id = pp.organization_id AND p.id = pp.project_id
+		WHERE pp.organization_id = ? AND pp.product_id = ? AND p.status = 'active'
+		ORDER BY p.name, p.id`, organizationID, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	refs := make([]ProductProjectRef, 0)
+	for rows.Next() {
+		var ref ProductProjectRef
+		if err := rows.Scan(&ref.ProjectID, &ref.Name); err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
+}
+
+func (s MySQLStore) LinkProductToProject(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, productID contract.ProductID) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO project_products (organization_id, project_id, product_id) VALUES (?, ?, ?)
+		ON DUPLICATE KEY UPDATE product_id = product_id`, organizationID, projectID, productID)
 	return err
 }
 
@@ -687,7 +826,8 @@ func (s MySQLStore) defaultWorkbench(ctx context.Context, organizationID contrac
 		updatedAt = projectValue.UpdatedAt
 	}
 	products := make([]contract.ProjectBusinessProduct, 0)
-	productRows, err := s.DB.QueryContext(ctx, `SELECT pr.id, pr.name, COALESCE(pr.ocean_engine_product_id, '')
+	productRows, err := s.DB.QueryContext(ctx, `SELECT pr.id, pr.name, COALESCE(pr.category, 'product'), COALESCE(pr.ocean_engine_product_id, ''),
+		COALESCE(pr.activity_type, ''), COALESCE(pr.activity_name, ''), COALESCE(pr.brand_name, '')
 		FROM project_products pp JOIN products pr ON pr.organization_id=pp.organization_id AND pr.id=pp.product_id
 		WHERE pp.organization_id=? AND pp.project_id=? ORDER BY pr.name, pr.id`, organizationID, projectID)
 	if err != nil {
@@ -695,7 +835,7 @@ func (s MySQLStore) defaultWorkbench(ctx context.Context, organizationID contrac
 	}
 	for productRows.Next() {
 		var product contract.ProjectBusinessProduct
-		if err := productRows.Scan(&product.ID, &product.Name, &product.OceanEngineProductID); err != nil {
+		if err := productRows.Scan(&product.ID, &product.Name, &product.Category, &product.OceanEngineProductID, &product.ActivityType, &product.ActivityName, &product.BrandName); err != nil {
 			productRows.Close()
 			return Workbench{}, err
 		}
@@ -1085,7 +1225,7 @@ func (s MySQLStore) GetBusinessContext(ctx context.Context, organizationID contr
 		value.BrandID = &id
 	}
 	value.BrandName = brandName.String
-	rows, err := s.DB.QueryContext(ctx, `SELECT pr.id, pr.name, COALESCE(pr.ocean_engine_product_id, '')
+	rows, err := s.DB.QueryContext(ctx, `SELECT pr.id, pr.name, COALESCE(pr.category, 'product'), COALESCE(pr.ocean_engine_product_id, '')
 		FROM project_products pp
 		JOIN products pr ON pr.organization_id = pp.organization_id AND pr.id = pp.product_id
 		WHERE pp.organization_id = ? AND pp.project_id = ?
@@ -1097,7 +1237,7 @@ func (s MySQLStore) GetBusinessContext(ctx context.Context, organizationID contr
 	value.Products = make([]contract.ProjectBusinessProduct, 0)
 	for rows.Next() {
 		var product contract.ProjectBusinessProduct
-		if err := rows.Scan(&product.ID, &product.Name, &product.OceanEngineProductID); err != nil {
+		if err := rows.Scan(&product.ID, &product.Name, &product.Category, &product.OceanEngineProductID); err != nil {
 			return contract.ProjectBusinessContext{}, err
 		}
 		value.Products = append(value.Products, product)

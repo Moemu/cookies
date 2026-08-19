@@ -558,6 +558,60 @@ func TestExecutionFixturesPersistRecoveryAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestExecutePlanWritesDirectlyWithoutApproval(t *testing.T) {
+	service, actor := newTestService()
+	plan, err := service.CreatePlan(context.Background(), actor, "project_a", testPlatformCreateRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := ExecutePlanRequest{ExpectedVersion: plan.Version}
+	created, replay, err := service.ExecutePlan(context.Background(), actor, "project_a", plan.ID, "direct-key", request)
+	if err != nil || replay {
+		t.Fatalf("execute err=%v replay=%v", err, replay)
+	}
+	if created.Execution.Status != ExecutionSucceeded {
+		t.Fatalf("execution status=%s", created.Execution.Status)
+	}
+	if created.Execution.ChangeSetID == "" || created.Execution.ApprovalID != "" {
+		t.Fatalf("execution should carry an audit change set but no approval: %#v", created.Execution)
+	}
+	again, replay, err := service.ExecutePlan(context.Background(), actor, "project_a", plan.ID, "direct-key", request)
+	if err != nil || !replay || again.Execution.ID != created.Execution.ID {
+		t.Fatalf("replay err=%v replay=%v", err, replay)
+	}
+	_, _, err = service.ExecutePlan(context.Background(), actor, "project_a", plan.ID, "stale-key", ExecutePlanRequest{ExpectedVersion: plan.Version + 1})
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale plan version err=%v", err)
+	}
+}
+
+func TestExecutePlanBlocksOnCapabilityPendingDraft(t *testing.T) {
+	service, actor := newTestService()
+	intent := validDeliveryIntent(t)
+	configuration := PlatformConfiguration{
+		SchemaVersion: PlatformConfigurationSchemaV2, ConfigurationID: "magnetic-config-direct", VersionNumber: 1,
+		Platform: DeliveryPlatformMagneticEngine, ProfileVersion: MagneticEngineConfigurationProfileV1,
+		Intent:                  IntentBinding{SchemaVersion: intent.SchemaVersion, IntentID: intent.IntentID, VersionNumber: intent.VersionNumber, CanonicalHash: intent.CanonicalHash},
+		HashAlgorithm:           CanonicalPayloadHashAlgorithm,
+		Payload:                 PlatformConfigurationPayload{Profile: DeliveryPlatformMagneticEngine, MagneticEngine: &MagneticEngineConfiguration{Profile: DeliveryPlatformMagneticEngine, Status: "capability_pending", ReasonCode: ContractErrorCapabilityPending, Reason: "no verified Magnetic Engine field evidence"}},
+		ConfigurationProvenance: ConfigurationProvenance{Kind: ConfigurationGeneratedManually},
+		FactProvenance:          FactProvenance{Source: FactSourceReplay, SnapshotRef: "replay://magnetic-direct"},
+	}
+	configuration, err := FinalizePlatformConfiguration(configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := service.CreatePlan(context.Background(), actor, "project_a", CreatePlanRequest{Intent: &intent, PlatformConfiguration: &configuration})
+	if err != nil {
+		t.Fatalf("capability_pending drafts must remain savable: %v", err)
+	}
+	_, _, err = service.ExecutePlan(context.Background(), actor, "project_a", plan.ID, "direct-magnetic", ExecutePlanRequest{ExpectedVersion: plan.Version})
+	var validationFailed *ValidationFailedError
+	if !errors.As(err, &validationFailed) {
+		t.Fatalf("execute should block capability_pending drafts, got %v", err)
+	}
+}
+
 func TestExecutionInvokesAdapterOnlyAfterDurableRunningState(t *testing.T) {
 	service, actor, _ := newTestServiceClock()
 	repository := service.Repository.(*memoryRepository)
@@ -1182,6 +1236,20 @@ func (r *memoryRepository) CreateOrReplayExecution(ctx context.Context, changeSe
 	}
 	value, err := r.RecordExecution(ctx, changeSet, approval, execution, evidence)
 	return value, false, err
+}
+
+func (r *memoryRepository) RecordDirectExecution(_ context.Context, changeSet ChangeSet, execution Execution, evidence Evidence) (ExecutionResult, error) {
+	plan, err := r.GetPlan(context.Background(), changeSet.OrganizationID, changeSet.ProjectID, changeSet.PlanID)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if plan.Version != changeSet.PlanVersion {
+		return ExecutionResult{}, ErrStalePlanVersion
+	}
+	r.changeSets[repositoryKey(changeSet.OrganizationID, changeSet.ProjectID, changeSet.ID)] = changeSet
+	value := ExecutionResult{ChangeSet: changeSet, Execution: execution, Evidence: evidence}
+	r.executions = append(r.executions, value)
+	return value, nil
 }
 
 func (r *memoryRepository) FindExecutionByIdempotency(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, key string) (ExecutionResult, bool, error) {

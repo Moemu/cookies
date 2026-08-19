@@ -13,15 +13,15 @@
 | [广告需求收集及策略分析 PRD](./01-demand-strategy-prd.md) | 通过 Codex + Skills 对话助手完成需求澄清与策略产出 | 产品、设计、研发、算法 |
 | [广告创意创作 PRD](./02-creative-studio-prd.md) | 生产小红书/公众号图文、电影感品牌广告、效果广告与独立素材剪辑 | 产品、设计、研发、算法 |
 | [广告素材经验与数据分析 PRD](./03-asset-management-prd.md) | 从素材内容与投放数据中沉淀经验、洞察和创作建议 | 产品、数据、算法、运营 |
-| [广告智能投放 PRD](./04-intelligent-delivery-prd.md) | 通过 Codex + Computer Use 完成配置、上线、监控与优化 | 产品、研发、算法、投手 |
-| [共享基座规格](./05-shared-foundation.md) | 用户组织、Provider、知识库、Agent、Computer Use、任务和治理能力 | 架构、平台、研发、运维 |
+| [广告智能投放 PRD](./04-intelligent-delivery-prd.md) | 通过 Codex + Browser RPA 完成配置、上线、监控与优化 | 产品、研发、算法、投手 |
+| [共享基座规格](./05-shared-foundation.md) | 用户组织、Provider、知识库、Agent、Browser RPA、任务和治理能力 | 架构、平台、研发、运维 |
 | [ORAG 知识库集成](./06-orag-integration.md) | ORAG submodule、Knowledge Gateway、租户映射、Provider 与升级测试 | 架构、平台、后端、运维 |
 | [统一模型 Provider 规格](./07-unified-model-provider.md) | 默认火山引擎，统一 LLM、VLM、图片、视频、音频、3D、路由与治理 | 架构、平台、后端、算法、运维 |
 | [项目、品牌与产品域](./08-project-brand-domain.md) | Project 如何连接四系统，以及 Brand、Product、资源索引、版本、权限和上下文所有权 | 产品、设计、架构、后端 |
 | [Codex 与 Skills 运行时](./09-codex-skills-runtime.md) | Agent Task、Worker、Skill 包、隔离、恢复和产物落库 | 架构、后端、算法、安全 |
 | [广告数据 Connector](./10-ad-data-connectors.md) | 平台授权、同步、原始数据、统一指标、归因、对账和数据质量 | 数据、后端、投放、分析 |
 | [媒体资产平台](./11-media-asset-platform.md) | 上传、扫描、转码、生成资产、授权、分发和删除 | 后端、创意、算法、运维 |
-| [Computer Use 运行时](./12-computer-use-runtime.md) | 受控设备、浏览器会话、人工接管、页面证据和紧急停机 | 架构、投放、安全、运维 |
+| [Browser RPA 运行时](./12-browser-rpa-runtime.md) | 受控设备、浏览器会话、人工接管、页面证据和紧急停机 | 架构、投放、安全、运维 |
 | [API 与领域事件契约](./13-api-event-contracts.md) | API 命名、错误、幂等、并发、SSE、事件目录、契约治理和已实现广告 AIGC/AI 混剪 OpenAPI 覆盖范围 | 全体研发 |
 | [工程、运维与安全基线](./14-engineering-operations-security.md) | 环境、CI/CD、多租户、SLO、RPO/RTO、可观测性与 AI 合规 | 研发、运维、安全 |
 | [PRD 通用交互与质量要求](./15-prd-cross-cutting-requirements.md) | 页面状态、并发编辑、AI 披露、可追踪性、无障碍和运营能力 | 产品、设计、研发、测试 |
@@ -58,7 +58,7 @@ Home 的 Project 列表、`/projects/:projectId/manage` 项目管理和 `/projec
 
 共享知识库由 [ORAG](https://github.com/shikanon/orag) 实现，源码以 Git submodule 固定在 `third_party/orag`；四个业务系统只访问 cookies Knowledge Gateway，不直接依赖 ORAG 数据库或内部包。所有模型能力由 [统一模型 Provider](./07-unified-model-provider.md) 提供，默认使用火山引擎。
 
-品牌、产品和广告项目由 [项目、品牌与产品域](./08-project-brand-domain.md) 统一拥有；媒体文件、广告数据、Agent 和 Computer Use 分别使用独立共享规格，避免把技术基座职责散落在四份 PRD 中。
+品牌、产品和广告项目由 [项目、品牌与产品域](./08-project-brand-domain.md) 统一拥有；媒体文件、广告数据、Agent 和 Browser RPA 分别使用独立共享规格，避免把技术基座职责散落在四份 PRD 中。
 
 ## 统一约定
 
@@ -88,7 +88,7 @@ Home 的 Project 列表、`/projects/:projectId/manage` 项目管理和 `/projec
 | 素材（Asset） | 图片、视频、音频、文案、脚本等分析对象及其内容特征。 |
 | 素材经验（Asset Insight） | 从素材内容、使用上下文和效果数据中归纳出的可复用结论。 |
 | Skill | 为 Codex 提供广告领域工作流、规则、参考和脚本的可复用能力包。 |
-| Computer Use | 由 Codex 操作已授权广告平台图形界面的执行能力。 |
+| Browser RPA | 由 Codex 操作已授权广告平台图形界面的执行能力。 |
 | 投放计划（Delivery Plan） | 映射到广告平台的目标、预算、受众、版位、创意和排期配置。 |
 | 闭环 | Brief 已确认，至少一个创意已上线，且效果数据已回流。 |
 

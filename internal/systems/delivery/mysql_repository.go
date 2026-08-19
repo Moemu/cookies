@@ -653,6 +653,68 @@ func (r MySQLRepository) FindExecutionByIdempotency(ctx context.Context, organiz
 	return value, err == nil, err
 }
 
+// RecordDirectExecution persists an execution bound directly to a plan
+// without requiring an Approval record. The ChangeSet is written as a
+// completed audit log entry. This is the "confirm launch" path for daily
+// operator writes, which do not pass through a separate approver.
+func (r MySQLRepository) RecordDirectExecution(ctx context.Context, changeSet ChangeSet, execution Execution, evidence Evidence) (ExecutionResult, error) {
+	if changeSet.TargetSnapshot == nil || changeSet.LegacyTargetSnapshot != nil {
+		return ExecutionResult{}, ErrLegacyConfigurationUnsupported
+	}
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	defer tx.Rollback()
+	var currentPlanVersion int64
+	err = tx.QueryRowContext(ctx, `SELECT current_version FROM delivery_plans
+		WHERE organization_id = ? AND project_id = ? AND id = ? FOR UPDATE`,
+		changeSet.OrganizationID, changeSet.ProjectID, changeSet.PlanID).Scan(&currentPlanVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ExecutionResult{}, ErrNotFound
+	}
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if currentPlanVersion != changeSet.PlanVersion {
+		return ExecutionResult{}, ErrStalePlanVersion
+	}
+	notes, err := json.Marshal(changeSet.PreflightNotes)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_change_sets (
+		id, organization_id, project_id, plan_id, plan_version, status, risk_level, preflight_notes, target_snapshot, target_snapshot_hash, target_snapshot_schema_version, recommendation_id,
+		approved_by, approved_at, rejected_by, rejected_at, rejection_reason, version, created_by, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?)`,
+		changeSet.ID, changeSet.OrganizationID, changeSet.ProjectID, changeSet.PlanID, changeSet.PlanVersion, changeSet.Status,
+		changeSet.RiskLevel, notes, changeSetSnapshotJSON(changeSet), nullableString(changeSet.TargetSnapshotHash), nullableString(changeSetSnapshotSchema(changeSet)), nullableString(changeSet.RecommendationID), changeSet.Version, changeSet.CreatedBy, changeSet.CreatedAt, changeSet.UpdatedAt)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_executions (id, organization_id, project_id, change_set_id, approval_id, status, version, execution_mode, adapter, source, scenario, idempotency_key, request_hash, executed_by, started_at, completed_at, retry_allowed, recovery_action, recovery_reason, compensation_candidates) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		execution.ID, execution.OrganizationID, execution.ProjectID, execution.ChangeSetID, nullableString(execution.ApprovalID), execution.Status, execution.Version, execution.Mode, execution.Adapter, execution.Source, execution.Scenario, execution.IdempotencyKey, execution.RequestHash, execution.ExecutedBy, execution.StartedAt, execution.CompletedAt, execution.RetryAllowed, execution.RecoveryAction, execution.RecoveryReason, mustJSON(execution.CompensationCandidates))
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO delivery_evidence (id, organization_id, project_id, execution_id, summary, evidence_mode, reversible, source, scenario, references_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		evidence.ID, evidence.OrganizationID, evidence.ProjectID, evidence.ExecutionID, evidence.Summary, evidence.Mode, evidence.Reversible, evidence.Source, evidence.Scenario, mustJSON(evidence.References), evidence.CreatedAt)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	for _, step := range execution.Steps {
+		_, err = tx.ExecContext(ctx, `INSERT INTO delivery_execution_steps (id, organization_id, project_id, execution_id, sequence_number, action, status, attempt, effect, outcome_summary, evidence_ref, started_at, completed_at, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			step.ID, execution.OrganizationID, execution.ProjectID, execution.ID, step.Sequence, step.Action, step.Status, step.Attempt, step.Effect, step.OutcomeSummary, step.EvidenceRef, step.StartedAt, step.CompletedAt, step.Version)
+		if err != nil {
+			return ExecutionResult{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return ExecutionResult{}, err
+	}
+	return ExecutionResult{ChangeSet: changeSet, Execution: execution, Evidence: evidence}, nil
+}
+
 func (r MySQLRepository) AdvanceExecution(ctx context.Context, execution Execution, next ExecutionStatus, completed *time.Time, action, reason string, compensation []string) (ExecutionResult, error) {
 	if !validExecutionTransition(execution.Status, next) {
 		return ExecutionResult{}, ErrInvalidState
@@ -707,7 +769,7 @@ func (r MySQLRepository) GetExecution(ctx context.Context, organizationID contra
 	var value ExecutionResult
 	var completedAt sql.NullTime
 	var compensation, references []byte
-	err := r.DB.QueryRowContext(ctx, `SELECT x.id, x.organization_id, x.project_id, x.change_set_id, x.approval_id, x.status, x.version, x.execution_mode, x.adapter, x.source, x.scenario, x.idempotency_key, x.request_hash, x.executed_by, x.started_at, x.completed_at, x.retry_allowed, x.recovery_action, x.recovery_reason, x.compensation_candidates, e.id, e.summary, e.evidence_mode, e.reversible, e.source, e.scenario, e.references_json, e.created_at FROM delivery_executions x JOIN delivery_evidence e ON e.organization_id=x.organization_id AND e.execution_id=x.id WHERE x.organization_id=? AND x.project_id=? AND x.id=?`, organizationID, projectID, id).Scan(
+	err := r.DB.QueryRowContext(ctx, `SELECT x.id, x.organization_id, x.project_id, x.change_set_id, COALESCE(x.approval_id, ''), x.status, x.version, x.execution_mode, x.adapter, x.source, x.scenario, x.idempotency_key, x.request_hash, x.executed_by, x.started_at, x.completed_at, x.retry_allowed, x.recovery_action, x.recovery_reason, x.compensation_candidates, e.id, e.summary, e.evidence_mode, e.reversible, e.source, e.scenario, e.references_json, e.created_at FROM delivery_executions x JOIN delivery_evidence e ON e.organization_id=x.organization_id AND e.execution_id=x.id WHERE x.organization_id=? AND x.project_id=? AND x.id=?`, organizationID, projectID, id).Scan(
 		&value.Execution.ID, &value.Execution.OrganizationID, &value.Execution.ProjectID, &value.Execution.ChangeSetID, &value.Execution.ApprovalID, &value.Execution.Status, &value.Execution.Version, &value.Execution.Mode, &value.Execution.Adapter, &value.Execution.Source, &value.Execution.Scenario, &value.Execution.IdempotencyKey, &value.Execution.RequestHash, &value.Execution.ExecutedBy, &value.Execution.StartedAt, &completedAt, &value.Execution.RetryAllowed, &value.Execution.RecoveryAction, &value.Execution.RecoveryReason, &compensation,
 		&value.Evidence.ID, &value.Evidence.Summary, &value.Evidence.Mode, &value.Evidence.Reversible, &value.Evidence.Source, &value.Evidence.Scenario, &references, &value.Evidence.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {

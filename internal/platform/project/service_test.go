@@ -37,7 +37,24 @@ type stubProjectStore struct {
 	saved     Workbench
 }
 
-func (*stubProjectStore) CreateBrand(context.Context, Brand) error { return nil }
+func (*stubProjectStore) CreateBrand(context.Context, Brand) error     { return nil }
+func (*stubProjectStore) CreateProduct(context.Context, Product) error { return nil }
+func (*stubProjectStore) ListProducts(context.Context, contract.OrganizationID) ([]Product, error) {
+	return nil, nil
+}
+func (*stubProjectStore) GetProduct(context.Context, contract.OrganizationID, contract.ProductID) (Product, error) {
+	return Product{}, ErrNotFound
+}
+func (*stubProjectStore) UpdateProduct(context.Context, Product) error { return nil }
+func (*stubProjectStore) ListProductProjects(context.Context, contract.OrganizationID, contract.ProductID) ([]ProductProjectRef, error) {
+	return nil, nil
+}
+func (*stubProjectStore) LinkProductToProject(context.Context, contract.OrganizationID, contract.ProjectID, contract.ProductID) error {
+	return nil
+}
+func (*stubProjectStore) DeleteProduct(context.Context, contract.OrganizationID, contract.ProductID) error {
+	return nil
+}
 func (*stubProjectStore) CreateProject(context.Context, Project, contract.Principal, []contract.ProductID) error {
 	return nil
 }

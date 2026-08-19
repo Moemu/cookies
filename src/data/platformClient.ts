@@ -34,6 +34,79 @@ export type PlatformBrand = {
   updated_at: string;
 };
 
+export type PlatformProductCategory = 'product' | 'activity'
+
+export type PlatformProductPriceBand = '0_9' | '10_99' | '100_999' | '1000_9999' | '10000_99999' | '100000_plus'
+
+export type PlatformBrandType = 'standard' | 'custom'
+
+export type PlatformProduct = {
+  id: string;
+  organization_id: string;
+  name: string;
+  category: PlatformProductCategory;
+  status: "active" | "archived";
+  product_image?: string;
+  price_band?: PlatformProductPriceBand;
+  activity_type?: string;
+  activity_name?: string;
+  brand_type?: PlatformBrandType;
+  brand_name?: string;
+  description?: string;
+  ocean_engine_product_id?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export const productPriceBandLabels: Record<PlatformProductPriceBand, string> = {
+  '0_9': '0-9元',
+  '10_99': '10-99元',
+  '100_999': '100-999元',
+  '1000_9999': '1000-9999元',
+  '10000_99999': '10000-99999元',
+  '100000_plus': '100000元以上',
+}
+
+export const brandTypeLabels: Record<PlatformBrandType, string> = {
+  standard: '标准品牌',
+  custom: '自定义品牌',
+}
+
+export const activityTypeLabels: Record<string, string> = {
+  red_packet: '红包活动',
+}
+
+export type PlatformProductProjectRef = {
+  project_id: string;
+  name: string;
+};
+
+export type PlatformCreateProductInput = {
+  name: string;
+  category: PlatformProductCategory;
+  product_image?: string;
+  price_band?: PlatformProductPriceBand;
+  activity_type?: string;
+  activity_name?: string;
+  brand_type?: PlatformBrandType;
+  brand_name?: string;
+  description?: string;
+};
+
+export type PlatformUpdateProductInput = {
+  name?: string;
+  category?: PlatformProductCategory;
+  status?: "active" | "archived";
+  product_image?: string;
+  price_band?: PlatformProductPriceBand;
+  activity_type?: string;
+  activity_name?: string;
+  brand_type?: PlatformBrandType;
+  brand_name?: string;
+  description?: string;
+  ocean_engine_product_id?: string;
+};
+
 export type PlatformProjectRuntime = {
   code: string;
   brand: string;
@@ -252,6 +325,40 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
   }
 
   return {
+    listProducts: async () => {
+      const products = asArray((await request<ItemsResponse<PlatformProduct>>("/products")).items);
+      return products;
+    },
+    createProduct: async (input: PlatformCreateProductInput) =>
+      request<PlatformProduct>("/products", { method: "POST", body: JSON.stringify(input) }),
+    getProduct: async (productId: string) => request<PlatformProduct>(`/products/${encodeURIComponent(productId)}`),
+    updateProduct: async (productId: string, input: PlatformUpdateProductInput) =>
+      request<PlatformProduct>(`/products/${encodeURIComponent(productId)}`, { method: "PATCH", body: JSON.stringify(input) }),
+    listProductProjects: async (productId: string) => {
+      const refs = asArray((await request<ItemsResponse<PlatformProductProjectRef>>(`/products/${encodeURIComponent(productId)}/projects`)).items);
+      return refs;
+    },
+    linkProductToProject: async (productId: string, projectId: string) =>
+      request<{ product_id: string; project_id: string }>(`/products/${encodeURIComponent(productId)}/projects/${encodeURIComponent(projectId)}`, { method: "POST" }),
+    deleteProduct: async (productId: string) => {
+      await request<Record<string, never>>(`/products/${encodeURIComponent(productId)}`, { method: "DELETE" })
+    },
+    putProductImage: async (productId: string, file: File) => {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await fetch(`${defaultPlatformBase}/products/${encodeURIComponent(productId)}/image`, {
+        method: "PUT",
+        credentials: "include",
+        body,
+      });
+      const payload = await readPayload<PlatformProduct>(response);
+      if (!response.ok) {
+        const error = payload as { error?: { message?: string }; message?: string };
+        throw new Error(error.error?.message ?? error.message ?? "上传商品图片失败");
+      }
+      return payload as PlatformProduct;
+    },
+    productImageUrl: (productId: string) => `${defaultPlatformBase}/products/${encodeURIComponent(productId)}/image`,
     listProjects: async () => {
       const projects = asArray((await request<ItemsResponse<PlatformProject>>("/projects")).items);
       // The application workbench can only operate on active, brand-bound

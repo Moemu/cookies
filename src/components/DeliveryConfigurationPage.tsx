@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Check, CircleAlert, Plus, RefreshCw, Save, ShieldCheck, Trash2 } from 'lucide-react'
+import { Check, CircleAlert, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 import {
   DeliveryApiError,
   deliveryPlanApi,
+  deliveryExecutionApi,
   type DeliveryControlChangeSet,
   type DeliveryPlan,
   type PlatformConfiguration,
@@ -111,6 +112,10 @@ function PlatformConfigurationDetails({ value }: { value: PlatformConfiguration 
 type OceanConfiguration = NonNullable<PlatformConfiguration['payload']['ocean_engine']>
 type OceanPromotion = OceanConfiguration['promotions'][number]
 
+const optimizationTargetOptions = [
+  { value: 'in_app_order', label: 'App 内下单' },
+] as const
+
 function updateReference(current: StableReference | undefined, id: string, objectKind: string): StableReference | undefined {
   const value = id.trim()
   if (!value) return undefined
@@ -129,12 +134,23 @@ function fromLocalDateTime(value: string) {
 }
 
 function MaterialObjectPicker({ label, assets, value, objectKind, onChange }: { label: string; assets: ApiAssetVersionPointer[]; value: StableReference[]; objectKind: string; onChange: (value: StableReference[]) => void }) {
-  const selected = new Set(value.map(reference => reference.id))
-  return <fieldset className="delivery-config-object-picker"><legend>{label}</legend><div>{assets.map(asset => <label key={asset.id} className={selected.has(asset.assetId) ? 'selected' : ''}>
-    <input type="checkbox" checked={selected.has(asset.assetId)} onChange={() => onChange(selected.has(asset.assetId) ? value.filter(reference => reference.id !== asset.assetId) : [...value, { namespace: 'cookies', object_kind: objectKind, scope: 'current_project', id: asset.assetId, version: String(asset.humanConfirmedVersion ?? asset.workingVersion), state: 'resolved', display_name_snapshot: asset.assetId, audit_attributes: { ocean_engine_material_id: asset.oceanEngineMaterialId ?? '' } }])}/>
-    <span className="delivery-config-object-preview">{asset.contentUrl ? asset.mediaKind === 'video' ? <video src={asset.contentUrl} controls preload="metadata"/> : <img src={asset.contentUrl} alt=""/> : <span>无预览</span>}</span>
-    <b>{asset.assetId}</b><small>{asset.oceanEngineMaterialId ? '已录入巨量' : '待 RPA 录入'}</small>
-  </label>)}</div>{!assets.length ? <p>当前项目没有已确认素材。</p> : null}</fieldset>
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [preview, setPreview] = useState<ApiAssetVersionPointer>()
+  const [draftIds, setDraftIds] = useState<string[]>(value.map(reference => reference.id ?? ''))
+  const draftSelected = new Set(draftIds)
+  const filteredAssets = assets.filter(asset => `${asset.assetId} ${asset.oceanEngineMaterialId ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const toggle = (asset: ApiAssetVersionPointer) => setDraftIds(current => current.includes(asset.assetId) ? current.filter(id => id !== asset.assetId) : [...current, asset.assetId])
+  const confirm = () => {
+    onChange(draftIds.map(id => {
+      const asset = assets.find(item => item.assetId === id)
+      return { namespace: 'cookies', object_kind: objectKind, scope: 'current_project', id, version: String(asset?.humanConfirmedVersion ?? asset?.workingVersion ?? 0), state: 'resolved' as const, display_name_snapshot: id, audit_attributes: { ocean_engine_material_id: asset?.oceanEngineMaterialId ?? '' } }
+    }))
+    setOpen(false)
+  }
+  return <fieldset className="delivery-config-object-picker"><legend>{label}</legend><div className="delivery-config-object-summary"><span>{value.length ? `${value.length} 个素材已选` : '尚未选择素材'}</span><button className="secondary-button" type="button" onClick={() => { setDraftIds(value.map(reference => reference.id ?? '')); setOpen(true) }}>选择素材</button></div>{value.length ? <div className="delivery-config-selected-chips">{value.map(reference => <span key={reference.id}>{reference.display_name_snapshot ?? reference.id}</span>)}</div> : null}{!assets.length ? <p>当前项目没有已确认素材。</p> : null}
+    {open ? <div className="delivery-material-modal-backdrop" role="presentation" onClick={() => setOpen(false)}><section className="delivery-material-modal" style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }} role="dialog" aria-modal="true" aria-label={`${label}选择器`} onClick={event => event.stopPropagation()}><header><div><span className="section-label">MATERIAL PICKER</span><h3>{label}</h3><p>可搜索、预览并多选当前项目已确认素材。</p></div><button className="text-button" type="button" onClick={() => setOpen(false)}>关闭</button></header><div className="delivery-material-modal-toolbar"><input autoFocus placeholder="搜索素材 ID 或巨量素材 ID" value={query} onChange={event => setQuery(event.target.value)}/><span>已选 {draftIds.length} 个</span><button className="text-button" type="button" onClick={() => setDraftIds([])}>清空</button></div><div className="delivery-material-modal-grid">{filteredAssets.map(asset => <label key={asset.id} className={draftSelected.has(asset.assetId) ? 'selected' : ''}><input type="checkbox" checked={draftSelected.has(asset.assetId)} onChange={() => toggle(asset)}/><button type="button" className="delivery-material-preview-button" onClick={() => setPreview(asset)}>{asset.contentUrl ? asset.mediaKind === 'video' ? <video src={asset.contentUrl} preload="metadata"/> : <img src={asset.contentUrl} alt=""/> : <span>无预览</span>}</button><b>{asset.assetId}</b><small>{asset.oceanEngineMaterialId ? '已录入巨量' : '待 RPA 录入'}</small></label>)}{!filteredAssets.length ? <div className="delivery-material-empty">{assets.length ? '没有匹配的素材，请更换搜索条件。' : '当前项目没有可选择的已确认素材。'}</div> : null}</div><footer><button className="secondary-button" type="button" onClick={() => setOpen(false)}>取消</button><button className="primary-button" type="button" onClick={confirm}>确认选择</button></footer>{preview ? <div className="delivery-material-preview-overlay" role="dialog" aria-label="素材预览" onClick={() => setPreview(undefined)}>{preview.contentUrl ? preview.mediaKind === 'video' ? <video src={preview.contentUrl} controls autoPlay onClick={event => event.stopPropagation()}/> : <img src={preview.contentUrl} alt={preview.assetId} onClick={event => event.stopPropagation()}/> : <span>无预览</span>}</div> : null}</section></div> : null}
+  </fieldset>
 }
 
 function ToggleField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
@@ -178,16 +194,16 @@ function PlatformConfigurationEditor({ value, onChange, products, assets }: { va
         <label><span>投放模式</span><select value={ocean.project.delivery_mode} onChange={event => updateProject({ delivery_mode: event.target.value })}><option value="manual">手动投放</option><option value="ubmax">UBMax</option></select></label>
         <label><span>深度优化方式</span><select value={ocean.project.deep_optimization_mode ?? 'disabled'} onChange={event => updateProject({ deep_optimization_mode: event.target.value })}><option value="disabled">不启用</option><option value="conversion_roi">成交 ROI</option><option value="net_conversion_order">净成交下单</option><option value="net_conversion_roi">净成交 ROI</option></select><small>平台会按当前场景限制可用选项。</small></label>
         {['lead_generation', 'ecommerce'].includes(ocean.project.marketing_purpose) ? <ToggleField label="AIGC 动态创意" checked={ocean.project.aigc_dynamic_creative ?? false} onChange={aigc_dynamic_creative => updateProject({ aigc_dynamic_creative })}/> : null}
-        <label><span>竞价策略</span><select value={ocean.project.budget_and_bidding.bidding_strategy} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, bidding_strategy: event.target.value } })}><option value="manual_bid">手动出价</option><option value="stable_cost">稳定成本</option><option value="maximum_conversion">最大转化</option></select></label>
+        <label><span>竞价策略</span><select value={ocean.project.budget_and_bidding.bidding_strategy} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, bidding_strategy: event.target.value } })}><option value="stable_cost">稳定成本 · 成本稳定在出价附近</option><option value="cost_cap">最优成本 · 均匀消耗预算，成本不超过出价</option><option value="maximum_conversion">最大转化 · 花完预算，拿到最大转化（价值）</option></select></label>
         <label><span>付费方式</span><select value={ocean.project.budget_and_bidding.charging_mode} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, charging_mode: event.target.value } })}><option value="CPC">按点击付费</option><option value="CPM">按展示付费</option><option value="OCPM">按目标转化出价</option></select></label>
-        <label><span>项目日预算</span><div className="delivery-config-money-input"><input type="number" inputMode="decimal" min="0" value={ocean.project.budget_and_bidding.daily_budget_minor / 100} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, daily_budget_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元 / 天</small></div></label>
+        <label><span>项目日预算</span><select value={ocean.project.budget_and_bidding.budget_mode ?? (ocean.project.budget_and_bidding.daily_budget_minor === 0 ? 'unlimited' : 'daily')} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, budget_mode: event.target.value as 'daily' | 'unlimited', daily_budget_minor: event.target.value === 'unlimited' ? 0 : Math.max(ocean.project.budget_and_bidding.daily_budget_minor, 100) } })}><option value="daily">设置日预算</option><option value="unlimited">不限</option></select>{(ocean.project.budget_and_bidding.budget_mode ?? 'daily') !== 'unlimited' ? <div className="delivery-config-money-input"><input type="number" inputMode="decimal" min="0" value={ocean.project.budget_and_bidding.daily_budget_minor / 100} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, budget_mode: 'daily', daily_budget_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元 / 天</small></div> : <small>预算不设上限</small>}</label>
         <label><span>项目出价</span><div className="delivery-config-money-input"><input type="number" inputMode="decimal" min="0" step="0.01" value={(ocean.project.budget_and_bidding.bid_minor ?? 0) / 100} onChange={event => updateProject({ budget_and_bidding: { ...ocean.project.budget_and_bidding, bid_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元</small></div></label>
         <label><span>投放周期</span><select value={ocean.project.schedule.mode ?? 'fixed_range'} onChange={event => updateProject({ schedule: { ...ocean.project.schedule, mode: event.target.value as 'long_term' | 'fixed_range' } })}><option value="long_term">从今天起长期投放</option><option value="fixed_range">设置开始和结束日期</option></select></label>
         <label><span>开始时间</span><input type="datetime-local" value={toLocalDateTime(ocean.project.schedule.start_at)} onChange={event => updateProject({ schedule: { ...ocean.project.schedule, start_at: fromLocalDateTime(event.target.value) } })}/></label>
         {ocean.project.schedule.mode !== 'long_term' ? <label><span>结束时间</span><input type="datetime-local" value={toLocalDateTime(ocean.project.schedule.end_at)} onChange={event => updateProject({ schedule: { ...ocean.project.schedule, end_at: fromLocalDateTime(event.target.value) } })}/></label> : null}
         {ocean.project.marketing_purpose === 'product_catalog' ? <fieldset className="delivery-config-inline-fieldset"><legend>投放版位</legend><label><span>投放位置</span><select value={ocean.project.placement_strategy ?? 'smart'} onChange={event => updateProject({ placement_strategy: event.target.value, placement_media: event.target.value === 'smart' ? undefined : ocean.project.placement_media })}><option value="smart">通投智选</option><option value="preferred_media">首选媒体</option></select></label>{ocean.project.placement_strategy === 'preferred_media' ? <div className="delivery-config-check-grid">{[{ key: 'all', label: '全选' }, { key: 'toutiao', label: '今日头条' }, { key: 'xigua', label: '西瓜视频' }, { key: 'douyin', label: '抖音' }, { key: 'fanqie', label: '番茄系媒体' }, { key: 'pangolin', label: '穿山甲' }].map(option => { const media = ['toutiao', 'xigua', 'douyin', 'fanqie', 'pangolin']; const checked = option.key === 'all' ? media.every(item => ocean.project.placement_media?.includes(item)) : ocean.project.placement_media?.includes(option.key) ?? false; return <label key={option.key}><input type="checkbox" checked={checked} onChange={event => updateProject({ placement_media: option.key === 'all' ? event.target.checked ? media : [] : event.target.checked ? [...new Set([...(ocean.project.placement_media ?? []), option.key])] : (ocean.project.placement_media ?? []).filter(item => item !== option.key) })}/><span>{option.label}</span></label> })}</div> : null}</fieldset> : null}
         <label><span>地域</span><select multiple value={ocean.project.targeting.regions ?? []} onChange={event => updateProject({ targeting: { ...ocean.project.targeting, regions: Array.from(event.currentTarget.selectedOptions, option => option.value) } })}>{['不限', '北京市', '上海市', '广东省', '浙江省', '江苏省', '四川省'].map(region => <option key={region} value={region === '不限' ? 'all' : region}>{region}</option>)}</select><small>按住 Ctrl 可多选。</small></label>
-        <label><span>年龄</span><select multiple value={ocean.project.targeting.age_ranges ?? []} onChange={event => updateProject({ targeting: { ...ocean.project.targeting, age_ranges: Array.from(event.currentTarget.selectedOptions, option => option.value) } })}>{['18-23', '24-30', '31-40', '41-49', '50+'].map(age => <option key={age} value={age}>{age}</option>)}</select><small>按住 Ctrl 可多选。</small></label>
+        <label><span>年龄</span><select multiple value={ocean.project.targeting.age_ranges ?? []} onChange={event => { const values = Array.from(event.currentTarget.selectedOptions, option => option.value); updateProject({ targeting: { ...ocean.project.targeting, age_ranges: values.includes('all') ? ['all'] : values } }) }}>{[['all', '不限'], ['18-23', '18-23'], ['24-30', '24-30'], ['31-40', '31-40'], ['41-49', '41-49'], ['50+', '50+']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><small>按住 Ctrl 可多选；选择“不限”会清除其他年龄。</small></label>
         <label><span>性别</span><select value={ocean.project.targeting.gender ?? ''} onChange={event => updateProject({ targeting: { ...ocean.project.targeting, gender: event.target.value } })}><option value="">不限</option><option value="male">男</option><option value="female">女</option></select></label>
         <ToggleField label="智能定向扩展" checked={ocean.project.targeting.smart_expansion} onChange={smart_expansion => updateProject({ targeting: { ...ocean.project.targeting, smart_expansion } })}/>
       </div>
@@ -196,16 +212,10 @@ function PlatformConfigurationEditor({ value, onChange, products, assets }: { va
       <div className="delivery-config-subheading"><div><span>02</span><div><h4>投放载体和监测</h4><p>设置落地页、优化目标、搜索快投和第三方监测。</p></div></div></div>
       <div className="delivery-config-editor-fields delivery-config-editor-fields--wide">
         <label><span>投放载体</span><select value={ocean.project.carrier} onChange={event => updateProject({ carrier: event.target.value })}><option value="orange_landing_page">橙子落地页</option>{ocean.project.marketing_purpose === 'lead_generation' && ocean.project.lead_capture_mode === 'smart_lead' ? <option value="orange_landing_page_and_im">橙子落地页 + 抖音私信页</option> : null}{ocean.project.marketing_purpose !== 'lead_generation' || ocean.project.lead_capture_mode === 'custom_lead' ? <><option value="owned_landing_page">自研落地页</option><option value="im">抖音私信页（原抖音主页）</option><option value="byte_miniapp">字节小程序</option></> : null}</select></label>
-        <label><span>优化目标 ID</span><input value={ocean.project.optimization_target_reference?.id ?? ''} placeholder={ocean.project.carrier === 'orange_landing_page' ? '选择平台内置优化目标' : '选择事件资产绑定目标'} onChange={event => updateProject({ optimization_target_reference: updateReference(ocean.project.optimization_target_reference, event.target.value, 'optimization_target') })}/></label>
-        {ocean.project.carrier === 'owned_landing_page' ? <>
-          <label><span>优化目标名称</span><input value={ocean.project.optimization_target_reference?.display_name_snapshot ?? ''} onChange={event => updateProject({ optimization_target_reference: { ...(updateReference(ocean.project.optimization_target_reference, ocean.project.optimization_target_reference?.id ?? 'unresolved', 'optimization_target')!), display_name_snapshot: event.target.value } })}/></label>
-          <label><span>事件资产名称</span><input value={ocean.project.optimization_target_reference?.audit_attributes?.event_asset_name ?? ''} onChange={event => updateProject({ optimization_target_reference: { ...(updateReference(ocean.project.optimization_target_reference, ocean.project.optimization_target_reference?.id ?? 'unresolved', 'optimization_target')!), audit_attributes: { ...ocean.project.optimization_target_reference?.audit_attributes, event_asset_name: event.target.value } } })}/></label>
-          <label><span>事件资产类型</span><input value={ocean.project.optimization_target_reference?.audit_attributes?.event_asset_type ?? ''} onChange={event => updateProject({ optimization_target_reference: { ...(updateReference(ocean.project.optimization_target_reference, ocean.project.optimization_target_reference?.id ?? 'unresolved', 'optimization_target')!), audit_attributes: { ...ocean.project.optimization_target_reference?.audit_attributes, event_asset_type: event.target.value } } })}/></label>
-        </> : null}
-        <label><span>商品目录 ID</span><input value={ocean.project.product_catalog_reference?.id ?? ''} onChange={event => updateProject({ product_catalog_reference: updateReference(ocean.project.product_catalog_reference, event.target.value, 'product_catalog') })}/></label>
+        <label><span>优化目标</span><select value={ocean.project.optimization_target_reference?.semantic_key ?? ocean.project.optimization_target_reference?.id ?? ''} onChange={event => { const option = optimizationTargetOptions.find(item => item.value === event.target.value); updateProject({ optimization_target_reference: option ? { namespace: 'cookies', object_kind: 'optimization_target', scope: 'current_project', id: option.value, semantic_key: option.value, state: 'resolved', display_name_snapshot: option.label } : undefined }) }}><option value="">请选择优化目标</option>{optimizationTargetOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+
         <ToggleField label="商品定向 · RTA 跳转" checked={ocean.project.product_targeting?.rta_redirect ?? false} onChange={rta_redirect => updateProject({ product_targeting: { ...ocean.project.product_targeting, rta_redirect } })}/>
         <ToggleField label="商品定向 · 地域匹配" checked={ocean.project.product_targeting?.region_match ?? false} onChange={region_match => updateProject({ product_targeting: { ...ocean.project.product_targeting, region_match } })}/>
-        <label><span>商品投放条件</span><textarea rows={2} value={ocean.project.product_targeting?.delivery_conditions?.join(', ') ?? ''} onChange={event => updateProject({ product_targeting: { ...ocean.project.product_targeting, delivery_conditions: event.target.value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean) } })}/></label>
         <label><span>搜索关键词</span><textarea rows={2} value={ocean.project.search_boost?.keywords?.join(', ') ?? ''} placeholder="多个关键词用逗号分隔" onChange={event => updateProject({ search_boost: { ...ocean.project.search_boost, keywords: event.target.value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean) } })}/></label>
         <label><span>搜索出价系数</span><input type="number" min="1" step="0.1" value={ocean.project.search_boost?.bid_coefficient ?? 1.1} onChange={event => updateProject({ search_boost: { ...ocean.project.search_boost, bid_coefficient: Number(event.target.value) } })}/></label>
         <ToggleField label="搜索定向扩展" checked={ocean.project.search_boost?.targeting_expansion ?? false} onChange={targeting_expansion => updateProject({ search_boost: { ...ocean.project.search_boost, targeting_expansion } })}/>
@@ -255,7 +265,6 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const [plans, setPlans] = useState<DeliveryPlan[]>([])
   const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get('plan_id') ?? '')
   const [changeSet, setChangeSet] = useState<DeliveryControlChangeSet>()
-  const [preflightMessage, setPreflightMessage] = useState('尚未检查当前计划。')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [editableConfiguration, setEditableConfiguration] = useState<PlatformConfiguration>()
@@ -267,9 +276,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const showConfiguration = activeView === '配置映射'
   const showCalibration = activeView === '字段校准与处置'
   const showPreflight = activeView === '检查与提交'
-  const approvalURL = changeSet ? projectPath(projectId, 'delivery', 'approvals', changeSet.id, '待我审批', undefined, tourRunId, tourCase) : undefined
   const planEditorURL = projectPath(projectId, 'delivery', 'plans', undefined, '计划列表', undefined, tourRunId, tourCase)
-  const canSubmit = !legacyReadOnly && (!changeSet || changeSet.status === 'draft' || changeSet.status === 'preflight_failed' || changeSet.status === 'rejected')
 
   const restoreWorkflow = async (planId: string) => {
     if (!planId) return
@@ -307,26 +314,6 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
     window.history.replaceState(window.history.state, '', url)
   }, [selectedId])
 
-  const preflightPlan = async () => {
-    if (!selectedPlan || legacyReadOnly) return
-    setBusy(true)
-    try {
-      const result = await deliveryPlanApi.preflight(projectId, selectedPlan.id)
-      setPreflightMessage(result.passed ? `检查通过（${formatTime(result.checkedAt)}）。` : `检查未通过：${result.checks.filter(check => !check.passed).map(check => check.message).join('；')}`)
-    } catch (error) { setNotice(errorMessage(error, '检查计划失败。')) } finally { setBusy(false) }
-  }
-
-  const createAndPreflightChangeSet = async () => {
-    if (!selectedPlan || legacyReadOnly) return
-    setBusy(true)
-    try {
-      const draft = changeSet?.status === 'draft' ? changeSet : await deliveryPlanApi.createChangeSet(projectId, selectedPlan.id, selectedPlan.currentVersionNumber)
-      const checked = await deliveryPlanApi.preflightChangeSet(projectId, draft.id, draft.version)
-      setChangeSet(checked)
-      setNotice(checked.status === 'preflight_passed' ? '变更申请已提交审批中心。' : '变更申请未通过最终检查。')
-    } catch (error) { setNotice(errorMessage(error, '提交变更申请失败。')) } finally { setBusy(false) }
-  }
-
   const saveConfiguration = async () => {
     if (!selectedPlan || !editableConfiguration) return
     setBusy(true)
@@ -337,6 +324,27 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
     } catch (error) { setNotice(errorMessage(error, '保存平台配置失败。')) } finally { setBusy(false) }
   }
 
+  const confirmLaunch = async () => {
+    if (!selectedPlan) return
+    setBusy(true)
+    try {
+      const idempotencyKey = `launch-${selectedPlan.id}-${selectedPlan.currentVersionNumber}-${Date.now()}`
+      const result = await deliveryExecutionApi.executePlan(projectId, selectedPlan.id, selectedPlan.currentVersionNumber, idempotencyKey)
+      setNotice(
+        result.execution.status === 'succeeded'
+          ? '已确认投放并完成平台写入（本地模拟）。'
+          : `投放执行结果为 ${result.execution.status}：${result.execution.recoveryReason || '详见执行记录'}。`,
+      )
+      setChangeSet(result.changeSet)
+    } catch (error) {
+      if (error instanceof DeliveryApiError && error.code === 'VALIDATION_FAILED' && error.violations.length) {
+        setNotice(`当前配置无法投放：${error.violations.map(item => item.reason).join('；')}`)
+      } else {
+        setNotice(errorMessage(error, '确认投放失败。'))
+      }
+    } finally { setBusy(false) }
+  }
+
   return <StateBoundary state={state} contextLabel="智能投放 / 平台配置" errorDetail="当前 Project 的平台配置无法读取。">
     <div className="delivery-config-workspace">
       <section className="delivery-config-toolbar"><label><span>投放计划</span><select name="delivery_plan" autoComplete="off" value={selectedId} onChange={event => setSelectedId(event.target.value)}>{plans.map(plan => <option value={plan.id} key={plan.id}>{plan.currentVersion.name} · V{plan.currentVersionNumber}</option>)}</select></label><a className="secondary-button" href={planEditorURL}>查看投放计划</a></section>
@@ -344,12 +352,14 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
       {!selectedPlan ? <div className="panel-empty">当前 Project 暂无投放计划。<a href={planEditorURL}>前往创建</a></div> : legacyReadOnly ? <section className="delivery-config-config-card">
         <div className="delivery-config-empty-inline"><CircleAlert size={20}/><div><b>历史配置，仅供查看</b><p>这份计划不能继续修改、检查或提交。若要继续投放，请新建计划并选择目标广告平台。</p></div></div>
       </section> : <>
-        {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存新版本'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration} products={currentProject.products ?? []} assets={confirmedAssets}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
+        {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration} products={currentProject.products ?? []} assets={confirmedAssets}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
         {showCalibration && platformConfiguration ? <CalibrationDispositionView value={platformConfiguration}/> : null}
         {showPreflight ? <section className="delivery-config-flow-grid delivery-config-flow-grid--preflight"><article className="delivery-config-preflight-card">
-          <header><div><span className="section-label">提交前检查</span><h3>检查并提交变更申请</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `变更申请 ${changeSet.status}` : '尚未提交'}</strong></header>
-          <div className="delivery-config-preflight-summary"><b>检查结果</b><p>{preflightMessage}</p></div>
-          <div className="delivery-config-actions delivery-config-preflight-actions"><button onClick={() => void preflightPlan()} disabled={busy}><ShieldCheck size={14}/>检查当前计划</button><button onClick={() => void createAndPreflightChangeSet()} disabled={busy || !canSubmit}><Check size={14}/>提交变更申请</button>{approvalURL && changeSet?.status !== 'draft' ? <a className="primary-button" href={approvalURL}>查看审批记录<ArrowRight size={14}/></a> : null}</div>
+          <header><div><span className="section-label">确认投放</span><h3>检查并确认投放</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `最近执行 ${changeSet.status}` : '尚未投放'}</strong></header>
+          <div className="delivery-config-preflight-summary"><b>服务端校验</b><p>保存时会校验结构；确认投放时要求执行所需引用与平台证据均已解析。</p></div>
+          <div className="delivery-config-actions delivery-config-preflight-actions">
+            <button className="primary-button" onClick={() => void confirmLaunch()} disabled={busy || legacyReadOnly}><Check size={14}/>确认投放</button>
+          </div>
         </article></section> : null}
       </>}
       {notice ? <div className="inline-notice" role="status">{notice}</div> : null}

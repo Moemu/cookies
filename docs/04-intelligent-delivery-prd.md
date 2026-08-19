@@ -3,24 +3,24 @@
 | 属性 | 内容 |
 | --- | --- |
 | 模块 | 广告智能投放 |
-| 文档版本 | v0.7 |
+| 文档版本 | v0.8 |
 | 文档状态 | 草案 |
 | 目标版本 | M1 / MVP |
-| 核心实现 | Codex + 平台 Skills + Computer Use |
+| 核心实现 | Codex + 平台 Skills + Playwright RPA |
 | 重点平台 | 抖音、快手广告投放平台 |
 | 上游输入 | 已批准策略、视频/图文创意包、账户上下文、转化目标 |
 
 ## 1. 产品定义
 
-本模块由 Codex 理解投放目标并规划步骤，加载抖音/快手平台 Skills，将计划字段转换为平台界面操作，再通过 Computer Use 在用户已授权、已登录的广告平台中完成配置、检查、提交、监控和优化动作。
+本模块由 Codex 理解投放目标并规划步骤，加载抖音/快手平台 Skills，将计划字段转换为平台界面操作，再通过 Playwright RPA 在用户已授权、已登录的广告平台中完成配置、检查、提交、监控和优化动作。
 
-cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Use 是核心执行方式，但任何真实预算、上线、扩量、素材替换或账户设置操作都必须受权限、预算护栏和人工确认约束。
+cookies 不假设所有平台都提供稳定、完整的开放 API。Playwright RPA（确定性浏览器自动化）是核心执行方式，但任何真实预算、上线、扩量、素材替换或账户设置操作都必须受权限、预算护栏和人工确认约束。
 
 ## 2. 产品目标
 
 1. 用户用自然语言或已批准策略发起投放，Codex 生成可理解、可审批的执行计划。
 2. 用平台 Skills 固化抖音、快手的操作流程、字段映射、校验规则和异常恢复。
-3. 用 Computer Use 完成平台 UI 的导航、录入、检查和提交，减少重复手工操作。
+3. 用 Playwright RPA 完成平台 UI 的导航、录入、检查和提交，减少重复手工操作。
 4. 每个关键步骤保存页面状态、执行证据和结果验证，避免“点过即成功”。
 5. 在敏感点击前暂停，请授权用户核对账户、预算、时间、受众、素材和最大影响。
 6. 汇总平台结果和投放数据，生成异常诊断与可执行优化建议。
@@ -28,11 +28,11 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 ### 非目标
 
 - 不绕过登录、验证码、双重验证、管理员授权或平台风控。
-- 不允许 Codex/Computer Use 在无人确认下首次上线、增加预算或扩量。
+- 不允许 Codex/Playwright RPA 在无人确认下首次上线、增加预算或扩量。
 - 不用坐标宏或不可观察脚本盲目点击平台页面。
 - 不把页面显示的成功提示当作唯一证据，必须读取对象状态或进行二次验证。
 - 不在 MVP 覆盖抖音、快手的所有高级投放能力。
-- 不承诺 Computer Use 可以永久适配频繁变化的平台 UI。
+- 不承诺 Playwright RPA 可以永久适配频繁变化的平台 UI。
 
 ## 系统边界与模块导航
 
@@ -40,7 +40,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 
 ### 系统边界
 
-智能投放是独立垂直系统，路由前缀为 `/delivery/*`。它拥有广告账户业务映射、投放计划、变更、平台对象、执行证据、监控、告警和优化建议；共享基座提供用户权限、Codex/Skills、Computer Use 环境、通用审批与审计。
+智能投放是独立垂直系统，路由前缀为 `/delivery/*`。它拥有广告账户业务映射、投放计划、变更、平台对象、执行证据、监控、告警和优化建议；共享基座提供用户权限、Codex/Skills、Browser RPA 环境、通用审批与审计。
 
 | 类型 | 内容 |
 | --- | --- |
@@ -55,16 +55,16 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 - DeliveryPlan、DeliveryChangeSet、PlatformEntity 使用关系、DeliveryEvidence、Alert 和 Recommendation 必须携带非空 `project_id`。
 - AdAccountBinding 和 ComputerUseEnvironment 可以是组织级资源，但每次计划、审批、执行和证据都必须落到具体 Project，并在最终提交前复核 Project、账户、预算和创意归属。
 - 投放计划默认只选择同一 Project 的批准策略和 CreativePackage；跨 Project 复用必须显式授权并冻结来源版本快照。
-- 切换 Project 不得让正在执行的 Computer Use 会话静默改换上下文；进行中的执行需先完成、暂停或接管，所有结果继续写回原 Project。
+- 切换 Project 不得让正在执行的 Browser RPA 会话静默改换上下文；进行中的执行需先完成、暂停或接管，所有结果继续写回原 Project。
 
 ### 一级导航
 
 | 一级导航 | 二级页面 | 路由示例 | 页面职责 |
 | --- | --- | --- | --- |
 | 投放作战台 | 今日概览、预算进度、异常、待办、最近执行 | `/delivery/home` | 投放系统全局态势与个人工作入口 |
-| 账户与环境 | 广告账户、平台资产、登录状态、执行设备、环境检查 | `/delivery/environments/*` | 管理账户业务映射并查看共享 Computer Use 环境 |
+| 账户与环境 | 广告账户、平台资产、登录状态、执行设备、环境检查 | `/delivery/environments/*` | 管理账户业务映射并查看共享 Browser RPA 环境 |
 | 投放计划 | 草稿、待校验、待批准、运行中、已结束、计划模板 | `/delivery/plans/*` | 创建、编辑、校验、版本化和管理 DeliveryPlan |
-| 执行中心 | 待执行、执行中、等待用户、结果未知、失败、已完成 | `/delivery/executions/*` | 观察和控制 Codex + Computer Use 执行任务 |
+| 执行中心 | 待执行、执行中、等待用户、结果未知、失败、已完成 | `/delivery/executions/*` | 观察和控制 Codex + Playwright RPA 执行任务 |
 | 监控告警 | 实时状态、预算、效果、拒审、追踪、素材疲劳、告警规则 | `/delivery/monitoring/*` | 监控平台状态、数据和异常处置 |
 | 优化中心 | 待处理建议、已采纳、观察中、已拒绝、效果跟踪 | `/delivery/optimizations/*` | 将分析建议转为受控 ChangeSet |
 | 审批中心 | 待我审批、我发起的、预算审批、紧急动作、已过期 | `/delivery/approvals/*` | 集中处理投放高风险动作审批 |
@@ -78,8 +78,8 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 
 ### 导航规则
 
-- 执行中心与投放计划分开：计划负责业务配置，执行中心负责 Computer Use 运行状态和接管。
-- 账户业务映射由本系统维护；设备、允许应用/站点等全局策略跳转 `/admin/computer-use/*`。
+- 执行中心与投放计划分开：计划负责业务配置，执行中心负责 Browser RPA 运行状态和接管。
+- 账户业务映射由本系统维护；设备、允许应用/站点等全局策略跳转 `/admin/browser-rpa/*`。
 - 审批中心展示投放差异与风险，底层审批人和签名能力来自共享基座。
 - 平台能力运营只维护抖音/快手业务流程，不重复实现全局 Skill Registry。
 - 权限使用 `delivery.*` 动作，查看、编辑、审批、执行、暂停相互独立。
@@ -88,18 +88,18 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 
 ### 3.1 运行环境
 
-- cookies 在支持 Codex 与 Computer Use 的受控桌面环境中运行。
-- 用户完成 Computer Use 启用，并允许目标浏览器/广告平台应用或站点。
+- cookies 在支持 Codex 与 Playwright RPA 的受控桌面环境中运行。
+- 用户完成 Playwright RPA 启用，并允许目标浏览器/广告平台应用或站点。
 - 用户已在目标广告平台登录；cookies 不保存或代填账户密码。
 - 平台窗口可见、会话有效，且当前账户具有完成任务所需权限。
-- Go 后端保存业务、审批和运行状态；Computer Use 只处理当前受控 UI 会话。
+- Go 后端保存业务、审批和运行状态；Playwright RPA 只处理当前受控 UI 会话。
 
 ### 3.2 平台范围
 
 - M1 为抖音、快手分别建立 Platform Skill 和回归用例。
 - 每个平台按功能逐项开放：创建草稿、提交上线、暂停、数据查看、优化修改。
 - 某平台 Skill 未通过当前版本回归时，只允许分析/生成操作说明，禁用真实写操作。
-- 稳定结构化接口可用于只读数据同步或结果对账，但投放执行主链路仍由 Codex + Computer Use 完成。
+- 稳定结构化接口可用于只读数据同步或结果对账，但投放执行主链路仍由 Codex + Playwright RPA 完成。
 
 ## 4. 角色分工
 
@@ -109,7 +109,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 | Go 控制面 | 权限、预算护栏、任务状态、审批令牌、审计、数据和恢复点 |
 | Codex | 理解目标、加载 Skill、规划步骤、判断页面、处理分支、验证结果 |
 | Platform Skill | 平台导航、字段映射、页面状态、校验、错误处理和回归样例 |
-| Computer Use | 在已允许的浏览器/应用中查看、点击、输入、截图和读取结果 |
+| Browser RPA | 在已允许的浏览器/应用中查看、点击、输入、截图和读取结果 |
 | 素材/数据模块 | 提供已批准创意、素材经验、指标、异常与优化依据 |
 
 ## 5. 平台 Skills
@@ -136,7 +136,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 | `delivery-preflight` | 统一预算、素材、授权、落地页、转化和追踪校验 |
 | `delivery-monitor` | 读取平台状态/数据，检查异常与数据新鲜度 |
 | `delivery-optimizer` | 基于策略、素材经验和效果数据生成优化建议/变更计划 |
-| `computer-use-safety` | 应用/站点允许范围、敏感动作识别、页面不可信输入和接管规则 |
+| `browser-rpa-safety` | 应用/站点允许范围、敏感动作识别、页面不可信输入和接管规则 |
 
 ## 6. 核心流程
 
@@ -146,10 +146,10 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 2. Codex 读取批准策略、创意版本、素材授权、账户范围和组织预算政策。
 3. 调用 `delivery-preflight` 和目标 Platform Skill，生成结构化执行计划。
 4. 工作台展示账户、目标、预算、受众、版位、创意、排期、转化与最大花费。
-5. 用户批准“进入平台配置”；Computer Use 打开已允许平台并识别当前账户/页面。
+5. 用户批准“进入平台配置”；Browser RPA 打开已允许平台并识别当前账户/页面。
 6. Codex 按 Skill 操作 UI，逐项录入；每一步读取页面确认实际值。
 7. 到达最终提交前暂停，展示页面截图、配置摘要、与批准计划的差异及风险。
-8. 有权用户确认后，Computer Use 执行最终点击。
+8. 有权用户确认后，Browser RPA 执行最终点击。
 9. Codex 读取成功/审核/错误状态和平台对象标识，必要时进入人工接管。
 10. 系统保存结果证据、平台对象映射、审计和下一步监控任务。
 
@@ -159,13 +159,13 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 2. 系统检查拒审、追踪中断、消耗突变、零转化、成本恶化和素材疲劳。
 3. Codex 调用素材经验和 `delivery-optimizer` 生成带依据的建议。
 4. 用户采纳建议后生成新的 DeliveryChangeSet，而不是立即修改平台。
-5. 变更重新经过校验、影响预览和审批，再由 Computer Use 执行。
+5. 变更重新经过校验、影响预览和审批，再由 Browser RPA 执行。
 
 ### 6.3 用户接管
 
 遇到验证码、登录失效、双重验证、权限申请、无法可靠识别页面、平台异常或 Skill 未覆盖分支时：
 
-- Computer Use 立即停止敏感输入和点击。
+- Browser RPA 立即停止敏感输入和点击。
 - 工作台说明当前页面、已完成步骤和需要用户完成的动作。
 - 用户接管操作后点击“继续”，Codex 重新读取页面并验证状态。
 - 不要求用户在聊天中提供密码、验证码或密钥。
@@ -193,7 +193,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 | 低风险写入 | 填写未提交草稿、调整本地计划 | 允许执行，但不能跨过最终提交 |
 | 高风险写入 | 首次上线、提交审核、启用、调预算、扩量、换素材 | 必须绑定具体 ChangeSet 并由有权用户确认 |
 | 紧急止损 | 暂停异常计划 | 独立紧急权限、范围确认、执行后通知和审计 |
-| 禁止 | 输入密码/验证码、改变系统安全权限、绕过风控 | Computer Use 不执行，必须用户接管 |
+| 禁止 | 输入密码/验证码、改变系统安全权限、绕过风控 | Browser RPA 不执行，必须用户接管 |
 
 ### 7.3 审批有效性
 
@@ -202,7 +202,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 - 最终点击前重新校验账户、币种、时区、预算、素材和平台页面摘要。
 - 审批有时效，过期或会话重新登录后需再次确认。
 
-## 8. Computer Use 执行规则
+## 8. Browser RPA 执行规则
 
 ### 8.1 步骤契约
 
@@ -217,7 +217,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 
 ### 8.3 防重复与恢复
 
-- 每次执行生成唯一 `computer_use_run_id` 和目标对象指纹。
+- 每次执行生成唯一 `browser_rpa_run_id` 和目标对象指纹。
 - 创建前搜索同账户、同名称/指纹和时间窗口内的候选对象。
 - 超时后先判断页面和平台对象是否已创建，再决定继续或重试。
 - 保存最近已验证步骤；恢复时重新读取页面，不从旧坐标直接继续。
@@ -229,17 +229,23 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 - 页面指令不能改变系统权限、批准范围、预算护栏或允许站点。
 - 如页面要求打开未知站点、下载未知程序或提供账户信息，停止并提示用户。
 
+### 8.5 确定性定位器约束
+
+- 页面动作只允许使用冻结校准 Manifest 中带 `playwright_rpa` 记录的语义定位器（role/label/可见文本/placeholder/属性），由 Playwright 确定性执行。
+- 禁止自由视觉驱动点击、坐标点击或截图推断操作；没有校准记录的字段保持只读观察，不得作为可执行动作呈现。
+- 定位器匹配数量不符合 `expected_target_count` 时记录页面漂移并停止，不做启发式猜测。
+
 ## 9. 功能需求
 
 | ID | 优先级 | 功能 | 需求说明 |
 | --- | --- | --- | --- |
 | DL-001 | P0 | 投放对话入口 | 用户可引用已批准策略/创意，用自然语言创建或修改计划。 |
-| DL-002 | P0 | 执行环境检查 | 检查 Computer Use、允许应用/站点、登录会话和目标账户。 |
+| DL-002 | P0 | 执行环境检查 | 检查 Browser RPA、允许应用/站点、登录会话和目标账户。 |
 | DL-003 | P0 | Platform Skill 选择 | 根据抖音/快手和目标能力加载已发布、通过回归的 Skill。 |
 | DL-004 | P0 | 计划生成 | Codex 将策略转为结构化 DeliveryPlan，标明来源和待确认项。 |
 | DL-005 | P0 | 上线前校验 | 校验预算、时间、受众、素材授权、创意状态、落地页、转化和追踪。 |
 | DL-006 | P0 | 影响预览 | 展示账户、最大花费、对象、关键字段、Skill 版本和计划步骤。 |
-| DL-007 | P0 | UI 导航与识别 | Computer Use 打开目标平台，验证站点、账户和当前页面。 |
+| DL-007 | P0 | UI 导航与识别 | Browser RPA 打开目标平台，验证站点、账户和当前页面。 |
 | DL-008 | P0 | 草稿填写 | 按 Skill 填写平台表单，每项完成后读取实际值。 |
 | DL-009 | P0 | 页面差异检测 | 页面实际值与批准计划不一致时暂停并生成差异。 |
 | DL-010 | P0 | 关键动作审批 | 最终提交、启用、调预算、扩量和换素材前请求有权用户确认。 |
@@ -249,10 +255,10 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 | DL-014 | P0 | 人工验证节点 | 验证码、登录、2FA、权限申请和未知页面必须转人工。 |
 | DL-015 | P0 | 证据与审计 | 保存计划、步骤、关键截图、批准、页面结果和操作者。 |
 | DL-016 | P0 | 暂停 | 独立权限执行计划暂停，并验证平台最终状态。 |
-| DL-017 | P0 | 状态/数据读取 | 通过 Computer Use 或已批准的结构化方式读取状态和关键数据。 |
+| DL-017 | P0 | 状态/数据读取 | 通过 Browser RPA 或已批准的结构化方式读取状态和关键数据。 |
 | DL-018 | P0 | 异常告警 | 发现拒审、会话失效、追踪中断、消耗/成本异常和素材疲劳。 |
 | DL-019 | P1 | 优化建议 | Codex 结合策略、素材经验和数据生成建议、风险与观察期。 |
-| DL-020 | P1 | 建议转执行 | 采纳建议后生成新 ChangeSet，重新审批并由 Computer Use 执行。 |
+| DL-020 | P1 | 建议转执行 | 采纳建议后生成新 ChangeSet，重新审批并由 Browser RPA 执行。 |
 | DL-021 | P1 | 平台 Skill 回放测试 | 使用受控测试账户验证关键路径和页面变化。 |
 | DL-022 | P1 | 计划复制 | 在同平台/跨平台复制时重新映射字段并展示差异。 |
 | DL-023 | P2 | 规则化半自动优化 | 在明确范围、上限、冷却期和人工审批下批量生成变更。 |
@@ -275,7 +281,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 - 日预算、总预算、币种、时区与最大影响。
 - 受众、排期、创意版本和转化事件。
 - 与上次批准内容的差异。
-- Computer Use 下一步将执行的具体动作。
+- Browser RPA 下一步将执行的具体动作。
 
 按钮使用明确动作，如“确认在快手提交 3 个广告组”，不使用模糊“继续”。
 
@@ -289,9 +295,9 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 
 `草稿 → 待校验 → 待批准 → 待执行 → UI 执行中 → 等待用户 → 结果验证中 → 已完成/部分完成/失败/结果未知`
 
-平台审核、启用、暂停、拒绝等是独立业务状态，不与 Computer Use 运行状态混淆。
+平台审核、启用、暂停、拒绝等是独立业务状态，不与 Browser RPA 运行状态混淆。
 
-### 11.2 Computer Use Run 状态
+### 11.2 Browser RPA Run 状态
 
 `准备中 → 检查环境 → 操作中 → 等待审批/等待接管 → 验证中 → 成功/部分成功/失败/已取消`
 
@@ -312,16 +318,16 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 | `POST /api/delivery/v1/plans/{id}/preflight` | 执行统一与平台 Skill 校验 |
 | `POST /api/delivery/v1/plans/{id}/change-sets` | 固化差异、风险和执行步骤 |
 | `POST /api/delivery/v1/change-sets/{id}/approve` | 通过共享审批能力批准具体内容哈希和预算范围 |
-| `POST /platform/v1/computer-use-runs` | 在共享基座创建受控 UI 执行任务 |
-| `GET /platform/v1/computer-use-runs/{id}/events` | SSE 获取步骤、截图、等待和结果 |
-| `POST /platform/v1/computer-use-runs/{id}/confirm` | 确认当前敏感动作，绑定投放审批令牌 |
-| `POST /platform/v1/computer-use-runs/{id}/takeover` | 暂停 Agent 并交给用户接管 |
-| `POST /platform/v1/computer-use-runs/{id}/resume` | 用户完成接管后重新识别并继续 |
+| `POST /platform/v1/browser-rpa/projects/{project_id}/runs` | 在共享基座创建受控 UI 执行任务 |
+| `GET /platform/v1/browser-rpa/projects/{project_id}/runs/{id}/events` | SSE 获取步骤、截图、等待和结果 |
+| `POST /platform/v1/browser-rpa/projects/{project_id}/runs/{id}/confirmations` | 确认当前敏感动作，绑定投放审批令牌 |
+| `POST /platform/v1/browser-rpa/projects/{project_id}/runs/{id}:takeover` | 暂停 Agent 并交给用户接管 |
+| `POST /platform/v1/browser-rpa/projects/{project_id}/runs/{id}:resume` | 用户完成接管后重新识别并继续 |
 | `POST /api/delivery/v1/plans/{id}/pause` | 执行暂停流程 |
 | `GET /api/delivery/v1/plans/{id}/evidence` | 查看步骤、页面证据、审批和结果 |
 | `GET /api/delivery/v1/plans/{id}/metrics` | 返回指标、口径和新鲜度 |
 
-确认接口一次性令牌只能用于完全一致的动作、对象和有效期。截图和 Computer Use 事件需要脱敏、加密并设置较短留存周期。
+确认接口一次性令牌只能用于完全一致的动作、对象和有效期。截图和 Browser RPA 事件需要脱敏、加密并设置较短留存周期。
 
 ## 13. 监控与优化规则
 
@@ -335,7 +341,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 ## 14. 指标与埋点
 
 - 从计划批准到平台提交完成的中位时长。
-- Computer Use 环境检查、页面识别、步骤执行和结果验证成功率。
+- Browser RPA 环境检查、页面识别、步骤执行和结果验证成功率。
 - 平台/页面/步骤维度的人工接管率、失败率和平均恢复时长。
 - 关键字段填写后读取一致率。
 - 结果未知率、重复对象数（目标为 0）和部分成功率。
@@ -344,29 +350,29 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 - 异常告警有效率、确认时间和暂停成功率。
 - 优化建议查看、采纳、执行及执行后相对效果。
 
-关键事件：`delivery_plan_created`、`preflight_completed`、`computer_use_environment_checked`、`platform_page_identified`、`computer_use_step_completed`、`delivery_difference_detected`、`sensitive_action_requested`、`sensitive_action_approved`、`user_takeover_started`、`delivery_submitted`、`delivery_result_verified`、`delivery_result_unknown`、`emergency_pause_completed`。
+关键事件：`delivery_plan_created`、`preflight_completed`、`browser_rpa_environment_checked`、`platform_page_identified`、`browser_rpa_step_completed`、`delivery_difference_detected`、`sensitive_action_requested`、`sensitive_action_approved`、`user_takeover_started`、`delivery_submitted`、`delivery_result_verified`、`delivery_result_unknown`、`emergency_pause_completed`。
 
 ## 15. 非功能要求
 
-- Computer Use 事件和业务状态服务端持久化，前端关闭不丢失审计记录。
+- Browser RPA 事件和业务状态服务端持久化，前端关闭不丢失审计记录。
 - 任务可暂停、取消和恢复；恢复时重新识别应用、站点、账户和页面。
 - 每一步有超时和有限重试；高风险动作失败或未知时禁止自动重复。
-- Computer Use 只能操作允许的应用/站点，尝试越界立即停止并记录。
+- Browser RPA 只能操作允许的应用/站点，尝试越界立即停止并记录。
 - 账户密码、验证码、访问令牌不进入聊天、截图元数据或业务日志。
 - 页面截图保存前按规则遮盖敏感标识；原图访问使用独立权限。
 - 用户本地输入或切换窗口时，系统可暂停避免争抢控制。
 - Platform Skill 版本和 UI 回归结果必须与每次真实执行关联。
 - 系统提供平台级写操作开关，可立即禁用新操作但保留查看与审计。
-- 生产 Computer Use 使用企业受控远程设备/虚拟机和任务独占浏览器会话，遵循 [Computer Use 运行时](./12-computer-use-runtime.md)。
+- 生产 Browser RPA 使用企业受控远程设备/虚拟机和任务独占浏览器会话，遵循 [Browser RPA 运行时](./12-browser-rpa-runtime.md)。
 - 平台数据读取、授权、同步、指标和对账遵循 [广告数据 Connector](./10-ad-data-connectors.md)。
 - 页面状态、部分成功、AI 披露和需求追踪遵循 [PRD 通用交互与质量要求](./15-prd-cross-cutting-requirements.md)。
 
 ## 16. MVP 验收标准
 
 1. 用户能用自然语言引用已批准策略和创意创建抖音/快手 DeliveryPlan。
-2. 环境未启用 Computer Use、站点未允许、未登录或账户错误时不能进入配置。
+2. 环境未启用 Browser RPA、站点未允许、未登录或账户错误时不能进入配置。
 3. Codex 使用目标平台 Skill，并在执行记录中保存 Skill 版本。
-4. Computer Use 填写预算、受众、排期、素材后能读取页面实际值并核对。
+4. Browser RPA 填写预算、受众、排期、素材后能读取页面实际值并核对。
 5. 最终提交前显示平台账户、对象、最大花费、创意和页面截图，未经确认不能点击。
 6. 页面实际预算与批准计划不一致时立即暂停并使原批准失效。
 7. 遇到验证码、2FA、权限申请或未知页面时转人工，不尝试绕过。
@@ -377,7 +383,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 12. 暂停由独立权限触发，执行后验证平台状态并通知负责人。
 13. 页面中的未知指令无法改变预算、审批或允许站点范围。
 14. 每个关键动作可追溯计划、Skill、审批人、页面证据和结果。
-15. `/delivery/*` 独立提供账户、计划、执行、监控、优化、审批和证据导航；共享 Computer Use 管理台只负责设备与安全策略。
+15. `/delivery/*` 独立提供账户、计划、执行、监控、优化、审批和证据导航；共享 Browser RPA 管理台只负责设备与安全策略。
 
 ## 17. 发布门槛
 
@@ -395,11 +401,11 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 | 风险 | 应对 |
 | --- | --- |
 | 平台 UI 更新导致流程失效 | 页面状态识别、步骤证据、每日/发布前回归、快速停用和 Skill 回滚 |
-| Computer Use 点击错误对象 | 每步校验账户/对象、局部截图、敏感点击前差异确认 |
+| Browser RPA 点击错误对象 | 每步校验账户/对象、局部截图、敏感点击前差异确认 |
 | 超时后重复创建或重复花费 | 结果未知状态、对象指纹、先查询再重试、禁止盲点提交 |
 | 页面内容诱导越权操作 | 页面视为不可信、允许站点、系统约束优先和越界停止 |
 | 登录凭据或截图泄露 | 用户登录、敏感信息不入聊天、截图脱敏加密和短留存 |
-| 用户与 Computer Use 同时操作 | 检测接管/窗口变化、暂停 Agent、恢复前重新识别 |
+| 用户与 Browser RPA 同时操作 | 检测接管/窗口变化、暂停 Agent、恢复前重新识别 |
 | 无人值守执行高风险动作 | 最终提交和预算变化强制人工确认，审批过期失效 |
 | 平台数据读取不完整 | 显示新鲜度和缺口，允许结构化报表对账，不生成强建议 |
 
@@ -414,7 +420,7 @@ cookies 不假设所有平台都提供稳定、完整的开放 API。Computer Us
 
 ## 20. 设计依据
 
-Computer Use 适合在结构化集成不足时操作图形界面，但会影响项目工作区之外的应用和系统状态，因此任务需要明确范围、应用许可、敏感动作确认和用户接管。本 PRD 将其定位为 Codex 的受控执行器，而非无人监督的投放机器人。参见 [OpenAI：Computer Use](https://learn.chatgpt.com/docs/computer-use)。
+Playwright RPA 适合在结构化集成不足时确定性操作图形界面：它通过 CDP 附加到用户已登录的浏览器会话，只执行冻结校准 Manifest 声明的语义定位器动作，可重复、可审计，但仍会影响项目工作区之外的平台状态，因此任务需要明确范围、站点许可、敏感动作确认和用户接管。本 PRD 将其定位为 Codex 的受控执行器，而非无人监督的投放机器人。迁移背景与兼容策略见 [Browser RPA 迁移修正案](./delivery/browser-rpa-migration-amendment.md)。
 
 ## 21. 变更记录
 
@@ -427,3 +433,4 @@ Computer Use 适合在结构化集成不足时操作图形界面，但会影响�
 | v0.5 | 2026-07-20 | 明确计划、执行、监控、优化、审批和证据的三级导航分布并接入统一导航规范 |
 | v0.6 | 2026-07-20 | 投放计划与创意筛选统一使用品牌广告和效果广告术语，并记录效果广告功能类型 |
 | v0.7 | 2026-07-21 | 接入全局 Project 上下文，明确计划、账户、执行会话、证据和跨项目素材的安全边界 |
+| v0.8 | 2026-08-19 | 执行层从视觉模型 Computer Use 迁移到 Playwright RPA（确定性语义定位器 + CDP 附加已登录会话）；新增 §8.5 确定性定位器约束；控制面改名 browser-rpa，历史授权/证据语义不变 |

@@ -226,6 +226,214 @@ func (s *Server) createBrand(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, value)
 }
 
+func (s *Server) listProducts(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	values, err := s.projects.ListProducts(r.Context(), rc.Actor)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Items []project.Product `json:"items"`
+	}{Items: values})
+}
+
+func (s *Server) createProduct(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body project.CreateProductRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.CreateProduct(r.Context(), rc.Actor, body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+
+func (s *Server) deleteProduct(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	if err := s.projects.DeleteProduct(r.Context(), rc.Actor, contract.ProductID(r.PathValue("product_id"))); err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) getProduct(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.GetProduct(r.Context(), rc.Actor, contract.ProductID(r.PathValue("product_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) updateProduct(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	var body project.UpdateProductRequest
+	if err := decodeJSON(w, r, &body); err != nil {
+		s.badRequest(w, r, err)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	value, err := s.projects.UpdateProduct(r.Context(), rc.Actor, contract.ProductID(r.PathValue("product_id")), body)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listProductProjects(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	values, err := s.projects.ListProductProjects(r.Context(), rc.Actor, contract.ProductID(r.PathValue("product_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Items []project.ProductProjectRef `json:"items"`
+	}{Items: values})
+}
+
+func (s *Server) linkProductToProject(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	if err := s.projects.LinkProductToProject(r.Context(), rc.Actor, contract.ProductID(r.PathValue("product_id")), contract.ProjectID(r.PathValue("project_id"))); err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		ProductID contract.ProductID `json:"product_id"`
+		ProjectID contract.ProjectID `json:"project_id"`
+	}{ProductID: contract.ProductID(r.PathValue("product_id")), ProjectID: contract.ProjectID(r.PathValue("project_id"))})
+}
+
+const maxProductImageBytes = 5 << 20 // 5 MiB
+
+// putProductImage accepts a multipart image upload for a product object,
+// stores it in the shared blob store, and persists the blob reference on the
+// product. The image is served back through GET /products/{id}/image, so the
+// stored reference is never exposed as an external URL.
+func (s *Server) putProductImage(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil || s.blobs == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	productID := contract.ProductID(r.PathValue("product_id"))
+	if _, err := s.projects.GetProduct(r.Context(), rc.Actor, productID); err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxProductImageBytes)
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		s.badRequest(w, r, fmt.Errorf("multipart field file is required"))
+		return
+	}
+	defer file.Close()
+	mimeType := normalizeImageContentType(header.Header.Get("Content-Type"))
+	if mimeType == "" {
+		s.badRequest(w, r, fmt.Errorf("product image must be JPEG, PNG, WebP, or GIF"))
+		return
+	}
+	extension := map[string]string{
+		"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+	}[mimeType]
+	key := fmt.Sprintf("%s/%s.%s", rc.Actor.OrganizationID, productID, extension)
+	info, err := s.blobs.Put(r.Context(), "product-images", key, file, header.Size, mimeType)
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	blobRef := fmt.Sprintf("product-images/%s", info.Key)
+	product, err := s.projects.UpdateProduct(r.Context(), rc.Actor, productID, project.UpdateProductRequest{ProductImage: &blobRef})
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, product)
+}
+
+// getProductImage streams the stored product image bytes back to the client.
+func (s *Server) getProductImage(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil || s.blobs == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	product, err := s.projects.GetProduct(r.Context(), rc.Actor, contract.ProductID(r.PathValue("product_id")))
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	bucket, key, ok := splitBlobRef(product.ProductImage)
+	if !ok {
+		s.writeServiceError(w, r, project.ErrProductNotFound)
+		return
+	}
+	reader, info, err := s.blobs.Open(r.Context(), assets.ObjectLocation{Bucket: bucket, Key: key})
+	if err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	defer reader.Close()
+	w.Header().Set("Content-Type", info.MIMEType)
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if _, err := io.Copy(w, reader); err != nil {
+		return
+	}
+}
+
+func normalizeImageContentType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(strings.Split(value, ";")[0])) {
+	case "image/jpeg", "image/png", "image/webp", "image/gif":
+		return strings.ToLower(strings.TrimSpace(strings.Split(value, ";")[0]))
+	default:
+		return ""
+	}
+}
+
+func splitBlobRef(ref string) (bucket, key string, ok bool) {
+	parts := strings.SplitN(ref, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	if s.projects == nil {
 		s.notImplemented(w, r)
@@ -2117,6 +2325,8 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusNotFound, "PROJECT_MEMBERSHIP_NOT_FOUND", "指定的项目成员关系不存在。", false
 	case errors.Is(err, project.ErrLastOwner):
 		status, code, message, retryable = http.StatusConflict, "PROJECT_LAST_OWNER_REQUIRED", "项目必须保留至少一名有效 owner。", false
+	case errors.Is(err, project.ErrProductMappingConflict):
+		status, code, message, retryable = http.StatusConflict, "PRODUCT_MAPPING_CONFLICT", "该巨量商品 ID 已绑定到本组织的另一个产品。", false
 	case errors.Is(err, project.ErrMembershipConflict):
 		status, code, message, retryable = http.StatusConflict, "PROJECT_MEMBERSHIP_CHANGED", "项目成员信息已发生变化，请刷新后重试。", false
 	case errors.Is(err, assets.ErrNotFound), errors.Is(err, project.ErrNotFound), errors.Is(err, remix.ErrNotFound), errors.Is(err, knowledge.ErrNotFound), errors.Is(err, agent.ErrNotFound), errors.Is(err, agent.ErrRunNotFound):

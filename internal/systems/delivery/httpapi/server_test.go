@@ -41,9 +41,9 @@ func TestDeliveryHTTPExposesPlanAndControlledActions(t *testing.T) {
 
 func TestPlatformEntityMappingHTTPKeepsPlatformValuesServerOwnedAndRequiresTwoReadbacks(t *testing.T) {
 	createdAt := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
-	app := &mappingApplicationStub{applicationStub: applicationStub{}, mapping: delivery.PlatformEntityMapping{SchemaVersion: delivery.PlatformEntityMappingV1, ID: "mapping_1", OrganizationID: "org_1", ProjectID: "project_1", AccountReferenceID: "account_1", PlanID: "plan_1", ConfigurationID: "configuration_1", BusinessExecutionID: "execution_1", ComputerUseRunID: "run_1", InternalObjectKind: "promotion", InternalObjectID: "draft_1", PlatformObjectKind: "promotion", Status: delivery.PlatformEntityMappingPending, Version: 1, CreatedAt: createdAt, UpdatedAt: createdAt}, controlledChange: delivery.ControlledChangeSet{SchemaVersion: delivery.ControlledChangeSetSchemaV1, ID: "change_mutation"}}
+	app := &mappingApplicationStub{applicationStub: applicationStub{}, mapping: delivery.PlatformEntityMapping{SchemaVersion: delivery.PlatformEntityMappingV1, ID: "mapping_1", OrganizationID: "org_1", ProjectID: "project_1", AccountReferenceID: "account_1", PlanID: "plan_1", ConfigurationID: "configuration_1", BusinessExecutionID: "execution_1", BrowserRpaRunID: "run_1", InternalObjectKind: "promotion", InternalObjectID: "draft_1", PlatformObjectKind: "promotion", Status: delivery.PlatformEntityMappingPending, Version: 1, CreatedAt: createdAt, UpdatedAt: createdAt}, controlledChange: delivery.ControlledChangeSet{SchemaVersion: delivery.ControlledChangeSetSchemaV1, ID: "change_mutation"}}
 	server := New(app)
-	body := `{"id":"mapping_1","account_reference_id":"account_1","plan_id":"plan_1","configuration_id":"configuration_1","business_execution_id":"execution_1","computer_use_run_id":"run_1","internal_object_kind":"project","internal_object_id":"draft_1","platform_object_kind":"project"}`
+	body := `{"id":"mapping_1","account_reference_id":"account_1","plan_id":"plan_1","configuration_id":"configuration_1","business_execution_id":"execution_1","browser_rpa_run_id":"run_1","internal_object_kind":"project","internal_object_id":"draft_1","platform_object_kind":"project"}`
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings", body))
 	if response.Code != http.StatusCreated || app.created.ProjectID != "project_1" || app.created.PlatformObjectID != "" || !strings.Contains(response.Body.String(), `"status":"pending_verification"`) {
@@ -476,6 +476,10 @@ func (s *applicationStub) RejectChangeSet(context.Context, contract.ActorContext
 	return delivery.ChangeSet{ID: "changeset-rejected", Status: delivery.ChangeSetRejected, Version: 2, RejectionReason: "needs revision"}, nil
 }
 func (s *applicationStub) Execute(context.Context, contract.ActorContext, contract.ProjectID, string, string, delivery.ExecuteRequest) (delivery.ExecutionResult, bool, error) {
+	now := time.Now()
+	return delivery.ExecutionResult{ChangeSet: s.changeSet, Execution: delivery.Execution{CompletedAt: &now}}, false, nil
+}
+func (s *applicationStub) ExecutePlan(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _, _ string, _ delivery.ExecutePlanRequest) (delivery.ExecutionResult, bool, error) {
 	now := time.Now()
 	return delivery.ExecutionResult{ChangeSet: s.changeSet, Execution: delivery.Execution{CompletedAt: &now}}, false, nil
 }

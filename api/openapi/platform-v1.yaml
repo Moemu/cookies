@@ -13,97 +13,97 @@ servers:
 security:
 - cookiesAuth: []
 paths:
-  /platform/v1/computer-use/kill-switches/{scope}:
+  /platform/v1/browser-rpa/kill-switches/{scope}:
     parameters:
     - name: scope
       in: path
       required: true
       schema: {type: string, enum: [global, platform, organization]}
     put:
-      operationId: setComputerUseKillSwitch
+      operationId: setBrowserRpaKillSwitch
       summary: Set a global, platform, or organization write prohibition.
-      description: Requires a service principal with platform.computer-use.admin. Read-only evidence and takeover remain available.
+      description: Requires a service principal with platform.browser-rpa.admin. Read-only evidence and takeover remain available.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/SetComputerUseKillSwitchRequest'}
+            schema: {$ref: '#/components/schemas/SetBrowserRpaKillSwitchRequest'}
       responses:
-        '200': {description: Authoritative Kill Switch., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseKillSwitch'}}}}
+        '200': {description: Authoritative Kill Switch., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaKillSwitch'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/environments:
+  /platform/v1/browser-rpa/projects/{project_id}/environments:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
     post:
-      operationId: registerComputerUseEnvironment
+      operationId: registerBrowserRpaEnvironment
       summary: Idempotently register one project/account-scoped visible local browser environment.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/RegisterComputerUseEnvironmentRequest'}
+            schema: {$ref: '#/components/schemas/RegisterBrowserRpaEnvironmentRequest'}
       responses:
-        '201': {description: Registered environment., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseEnvironment'}}}}
+        '201': {description: Registered environment., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaEnvironment'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/environments/{environment_id}:
+  /platform/v1/browser-rpa/projects/{project_id}/environments/{environment_id}:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseEnvironmentID'
+    - $ref: '#/components/parameters/BrowserRpaEnvironmentID'
     get:
-      operationId: getComputerUseEnvironment
+      operationId: getBrowserRpaEnvironment
       summary: Read one project-scoped environment.
       responses:
-        '200': {description: Environment., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseEnvironment'}}}}
+        '200': {description: Environment., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaEnvironment'}}}}
         '404': {$ref: '#/components/responses/NotFound'}
-  /platform/v1/computer-use/projects/{project_id}/browser-profiles:
+  /platform/v1/browser-rpa/projects/{project_id}/browser-profiles:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
     post:
-      operationId: registerComputerUseBrowserProfile
+      operationId: registerBrowserRpaBrowserProfile
       summary: Idempotently register a browser profile bound to an existing environment and exact account.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/RegisterComputerUseBrowserProfileRequest'}
+            schema: {$ref: '#/components/schemas/RegisterBrowserRpaBrowserProfileRequest'}
       responses:
-        '201': {description: Registered profile., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseBrowserProfile'}}}}
+        '201': {description: Registered profile., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaBrowserProfile'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/browser-profiles/{profile_id}:
+  /platform/v1/browser-rpa/projects/{project_id}/browser-profiles/{profile_id}:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseProfileID'
+    - $ref: '#/components/parameters/BrowserRpaProfileID'
     get:
-      operationId: getComputerUseBrowserProfile
+      operationId: getBrowserRpaBrowserProfile
       summary: Read one project-scoped browser profile.
       responses:
-        '200': {description: Browser profile., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseBrowserProfile'}}}}
+        '200': {description: Browser profile., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaBrowserProfile'}}}}
         '404': {$ref: '#/components/responses/NotFound'}
-  /platform/v1/computer-use/projects/{project_id}/site-policies:
+  /platform/v1/browser-rpa/projects/{project_id}/site-policies:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
     post:
-      operationId: registerComputerUseSitePolicy
+      operationId: registerBrowserRpaSitePolicy
       summary: Idempotently register an exact HTTPS host, page-kind and platform-project allowlist.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/RegisterComputerUseSitePolicyRequest'}
+            schema: {$ref: '#/components/schemas/RegisterBrowserRpaSitePolicyRequest'}
       responses:
-        '201': {description: Registered site policy., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseSitePolicy'}}}}
+        '201': {description: Registered site policy., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaSitePolicy'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/site-policies/{policy_id}:
+  /platform/v1/browser-rpa/projects/{project_id}/site-policies/{policy_id}:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUsePolicyID'
+    - $ref: '#/components/parameters/BrowserRpaPolicyID'
     get:
-      operationId: getComputerUseSitePolicy
+      operationId: getBrowserRpaSitePolicy
       summary: Read one project-scoped site policy.
       responses:
-        '200': {description: Site policy., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseSitePolicy'}}}}
+        '200': {description: Site policy., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaSitePolicy'}}}}
         '404': {$ref: '#/components/responses/NotFound'}
-  /platform/v1/computer-use/projects/{project_id}/kill-switches/active:
+  /platform/v1/browser-rpa/projects/{project_id}/kill-switches/active:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
     - name: platform
@@ -111,7 +111,7 @@ paths:
       required: true
       schema: {type: string, const: ocean_engine}
     get:
-      operationId: getActiveComputerUseKillSwitch
+      operationId: getActiveBrowserRpaKillSwitch
       summary: Resolve the winning global, platform, or organization Kill Switch without blocking evidence reads.
       responses:
         '200':
@@ -126,13 +126,13 @@ paths:
                   active: {type: boolean}
                   kill_switch:
                     anyOf:
-                    - {$ref: '#/components/schemas/ComputerUseKillSwitch'}
+                    - {$ref: '#/components/schemas/BrowserRpaKillSwitch'}
                     - {type: 'null'}
-  /platform/v1/computer-use/projects/{project_id}/runs:
+  /platform/v1/browser-rpa/projects/{project_id}/runs:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
     post:
-      operationId: createComputerUseRun
+      operationId: createBrowserRpaRun
       summary: Create or idempotently replay a controlled UI-session run.
       parameters:
       - name: Idempotency-Key
@@ -143,39 +143,39 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/CreateComputerUseRunRequest'}
+            schema: {$ref: '#/components/schemas/CreateBrowserRpaRunRequest'}
       responses:
         '201':
           description: Created controlled run.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/ComputerUseRun'}
+              schema: {$ref: '#/components/schemas/BrowserRpaRun'}
         '200':
           description: Idempotent replay of the same request.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/ComputerUseRun'}
+              schema: {$ref: '#/components/schemas/BrowserRpaRun'}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     get:
-      operationId: getComputerUseRun
+      operationId: getBrowserRpaRun
       summary: Read a controlled run from its authoritative server state.
       responses:
         '200':
           description: Controlled run.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/ComputerUseRun'}
+              schema: {$ref: '#/components/schemas/BrowserRpaRun'}
         '404': {$ref: '#/components/responses/NotFound'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/events:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}/events:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     get:
-      operationId: listComputerUseRunEvents
+      operationId: listBrowserRpaRunEvents
       summary: Read append-only run events; Kill Switches never block this query.
       responses:
         '200':
@@ -186,14 +186,14 @@ paths:
                 type: object
                 required: [items]
                 properties:
-                  items: {type: array, items: {$ref: '#/components/schemas/ComputerUseEvent'}}
+                  items: {type: array, items: {$ref: '#/components/schemas/BrowserRpaEvent'}}
                 additionalProperties: false
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/evidence:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}/evidence:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     get:
-      operationId: listComputerUseRunEvidence
+      operationId: listBrowserRpaRunEvidence
       summary: Read redacted structured page evidence.
       responses:
         '200':
@@ -204,34 +204,34 @@ paths:
                 type: object
                 required: [items]
                 properties:
-                  items: {type: array, items: {$ref: '#/components/schemas/ComputerUseEvidence'}}
+                  items: {type: array, items: {$ref: '#/components/schemas/BrowserRpaEvidence'}}
                 additionalProperties: false
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-evidence:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}/takeover-evidence:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     post:
-      operationId: recordComputerUseTakeoverEvidence
+      operationId: recordBrowserRpaTakeoverEvidence
       summary: Record one fenced non-write browser observation or form-readback step during an active takeover.
       description: Only observe_page, begin_form_fill, field_readback, discard_draft, and verify_no_write are accepted. The run must be paused in awaiting_takeover with a valid lease and exact site-policy match. This endpoint cannot authorize or perform save, create, submit, enable, or any other remote write.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/RecordComputerUseTakeoverEvidenceRequest'}
+            schema: {$ref: '#/components/schemas/RecordBrowserRpaTakeoverEvidenceRequest'}
       responses:
         '200':
           description: Atomically recorded Run version, Step, Event and redacted Evidence.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/RecordedComputerUseTakeoverEvidence'}
+              schema: {$ref: '#/components/schemas/RecordedBrowserRpaTakeoverEvidence'}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-action-attempts:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}/takeover-action-attempts:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     post:
-      operationId: authorizeComputerUseTakeoverAction
+      operationId: authorizeBrowserRpaTakeoverAction
       summary: Atomically authorize exactly one operator-controlled final click without performing it.
       description: Requires an active fenced takeover, an exact site-policy match, zero readback diffs, an unexpired immutable authority binding, an inactive Kill Switch, and a fresh one-time final confirmation. The confirmation, authorized attempt, pre-click evidence, running step, and transition to submitting are committed atomically. No Browser Driver is invoked.
       parameters:
@@ -243,173 +243,173 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/AuthorizeComputerUseTakeoverActionRequest'}
+            schema: {$ref: '#/components/schemas/AuthorizeBrowserRpaTakeoverActionRequest'}
       responses:
         '200':
           description: Single-use authorization and redacted pre-click evidence. The caller remains responsible for the manual browser click.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/AuthorizedComputerUseTakeoverAction'}
+              schema: {$ref: '#/components/schemas/AuthorizedBrowserRpaTakeoverAction'}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/takeover-action-attempts/{attempt_id}:outcome:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}/takeover-action-attempts/{attempt_id}:outcome:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     - name: attempt_id
       in: path
       required: true
       schema: {type: string, minLength: 1}
     post:
-      operationId: recordComputerUseTakeoverActionOutcome
+      operationId: recordBrowserRpaTakeoverActionOutcome
       summary: Record fenced result-page or list-page evidence for the one authorized click.
       description: result_observed advances to verifying; list_confirmed advances to succeeded; result_unknown is terminal and requires reconciliation, never resubmission. Delivery confirms the platform mapping only after distinct result and list evidence agree on object ID and status.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/RecordComputerUseTakeoverOutcomeRequest'}
+            schema: {$ref: '#/components/schemas/RecordBrowserRpaTakeoverOutcomeRequest'}
       responses:
         '200':
           description: Atomically recorded outcome evidence, step, event, and Run transition.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/RecordedComputerUseTakeoverEvidence'}
+              schema: {$ref: '#/components/schemas/RecordedBrowserRpaTakeoverEvidence'}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}/leases:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     post:
-      operationId: acquireComputerUseRunLease
+      operationId: acquireBrowserRpaRunLease
       summary: Atomically acquire the one exclusive visible-browser lease and attach it to the run.
-      requestBody: {$ref: '#/components/requestBodies/ComputerUseExpectedVersion'}
+      requestBody: {$ref: '#/components/requestBodies/BrowserRpaExpectedVersion'}
       responses:
         '200':
           description: Fenced lease and incremented authoritative Run.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/AcquiredComputerUseRunLease'}
+              schema: {$ref: '#/components/schemas/AcquiredBrowserRpaRunLease'}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases/{lease_id}:heartbeat:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}/leases/{lease_id}:heartbeat:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
-    - $ref: '#/components/parameters/ComputerUseLeaseID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
+    - $ref: '#/components/parameters/BrowserRpaLeaseID'
     post:
-      operationId: heartbeatComputerUseRunLease
+      operationId: heartbeatBrowserRpaRunLease
       summary: Renew the fenced exclusive lease attached to this run.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/HeartbeatComputerUseRunLeaseRequest'}
+            schema: {$ref: '#/components/schemas/HeartbeatBrowserRpaRunLeaseRequest'}
       responses:
         '200':
           description: Renewed lease.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/ComputerUseSessionLease'}
+              schema: {$ref: '#/components/schemas/BrowserRpaSessionLease'}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/leases/{lease_id}:release:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}/leases/{lease_id}:release:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
-    - $ref: '#/components/parameters/ComputerUseLeaseID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
+    - $ref: '#/components/parameters/BrowserRpaLeaseID'
     post:
-      operationId: releaseComputerUseRunLease
+      operationId: releaseBrowserRpaRunLease
       summary: Atomically release the fenced lease and detach it from the run for safe recovery.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/ReleaseComputerUseRunLeaseRequest'}
+            schema: {$ref: '#/components/schemas/ReleaseBrowserRpaRunLeaseRequest'}
       responses:
         '200':
           description: Released lease and incremented authoritative Run.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/AcquiredComputerUseRunLease'}
+              schema: {$ref: '#/components/schemas/AcquiredBrowserRpaRunLease'}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:pause:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:pause:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     post:
-      operationId: pauseComputerUseRun
+      operationId: pauseBrowserRpaRun
       summary: Pause automated actions without blocking evidence reads or takeover.
-      requestBody: {$ref: '#/components/requestBodies/ComputerUseExpectedVersion'}
+      requestBody: {$ref: '#/components/requestBodies/BrowserRpaExpectedVersion'}
       responses:
-        '200': {description: Paused run., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '200': {description: Paused run., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:resume:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:resume:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     post:
-      operationId: resumeComputerUseRun
+      operationId: resumeBrowserRpaRun
       summary: Resume through environment, page and account re-identification.
-      requestBody: {$ref: '#/components/requestBodies/ComputerUseExpectedVersion'}
+      requestBody: {$ref: '#/components/requestBodies/BrowserRpaExpectedVersion'}
       responses:
-        '200': {description: Run returned to environment_check., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '200': {description: Run returned to environment_check., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:cancel:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:cancel:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     post:
-      operationId: cancelComputerUseRun
+      operationId: cancelBrowserRpaRun
       summary: Cancel a run only when no unknown remote result exists.
-      requestBody: {$ref: '#/components/requestBodies/ComputerUseExpectedVersion'}
+      requestBody: {$ref: '#/components/requestBodies/BrowserRpaExpectedVersion'}
       responses:
-        '200': {description: Cancelled run., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '200': {description: Cancelled run., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:takeover:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:takeover:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     post:
-      operationId: takeoverComputerUseRun
+      operationId: takeoverBrowserRpaRun
       summary: Pause automation and hand the visible session to the user.
-      requestBody: {$ref: '#/components/requestBodies/ComputerUseExpectedVersion'}
+      requestBody: {$ref: '#/components/requestBodies/BrowserRpaExpectedVersion'}
       responses:
-        '200': {description: Run awaiting or under takeover., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '200': {description: Run awaiting or under takeover., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}/confirmations:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}/confirmations:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     post:
-      operationId: issueComputerUseFinalConfirmation
+      operationId: issueBrowserRpaFinalConfirmation
       summary: Issue a short-lived one-time confirmation for the exact frozen run binding.
       description: The bearer secret is returned once and only its SHA-256 digest is persisted. Issuing a confirmation does not submit an external form.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/IssueComputerUseConfirmationRequest'}
+            schema: {$ref: '#/components/schemas/IssueBrowserRpaConfirmationRequest'}
       responses:
         '201':
           description: One-time confirmation secret and audit view.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/IssuedComputerUseConfirmation'}
+              schema: {$ref: '#/components/schemas/IssuedBrowserRpaConfirmation'}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:prepare:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:prepare:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     post:
-      operationId: prepareComputerUseRun
+      operationId: prepareBrowserRpaRun
       summary: Advance environment checks and deterministic/manual page preparation to the final-confirmation boundary.
       responses:
-        '200': {description: Prepared run., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '200': {description: Prepared run., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
-  /platform/v1/computer-use/projects/{project_id}/runs/{run_id}:submit:
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:submit:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
-    - $ref: '#/components/parameters/ComputerUseRunID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
     post:
-      operationId: submitComputerUseControlledAction
+      operationId: submitBrowserRpaControlledAction
       summary: Atomically consume one final confirmation and authorize one fenced action attempt.
       requestBody:
         required: true
@@ -427,7 +427,7 @@ paths:
                 fencing_token: {type: integer, minimum: 1}
                 idempotency_key: {type: string}
       responses:
-        '200': {description: Authoritative terminal or recovery run state., content: {application/json: {schema: {$ref: '#/components/schemas/ComputerUseRun'}}}}
+        '200': {description: Authoritative terminal or recovery run state., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
   /platform/v1/provider/capabilities:
     get:
@@ -3153,27 +3153,27 @@ paths:
           $ref: '#/components/responses/Conflict'
 components:
   parameters:
-    ComputerUseEnvironmentID:
+    BrowserRpaEnvironmentID:
       name: environment_id
       in: path
       required: true
       schema: {type: string, minLength: 1, maxLength: 96}
-    ComputerUseProfileID:
+    BrowserRpaProfileID:
       name: profile_id
       in: path
       required: true
       schema: {type: string, minLength: 1, maxLength: 96}
-    ComputerUsePolicyID:
+    BrowserRpaPolicyID:
       name: policy_id
       in: path
       required: true
       schema: {type: string, minLength: 1, maxLength: 96}
-    ComputerUseLeaseID:
+    BrowserRpaLeaseID:
       name: lease_id
       in: path
       required: true
       schema: {type: string, minLength: 1, maxLength: 96}
-    ComputerUseRunID:
+    BrowserRpaRunID:
       name: run_id
       in: path
       required: true
@@ -3304,7 +3304,7 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   requestBodies:
-    ComputerUseExpectedVersion:
+    BrowserRpaExpectedVersion:
       required: true
       content:
         application/json:
@@ -3315,7 +3315,7 @@ components:
             properties:
               expected_version: {type: integer, minimum: 1}
   schemas:
-    SetComputerUseKillSwitchRequest:
+    SetBrowserRpaKillSwitchRequest:
       type: object
       additionalProperties: false
       required: [active, reason, expected_version]
@@ -3324,7 +3324,7 @@ components:
         active: {type: boolean}
         reason: {type: string, minLength: 1, maxLength: 1000}
         expected_version: {type: integer, minimum: 0}
-    ComputerUseKillSwitch:
+    BrowserRpaKillSwitch:
       type: object
       additionalProperties: false
       required: [id, scope, active, reason, version, updated_by, updated_at]
@@ -3338,7 +3338,7 @@ components:
         version: {type: integer, minimum: 1}
         updated_by: {type: string}
         updated_at: {type: string, format: date-time}
-    RegisterComputerUseEnvironmentRequest:
+    RegisterBrowserRpaEnvironmentRequest:
       type: object
       additionalProperties: false
       required: [id, platform, account_id, mode, browser_version, region, healthy]
@@ -3350,7 +3350,7 @@ components:
         browser_version: {type: string, minLength: 1, maxLength: 64}
         region: {type: string, minLength: 1, maxLength: 64}
         healthy: {type: boolean}
-    ComputerUseEnvironment:
+    BrowserRpaEnvironment:
       type: object
       additionalProperties: false
       required: [id, organization_id, project_id, platform, account_id, mode, browser_version, region, healthy, version]
@@ -3365,7 +3365,7 @@ components:
         region: {type: string}
         healthy: {type: boolean}
         version: {type: integer, const: 1}
-    RegisterComputerUseBrowserProfileRequest:
+    RegisterBrowserRpaBrowserProfileRequest:
       type: object
       additionalProperties: false
       required: [id, environment_id, platform, account_id, state]
@@ -3375,7 +3375,7 @@ components:
         platform: {type: string, const: ocean_engine}
         account_id: {type: string, minLength: 1, maxLength: 160}
         state: {type: string, enum: [ready, takeover_required, disabled]}
-    ComputerUseBrowserProfile:
+    BrowserRpaBrowserProfile:
       type: object
       additionalProperties: false
       required: [id, organization_id, project_id, environment_id, platform, account_id, state, version]
@@ -3388,7 +3388,7 @@ components:
         account_id: {type: string}
         state: {type: string, enum: [ready, takeover_required, disabled]}
         version: {type: integer, const: 1}
-    RegisterComputerUseSitePolicyRequest:
+    RegisterBrowserRpaSitePolicyRequest:
       type: object
       additionalProperties: false
       required: [id, platform, account_id, allowed_protocols, allowed_hosts, allowed_page_kinds, allowed_platform_project_ids]
@@ -3400,7 +3400,7 @@ components:
         allowed_hosts: {type: array, minItems: 1, uniqueItems: true, items: {type: string, pattern: '^[a-z0-9.-]+$'}}
         allowed_page_kinds: {type: array, minItems: 1, uniqueItems: true, items: {type: string, minLength: 1}}
         allowed_platform_project_ids: {type: array, minItems: 1, uniqueItems: true, items: {type: string, minLength: 1}}
-    ComputerUseSitePolicy:
+    BrowserRpaSitePolicy:
       type: object
       additionalProperties: false
       required: [id, organization_id, project_id, platform, account_id, allowed_protocols, allowed_hosts, allowed_page_kinds, allowed_platform_project_ids, version]
@@ -3415,14 +3415,14 @@ components:
         allowed_page_kinds: {type: array, items: {type: string}}
         allowed_platform_project_ids: {type: array, items: {type: string}}
         version: {type: integer, const: 1}
-    HeartbeatComputerUseRunLeaseRequest:
+    HeartbeatBrowserRpaRunLeaseRequest:
       type: object
       additionalProperties: false
       required: [expected_version, fencing_token]
       properties:
         expected_version: {type: integer, minimum: 1}
         fencing_token: {type: integer, minimum: 1}
-    ReleaseComputerUseRunLeaseRequest:
+    ReleaseBrowserRpaRunLeaseRequest:
       type: object
       additionalProperties: false
       required: [expected_run_version, expected_lease_version, fencing_token]
@@ -3430,24 +3430,24 @@ components:
         expected_run_version: {type: integer, minimum: 1}
         expected_lease_version: {type: integer, minimum: 1}
         fencing_token: {type: integer, minimum: 1}
-    ComputerUseBlockingReason:
+    BrowserRpaBlockingReason:
       type: string
       enum: [FINAL_CONFIRMATION_REQUIRED, FINAL_CONFIRMATION_INVALID, APPROVAL_INVALID, LEASE_INVALID, KILL_SWITCH_ACTIVE, ACCOUNT_MISMATCH, PROJECT_NOT_ALLOWED, SITE_NOT_ALLOWED, PAGE_DRIFT, WORKFLOW_DRIFT, SKILL_DRIFT, RESULT_RECONCILIATION_REQUIRED]
-    ComputerUseRunState:
+    BrowserRpaRunState:
       type: string
       enum: [queued, environment_check, awaiting_takeover, preparing, awaiting_confirmation, submitting, verifying, succeeded, failed, partial, result_unknown, cancelled]
-    ComputerUseAuthorityBinding:
+    BrowserRpaAuthorityBinding:
       type: object
       additionalProperties: false
       required: [schema_version, organization_id, project_id, business_execution_id, change_set_id, approval_id, approval_action_hash, account_reference_id, object_fingerprint, action, budget_limit_minor, currency, plan_canonical_hash, intent_canonical_hash, feedback_canonical_hash, decision_canonical_hash, configuration_canonical_hash, workflow_id, workflow_canonical_hash, workflow_step_id]
       properties:
-        schema_version: {type: string, const: computer-use-authority/v1}
+        schema_version: {type: string, enum: [browser-rpa-authority/v1, computer-use-authority/v1]}
         organization_id: {type: string}
         project_id: {type: string}
         business_execution_id: {type: string}
         change_set_id: {type: string}
         approval_id: {type: string}
-        approval_action_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        approval_action_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
         account_reference_id: {type: string}
         parent_platform_project_id: {type: string}
         target_mapping_id: {type: string}
@@ -3456,9 +3456,9 @@ components:
         target_platform_object_kind: {type: string, enum: [promotion]}
         operator_principal_id: {type: string}
         supersedes_controlled_change_set_id: {type: string}
-        promotion_mutation: {$ref: '#/components/schemas/ComputerUsePromotionMutation'}
-        promotion_control: {$ref: '#/components/schemas/ComputerUsePromotionControl'}
-        promotion_restart: {$ref: '#/components/schemas/ComputerUsePromotionRestart'}
+        promotion_mutation: {$ref: '#/components/schemas/BrowserRpaPromotionMutation'}
+        promotion_control: {$ref: '#/components/schemas/BrowserRpaPromotionControl'}
+        promotion_restart: {$ref: '#/components/schemas/BrowserRpaPromotionRestart'}
         object_fingerprint: {type: string}
         action: {type: string, enum: [create_project_and_promotions, create_promotions_in_existing_project, update_promotion_budget, update_promotion_materials, pause_promotion, resume_promotion]}
         project_budget_mode: {type: string, enum: [daily, unlimited]}
@@ -3466,31 +3466,31 @@ components:
         promotion_budget_limit_minor: {type: integer, minimum: 0}
         budget_limit_minor: {type: integer, minimum: 0}
         currency: {type: string, const: CNY}
-        plan_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
-        intent_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
-        feedback_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
-        decision_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
-        configuration_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        plan_canonical_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
+        intent_canonical_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
+        feedback_canonical_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
+        decision_canonical_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
+        configuration_canonical_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
         workflow_id: {type: string}
-        workflow_canonical_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        workflow_canonical_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
         workflow_step_id: {type: string}
         skill_id: {type: string}
         skill_version: {type: string}
-    ComputerUsePromotionMaterialReference:
+    BrowserRpaPromotionMaterialReference:
       type: object
       additionalProperties: false
       required: [reference_id, authorization_evidence_id]
       properties:
         reference_id: {type: string}
         authorization_evidence_id: {type: string}
-    ComputerUsePromotionLandingPageReference:
+    BrowserRpaPromotionLandingPageReference:
       type: object
       additionalProperties: false
       required: [reference_id, authorization_evidence_id]
       properties:
         reference_id: {type: string}
         authorization_evidence_id: {type: string}
-    ComputerUsePromotionScheduleWindow:
+    BrowserRpaPromotionScheduleWindow:
       type: object
       additionalProperties: false
       required: [start_at, end_at, timezone]
@@ -3498,7 +3498,7 @@ components:
         start_at: {type: string, format: date-time}
         end_at: {type: string, format: date-time}
         timezone: {type: string}
-    ComputerUsePromotionMutation:
+    BrowserRpaPromotionMutation:
       type: object
       additionalProperties: false
       required: [current_daily_budget_minor, target_daily_budget_minor, current_state_hash, target_state_hash]
@@ -3507,13 +3507,13 @@ components:
         target_daily_budget_minor: {type: integer, minimum: 30000}
         current_materials:
           type: array
-          items: {$ref: '#/components/schemas/ComputerUsePromotionMaterialReference'}
+          items: {$ref: '#/components/schemas/BrowserRpaPromotionMaterialReference'}
         target_materials:
           type: array
-          items: {$ref: '#/components/schemas/ComputerUsePromotionMaterialReference'}
-        current_state_hash: {$ref: '#/components/schemas/ComputerUseHash'}
-        target_state_hash: {$ref: '#/components/schemas/ComputerUseHash'}
-    ComputerUsePromotionControl:
+          items: {$ref: '#/components/schemas/BrowserRpaPromotionMaterialReference'}
+        current_state_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
+        target_state_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
+    BrowserRpaPromotionControl:
       type: object
       additionalProperties: false
       required: [current_daily_budget_minor, current_platform_status, target_platform_status, current_state_hash, target_state_hash]
@@ -3521,9 +3521,9 @@ components:
         current_daily_budget_minor: {type: integer, minimum: 30000}
         current_platform_status: {type: string, const: delivering}
         target_platform_status: {type: string, const: paused}
-        current_state_hash: {$ref: '#/components/schemas/ComputerUseHash'}
-        target_state_hash: {$ref: '#/components/schemas/ComputerUseHash'}
-    ComputerUsePromotionRestart:
+        current_state_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
+        target_state_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
+    BrowserRpaPromotionRestart:
       type: object
       additionalProperties: false
       required: [current_daily_budget_minor, approved_daily_budget_minor, current_platform_status, target_platform_status, schedule, materials, landing_page, current_state_hash, target_state_hash]
@@ -3532,41 +3532,41 @@ components:
         approved_daily_budget_minor: {type: integer, minimum: 30000}
         current_platform_status: {type: string, const: paused}
         target_platform_status: {type: string, const: delivering}
-        schedule: {$ref: '#/components/schemas/ComputerUsePromotionScheduleWindow'}
+        schedule: {$ref: '#/components/schemas/BrowserRpaPromotionScheduleWindow'}
         materials:
           type: array
           minItems: 1
-          items: {$ref: '#/components/schemas/ComputerUsePromotionMaterialReference'}
-        landing_page: {$ref: '#/components/schemas/ComputerUsePromotionLandingPageReference'}
-        current_state_hash: {$ref: '#/components/schemas/ComputerUseHash'}
-        target_state_hash: {$ref: '#/components/schemas/ComputerUseHash'}
-    ComputerUseRun:
+          items: {$ref: '#/components/schemas/BrowserRpaPromotionMaterialReference'}
+        landing_page: {$ref: '#/components/schemas/BrowserRpaPromotionLandingPageReference'}
+        current_state_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
+        target_state_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
+    BrowserRpaRun:
       type: object
       additionalProperties: false
       required: [schema_version, id, organization_id, project_id, platform, account_id, authority, environment_id, profile_id, lease_id, policy_id, state, paused, takeover_active, version, idempotency_key, request_hash, created_by, created_at, updated_at]
       properties:
-        schema_version: {type: string, const: computer-use-run/v1}
+        schema_version: {type: string, enum: [browser-rpa-run/v1, computer-use-run/v1]}
         id: {type: string}
         organization_id: {type: string}
         project_id: {type: string}
         platform: {type: string, const: ocean_engine}
         account_id: {type: string}
-        authority: {$ref: '#/components/schemas/ComputerUseAuthorityBinding'}
+        authority: {$ref: '#/components/schemas/BrowserRpaAuthorityBinding'}
         environment_id: {type: string}
         profile_id: {type: string}
         lease_id: {type: string}
         policy_id: {type: string}
-        state: {$ref: '#/components/schemas/ComputerUseRunState'}
-        blocking_reason: {$ref: '#/components/schemas/ComputerUseBlockingReason'}
+        state: {$ref: '#/components/schemas/BrowserRpaRunState'}
+        blocking_reason: {$ref: '#/components/schemas/BrowserRpaBlockingReason'}
         paused: {type: boolean}
         takeover_active: {type: boolean}
         version: {type: integer, minimum: 1}
         idempotency_key: {type: string}
-        request_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        request_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
         created_by: {type: string}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
-    CreateComputerUseRunRequest:
+    CreateBrowserRpaRunRequest:
       type: object
       additionalProperties: false
       required: [project_id, platform, account_id, business_execution_id, environment_id, profile_id, policy_id]
@@ -3581,7 +3581,7 @@ components:
         environment_id: {type: string, minLength: 1}
         profile_id: {type: string, minLength: 1}
         policy_id: {type: string, minLength: 1}
-    ComputerUseEvent:
+    BrowserRpaEvent:
       type: object
       additionalProperties: false
       required: [id, organization_id, project_id, run_id, sequence, kind, summary, actor, created_at]
@@ -3595,12 +3595,12 @@ components:
         summary: {type: string}
         actor: {type: string}
         created_at: {type: string, format: date-time}
-    ComputerUseEvidence:
+    BrowserRpaEvidence:
       type: object
       additionalProperties: false
       required: [schema_version, id, organization_id, project_id, run_id, step_id, before_page_facts, after_page_facts, field_readback, diff_keys, page_reference, object_fingerprint, selector_version, action_version, redaction_version, created_at]
       properties:
-        schema_version: {type: string, const: computer-use-evidence/v1}
+        schema_version: {type: string, enum: [browser-rpa-evidence/v1, computer-use-evidence/v1]}
         id: {type: string}
         organization_id: {type: string}
         project_id: {type: string}
@@ -3618,7 +3618,7 @@ components:
         action_version: {type: string}
         redaction_version: {type: string}
         created_at: {type: string, format: date-time}
-    ComputerUseStep:
+    BrowserRpaStep:
       type: object
       additionalProperties: false
       required: [id, run_id, sequence, workflow_step_id, action, status, attempt, version]
@@ -3629,10 +3629,10 @@ components:
         workflow_step_id: {type: string, minLength: 1}
         action: {type: string, enum: [observe_page, begin_form_fill, field_readback, discard_draft, verify_no_write, submit_platform_configuration, result_observed, list_confirmed, rejected_or_error, result_unknown]}
         status: {type: string, enum: [running, succeeded, failed, result_unknown]}
-        blocking_reason: {$ref: '#/components/schemas/ComputerUseBlockingReason'}
+        blocking_reason: {$ref: '#/components/schemas/BrowserRpaBlockingReason'}
         attempt: {type: integer, minimum: 1}
         version: {type: integer, minimum: 1}
-    ComputerUseSessionLease:
+    BrowserRpaSessionLease:
       type: object
       additionalProperties: false
       required: [id, organization_id, project_id, run_id, environment_id, profile_id, platform, account_id, holder, fencing_token, version, expires_at, heartbeat_deadline]
@@ -3651,14 +3651,14 @@ components:
         expires_at: {type: string, format: date-time}
         heartbeat_deadline: {type: string, format: date-time}
         released_at: {type: string, format: date-time}
-    AcquiredComputerUseRunLease:
+    AcquiredBrowserRpaRunLease:
       type: object
       additionalProperties: false
       required: [run, lease]
       properties:
-        run: {$ref: '#/components/schemas/ComputerUseRun'}
-        lease: {$ref: '#/components/schemas/ComputerUseSessionLease'}
-    RecordComputerUseTakeoverEvidenceRequest:
+        run: {$ref: '#/components/schemas/BrowserRpaRun'}
+        lease: {$ref: '#/components/schemas/BrowserRpaSessionLease'}
+    RecordBrowserRpaTakeoverEvidenceRequest:
       type: object
       additionalProperties: false
       required: [expected_version, lease_id, fencing_token, step_id, sequence, action, status, page_kind, platform_project_id, before_page_facts, after_page_facts, field_readback, diff_keys, page_reference, selector_version, action_version]
@@ -3679,15 +3679,15 @@ components:
         page_reference: {type: string, format: uri}
         selector_version: {type: string, minLength: 1}
         action_version: {type: string, minLength: 1}
-    RecordedComputerUseTakeoverEvidence:
+    RecordedBrowserRpaTakeoverEvidence:
       type: object
       additionalProperties: false
       required: [run, step, evidence]
       properties:
-        run: {$ref: '#/components/schemas/ComputerUseRun'}
-        step: {$ref: '#/components/schemas/ComputerUseStep'}
-        evidence: {$ref: '#/components/schemas/ComputerUseEvidence'}
-    AuthorizeComputerUseTakeoverActionRequest:
+        run: {$ref: '#/components/schemas/BrowserRpaRun'}
+        step: {$ref: '#/components/schemas/BrowserRpaStep'}
+        evidence: {$ref: '#/components/schemas/BrowserRpaEvidence'}
+    AuthorizeBrowserRpaTakeoverActionRequest:
       type: object
       additionalProperties: false
       required: [expected_version, step_id, sequence, confirmation_id, confirmation_token, lease_id, fencing_token, page_kind, platform_project_id, before_page_facts, field_readback, diff_keys, page_reference, selector_version, action_version]
@@ -3707,7 +3707,7 @@ components:
         page_reference: {type: string, format: uri}
         selector_version: {type: string, minLength: 1}
         action_version: {type: string, minLength: 1}
-    ComputerUseControlledActionAttempt:
+    BrowserRpaControlledActionAttempt:
       type: object
       additionalProperties: false
       required: [id, organization_id, project_id, run_id, step_id, confirmation_id, approval_id, lease_id, fencing_token, action_hash, idempotency_key, status, created_at]
@@ -3721,20 +3721,20 @@ components:
         approval_id: {type: string}
         lease_id: {type: string}
         fencing_token: {type: integer, minimum: 1}
-        action_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        action_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
         idempotency_key: {type: string}
         status: {type: string, const: authorized}
         created_at: {type: string, format: date-time}
-    AuthorizedComputerUseTakeoverAction:
+    AuthorizedBrowserRpaTakeoverAction:
       type: object
       additionalProperties: false
       required: [run, attempt, step, evidence]
       properties:
-        run: {$ref: '#/components/schemas/ComputerUseRun'}
-        attempt: {$ref: '#/components/schemas/ComputerUseControlledActionAttempt'}
-        step: {$ref: '#/components/schemas/ComputerUseStep'}
-        evidence: {$ref: '#/components/schemas/ComputerUseEvidence'}
-    RecordComputerUseTakeoverOutcomeRequest:
+        run: {$ref: '#/components/schemas/BrowserRpaRun'}
+        attempt: {$ref: '#/components/schemas/BrowserRpaControlledActionAttempt'}
+        step: {$ref: '#/components/schemas/BrowserRpaStep'}
+        evidence: {$ref: '#/components/schemas/BrowserRpaEvidence'}
+    RecordBrowserRpaTakeoverOutcomeRequest:
       type: object
       additionalProperties: false
       required: [expected_version, lease_id, fencing_token, step_id, sequence, outcome, page_kind, platform_project_id, before_page_facts, after_page_facts, field_readback, page_reference, selector_version, action_version]
@@ -3753,24 +3753,24 @@ components:
         page_reference: {type: string, format: uri}
         selector_version: {type: string, minLength: 1}
         action_version: {type: string, minLength: 1}
-    IssueComputerUseConfirmationRequest:
+    IssueBrowserRpaConfirmationRequest:
       type: object
       additionalProperties: false
       required: [expected_version, binding_hash]
       properties:
         expected_version: {type: integer, minimum: 1}
-        binding_hash: {$ref: '#/components/schemas/ComputerUseHash'}
-    IssuedComputerUseConfirmation:
+        binding_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
+    IssuedBrowserRpaConfirmation:
       type: object
       additionalProperties: false
       required: [confirmation_id, bearer_secret, binding_hash, issued_at, expires_at]
       properties:
         confirmation_id: {type: string}
         bearer_secret: {type: string, minLength: 32, writeOnly: true}
-        binding_hash: {$ref: '#/components/schemas/ComputerUseHash'}
+        binding_hash: {$ref: '#/components/schemas/BrowserRpaHash'}
         issued_at: {type: string, format: date-time}
         expires_at: {type: string, format: date-time}
-    ComputerUseHash:
+    BrowserRpaHash:
       type: string
       pattern: '^[0-9a-f]{64}$'
     SHA256:

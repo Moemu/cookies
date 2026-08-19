@@ -30,8 +30,10 @@ import (
 	"github.com/shikanon/cookies/internal/integrations/strategycreative"
 	"github.com/shikanon/cookies/internal/platform/agent"
 	"github.com/shikanon/cookies/internal/platform/assets"
-	"github.com/shikanon/cookies/internal/platform/computeruse"
-	computerusehttp "github.com/shikanon/cookies/internal/platform/computeruse/httpapi"
+	"github.com/shikanon/cookies/internal/platform/browserautomation"
+	browserautomationhttp "github.com/shikanon/cookies/internal/platform/browserautomation/httpapi"
+	"github.com/shikanon/cookies/internal/platform/browserautomation/plancompile"
+	"github.com/shikanon/cookies/internal/platform/browserautomation/rparunner"
 	"github.com/shikanon/cookies/internal/platform/config"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/database"
@@ -48,6 +50,7 @@ import (
 	"github.com/shikanon/cookies/internal/platform/remix"
 	"github.com/shikanon/cookies/internal/systems/creative"
 	"github.com/shikanon/cookies/internal/systems/delivery"
+	"github.com/shikanon/cookies/internal/systems/delivery/calibrationmanifest"
 	deliveryhttp "github.com/shikanon/cookies/internal/systems/delivery/httpapi"
 	"github.com/shikanon/cookies/internal/systems/insights"
 	insightshttp "github.com/shikanon/cookies/internal/systems/insights/httpapi"
@@ -450,7 +453,7 @@ func main() {
 		ProjectAuthorizer: projectStore,
 		Readiness:         database.Readiness{DB: db},
 		Identities:        identityStore, Accounts: identityStore, Projects: projectService, ProjectMembers: projectStore,
-		Uploads: uploadService, Intakes: intakeService, Creative: creativeService, ProductionCenter: productionCenter, ProductionAssets: productionCenter, ProductionRetry: productionRetry,
+		Uploads: uploadService, Blobs: blobs, Intakes: intakeService, Creative: creativeService, ProductionCenter: productionCenter, ProductionAssets: productionCenter, ProductionRetry: productionRetry,
 		Sessions: sessionService, Knowledge: knowledgeService,
 		RemixPlans: remixService, Evals: remixService, AgentRuns: agentService,
 		ProviderConfig: provider.MySQLGatewayConfigStore{DB: db},
@@ -467,16 +470,36 @@ func main() {
 	}
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 		httpserver.DomainMount{Pattern: "/api/delivery/v1/", Handler: deliveryhttp.New(deliveryService)})
-	computerUseRepository := computeruse.MySQLRepository{DB: db}
-	computerUseService := computeruse.Service{
-		Repository: computerUseRepository,
-		AuthorityProvider: delivery.ComputerUseAuthorityProvider{
+	browserRpaRepository := browserautomation.MySQLRepository{DB: db}
+	browserRpaService := browserautomation.Service{
+		Repository: browserRpaRepository,
+		AuthorityProvider: delivery.BrowserRpaAuthorityProvider{
 			Repository: delivery.MySQLRepository{DB: db},
 		},
 		NewID: func(prefix string) (string, error) { return ids.New(prefix) },
 	}
+	browserRpaServer := browserautomationhttp.NewTakeoverOnly(browserRpaService, projectStore)
+	if cfg.BrowserRPA.Enabled {
+		manifest, err := calibrationmanifest.Current()
+		if err != nil {
+			log.Fatalf("load OceanEngine calibration manifest: %v", err)
+		}
+		adapter := rparunner.NewPlaywrightRPAAdapter(rparunner.AdapterConfig{
+			Command:             strings.Fields(cfg.BrowserRPA.Command),
+			ScriptPath:          cfg.BrowserRPA.ScriptPath,
+			WorkDir:             ".",
+			EvidenceRoot:        cfg.BrowserRPA.EvidenceRoot,
+			PrepareTimeout:      time.Duration(cfg.BrowserRPA.PrepareTimeoutSeconds) * time.Second,
+			SubmitTimeout:       time.Duration(cfg.BrowserRPA.SubmitTimeoutSeconds) * time.Second,
+			FallbackCDPEndpoint: cfg.BrowserRPA.CDPEndpointFallback,
+		}, browserRpaRepository, browserRpaService, plancompile.Compiler{Manifest: manifest})
+		browserRpaServer = browserautomationhttp.New(browserRpaService, browserautomation.Worker{Service: browserRpaService, Adapter: adapter}, projectStore)
+		log.Printf("browser_rpa_automated_worker=true")
+	}
+	browserRpaServer.MountLegacyAlias()
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
-		httpserver.DomainMount{Pattern: "/api/platform/v1/computer-use/", Handler: computerusehttp.NewTakeoverOnly(computerUseService, projectStore)})
+		httpserver.DomainMount{Pattern: "/api/platform/v1/browser-rpa/", Handler: browserRpaServer},
+		httpserver.DomainMount{Pattern: "/api/platform/v1/computer-use/", Handler: browserRpaServer})
 	// 文本模型出口。Strategy 和 Insights 共用同一个网关适配器和同一个能力别名——
 	// 它们要的是同一件事：调一次文本模型。**目前也共用同一个开关**
 	// （COOKIES_STRATEGY_REAL_PROVIDER_ENABLED），这是个遗留：

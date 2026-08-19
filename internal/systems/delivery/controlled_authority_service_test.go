@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shikanon/cookies/internal/platform/computeruse"
+	"github.com/shikanon/cookies/internal/platform/browserautomation"
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
@@ -71,16 +71,16 @@ func (r *controlledMemoryRepository) GetControlledExecution(_ context.Context, o
 	}
 	return v, nil
 }
-func (r *controlledMemoryRepository) AttachComputerUseRun(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion int64, runID string, now time.Time) (ControlledExecution, error) {
+func (r *controlledMemoryRepository) AttachBrowserRpaRun(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion int64, runID string, now time.Time) (ControlledExecution, error) {
 	key := repositoryKey(org, project, id)
 	v, ok := r.executions[key]
 	if !ok {
 		return ControlledExecution{}, ErrNotFound
 	}
-	if v.Version != expectedVersion || v.Status != "pending" || v.ComputerUseRunID != "" {
+	if v.Version != expectedVersion || v.Status != "pending" || v.BrowserRpaRunID != "" {
 		return ControlledExecution{}, ErrVersionConflict
 	}
-	v.ComputerUseRunID = runID
+	v.BrowserRpaRunID = runID
 	v.Status = "running"
 	v.Version++
 	v.UpdatedAt = now
@@ -218,17 +218,17 @@ func (r *controlledMemoryRepository) ConfirmPlatformEntityMappingMutation(_ cont
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrNotFound
 	}
 	evidenceScope := mapping
-	evidenceScope.ComputerUseRunID = execution.ComputerUseRunID
+	evidenceScope.BrowserRpaRunID = execution.BrowserRpaRunID
 	evidenceScope.InternalObjectID = change.Binding.ObjectFingerprint
 	objectID, status, err := validatePlatformMappingEvidence(evidenceScope, result, list)
 	targetStatus := change.Binding.existingPromotionTargetStatus()
 	if err != nil || objectID != mapping.PlatformObjectID || result.Evidence.FieldReadback["target_state_hash"] != targetStateHash || list.Evidence.FieldReadback["target_state_hash"] != targetStateHash || (targetStatus != "" && status != targetStatus) {
 		return PlatformEntityMapping{}, PlatformEntityMappingRevision{}, ErrApprovalContentMismatch
 	}
-	revision := PlatformEntityMappingRevision{MappingID: mapping.ID, OrganizationID: org, ProjectID: project, Version: mapping.Version + 1, Action: change.Action, BusinessExecutionID: execution.ID, ComputerUseRunID: execution.ComputerUseRunID, PlatformObjectID: objectID, PlatformStatus: status, PreviousStateAction: mapping.CurrentStateAction, PreviousStateHash: mapping.CurrentStateHash, CurrentStateAction: change.Action, CurrentStateHash: targetStateHash, ResultEvidenceID: resultEvidenceID, ListEvidenceID: listEvidenceID, CreatedAt: list.Evidence.CreatedAt}
+	revision := PlatformEntityMappingRevision{MappingID: mapping.ID, OrganizationID: org, ProjectID: project, Version: mapping.Version + 1, Action: change.Action, BusinessExecutionID: execution.ID, BrowserRpaRunID: execution.BrowserRpaRunID, PlatformObjectID: objectID, PlatformStatus: status, PreviousStateAction: mapping.CurrentStateAction, PreviousStateHash: mapping.CurrentStateHash, CurrentStateAction: change.Action, CurrentStateHash: targetStateHash, ResultEvidenceID: resultEvidenceID, ListEvidenceID: listEvidenceID, CreatedAt: list.Evidence.CreatedAt}
 	mapping.PlatformStatus = status
 	mapping.BusinessExecutionID = execution.ID
-	mapping.ComputerUseRunID = execution.ComputerUseRunID
+	mapping.BrowserRpaRunID = execution.BrowserRpaRunID
 	mapping.CurrentStateAction = change.Action
 	mapping.CurrentStateHash = targetStateHash
 	mapping.ResultEvidenceID = resultEvidenceID
@@ -309,16 +309,16 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	if execution.RemoteWriteApprovalID != approval.ID || execution.Status != "pending" {
 		t.Fatalf("execution=%#v", execution)
 	}
-	execution, err = service.AttachComputerUseRun(context.Background(), actor, "project_a", execution.ID, execution.Version, "run_1")
-	if err != nil || execution.Status != "running" || execution.ComputerUseRunID != "run_1" || execution.Version != 2 {
+	execution, err = service.AttachBrowserRpaRun(context.Background(), actor, "project_a", execution.ID, execution.Version, "run_1")
+	if err != nil || execution.Status != "running" || execution.BrowserRpaRunID != "run_1" || execution.Version != 2 {
 		t.Fatalf("attached execution=%#v err=%v", execution, err)
 	}
-	mapping, err := service.CreatePendingPlatformEntityMapping(context.Background(), actor, PlatformEntityMapping{ID: "mapping_1", ProjectID: "project_a", AccountReferenceID: change.Binding.AccountReferenceID, PlanID: change.Binding.PlanID, ConfigurationID: change.Binding.ConfigurationID, BusinessExecutionID: execution.ID, ComputerUseRunID: execution.ComputerUseRunID, InternalObjectKind: "promotion", InternalObjectID: change.Binding.ObjectFingerprint, PlatformObjectKind: "promotion"})
+	mapping, err := service.CreatePendingPlatformEntityMapping(context.Background(), actor, PlatformEntityMapping{ID: "mapping_1", ProjectID: "project_a", AccountReferenceID: change.Binding.AccountReferenceID, PlanID: change.Binding.PlanID, ConfigurationID: change.Binding.ConfigurationID, BusinessExecutionID: execution.ID, BrowserRpaRunID: execution.BrowserRpaRunID, InternalObjectKind: "promotion", InternalObjectID: change.Binding.ObjectFingerprint, PlatformObjectKind: "promotion"})
 	if err != nil || mapping.Status != PlatformEntityMappingPending || mapping.PlatformObjectID != "" || mapping.PlatformStatus != "" || mapping.ResultEvidenceID != "" || mapping.ListEvidenceID != "" {
 		t.Fatalf("pending mapping=%#v err=%v", mapping, err)
 	}
-	repo.evidence["evidence_result"] = validMappingEvidence(mapping, "evidence_result", "step_result", 2, computeruse.TakeoverResultObserved, "platform_1", "pending_review")
-	repo.evidence["evidence_list"] = validMappingEvidence(mapping, "evidence_list", "step_list", 3, computeruse.TakeoverListConfirmed, "platform_1", "pending_review")
+	repo.evidence["evidence_result"] = validMappingEvidence(mapping, "evidence_result", "step_result", 2, browserautomation.TakeoverResultObserved, "platform_1", "pending_review")
+	repo.evidence["evidence_list"] = validMappingEvidence(mapping, "evidence_list", "step_list", 3, browserautomation.TakeoverListConfirmed, "platform_1", "pending_review")
 	mapping, err = service.ConfirmPlatformEntityMapping(context.Background(), actor, "project_a", mapping.ID, ConfirmPlatformEntityMappingRequest{ExpectedVersion: mapping.Version, ResultEvidenceID: "evidence_result", ListEvidenceID: "evidence_list"})
 	if err != nil || mapping.Status != PlatformEntityMappingConfirmed || mapping.Version != 2 {
 		t.Fatalf("confirmed mapping=%#v err=%v", mapping, err)
@@ -336,7 +336,7 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	calibrationExecution, err = service.AttachComputerUseRun(context.Background(), actor, "project_a", calibrationExecution.ID, calibrationExecution.Version, "run_calibration_1")
+	calibrationExecution, err = service.AttachBrowserRpaRun(context.Background(), actor, "project_a", calibrationExecution.ID, calibrationExecution.Version, "run_calibration_1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,28 +377,28 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutationExecution, err = service.AttachComputerUseRun(context.Background(), actor, "project_a", mutationExecution.ID, mutationExecution.Version, "run_mutation_1")
+	mutationExecution, err = service.AttachBrowserRpaRun(context.Background(), actor, "project_a", mutationExecution.ID, mutationExecution.Version, "run_mutation_1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	evidenceScope := mapping
-	evidenceScope.ComputerUseRunID = mutationExecution.ComputerUseRunID
+	evidenceScope.BrowserRpaRunID = mutationExecution.BrowserRpaRunID
 	evidenceScope.InternalObjectID = mutationChange.Binding.ObjectFingerprint
-	resultMutationEvidence := validMappingEvidence(evidenceScope, "evidence_mutation_result", "step_mutation_result", 2, computeruse.TakeoverResultObserved, mapping.PlatformObjectID, "pending_review")
+	resultMutationEvidence := validMappingEvidence(evidenceScope, "evidence_mutation_result", "step_mutation_result", 2, browserautomation.TakeoverResultObserved, mapping.PlatformObjectID, "pending_review")
 	resultMutationEvidence.Evidence.FieldReadback["target_state_hash"] = mutation.TargetStateHash
-	listMutationEvidence := validMappingEvidence(evidenceScope, "evidence_mutation_list", "step_mutation_list", 3, computeruse.TakeoverListConfirmed, mapping.PlatformObjectID, "pending_review")
+	listMutationEvidence := validMappingEvidence(evidenceScope, "evidence_mutation_list", "step_mutation_list", 3, browserautomation.TakeoverListConfirmed, mapping.PlatformObjectID, "pending_review")
 	listMutationEvidence.Evidence.FieldReadback["target_state_hash"] = mutation.TargetStateHash
 	repo.evidence[resultMutationEvidence.Evidence.ID] = resultMutationEvidence
 	repo.evidence[listMutationEvidence.Evidence.ID] = listMutationEvidence
 	updatedMapping, revision, err := service.ConfirmPlatformEntityMappingMutation(context.Background(), actor, "project_a", mapping.ID, ConfirmPlatformEntityMappingMutationRequest{ExpectedVersion: mapping.Version, BusinessExecutionID: mutationExecution.ID, ResultEvidenceID: resultMutationEvidence.Evidence.ID, ListEvidenceID: listMutationEvidence.Evidence.ID})
-	if err != nil || updatedMapping.Version != mapping.Version+1 || updatedMapping.BusinessExecutionID != mutationExecution.ID || updatedMapping.ComputerUseRunID != mutationExecution.ComputerUseRunID || updatedMapping.CurrentStateAction != ControlledActionUpdatePromotionBudget || updatedMapping.CurrentStateHash != mutation.TargetStateHash || revision.PreviousStateHash != "" || revision.CurrentStateAction != ControlledActionUpdatePromotionBudget || revision.CurrentStateHash != mutation.TargetStateHash || revision.Action != ControlledActionUpdatePromotionBudget {
+	if err != nil || updatedMapping.Version != mapping.Version+1 || updatedMapping.BusinessExecutionID != mutationExecution.ID || updatedMapping.BrowserRpaRunID != mutationExecution.BrowserRpaRunID || updatedMapping.CurrentStateAction != ControlledActionUpdatePromotionBudget || updatedMapping.CurrentStateHash != mutation.TargetStateHash || revision.PreviousStateHash != "" || revision.CurrentStateAction != ControlledActionUpdatePromotionBudget || revision.CurrentStateHash != mutation.TargetStateHash || revision.Action != ControlledActionUpdatePromotionBudget {
 		t.Fatalf("updated mapping=%#v revision=%#v err=%v", updatedMapping, revision, err)
 	}
 	if _, _, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", updatedMapping.ID, CompileMappedControlledChangeSetRequest{ExpectedMappingVersion: updatedMapping.Version, Action: ControlledAction("update_promotion_schedule"), CurrentDailyBudgetMinor: 36000, TargetDailyBudgetMinor: 36000}); err != ErrInvalidRequest {
 		t.Fatalf("project-owned schedule was accepted through a promotion mapping: %v", err)
 	}
 	for _, material := range []struct{ reference, evidence string }{{"asset_a", "material_evidence_a"}, {"asset_b", "material_evidence_b"}} {
-		repo.evidence[material.evidence] = platformMappingEvidence{Evidence: computeruse.Evidence{ID: material.evidence, OrganizationID: actor.OrganizationID, ProjectID: "project_a", FieldReadback: map[string]string{"authorized_material_reference_id": material.reference, "material_available": "true"}}}
+		repo.evidence[material.evidence] = platformMappingEvidence{Evidence: browserautomation.Evidence{ID: material.evidence, OrganizationID: actor.OrganizationID, ProjectID: "project_a", FieldReadback: map[string]string{"authorized_material_reference_id": material.reference, "material_available": "true"}}}
 	}
 	materialChange, _, err := service.CompileMappedControlledChangeSet(context.Background(), actor, "project_a", updatedMapping.ID, CompileMappedControlledChangeSetRequest{ExpectedMappingVersion: updatedMapping.Version, Action: ControlledActionUpdatePromotionMaterials, CurrentDailyBudgetMinor: 36000, TargetDailyBudgetMinor: 36000, CurrentMaterials: []ControlledMaterialReference{{ReferenceID: "asset_a", AuthorizationEvidenceID: "material_evidence_a"}}, TargetMaterials: []ControlledMaterialReference{{ReferenceID: "asset_a", AuthorizationEvidenceID: "material_evidence_a"}, {ReferenceID: "asset_b", AuthorizationEvidenceID: "material_evidence_b"}}})
 	if err != nil || materialChange.Binding.PromotionMutation == nil || len(materialChange.Binding.PromotionMutation.TargetMaterials) != 2 {
@@ -426,16 +426,16 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	pauseExecution, err = service.AttachComputerUseRun(context.Background(), actor, "project_a", pauseExecution.ID, pauseExecution.Version, "run_pause_1")
+	pauseExecution, err = service.AttachBrowserRpaRun(context.Background(), actor, "project_a", pauseExecution.ID, pauseExecution.Version, "run_pause_1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	pauseEvidenceScope := updatedMapping
-	pauseEvidenceScope.ComputerUseRunID = pauseExecution.ComputerUseRunID
+	pauseEvidenceScope.BrowserRpaRunID = pauseExecution.BrowserRpaRunID
 	pauseEvidenceScope.InternalObjectID = pauseChange.Binding.ObjectFingerprint
-	pauseResult := validMappingEvidence(pauseEvidenceScope, "evidence_pause_result", "step_pause_result", 2, computeruse.TakeoverResultObserved, updatedMapping.PlatformObjectID, "paused")
+	pauseResult := validMappingEvidence(pauseEvidenceScope, "evidence_pause_result", "step_pause_result", 2, browserautomation.TakeoverResultObserved, updatedMapping.PlatformObjectID, "paused")
 	pauseResult.Evidence.FieldReadback["target_state_hash"] = pauseChange.Binding.PromotionControl.TargetStateHash
-	pauseList := validMappingEvidence(pauseEvidenceScope, "evidence_pause_list", "step_pause_list", 3, computeruse.TakeoverListConfirmed, updatedMapping.PlatformObjectID, "paused")
+	pauseList := validMappingEvidence(pauseEvidenceScope, "evidence_pause_list", "step_pause_list", 3, browserautomation.TakeoverListConfirmed, updatedMapping.PlatformObjectID, "paused")
 	pauseList.Evidence.FieldReadback["target_state_hash"] = pauseChange.Binding.PromotionControl.TargetStateHash
 	repo.evidence[pauseResult.Evidence.ID] = pauseResult
 	repo.evidence[pauseList.Evidence.ID] = pauseList
@@ -445,7 +445,7 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	}
 
 	landingEvidenceID := "landing_evidence_a"
-	repo.evidence[landingEvidenceID] = platformMappingEvidence{Evidence: computeruse.Evidence{ID: landingEvidenceID, OrganizationID: actor.OrganizationID, ProjectID: "project_a", FieldReadback: map[string]string{"authorized_landing_page_reference_id": "landing_a", "landing_page_available": "true"}}}
+	repo.evidence[landingEvidenceID] = platformMappingEvidence{Evidence: browserautomation.Evidence{ID: landingEvidenceID, OrganizationID: actor.OrganizationID, ProjectID: "project_a", FieldReadback: map[string]string{"authorized_landing_page_reference_id": "landing_a", "landing_page_available": "true"}}}
 	restartSchedule := ControlledScheduleWindow{StartAt: now.Add(-time.Hour), EndAt: now.Add(24 * time.Hour), Timezone: "Asia/Shanghai"}
 	restartRequest := CompileControlledRestartChangeSetRequest{
 		ExpectedMappingVersion:   pausedMapping.Version,
@@ -481,16 +481,16 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	restartExecution, err = service.AttachComputerUseRun(context.Background(), actor, "project_a", restartExecution.ID, restartExecution.Version, "run_restart_1")
+	restartExecution, err = service.AttachBrowserRpaRun(context.Background(), actor, "project_a", restartExecution.ID, restartExecution.Version, "run_restart_1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	restartEvidenceScope := pausedMapping
-	restartEvidenceScope.ComputerUseRunID = restartExecution.ComputerUseRunID
+	restartEvidenceScope.BrowserRpaRunID = restartExecution.BrowserRpaRunID
 	restartEvidenceScope.InternalObjectID = restartChange.Binding.ObjectFingerprint
-	restartResult := validMappingEvidence(restartEvidenceScope, "evidence_restart_result", "step_restart_result", 2, computeruse.TakeoverResultObserved, pausedMapping.PlatformObjectID, "delivering")
+	restartResult := validMappingEvidence(restartEvidenceScope, "evidence_restart_result", "step_restart_result", 2, browserautomation.TakeoverResultObserved, pausedMapping.PlatformObjectID, "delivering")
 	restartResult.Evidence.FieldReadback["target_state_hash"] = restartChange.Binding.PromotionRestart.TargetStateHash
-	restartList := validMappingEvidence(restartEvidenceScope, "evidence_restart_list", "step_restart_list", 3, computeruse.TakeoverListConfirmed, pausedMapping.PlatformObjectID, "delivering")
+	restartList := validMappingEvidence(restartEvidenceScope, "evidence_restart_list", "step_restart_list", 3, browserautomation.TakeoverListConfirmed, pausedMapping.PlatformObjectID, "delivering")
 	restartList.Evidence.FieldReadback["target_state_hash"] = restartChange.Binding.PromotionRestart.TargetStateHash
 	repo.evidence[restartResult.Evidence.ID] = restartResult
 	repo.evidence[restartList.Evidence.ID] = restartList
@@ -500,17 +500,17 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	}
 }
 
-func validMappingEvidence(mapping PlatformEntityMapping, evidenceID, stepID string, sequence int, action computeruse.TakeoverWriteOutcome, objectID, status string) platformMappingEvidence {
+func validMappingEvidence(mapping PlatformEntityMapping, evidenceID, stepID string, sequence int, action browserautomation.TakeoverWriteOutcome, objectID, status string) platformMappingEvidence {
 	return platformMappingEvidence{
-		Evidence: computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: evidenceID, OrganizationID: mapping.OrganizationID, ProjectID: mapping.ProjectID, RunID: mapping.ComputerUseRunID, StepID: stepID, ObjectFingerprint: mapping.InternalObjectID, FieldReadback: map[string]string{"platform_object_id": objectID, "platform_status": status}, CreatedAt: time.Date(2026, 8, 13, 13, 0, sequence, 0, time.UTC)},
-		Step:     computeruse.RunStep{ID: stepID, RunID: mapping.ComputerUseRunID, Sequence: sequence, Action: string(action), Status: computeruse.StepSucceeded},
+		Evidence: browserautomation.Evidence{SchemaVersion: browserautomation.EvidenceSchemaV1, ID: evidenceID, OrganizationID: mapping.OrganizationID, ProjectID: mapping.ProjectID, RunID: mapping.BrowserRpaRunID, StepID: stepID, ObjectFingerprint: mapping.InternalObjectID, FieldReadback: map[string]string{"platform_object_id": objectID, "platform_status": status}, CreatedAt: time.Date(2026, 8, 13, 13, 0, sequence, 0, time.UTC)},
+		Step:     browserautomation.RunStep{ID: stepID, RunID: mapping.BrowserRpaRunID, Sequence: sequence, Action: string(action), Status: browserautomation.StepSucceeded},
 	}
 }
 
 func TestPlatformEntityMappingConfirmationRejectsUntrustedEvidence(t *testing.T) {
 	now := time.Date(2026, 8, 13, 13, 0, 0, 0, time.UTC)
 	actor := contract.ActorContext{OrganizationID: "org_a", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "operator"}, Scopes: contract.ScopesFromStrings([]string{string(ScopeExecute)})}
-	base := PlatformEntityMapping{SchemaVersion: PlatformEntityMappingV1, ID: "mapping_1", OrganizationID: actor.OrganizationID, ProjectID: "project_a", AccountReferenceID: "account_1", PlanID: "plan_1", ConfigurationID: "configuration_1", BusinessExecutionID: "execution_1", ComputerUseRunID: "run_1", InternalObjectKind: "project", InternalObjectID: "fingerprint_1", PlatformObjectKind: "project", Status: PlatformEntityMappingPending, Version: 1, CreatedAt: now}
+	base := PlatformEntityMapping{SchemaVersion: PlatformEntityMappingV1, ID: "mapping_1", OrganizationID: actor.OrganizationID, ProjectID: "project_a", AccountReferenceID: "account_1", PlanID: "plan_1", ConfigurationID: "configuration_1", BusinessExecutionID: "execution_1", BrowserRpaRunID: "run_1", InternalObjectKind: "project", InternalObjectID: "fingerprint_1", PlatformObjectKind: "project", Status: PlatformEntityMappingPending, Version: 1, CreatedAt: now}
 	tests := []struct {
 		name   string
 		mutate func(*controlledMemoryRepository)
@@ -520,18 +520,18 @@ func TestPlatformEntityMappingConfirmationRejectsUntrustedEvidence(t *testing.T)
 	}{
 		{name: "evidence does not exist", result: "forged_result", list: "forged_list", want: ErrNotFound},
 		{name: "cross run evidence", result: "result", list: "list", want: ErrApprovalContentMismatch, mutate: func(repo *controlledMemoryRepository) {
-			result := validMappingEvidence(base, "result", "step_result", 2, computeruse.TakeoverResultObserved, "platform_1", "pending_review")
+			result := validMappingEvidence(base, "result", "step_result", 2, browserautomation.TakeoverResultObserved, "platform_1", "pending_review")
 			result.Evidence.RunID = "run_other"
 			repo.evidence["result"] = result
-			repo.evidence["list"] = validMappingEvidence(base, "list", "step_list", 3, computeruse.TakeoverListConfirmed, "platform_1", "pending_review")
+			repo.evidence["list"] = validMappingEvidence(base, "list", "step_list", 3, browserautomation.TakeoverListConfirmed, "platform_1", "pending_review")
 		}},
 		{name: "wrong step action", result: "result", list: "list", want: ErrApprovalContentMismatch, mutate: func(repo *controlledMemoryRepository) {
-			repo.evidence["result"] = validMappingEvidence(base, "result", "step_result", 2, computeruse.TakeoverListConfirmed, "platform_1", "pending_review")
-			repo.evidence["list"] = validMappingEvidence(base, "list", "step_list", 3, computeruse.TakeoverListConfirmed, "platform_1", "pending_review")
+			repo.evidence["result"] = validMappingEvidence(base, "result", "step_result", 2, browserautomation.TakeoverListConfirmed, "platform_1", "pending_review")
+			repo.evidence["list"] = validMappingEvidence(base, "list", "step_list", 3, browserautomation.TakeoverListConfirmed, "platform_1", "pending_review")
 		}},
 		{name: "forged object value", result: "result", list: "list", want: ErrApprovalContentMismatch, mutate: func(repo *controlledMemoryRepository) {
-			repo.evidence["result"] = validMappingEvidence(base, "result", "step_result", 2, computeruse.TakeoverResultObserved, "platform_1", "pending_review")
-			repo.evidence["list"] = validMappingEvidence(base, "list", "step_list", 3, computeruse.TakeoverListConfirmed, "platform_forged", "pending_review")
+			repo.evidence["result"] = validMappingEvidence(base, "result", "step_result", 2, browserautomation.TakeoverResultObserved, "platform_1", "pending_review")
+			repo.evidence["list"] = validMappingEvidence(base, "list", "step_list", 3, browserautomation.TakeoverListConfirmed, "platform_forged", "pending_review")
 		}},
 	}
 	for _, testCase := range tests {

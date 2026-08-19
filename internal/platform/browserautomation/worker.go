@@ -1,0 +1,290 @@
+package browserautomation
+
+import (
+	"context"
+	"errors"
+	"strconv"
+
+	"github.com/shikanon/cookies/internal/platform/contract"
+)
+
+type WorkerOutcome string
+
+const (
+	WorkerSuccess       WorkerOutcome = "success"
+	WorkerFailed        WorkerOutcome = "failed"
+	WorkerPartial       WorkerOutcome = "partial"
+	WorkerResultUnknown WorkerOutcome = "result_unknown"
+)
+
+type PreparedPage struct {
+	BeforeFacts map[string]string
+	Readback    map[string]string
+	DiffKeys    []string
+	PageRef     string
+	// Evidence metadata supplied by the executing adapter. Empty values fall
+	// back to the deterministic-fake provenance used by test adapters.
+	ScreenshotRef   string
+	SelectorVersion string
+	ActionVersion   string
+}
+
+// Typed adapter failures. Worker.Prepare classifies them into stable blocking
+// reasons; adapters must wrap these instead of returning free-form text.
+var (
+	ErrAccountMismatch        = errors.New("browser rpa account mismatch")
+	ErrPageDrift              = errors.New("browser rpa page drift")
+	ErrEnvironmentUnavailable = errors.New("browser rpa environment unavailable")
+	ErrResultUnknown          = errors.New("browser rpa result unknown")
+)
+
+type WorkerAdapter interface {
+	Prepare(context.Context, BrowserRpaRun) (PreparedPage, error)
+	Submit(context.Context, BrowserRpaRun, ControlledActionAttempt) (WorkerOutcome, PreparedPage, error)
+}
+
+type DeterministicFakeAdapter struct {
+	Outcome   WorkerOutcome
+	AccountID string
+}
+
+func (a DeterministicFakeAdapter) Prepare(_ context.Context, run BrowserRpaRun) (PreparedPage, error) {
+	if a.AccountID != "" && a.AccountID != run.AccountID {
+		return PreparedPage{}, ErrAccountMismatch
+	}
+	readback := map[string]string{"account_id": run.AccountID, "object_fingerprint": run.Authority.ObjectFingerprint}
+	if changesExistingPromotionAction(run.Authority.Action) {
+		readback["platform_object_id"] = run.Authority.TargetPlatformObjectID
+		if currentStateHash, targetStateHash, err := run.Authority.existingPromotionStateHashes(); err == nil {
+			readback["current_state_hash"] = currentStateHash
+			readback["target_state_hash"] = targetStateHash
+		}
+		if restart := run.Authority.PromotionRestart; restart != nil {
+			scheduleHash, materialsHash, err := restart.readbackHashes()
+			if err != nil {
+				return PreparedPage{}, err
+			}
+			readback["platform_project_id"] = run.Authority.ParentPlatformProjectID
+			readback["platform_status"] = restart.CurrentPlatformStatus
+			readback["daily_budget_minor"] = strconv.FormatInt(restart.ApprovedDailyBudgetMinor, 10)
+			readback["schedule_hash"] = scheduleHash
+			readback["material_references_hash"] = materialsHash
+			readback["landing_page_reference_id"] = restart.LandingPage.ReferenceID
+			readback["materials_available"] = "true"
+			readback["landing_page_available"] = "true"
+		}
+	}
+	return PreparedPage{BeforeFacts: map[string]string{"account_id": run.AccountID, "page_kind": "review"}, Readback: readback, DiffKeys: []string{}, PageRef: "fake://oceanengine/review"}, nil
+}
+func (a DeterministicFakeAdapter) Submit(_ context.Context, run BrowserRpaRun, _ ControlledActionAttempt) (WorkerOutcome, PreparedPage, error) {
+	outcome := a.Outcome
+	if outcome == "" {
+		outcome = WorkerSuccess
+	}
+	objectID := "fake-object-" + run.ID
+	if changesExistingPromotionAction(run.Authority.Action) {
+		objectID = run.Authority.TargetPlatformObjectID
+	}
+	targetStateHash := ""
+	if _, stateHash, err := run.Authority.existingPromotionStateHashes(); err == nil {
+		targetStateHash = stateHash
+	}
+	platformStatus := string(outcome)
+	if targetStatus := run.Authority.existingPromotionTargetStatus(); targetStatus != "" && outcome == WorkerSuccess {
+		platformStatus = targetStatus
+	}
+	page := PreparedPage{BeforeFacts: map[string]string{"object_fingerprint": run.Authority.ObjectFingerprint}, Readback: map[string]string{"platform_object_id": objectID, "platform_status": platformStatus, "target_state_hash": targetStateHash}, DiffKeys: []string{}, PageRef: "fake://oceanengine/result"}
+	return outcome, page, nil
+}
+
+type Worker struct {
+	Service Service
+	Adapter WorkerAdapter
+}
+
+func (w Worker) Prepare(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) (BrowserRpaRun, error) {
+	run, err := w.Service.Repository.GetRun(ctx, org, project, runID)
+	if err != nil {
+		return BrowserRpaRun{}, err
+	}
+	if run.Paused || run.TakeoverActive {
+		return BrowserRpaRun{}, ErrInvalidTransition
+	}
+	if run.State == RunQueued {
+		run, err = w.Service.TransitionRun(ctx, org, project, runID, run.Version, RunEnvironmentCheck, "")
+		if err != nil {
+			return BrowserRpaRun{}, err
+		}
+	}
+	if run.State != RunEnvironmentCheck {
+		return BrowserRpaRun{}, ErrInvalidTransition
+	}
+	run, err = w.Service.TransitionRun(ctx, org, project, runID, run.Version, RunPreparing, "")
+	if err != nil {
+		return BrowserRpaRun{}, err
+	}
+	prepared, err := w.Adapter.Prepare(ctx, run)
+	if err != nil {
+		reason := BlockPageDrift
+		if errors.Is(err, ErrAccountMismatch) {
+			reason = BlockAccountMismatch
+		}
+		return w.Service.TransitionRun(ctx, org, project, runID, run.Version, RunFailed, reason)
+	}
+	if changesExistingPromotionAction(run.Authority.Action) && run.Authority.validatePreSubmitReadback(prepared.Readback, w.Service.now()) != nil {
+		return w.Service.TransitionRun(ctx, org, project, runID, run.Version, RunFailed, BlockPageDrift)
+	}
+	step := RunStep{ID: run.ID + "-prepare", RunID: run.ID, Sequence: 1, WorkflowStepID: run.Authority.WorkflowStepID, Action: "prepare_and_readback", Status: StepSucceeded, Attempt: 1, Version: 1}
+	if err := w.Service.Repository.PutStep(ctx, org, project, step); err != nil {
+		return BrowserRpaRun{}, err
+	}
+	if err := w.appendEvidence(ctx, run, step, prepared); err != nil {
+		return BrowserRpaRun{}, err
+	}
+	return w.Service.TransitionRun(ctx, org, project, runID, run.Version, RunAwaitingConfirmation, BlockFinalConfirmationRequired)
+}
+
+type WorkerSubmitRequest struct{ Authorize AuthorizeActionRequest }
+
+func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (BrowserRpaRun, error) {
+	run, err := w.Service.Repository.GetRun(ctx, request.Authorize.OrganizationID, request.Authorize.ProjectID, request.Authorize.RunID)
+	if err != nil {
+		return BrowserRpaRun{}, err
+	}
+	step := RunStep{ID: request.Authorize.StepID, RunID: run.ID, Sequence: 2, WorkflowStepID: run.Authority.WorkflowStepID, Action: "submit_platform_configuration", Status: StepPending, Attempt: 1, Version: 1}
+	if err := w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step); err != nil {
+		return BrowserRpaRun{}, err
+	}
+	attempt, err := w.Service.AuthorizeAction(ctx, request.Authorize)
+	if err != nil {
+		return BrowserRpaRun{}, err
+	}
+	run, err = w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunSubmitting, "")
+	if err != nil {
+		return BrowserRpaRun{}, err
+	}
+	step.Status = StepRunning
+	step.Version++
+	if err := w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step); err != nil {
+		return BrowserRpaRun{}, err
+	}
+	outcome, page, adapterErr := w.Adapter.Submit(ctx, run, attempt)
+	if adapterErr != nil {
+		step.Status = StepFailed
+		step.Version++
+		_ = w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step)
+		return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunFailed, BlockResultReconciliation)
+	}
+	if outcome == WorkerResultUnknown {
+		step.Status = StepResultUnknown
+		step.Version++
+		_ = w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step)
+		_ = w.appendEvidence(ctx, run, step, page)
+		return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunResultUnknown, BlockResultReconciliation)
+	}
+	run, err = w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunVerifying, "")
+	if err != nil {
+		return BrowserRpaRun{}, err
+	}
+	step.Version++
+	step.Status = StepSucceeded
+	if outcome == WorkerFailed {
+		step.Status = StepFailed
+	}
+	if err := w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step); err != nil {
+		return BrowserRpaRun{}, err
+	}
+	if err := w.appendEvidence(ctx, run, step, page); err != nil {
+		return BrowserRpaRun{}, err
+	}
+	terminal := RunSucceeded
+	reason := BlockingReason("")
+	if outcome == WorkerFailed {
+		terminal = RunFailed
+	}
+	if outcome == WorkerPartial {
+		terminal = RunPartial
+		reason = BlockResultReconciliation
+	}
+	return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, terminal, reason)
+}
+
+func (w Worker) appendEvidence(ctx context.Context, run BrowserRpaRun, step RunStep, page PreparedPage) error {
+	now := w.Service.now()
+	id, err := w.Service.newID("brpa_evidence")
+	if err != nil {
+		return err
+	}
+	selectorVersion := page.SelectorVersion
+	if selectorVersion == "" {
+		selectorVersion = "deterministic-fake-selector/v1"
+	}
+	actionVersion := page.ActionVersion
+	if actionVersion == "" {
+		actionVersion = "deterministic-fake-action/v1"
+	}
+	evidence := Evidence{SchemaVersion: EvidenceSchemaV1, ID: id, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, BeforePageFacts: page.BeforeFacts, AfterPageFacts: page.Readback, FieldReadback: page.Readback, DiffKeys: page.DiffKeys, PageReference: page.PageRef, ScreenshotReference: page.ScreenshotRef, ObjectFingerprint: run.Authority.ObjectFingerprint, SelectorVersion: selectorVersion, ActionVersion: actionVersion, CreatedAt: now}
+	return w.Service.Repository.AppendEvidence(ctx, RedactEvidence(evidence))
+}
+
+type ControlAction string
+
+const (
+	ControlPause           ControlAction = "pause"
+	ControlResume          ControlAction = "resume"
+	ControlCancel          ControlAction = "cancel"
+	ControlTakeover        ControlAction = "takeover"
+	ControlReleaseTakeover ControlAction = "release_takeover"
+)
+
+func (s Service) ControlRun(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string, expected int64, action ControlAction) (BrowserRpaRun, error) {
+	run, err := s.Repository.GetRun(ctx, org, project, runID)
+	if err != nil {
+		return BrowserRpaRun{}, err
+	}
+	if run.Version != expected {
+		return BrowserRpaRun{}, ErrVersionConflict
+	}
+	switch action {
+	case ControlPause:
+		if terminalState(run.State) {
+			return BrowserRpaRun{}, ErrInvalidTransition
+		}
+		return s.setRunControl(ctx, run, expected, run.State, true, false, run.BlockingReason, action)
+	case ControlTakeover:
+		if terminalState(run.State) {
+			return BrowserRpaRun{}, ErrInvalidTransition
+		}
+		return s.setRunControl(ctx, run, expected, RunAwaitingTakeover, true, true, run.BlockingReason, action)
+	case ControlReleaseTakeover, ControlResume:
+		if !run.Paused && !run.TakeoverActive {
+			return BrowserRpaRun{}, ErrInvalidTransition
+		}
+		return s.setRunControl(ctx, run, expected, RunEnvironmentCheck, false, false, "", action)
+	case ControlCancel:
+		if terminalState(run.State) {
+			return BrowserRpaRun{}, ErrInvalidTransition
+		}
+		return s.setRunControl(ctx, run, expected, RunCancelled, false, false, "", action)
+	default:
+		return BrowserRpaRun{}, ErrInvalidContract
+	}
+}
+func (s Service) setRunControl(ctx context.Context, run BrowserRpaRun, expected int64, state RunState, paused, takeover bool, reason BlockingReason, action ControlAction) (BrowserRpaRun, error) {
+	updated, err := s.Repository.SetRunControl(ctx, run.OrganizationID, run.ProjectID, run.ID, expected, state, paused, takeover, reason, s.now())
+	if err != nil {
+		return BrowserRpaRun{}, err
+	}
+	if err := s.recordEvent(ctx, updated, "control_"+string(action), string(action), run.CreatedBy); err != nil {
+		return BrowserRpaRun{}, err
+	}
+	return updated, nil
+}
+func terminalState(state RunState) bool {
+	switch state {
+	case RunSucceeded, RunFailed, RunPartial, RunResultUnknown, RunCancelled:
+		return true
+	default:
+		return false
+	}
+}

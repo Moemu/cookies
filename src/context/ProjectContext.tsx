@@ -68,11 +68,12 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           ])
         : [null, await api.listAgencyWorkbench({ projectIds: [] })]
       const existingProjects = new Map(projectsRef.current.map(project => [project.id, project]))
+      const productsByProjectId = new Map(workbench.projects.map(project => [project.id, project.products ?? []]))
       const nextProjects = apiProjects.map(project => {
         if (activeSnapshot?.project.id === project.id) {
-          return toProjectRecord(activeSnapshot.project, activeSnapshot.artifacts, activeSnapshot.jobs, activeSnapshot.tasks, activeSnapshot.changeSets, activeSnapshot.operations)
+          return toProjectRecord(withProjectProducts(activeSnapshot.project, productsByProjectId.get(project.id)), activeSnapshot.artifacts, activeSnapshot.jobs, activeSnapshot.tasks, activeSnapshot.changeSets, activeSnapshot.operations)
         }
-        return existingProjects.get(project.id) ?? toProjectRecord(project)
+        return existingProjects.get(project.id) ?? toProjectRecord(withProjectProducts(project, productsByProjectId.get(project.id)))
       })
       if (reloadRequestRef.current !== requestId) {
         setRouteDiagnostic(`已忽略过期的 Project 加载响应，当前路由目标为 ${targetProjectIdRef.current || '未选择 Project'}。`)
@@ -110,8 +111,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
                 api.getProjectSnapshot(project.id),
                 api.listAgencyWorkbench({ projectIds: [project.id] }),
               ])
+              const projectProducts = projectWorkbench.projects.find(candidate => candidate.id === project.id)?.products
               return {
-                project: toProjectRecord(snapshot.project, snapshot.artifacts, snapshot.jobs, snapshot.tasks, snapshot.changeSets, snapshot.operations),
+                project: toProjectRecord(withProjectProducts(snapshot.project, projectProducts), snapshot.artifacts, snapshot.jobs, snapshot.tasks, snapshot.changeSets, snapshot.operations),
                 workbench: projectWorkbench,
               }
             } catch {
@@ -292,6 +294,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [loadedProjectId, projects, reloadProjects])
   const value = useMemo(() => ({ projects, currentProject, agencyWorkbench, targetProjectId, loadedProjectId, isLoading, error, routeDiagnostic, reloadProjects, selectProject, createProject, updateProject, createTask, updateTask, advanceArtifact, updateArtifact, addChangeSet, preflightChangeSet, approveChangeSet, executeChangeSet, rollbackChangeSet }), [projects, currentProject, agencyWorkbench, targetProjectId, loadedProjectId, isLoading, error, routeDiagnostic, reloadProjects, selectProject, createProject, updateProject, createTask, updateTask, advanceArtifact, updateArtifact, addChangeSet, preflightChangeSet, approveChangeSet, executeChangeSet, rollbackChangeSet])
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
+}
+
+function withProjectProducts(project: ApiProject, products?: ApiProject['products']): ApiProject {
+  return products ? { ...project, products } : project
 }
 
 function toProjectRecord(project: ApiProject, artifacts: ApiArtifact[] = [], jobs: ApiGenerationJob[] = [], tasks: ApiBusinessTask[] = [], changeSets: DeliveryChangeSet[] = [], operations: ApiOperationalRecord[] = []): ProjectRecord {
