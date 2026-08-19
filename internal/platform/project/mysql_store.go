@@ -437,6 +437,15 @@ func (s MySQLStore) ListProductProjects(ctx context.Context, organizationID cont
 	return refs, rows.Err()
 }
 
+func (s MySQLStore) LinkProductToProject(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, productID contract.ProductID) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO project_products (organization_id, project_id, product_id) VALUES (?, ?, ?)
+		ON DUPLICATE KEY UPDATE product_id = product_id`, organizationID, projectID, productID)
+	return err
+}
+
 func (s MySQLStore) CreateProject(ctx context.Context, project Project, principal contract.Principal, productIDs []contract.ProductID) error {
 	if s.DB == nil {
 		return fmt.Errorf("project database is required")

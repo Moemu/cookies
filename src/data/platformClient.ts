@@ -338,6 +338,8 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
       const refs = asArray((await request<ItemsResponse<PlatformProductProjectRef>>(`/products/${encodeURIComponent(productId)}/projects`)).items);
       return refs;
     },
+    linkProductToProject: async (productId: string, projectId: string) =>
+      request<{ product_id: string; project_id: string }>(`/products/${encodeURIComponent(productId)}/projects/${encodeURIComponent(projectId)}`, { method: "POST" }),
     putProductImage: async (productId: string, file: File) => {
       const body = new FormData();
       body.append("file", file);

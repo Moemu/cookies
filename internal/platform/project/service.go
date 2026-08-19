@@ -27,6 +27,7 @@ type Store interface {
 	GetProduct(context.Context, contract.OrganizationID, contract.ProductID) (Product, error)
 	UpdateProduct(context.Context, Product) error
 	ListProductProjects(context.Context, contract.OrganizationID, contract.ProductID) ([]ProductProjectRef, error)
+	LinkProductToProject(context.Context, contract.OrganizationID, contract.ProjectID, contract.ProductID) error
 	CreateProject(context.Context, Project, contract.Principal, []contract.ProductID) error
 	UpdateProject(context.Context, Project, ProjectRuntime, int64) error
 	CreateProjectArtifact(context.Context, ProjectArtifact) error
@@ -286,6 +287,28 @@ func (s Service) ListProductProjects(ctx context.Context, actor contract.ActorCo
 		return nil, fmt.Errorf("product id must not be empty")
 	}
 	return s.Store.ListProductProjects(ctx, actor.OrganizationID, productID)
+}
+
+// LinkProductToProject associates an organization-level product with a
+// project so the project's delivery forms can offer it in the cookies
+// product dropdown. The association is idempotent.
+func (s Service) LinkProductToProject(ctx context.Context, actor contract.ActorContext, productID contract.ProductID, projectID contract.ProjectID) error {
+	if s.Store == nil {
+		return fmt.Errorf("project store is required")
+	}
+	if err := actor.Validate(); err != nil {
+		return err
+	}
+	if productID == "" || projectID == "" {
+		return fmt.Errorf("product id and project id must not be empty")
+	}
+	if _, err := s.Store.GetProduct(ctx, actor.OrganizationID, productID); err != nil {
+		return err
+	}
+	if _, err := s.Store.GetProject(ctx, actor.OrganizationID, projectID); err != nil {
+		return err
+	}
+	return s.Store.LinkProductToProject(ctx, actor.OrganizationID, projectID, productID)
 }
 
 func (s Service) CreateProject(ctx context.Context, actor contract.ActorContext, request CreateProjectRequest) (Project, error) {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Archive, Check, ImagePlus, Package, Pencil, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
+import { Archive, Check, ImagePlus, Link2, Package, Pencil, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
 import {
   activityTypeLabels,
   brandTypeLabels,
@@ -11,6 +11,7 @@ import {
   type PlatformProductPriceBand,
   type PlatformProductProjectRef,
 } from '../data/platformClient'
+import { useProject } from '../context/ProjectContext'
 
 type ProductForm = {
   category: PlatformProductCategory
@@ -60,6 +61,7 @@ function mappingStatus(product: PlatformProduct) {
 }
 
 export function ProductsPage({ activeView }: { activeView: string }) {
+  const { currentProject } = useProject()
   const isMapping = activeView === '巨量映射'
   const [products, setProducts] = useState<PlatformProduct[]>([])
   const [selectedId, setSelectedId] = useState('')
@@ -222,6 +224,23 @@ export function ProductsPage({ activeView }: { activeView: string }) {
     }
   }
 
+  const linkedToCurrentProject = selected && projectRefs.some(ref => ref.project_id === currentProject.id)
+
+  const linkToCurrentProject = async () => {
+    if (!selected || linkedToCurrentProject) return
+    setBusy(true)
+    try {
+      await platformClient.linkProductToProject(selected.id, currentProject.id)
+      const refs = await platformClient.listProductProjects(selected.id)
+      setProjectRefs(refs)
+      setNotice(`${selected.name} 已关联到「${currentProject.name}」，投放计划下拉即可选择。`)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '关联项目失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return <div className="products-view">
     <div className="table-surface">
       <div className="surface-toolbar">
@@ -285,7 +304,9 @@ export function ProductsPage({ activeView }: { activeView: string }) {
       </dl>
       <footer>
         <div><span>巨量映射</span>{mappingStatus(selected)}</div>
-        <div><span>项目关联</span><em>{projectRefs.length ? projectRefs.map(ref => ref.name).join('、') : '尚未关联项目'}</em></div>
+        <div><span>项目关联</span><em>{projectRefs.length ? projectRefs.map(ref => ref.name).join('、') : '尚未关联项目'}</em>
+          {!linkedToCurrentProject ? <button className="text-button" onClick={() => void linkToCurrentProject()} disabled={busy}><Link2 size={14}/>关联到当前项目</button> : <span className="products-linked-badge">已关联到当前项目</span>}
+        </div>
       </footer>
     </div> : null}
 

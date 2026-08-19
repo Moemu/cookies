@@ -49,6 +49,9 @@ func (*stubProjectStore) UpdateProduct(context.Context, Product) error { return 
 func (*stubProjectStore) ListProductProjects(context.Context, contract.OrganizationID, contract.ProductID) ([]ProductProjectRef, error) {
 	return nil, nil
 }
+func (*stubProjectStore) LinkProductToProject(context.Context, contract.OrganizationID, contract.ProjectID, contract.ProductID) error {
+	return nil
+}
 func (*stubProjectStore) CreateProject(context.Context, Project, contract.Principal, []contract.ProductID) error {
 	return nil
 }

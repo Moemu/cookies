@@ -310,6 +310,22 @@ func (s *Server) listProductProjects(w http.ResponseWriter, r *http.Request) {
 	}{Items: values})
 }
 
+func (s *Server) linkProductToProject(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	if err := s.projects.LinkProductToProject(r.Context(), rc.Actor, contract.ProductID(r.PathValue("product_id")), contract.ProjectID(r.PathValue("project_id"))); err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		ProductID contract.ProductID `json:"product_id"`
+		ProjectID contract.ProjectID `json:"project_id"`
+	}{ProductID: contract.ProductID(r.PathValue("product_id")), ProjectID: contract.ProjectID(r.PathValue("project_id"))})
+}
+
 const maxProductImageBytes = 5 << 20 // 5 MiB
 
 // putProductImage accepts a multipart image upload for a product object,

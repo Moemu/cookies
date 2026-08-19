@@ -2453,6 +2453,10 @@ func (staticProjectManager) ListProductProjects(context.Context, contract.ActorC
 	return nil, nil
 }
 
+func (staticProjectManager) LinkProductToProject(context.Context, contract.ActorContext, contract.ProductID, contract.ProjectID) error {
+	return nil
+}
+
 func (staticProjectManager) CreateProject(context.Context, contract.ActorContext, project.CreateProjectRequest) (project.Project, error) {
 	return project.Project{}, nil
 }

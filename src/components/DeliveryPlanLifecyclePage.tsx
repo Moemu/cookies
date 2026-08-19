@@ -71,6 +71,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
 
   const selectedPlan = useMemo(() => plans.find(plan => plan.id === selectedId), [plans, selectedId])
   const productsCatalogURL = projectPath(projectId, 'delivery', 'products')
+  const projectProducts = agencyWorkbench?.projects.find(project => project.id === projectId)?.products ?? currentProject.products ?? []
   const configurationLaunchURL = useMemo(() => {
     const base = projectPath(projectId, 'delivery', 'configuration', undefined, '配置映射')
     return selectedPlan ? `${base}&plan_id=${encodeURIComponent(selectedPlan.id)}` : base
@@ -220,7 +221,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
         </nav>
 
         <section className="delivery-plan-form" aria-label={`${section}编辑区`}>
-          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft} strategyTasks={strategyTasks} products={currentProject.products} marketingPurposeSuggestion={marketingPurposeSuggestion} productsCatalogURL={productsCatalogURL}/> : null}
+          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft} strategyTasks={strategyTasks} products={projectProducts} marketingPurposeSuggestion={marketingPurposeSuggestion} productsCatalogURL={productsCatalogURL}/> : null}
           {section === '预算与排期' ? <BudgetScheduleFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '投放载体和监测' ? <TrackingFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '素材引用' ? <CreativeFields draft={draft} changeDraft={changeDraft} confirmedAssets={confirmedAssets}/> : null}
