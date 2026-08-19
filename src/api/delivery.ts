@@ -124,7 +124,7 @@ export type PlatformConfiguration = {
         delivery_mode: string
         targeting: { regions?: string[]; age_ranges?: string[]; gender?: string; smart_expansion: boolean }
         schedule: { mode?: 'long_term' | 'fixed_range'; start_at: string; end_at: string; timezone: string }
-        budget_and_bidding: { currency: 'CNY'; daily_budget_minor: number; bidding_strategy: string; charging_mode: string; bid_minor?: number }
+        budget_and_bidding: { budget_mode?: 'daily' | 'unlimited'; currency: 'CNY'; daily_budget_minor: number; bidding_strategy: string; charging_mode: string; bid_minor?: number }
         monitoring_references?: StableReference[]
         search_boost?: { keywords?: string[]; bid_coefficient?: number; targeting_expansion?: boolean }
         product_catalog_reference?: StableReference
