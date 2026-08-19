@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { CircleAlert, CircleCheck, Clock3, FileCheck2, Hand, Pause, RefreshCw, ShieldAlert, XCircle } from 'lucide-react'
 import { controlledExecutionApi, ControlledExecutionApiError } from './api'
-import type { ComputerUseEvidence, ComputerUseRun, ComputerUseRunEvent, ControlledExecutionTransportState } from './model'
+import type { BrowserRpaEvidence, BrowserRpaRun, BrowserRpaRunEvent, ControlledExecutionTransportState } from './model'
 import { isTerminalControlledExecutionState, presentControlledExecution, shortHash } from './presentation'
-import './controlled-execution.css'
+import './browser-rpa-execution.css'
 
 type Props = {
   projectId: string
-  /** The route should supply a server-issued ComputerUseRun id; an absent id is a real empty state, not a fixture. */
+  /** The route should supply a server-issued BrowserRpaRun id; an absent id is a real empty state, not a fixture. */
   runId?: string
 }
 
-export function ControlledExecutionWorkspace({ projectId, runId }: Props) {
+export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
   const [transport, setTransport] = useState<ControlledExecutionTransportState>(() => runId ? { kind: 'loading' } : { kind: 'empty' })
   const [notice, setNotice] = useState('')
   const [actionPending, setActionPending] = useState(false)
@@ -105,7 +105,7 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
   return <section className="controlled-execution-workspace" aria-label="受控执行中心">
     <header className="controlled-execution-header">
       <div>
-        <span className="section-label">Controlled Computer Use</span>
+        <span className="section-label">Controlled Browser RPA</span>
         <h2>受控执行中心</h2>
         <p>服务端 Run 是权威状态；本页不保存本地终态，也不提供直接远端提交按钮。</p>
       </div>
@@ -144,7 +144,7 @@ function WorkspaceReady({ workspace, busy, notice, onRefresh, onControl }: {
   </section>
 }
 
-function AuthorityChain({ run }: { run: ComputerUseRun }) {
+function AuthorityChain({ run }: { run: BrowserRpaRun }) {
   const changing = Boolean(run.authority.promotion_mutation || run.authority.promotion_control || run.authority.promotion_restart)
   const emergencyPause = run.authority.action === 'pause_promotion'
   const controlledRestart = run.authority.action === 'resume_promotion'
@@ -158,7 +158,7 @@ function AuthorityChain({ run }: { run: ComputerUseRun }) {
   </ol>
 }
 
-function PromotionChangeDiff({ run }: { run: ComputerUseRun }) {
+function PromotionChangeDiff({ run }: { run: BrowserRpaRun }) {
   const mutation = run.authority.promotion_mutation
   const control = run.authority.promotion_control
   const restart = run.authority.promotion_restart
@@ -198,7 +198,7 @@ function statusLabel(status: string) {
   return ({ delivering: '投放中', paused: '已暂停' } as Record<string, string>)[status] ?? status
 }
 
-function mutationRows(action: string, mutation: NonNullable<ComputerUseRun['authority']['promotion_mutation']>) {
+function mutationRows(action: string, mutation: NonNullable<BrowserRpaRun['authority']['promotion_mutation']>) {
   if (action === 'update_promotion_materials') {
     return [{ label: '已授权素材', current: `${mutation.current_materials?.length ?? 0} 个`, target: `${mutation.target_materials?.length ?? 0} 个` }]
   }
@@ -218,8 +218,8 @@ function StatusBanner({ presentation }: { presentation: ReturnType<typeof presen
   </div>
 }
 
-function RunTimeline({ run }: { run: ComputerUseRun }) {
-  const steps: Array<{ state: ComputerUseRun['state']; label: string }> = [
+function RunTimeline({ run }: { run: BrowserRpaRun }) {
+  const steps: Array<{ state: BrowserRpaRun['state']; label: string }> = [
     { state: 'environment_check', label: '环境检查' },
     { state: 'preparing', label: '准备表单' },
     { state: 'awaiting_confirmation', label: '核对差异与等待确认' },
@@ -237,14 +237,14 @@ function RunTimeline({ run }: { run: ComputerUseRun }) {
 }
 
 function ControlPanel({ run, busy, terminal, showTakeover, onControl }: {
-  run: ComputerUseRun
+  run: BrowserRpaRun
   busy: boolean
   terminal: boolean
   showTakeover: boolean
   onControl: (action: 'pause' | 'resume' | 'cancel' | 'takeover' | 'release_takeover') => void
 }) {
   return <section className="controlled-execution-controls" aria-label="运行控制">
-    <div><span className="section-label">运行控制</span><h3>执行流程的暂停、接管和取消</h3><p>这里仅控制 Computer Use 执行流程，不会暂停广告平台上的推广单元；平台紧急暂停必须使用独立 ChangeSet 和 Approval。</p></div>
+    <div><span className="section-label">运行控制</span><h3>执行流程的暂停、接管和取消</h3><p>这里仅控制 Playwright RPA 执行流程，不会暂停广告平台上的推广单元；平台紧急暂停必须使用独立 ChangeSet 和 Approval。</p></div>
     <div className="controlled-execution-control-actions">
       {run.paused ? <button className="secondary-button" onClick={() => onControl('resume')} disabled={busy || terminal}>恢复并重新识别</button> : <button className="secondary-button" onClick={() => onControl('pause')} disabled={busy || terminal}>暂停执行流程</button>}
       {showTakeover ? <button className="secondary-button" onClick={() => onControl(run.takeover_active ? 'release_takeover' : 'takeover')} disabled={busy || terminal}><Hand size={15} />{run.takeover_active ? '释放接管' : '人工接管'}</button> : null}
@@ -260,7 +260,7 @@ function RecoveryPanel({ kind }: { kind: ReturnType<typeof presentControlledExec
   return null
 }
 
-function EvidencePanel({ evidence, events }: { evidence: ComputerUseEvidence[]; events: ComputerUseRunEvent[] }) {
+function EvidencePanel({ evidence, events }: { evidence: BrowserRpaEvidence[]; events: BrowserRpaRunEvent[] }) {
   return <section className="controlled-execution-evidence" aria-label="证据与事件">
     <header><div><span className="section-label">Evidence & Audit</span><h3>脱敏证据与事件</h3></div><small>仅显示脱敏键、引用和版本，不渲染原始页面事实或凭据。</small></header>
     <div className="controlled-execution-evidence-grid">

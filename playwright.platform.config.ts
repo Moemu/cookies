@@ -78,7 +78,7 @@ const localGoEnv = {
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: /(platform-go-demo|strategy-brand-video-foundation|strategy-workspace-rearchitecture|delivery-plan-preflight|delivery-approval-content-hash|delivery-decision-workflow|delivery-execution-scenarios|delivery-monitoring-alerts|delivery-platform-configuration|delivery-controlled-execution|delivery-mock-tour|video-editor-phase1)\.spec\.ts/,
+  testMatch: /(platform-go-demo|strategy-brand-video-foundation|strategy-workspace-rearchitecture|delivery-plan-preflight|delivery-approval-content-hash|delivery-decision-workflow|delivery-execution-scenarios|delivery-monitoring-alerts|delivery-platform-configuration|delivery-browser-rpa-execution|delivery-mock-tour|video-editor-phase1)\.spec\.ts/,
   fullyParallel: false,
   workers: 1,
   use: {

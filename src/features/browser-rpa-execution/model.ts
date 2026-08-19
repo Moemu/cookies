@@ -1,4 +1,4 @@
-export type ComputerUseRunState =
+export type BrowserRpaRunState =
   | 'queued'
   | 'environment_check'
   | 'awaiting_takeover'
@@ -12,7 +12,7 @@ export type ComputerUseRunState =
   | 'result_unknown'
   | 'cancelled'
 
-export type ComputerUseBlockingReason =
+export type BrowserRpaBlockingReason =
   | 'FINAL_CONFIRMATION_REQUIRED'
   | 'FINAL_CONFIRMATION_INVALID'
   | 'APPROVAL_INVALID'
@@ -26,8 +26,8 @@ export type ComputerUseBlockingReason =
   | 'SKILL_DRIFT'
   | 'RESULT_RECONCILIATION_REQUIRED'
 
-export type ComputerUseAuthorityBinding = {
-  schema_version: 'computer-use-authority/v1'
+export type BrowserRpaAuthorityBinding = {
+  schema_version: 'browser-rpa-authority/v1' | 'computer-use-authority/v1'
   business_execution_id: string
   change_set_id: string
   approval_id: string
@@ -84,20 +84,20 @@ export type ComputerUseAuthorityBinding = {
   skill_version?: string
 }
 
-export type ComputerUseRun = {
-  schema_version: 'computer-use-run/v1'
+export type BrowserRpaRun = {
+  schema_version: 'browser-rpa-run/v1' | 'computer-use-run/v1'
   id: string
   organization_id: string
   project_id: string
   platform: 'ocean_engine'
   account_id: string
-  authority: ComputerUseAuthorityBinding
+  authority: BrowserRpaAuthorityBinding
   environment_id: string
   profile_id: string
   lease_id: string
   policy_id: string
-  state: ComputerUseRunState
-  blocking_reason?: ComputerUseBlockingReason
+  state: BrowserRpaRunState
+  blocking_reason?: BrowserRpaBlockingReason
   paused: boolean
   takeover_active: boolean
   version: number
@@ -108,7 +108,7 @@ export type ComputerUseRun = {
   updated_at: string
 }
 
-export type ComputerUseRunEvent = {
+export type BrowserRpaRunEvent = {
   id: string
   run_id: string
   sequence: number
@@ -119,7 +119,7 @@ export type ComputerUseRunEvent = {
 }
 
 /** Evidence is already redacted by the platform service. The UI intentionally renders keys and references, not raw page facts. */
-export type ComputerUseEvidence = {
+export type BrowserRpaEvidence = {
   id: string
   run_id: string
   step_id: string
@@ -135,9 +135,9 @@ export type ComputerUseEvidence = {
 }
 
 export type ControlledExecutionWorkspace = {
-  run: ComputerUseRun
-  events: ComputerUseRunEvent[]
-  evidence: ComputerUseEvidence[]
+  run: BrowserRpaRun
+  events: BrowserRpaRunEvent[]
+  evidence: BrowserRpaEvidence[]
 }
 
 export type ControlledExecutionTransportState =

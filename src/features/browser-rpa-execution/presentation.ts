@@ -1,6 +1,6 @@
-import type { ComputerUseRun, ControlledExecutionPresentation } from './model'
+import type { BrowserRpaRun, ControlledExecutionPresentation } from './model'
 
-const statePresentation: Record<ComputerUseRun['state'], Omit<ControlledExecutionPresentation, 'kind' | 'allowsNormalRetry'>> = {
+const statePresentation: Record<BrowserRpaRun['state'], Omit<ControlledExecutionPresentation, 'kind' | 'allowsNormalRetry'>> = {
   queued: { tone: 'neutral', title: '已排队等待环境检查', detail: '尚未开始页面或平台动作。' },
   environment_check: { tone: 'neutral', title: '正在检查执行环境', detail: '服务端正在核验环境、账户、站点策略和会话租约。' },
   awaiting_takeover: { tone: 'warning', title: '等待人工接管', detail: '首期接管模式的正常状态。接管前不会继续自动动作。' },
@@ -15,7 +15,7 @@ const statePresentation: Record<ComputerUseRun['state'], Omit<ControlledExecutio
   cancelled: { tone: 'neutral', title: '运行已取消', detail: '运行保持可审计；如需继续，必须建立新的受控流程。' },
 }
 
-export function presentControlledExecution(run: ComputerUseRun): ControlledExecutionPresentation {
+export function presentControlledExecution(run: BrowserRpaRun): ControlledExecutionPresentation {
   if (run.blocking_reason === 'KILL_SWITCH_ACTIVE') {
     return { kind: 'kill_switch_active', tone: 'danger', title: 'Kill Switch 已激活', detail: '已阻止新的写入尝试；仍可查看证据、取消或进行人工接管。', allowsNormalRetry: false }
   }
@@ -35,7 +35,7 @@ export function presentControlledExecution(run: ComputerUseRun): ControlledExecu
   }
 }
 
-export function isTerminalControlledExecutionState(state: ComputerUseRun['state']) {
+export function isTerminalControlledExecutionState(state: BrowserRpaRun['state']) {
   return state === 'succeeded' || state === 'failed' || state === 'partial' || state === 'result_unknown' || state === 'cancelled'
 }
 

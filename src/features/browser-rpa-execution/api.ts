@@ -1,7 +1,7 @@
 import type {
-  ComputerUseEvidence,
-  ComputerUseRun,
-  ComputerUseRunEvent,
+  BrowserRpaEvidence,
+  BrowserRpaRun,
+  BrowserRpaRunEvent,
   ControlledExecutionWorkspace,
 } from './model'
 
@@ -12,7 +12,7 @@ export class ControlledExecutionApiError extends Error {
   }
 }
 
-const apiPrefix = '/api/platform/v1/computer-use/projects'
+const apiPrefix = '/api/platform/v1/browser-rpa/projects'
 
 /**
  * Thin platform-control-plane client. It intentionally does not import legacy
@@ -22,9 +22,9 @@ export const controlledExecutionApi = {
   async getWorkspace(projectId: string, runId: string, signal?: AbortSignal): Promise<ControlledExecutionWorkspace> {
     const path = `${apiPrefix}/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`
     const [run, events, evidence] = await Promise.all([
-      request<ComputerUseRun>(path, { signal }),
-      request<{ items?: ComputerUseRunEvent[] }>(`${path}/events`, { signal }),
-      request<{ items?: ComputerUseEvidence[] }>(`${path}/evidence`, { signal }),
+      request<BrowserRpaRun>(path, { signal }),
+      request<{ items?: BrowserRpaRunEvent[] }>(`${path}/events`, { signal }),
+      request<{ items?: BrowserRpaEvidence[] }>(`${path}/evidence`, { signal }),
     ])
     return { run, events: events.items ?? [], evidence: evidence.items ?? [] }
   },
@@ -47,7 +47,7 @@ export const controlledExecutionApi = {
 }
 
 function control(projectId: string, runId: string, expectedVersion: number, action: 'pause' | 'resume' | 'cancel' | 'takeover' | 'release_takeover') {
-  return request<ComputerUseRun>(`${apiPrefix}/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}:${action}`, {
+  return request<BrowserRpaRun>(`${apiPrefix}/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}:${action}`, {
     method: 'POST',
     body: JSON.stringify({ expected_version: expectedVersion }),
   })

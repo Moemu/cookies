@@ -56,8 +56,8 @@ const ProductionCenterPage = lazy(() => import('../features/production-center/Pr
   default: module.ProductionCenterPage,
 })))
 
-const ControlledExecutionWorkspace = lazy(() => import('../features/delivery-controlled-execution/ControlledExecutionWorkspace').then(module => ({
-  default: module.ControlledExecutionWorkspace,
+const ControlledExecutionWorkspace = lazy(() => import('../features/browser-rpa-execution/BrowserRpaExecutionWorkspace').then(module => ({
+  default: module.BrowserRpaExecutionWorkspace,
 })))
 
 type OpenProject = (id: string, system?: SystemKey, navId?: string, objectId?: string, view?: string, contextId?: string, tourRunId?: string, tourCase?: string) => void
