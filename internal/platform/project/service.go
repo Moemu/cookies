@@ -19,6 +19,7 @@ var ErrMembershipNotFound = errors.New("project membership not found")
 var ErrMembershipForbidden = errors.New("project membership operation forbidden")
 var ErrMembershipConflict = errors.New("project membership changed")
 var ErrLastOwner = errors.New("project must keep an active owner")
+var ErrProductMappingConflict = errors.New("ocean engine product ID is already bound")
 
 type Store interface {
 	CreateBrand(context.Context, Brand) error
@@ -28,6 +29,7 @@ type Store interface {
 	UpdateProduct(context.Context, Product) error
 	ListProductProjects(context.Context, contract.OrganizationID, contract.ProductID) ([]ProductProjectRef, error)
 	LinkProductToProject(context.Context, contract.OrganizationID, contract.ProjectID, contract.ProductID) error
+	DeleteProduct(context.Context, contract.OrganizationID, contract.ProductID) error
 	CreateProject(context.Context, Project, contract.Principal, []contract.ProductID) error
 	UpdateProject(context.Context, Project, ProjectRuntime, int64) error
 	CreateProjectArtifact(context.Context, ProjectArtifact) error
@@ -309,6 +311,19 @@ func (s Service) LinkProductToProject(ctx context.Context, actor contract.ActorC
 		return err
 	}
 	return s.Store.LinkProductToProject(ctx, actor.OrganizationID, projectID, productID)
+}
+
+func (s Service) DeleteProduct(ctx context.Context, actor contract.ActorContext, productID contract.ProductID) error {
+	if s.Store == nil {
+		return fmt.Errorf("project store is required")
+	}
+	if err := actor.Validate(); err != nil {
+		return err
+	}
+	if productID == "" {
+		return fmt.Errorf("product id must not be empty")
+	}
+	return s.Store.DeleteProduct(ctx, actor.OrganizationID, productID)
 }
 
 func (s Service) CreateProject(ctx context.Context, actor contract.ActorContext, request CreateProjectRequest) (Project, error) {

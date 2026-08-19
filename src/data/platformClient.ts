@@ -340,6 +340,9 @@ export function createPlatformClient(options: PlatformClientOptions = {}) {
     },
     linkProductToProject: async (productId: string, projectId: string) =>
       request<{ product_id: string; project_id: string }>(`/products/${encodeURIComponent(productId)}/projects/${encodeURIComponent(projectId)}`, { method: "POST" }),
+    deleteProduct: async (productId: string) => {
+      await request<Record<string, never>>(`/products/${encodeURIComponent(productId)}`, { method: "DELETE" })
+    },
     putProductImage: async (productId: string, file: File) => {
       const body = new FormData();
       body.append("file", file);

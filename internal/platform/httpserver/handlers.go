@@ -261,6 +261,19 @@ func (s *Server) createProduct(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, value)
 }
 
+func (s *Server) deleteProduct(w http.ResponseWriter, r *http.Request) {
+	if s.projects == nil {
+		s.notImplemented(w, r)
+		return
+	}
+	rc, _ := contract.RequestContextFrom(r.Context())
+	if err := s.projects.DeleteProduct(r.Context(), rc.Actor, contract.ProductID(r.PathValue("product_id"))); err != nil {
+		s.writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) getProduct(w http.ResponseWriter, r *http.Request) {
 	if s.projects == nil {
 		s.notImplemented(w, r)
@@ -2312,6 +2325,8 @@ func (s *Server) writeServiceError(w http.ResponseWriter, r *http.Request, err e
 		status, code, message, retryable = http.StatusNotFound, "PROJECT_MEMBERSHIP_NOT_FOUND", "指定的项目成员关系不存在。", false
 	case errors.Is(err, project.ErrLastOwner):
 		status, code, message, retryable = http.StatusConflict, "PROJECT_LAST_OWNER_REQUIRED", "项目必须保留至少一名有效 owner。", false
+	case errors.Is(err, project.ErrProductMappingConflict):
+		status, code, message, retryable = http.StatusConflict, "PRODUCT_MAPPING_CONFLICT", "该巨量商品 ID 已绑定到本组织的另一个产品。", false
 	case errors.Is(err, project.ErrMembershipConflict):
 		status, code, message, retryable = http.StatusConflict, "PROJECT_MEMBERSHIP_CHANGED", "项目成员信息已发生变化，请刷新后重试。", false
 	case errors.Is(err, assets.ErrNotFound), errors.Is(err, project.ErrNotFound), errors.Is(err, remix.ErrNotFound), errors.Is(err, knowledge.ErrNotFound), errors.Is(err, agent.ErrNotFound), errors.Is(err, agent.ErrRunNotFound):

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Archive, Check, ImagePlus, Link2, Package, Pencil, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
 import {
   activityTypeLabels,
@@ -73,25 +73,42 @@ export function ProductsPage({ activeView }: { activeView: string }) {
   const [projectRefs, setProjectRefs] = useState<PlatformProductProjectRef[]>([])
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const loadRequestRef = useRef(0)
 
   const selected = useMemo(() => products.find(product => product.id === selectedId), [products, selectedId])
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const projectId = currentProject.id
+    const requestId = loadRequestRef.current + 1
+    loadRequestRef.current = requestId
     setBusy(true)
+    setProducts([])
+    setSelectedId('')
+    setProjectRefs([])
     try {
       const values = await platformClient.listProducts()
-      setProducts(values)
-      setSelectedId(current => (current && values.some(product => product.id === current) ? current : values[0]?.id ?? ''))
+      const linked = await Promise.all(values.map(async product => ({
+        product,
+        projects: await platformClient.listProductProjects(product.id),
+      })))
+      const scoped = linked.filter(item => item.projects.some(project => project.project_id === projectId)).map(item => item.product)
+      if (loadRequestRef.current !== requestId) return
+      setProducts(scoped)
+      setSelectedId(scoped[0]?.id ?? '')
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : '加载产品目录失败')
+      if (loadRequestRef.current === requestId) setNotice(error instanceof Error ? error.message : '加载产品目录失败')
     } finally {
-      setBusy(false)
+      if (loadRequestRef.current === requestId) setBusy(false)
     }
-  }
+  }, [currentProject.id])
 
   useEffect(() => {
     void load()
-  }, [])
+  }, [load])
+
+  useEffect(() => {
+    setSelectedId(current => products.some(product => product.id === current) ? current : products[0]?.id ?? '')
+  }, [products])
 
   useEffect(() => {
     let active = true
@@ -104,6 +121,10 @@ export function ProductsPage({ activeView }: { activeView: string }) {
     })
     return () => { active = false }
   }, [selectedId])
+
+  const refreshScopedProducts = async () => {
+    await load()
+  }
 
   const openCreate = () => {
     setForm(emptyForm)
@@ -157,10 +178,10 @@ export function ProductsPage({ activeView }: { activeView: string }) {
         setNotice(`${updated.name} 已更新。`)
       } else {
         const created = await platformClient.createProduct(input)
-        setProducts(current => [...current, created])
-        setSelectedId(created.id)
+        await platformClient.linkProductToProject(created.id, currentProject.id)
         await applyImageChanges(created.id)
-        setNotice(`${created.name} 已创建。`)
+        await refreshScopedProducts()
+        setNotice(`${created.name} 已创建并关联到「${currentProject.name}」。`)
       }
       setDialog(null)
     } catch (error) {
@@ -211,6 +232,20 @@ export function ProductsPage({ activeView }: { activeView: string }) {
     }
   }
 
+  const deleteProduct = async (product: PlatformProduct) => {
+    if (!window.confirm(`确定删除「${product.name}」吗？删除后会解除所有项目关联，且不可恢复。`)) return
+    setBusy(true)
+    try {
+      await platformClient.deleteProduct(product.id)
+      await refreshScopedProducts()
+      setNotice(`${product.name} 已删除。`)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '删除产品失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const toggleArchive = async (product: PlatformProduct) => {
     setBusy(true)
     try {
@@ -246,7 +281,7 @@ export function ProductsPage({ activeView }: { activeView: string }) {
       <div className="surface-toolbar">
         <div><span className="section-label">PRODUCT CATALOG</span><h3>{isMapping ? '巨量映射' : '产品列表'}</h3><span className="products-count">{products.length} 个{isMapping ? '' : '产品'}</span></div>
         <div className="products-toolbar-actions">
-          <button aria-label="刷新" onClick={() => void load()} disabled={busy}><RefreshCw size={15}/></button>
+          <button aria-label="刷新" onClick={() => void refreshScopedProducts()} disabled={busy}><RefreshCw size={15}/></button>
           <button className="primary-button" onClick={openCreate} disabled={busy}><Plus size={15}/>新建产品</button>
         </div>
       </div>
@@ -279,11 +314,12 @@ export function ProductsPage({ activeView }: { activeView: string }) {
             <td><span className="products-row-actions">
               <button className="text-button" onClick={event => { event.stopPropagation(); openEdit(product) }} disabled={busy}><Pencil size={14}/>编辑</button>
               <button className="text-button" onClick={event => { event.stopPropagation(); void toggleArchive(product) }} disabled={busy}><Archive size={14}/>{product.status === 'archived' ? '恢复' : '归档'}</button>
+              <button className="text-button danger" onClick={event => { event.stopPropagation(); void deleteProduct(product) }} disabled={busy}><Trash2 size={14}/>删除</button>
             </span></td>
           </tr>)}
         </tbody>
       </table>}
-      {!products.length && !busy ? <div className="panel-empty"><Package size={22}/><h3>当前组织还没有产品</h3><p>点击右上角「新建产品」创建第一个产品对象。</p></div> : null}
+      {!products.length && !busy ? <div className="panel-empty"><Package size={22}/><h3>当前 Project 还没有产品</h3><p>点击右上角「新建产品」创建并关联当前 Project 的第一个产品。</p></div> : null}
     </div>
 
     {!isMapping && selected ? <div className="products-detail">

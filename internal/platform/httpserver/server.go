@@ -115,6 +115,7 @@ type ProjectManager interface {
 	UpdateProduct(context.Context, contract.ActorContext, contract.ProductID, project.UpdateProductRequest) (project.Product, error)
 	ListProductProjects(context.Context, contract.ActorContext, contract.ProductID) ([]project.ProductProjectRef, error)
 	LinkProductToProject(context.Context, contract.ActorContext, contract.ProductID, contract.ProjectID) error
+	DeleteProduct(context.Context, contract.ActorContext, contract.ProductID) error
 	CreateProject(context.Context, contract.ActorContext, project.CreateProjectRequest) (project.Project, error)
 	UpdateProject(context.Context, contract.ActorContext, contract.ProjectID, project.UpdateProjectRequest) (project.Project, error)
 	GetDetail(context.Context, contract.ActorContext, contract.ProjectID) (project.ProjectDetail, error)
@@ -370,6 +371,7 @@ func NewWithDependencies(dependencies Dependencies) *Server {
 	server.mux.Handle("POST /platform/v1/products", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.createProduct))))
 	server.mux.Handle("GET /platform/v1/products/{product_id}", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.getProduct))))
 	server.mux.Handle("PATCH /platform/v1/products/{product_id}", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.updateProduct))))
+	server.mux.Handle("DELETE /platform/v1/products/{product_id}", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.deleteProduct))))
 	server.mux.Handle("GET /platform/v1/products/{product_id}/projects", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.listProductProjects))))
 	server.mux.Handle("PUT /platform/v1/products/{product_id}/image", server.requireAuthentication(server.requireScope("project.write", http.HandlerFunc(server.putProductImage))))
 	server.mux.Handle("GET /platform/v1/products/{product_id}/image", server.requireAuthentication(server.requireScope("project.read", http.HandlerFunc(server.getProductImage))))

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/platform/ids"
@@ -353,7 +354,41 @@ func (s MySQLStore) CreateProduct(ctx context.Context, product Product) error {
 		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))`,
 		product.ID, product.OrganizationID, product.Name, product.Category, product.Status,
 		product.ProductImage, product.PriceBand, product.ActivityType, product.ActivityName, product.BrandType, product.BrandName, product.Description, product.OceanEngineProductID)
+	if isProductMappingConflict(err) {
+		return ErrProductMappingConflict
+	}
 	return err
+}
+
+func isProductMappingConflict(err error) bool {
+	var mysqlError *mysqlDriver.MySQLError
+	return errors.As(err, &mysqlError) && mysqlError.Number == 1062 && strings.Contains(mysqlError.Message, "uq_products_org_ocean_engine_id")
+}
+
+func (s MySQLStore) DeleteProduct(ctx context.Context, organizationID contract.OrganizationID, productID contract.ProductID) error {
+	if s.DB == nil {
+		return fmt.Errorf("project database is required")
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM project_products WHERE organization_id=? AND product_id=?`, organizationID, productID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM products WHERE organization_id=? AND id=?`, organizationID, productID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrProductNotFound
+	}
+	return tx.Commit()
 }
 
 func (s MySQLStore) ListProducts(ctx context.Context, organizationID contract.OrganizationID) ([]Product, error) {
@@ -410,6 +445,9 @@ func (s MySQLStore) UpdateProduct(ctx context.Context, product Product) error {
 		product.Name, product.Category, product.Status,
 		product.ProductImage, product.PriceBand, product.ActivityType, product.ActivityName, product.BrandType, product.BrandName, product.Description, product.OceanEngineProductID,
 		product.OrganizationID, product.ID)
+	if isProductMappingConflict(err) {
+		return ErrProductMappingConflict
+	}
 	return err
 }
 
