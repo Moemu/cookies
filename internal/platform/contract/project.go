@@ -21,12 +21,12 @@ const (
 type ProductPriceBand string
 
 const (
-	PriceBand0To9       ProductPriceBand = "0_9"
-	PriceBand10To99     ProductPriceBand = "10_99"
-	PriceBand100To999   ProductPriceBand = "100_999"
-	PriceBand1000To9999 ProductPriceBand = "1000_9999"
+	PriceBand0To9         ProductPriceBand = "0_9"
+	PriceBand10To99       ProductPriceBand = "10_99"
+	PriceBand100To999     ProductPriceBand = "100_999"
+	PriceBand1000To9999   ProductPriceBand = "1000_9999"
 	PriceBand10000To99999 ProductPriceBand = "10000_99999"
-	PriceBand100000Plus ProductPriceBand = "100000_plus"
+	PriceBand100000Plus   ProductPriceBand = "100000_plus"
 )
 
 // BrandType indicates whether the brand is an OceanEngine standard brand
@@ -44,21 +44,21 @@ const (
 // a product without a bound OceanEngine object is treated as not yet created
 // on the platform.
 type Product struct {
-	ID                   ProductID      `json:"id"`
-	OrganizationID       OrganizationID `json:"organization_id"`
-	Name                 string         `json:"name"`
-	Category             ProductCategory `json:"category"`
-	Status               string         `json:"status"`
-	ProductImage         string         `json:"product_image,omitempty"`
+	ID                   ProductID        `json:"id"`
+	OrganizationID       OrganizationID   `json:"organization_id"`
+	Name                 string           `json:"name"`
+	Category             ProductCategory  `json:"category"`
+	Status               string           `json:"status"`
+	ProductImage         string           `json:"product_image,omitempty"`
 	PriceBand            ProductPriceBand `json:"price_band,omitempty"`
-	ActivityType         string         `json:"activity_type,omitempty"`
-	ActivityName         string         `json:"activity_name,omitempty"`
-	BrandType            BrandType      `json:"brand_type,omitempty"`
-	BrandName            string         `json:"brand_name,omitempty"`
-	Description          string         `json:"description,omitempty"`
-	OceanEngineProductID string         `json:"ocean_engine_product_id,omitempty"`
-	CreatedAt            string         `json:"created_at"`
-	UpdatedAt            string         `json:"updated_at"`
+	ActivityType         string           `json:"activity_type,omitempty"`
+	ActivityName         string           `json:"activity_name,omitempty"`
+	BrandType            BrandType        `json:"brand_type,omitempty"`
+	BrandName            string           `json:"brand_name,omitempty"`
+	Description          string           `json:"description,omitempty"`
+	OceanEngineProductID string           `json:"ocean_engine_product_id,omitempty"`
+	CreatedAt            string           `json:"created_at"`
+	UpdatedAt            string           `json:"updated_at"`
 }
 
 // ProjectRef is the stable cross-module pointer to an authorized project
@@ -106,13 +106,13 @@ type ProjectBusinessContext struct {
 }
 
 type ProjectBusinessProduct struct {
-	ID                   ProductID      `json:"id"`
-	Name                 string         `json:"name"`
+	ID                   ProductID       `json:"id"`
+	Name                 string          `json:"name"`
 	Category             ProductCategory `json:"category"`
-	ActivityType         string         `json:"activity_type,omitempty"`
-	ActivityName         string         `json:"activity_name,omitempty"`
-	BrandName            string         `json:"brand_name,omitempty"`
-	OceanEngineProductID string         `json:"ocean_engine_product_id,omitempty"`
+	ActivityType         string          `json:"activity_type,omitempty"`
+	ActivityName         string          `json:"activity_name,omitempty"`
+	BrandName            string          `json:"brand_name,omitempty"`
+	OceanEngineProductID string          `json:"ocean_engine_product_id,omitempty"`
 }
 
 func (c ProjectContext) Validate() error {
