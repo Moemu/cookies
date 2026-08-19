@@ -9,7 +9,78 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+      video-editor: ${{ steps.filter.outputs.video-editor }}
+      migrations: ${{ steps.filter.outputs.migrations }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # dorny/paths-filter needs history to diff the base (PR merge-base /
+          # previous commit on push); submodules are not needed to diff.
+          fetch-depth: 0
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - 'cmd/**'
+              - 'internal/**'
+              - 'go.mod'
+              - 'go.sum'
+              - 'api/fixtures/embed.go'
+              - 'test/delivery-platform-configuration-hash.go'
+            frontend:
+              - 'src/**'
+              - 'server/**'
+              - 'test/**'
+              - 'index.html'
+              - 'vite.config.ts'
+              - 'tsconfig*.json'
+              - 'public/**'
+              - 'package.json'
+              - 'package-lock.json'
+            contracts:
+              - 'api/**'
+              - 'docs/delivery/**'
+              - 'test/strategy-creative-contracts.test.ts'
+              - 'test/delivery-platform-configuration-contract.test.ts'
+              - 'test/controlled-browser-rpa-contract.test.ts'
+            video-editor:
+              - 'deployments/render-worker/**'
+              - 'internal/platform/media/**'
+              - 'internal/platform/assets/**'
+              - 'e2e/video-editor-phase1.spec.ts'
+              - 'playwright.platform.config.ts'
+              - 'scripts/verify-video-editor-c0.sh'
+              - 'scripts/generate-video-editor-c0-fixtures.sh'
+              - 'scripts/prepare-video-editor-e2e-blobs.mjs'
+              - 'scripts/verify-opencut-exit.mjs'
+              - 'scripts/benchmark-video-timeline.ts'
+              - 'src/features/video-editing/**'
+              - 'third_party/opencut-timeline/**'
+            migrations:
+              - 'cmd/cookies-migrate/**'
+              - 'migrations/**'
+              - 'internal/platform/migration/**'
+              - 'internal/platform/jobruntime/**'
+              - 'internal/platform/knowledge/**'
+              - 'internal/systems/delivery/**'
+              - 'internal/systems/strategy/**'
+              - 'internal/systems/creative/**'
+
+  go:
+    needs: changes
+    # On PRs only run when Go sources changed; every push to main runs the full
+    # slate so deploy.yml's "Platform CI success" gate keeps its coverage.
+    if: >-
+      needs.changes.outputs.go == 'true' ||
+      github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,28 +95,28 @@ jobs:
       - name: Check Go formatting
         run: test -z "$(gofmt -l $(find cmd internal -name '*.go' -type f))"
 
-      - name: Validate event schema JSON
-        run: |
-          for schema in api/events/*.json api/contracts/*.json api/fixtures/*.json; do
-            python3 -m json.tool "$schema" > /dev/null
-          done
-
       - name: Run static analysis
         run: go vet ./...
 
       - name: Run tests
         run: go test -race ./...
 
-      - name: Verify video editor MVP FFmpeg golden
-        run: |
-          docker build --target verifier -f deployments/render-worker/Dockerfile -t cookies-render-verifier:c0 .
-          docker run --rm --volume "$PWD:/workspace" --workdir /workspace cookies-render-verifier:c0 sh scripts/verify-video-editor-c0.sh
-
       - name: Build platform API
         run: go build ./cmd/cookies-api
 
       - name: Build migration command
         run: go build ./cmd/cookies-migrate
+
+  frontend:
+    needs: changes
+    if: >-
+      needs.changes.outputs.frontend == 'true' ||
+      github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: actions/setup-node@v4
         with:
@@ -68,6 +139,80 @@ jobs:
       - name: Build root frontend
         run: npm run build
 
+  contracts:
+    needs: changes
+    if: >-
+      needs.changes.outputs.contracts == 'true' ||
+      github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Validate event schema JSON
+        run: |
+          for schema in api/events/*.json api/contracts/*.json api/fixtures/*.json; do
+            python3 -m json.tool "$schema" > /dev/null
+          done
+
+      - name: Validate API contracts
+        run: npm run contract:check
+
+  video-editor:
+    needs: changes
+    if: >-
+      needs.changes.outputs.video-editor == 'true' ||
+      github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Cache the downloaded Playwright browsers so repeated video-editor PRs
+      # skip the 6-30 min Chromium download; apt deps still install each run.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Verify video editor MVP FFmpeg golden
+        run: |
+          docker build --target verifier -f deployments/render-worker/Dockerfile -t cookies-render-verifier:c0 .
+          docker run --rm --volume "$PWD:/workspace" --workdir /workspace cookies-render-verifier:c0 sh scripts/verify-video-editor-c0.sh
+
       - name: Verify OpenCut exit boundary and timeline performance budgets
         run: npm run test:video-editor-governance
 
@@ -77,10 +222,11 @@ jobs:
       - name: Run video editor real-browser acceptance
         run: ./node_modules/.bin/playwright test e2e/video-editor-phase1.spec.ts --config=playwright.platform.config.ts
 
-      - name: Validate API contracts
-        run: npm run contract:check
-
   migrations:
+    needs: changes
+    if: >-
+      needs.changes.outputs.migrations == 'true' ||
+      github.event_name == 'push'
     runs-on: ubuntu-latest
     services:
       mysql:
