@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shikanon/cookies/internal/platform/computeruse"
+	"github.com/shikanon/cookies/internal/platform/browserautomation"
 )
 
-func TestComputerUseAuthorityIsServerResolvedBoundAndRevalidated(t *testing.T) {
+func TestBrowserRpaAuthorityIsServerResolvedBoundAndRevalidated(t *testing.T) {
 	now := time.Date(2026, 8, 13, 9, 0, 0, 0, time.UTC)
 	repo := newControlledMemoryRepository()
 	binding := validControlledBinding()
@@ -21,7 +21,7 @@ func TestComputerUseAuthorityIsServerResolvedBoundAndRevalidated(t *testing.T) {
 	repo.approvals[repositoryKey(change.OrganizationID, change.ProjectID, change.ID)] = approval
 	repo.executions[repositoryKey(change.OrganizationID, change.ProjectID, execution.ID)] = execution
 
-	provider := ComputerUseAuthorityProvider{Repository: repo}
+	provider := BrowserRpaAuthorityProvider{Repository: repo}
 	resolved, err := provider.ResolveAuthority(context.Background(), change.OrganizationID, change.ProjectID, execution.ID, now)
 	if err != nil {
 		t.Fatal(err)
@@ -39,10 +39,10 @@ func TestComputerUseAuthorityIsServerResolvedBoundAndRevalidated(t *testing.T) {
 	if err != nil || replayed.BoundRunID != "run_1" {
 		t.Fatalf("replayed=%+v err=%v", replayed, err)
 	}
-	if err := provider.VerifyAuthority(context.Background(), resolved.Binding, "run_2", now); err != computeruse.ErrInvalidContract {
+	if err := provider.VerifyAuthority(context.Background(), resolved.Binding, "run_2", now); err != browserautomation.ErrInvalidContract {
 		t.Fatalf("cross-run verification err=%v", err)
 	}
-	if _, err := provider.ResolveAuthority(context.Background(), change.OrganizationID, change.ProjectID, execution.ID, approval.ExpiresAt); err != computeruse.ErrInvalidContract {
+	if _, err := provider.ResolveAuthority(context.Background(), change.OrganizationID, change.ProjectID, execution.ID, approval.ExpiresAt); err != browserautomation.ErrInvalidContract {
 		t.Fatalf("expired approval err=%v", err)
 	}
 }

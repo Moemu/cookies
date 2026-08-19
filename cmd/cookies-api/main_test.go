@@ -19,16 +19,22 @@ func TestHTTPServerWriteTimeoutCoversLongRunningModelRequests(t *testing.T) {
 	}
 }
 
-func TestProductionComputerUseMountIsTakeoverOnly(t *testing.T) {
+func TestProductionBrowserRPAMountIsSafeByDefault(t *testing.T) {
 	source, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	mainSource := string(source)
-	if !strings.Contains(mainSource, "computerusehttp.NewTakeoverOnly") {
-		t.Fatal("production API must mount the takeover-only Computer Use control plane")
+	if !strings.Contains(mainSource, "browserautomationhttp.NewTakeoverOnly") {
+		t.Fatal("production API must mount the takeover-only Browser RPA control plane")
 	}
-	if strings.Contains(mainSource, "computeruse.DeterministicFakeAdapter") {
-		t.Fatal("production API must not wire the deterministic fake Computer Use adapter")
+	if !strings.Contains(mainSource, "cfg.BrowserRPA.Enabled") {
+		t.Fatal("automated Browser RPA worker must be gated on COOKIES_BROWSER_RPA_ENABLED")
+	}
+	if !strings.Contains(mainSource, "rparunner.NewPlaywrightRPAAdapter") {
+		t.Fatal("automated Browser RPA worker must wire the real Playwright adapter")
+	}
+	if strings.Contains(mainSource, "browserautomation.DeterministicFakeAdapter") {
+		t.Fatal("production API must not wire the deterministic fake Browser RPA adapter")
 	}
 }

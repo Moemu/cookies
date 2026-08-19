@@ -9,11 +9,11 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/shikanon/cookies/internal/platform/computeruse"
+	"github.com/shikanon/cookies/internal/platform/browserautomation"
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
-func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
+func TestMySQLBrowserRpaRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	dsn := os.Getenv("COOKIES_TEST_MYSQL_DSN")
 	if dsn == "" {
 		t.Skip("COOKIES_TEST_MYSQL_DSN is not configured")
@@ -34,7 +34,7 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		for _, statement := range []string{`DELETE FROM delivery_platform_entity_mapping_revisions WHERE organization_id=?`, `DELETE FROM delivery_platform_entity_mappings WHERE organization_id=?`, `DELETE FROM computer_use_evidence WHERE organization_id=?`, `DELETE FROM computer_use_run_steps WHERE organization_id=?`, `DELETE FROM computer_use_events WHERE organization_id=?`, `UPDATE computer_use_runs SET lease_id=NULL WHERE organization_id=?`, `DELETE FROM computer_use_session_leases WHERE organization_id=?`, `DELETE FROM computer_use_runs WHERE organization_id=?`, `DELETE FROM computer_use_site_policies WHERE organization_id=?`, `DELETE FROM computer_use_browser_profiles WHERE organization_id=?`, `DELETE FROM computer_use_environments WHERE organization_id=?`, `DELETE FROM delivery_controlled_executions WHERE organization_id=?`, `DELETE FROM delivery_remote_write_approvals WHERE organization_id=?`, `DELETE FROM delivery_controlled_change_sets WHERE organization_id=?`, `DELETE FROM projects WHERE organization_id=?`, `DELETE FROM organizations WHERE id=?`} {
+		for _, statement := range []string{`DELETE FROM delivery_platform_entity_mapping_revisions WHERE organization_id=?`, `DELETE FROM delivery_platform_entity_mappings WHERE organization_id=?`, `DELETE FROM browser_rpa_evidence WHERE organization_id=?`, `DELETE FROM browser_rpa_run_steps WHERE organization_id=?`, `DELETE FROM browser_rpa_events WHERE organization_id=?`, `UPDATE browser_rpa_runs SET lease_id=NULL WHERE organization_id=?`, `DELETE FROM browser_rpa_session_leases WHERE organization_id=?`, `DELETE FROM browser_rpa_runs WHERE organization_id=?`, `DELETE FROM browser_rpa_site_policies WHERE organization_id=?`, `DELETE FROM browser_rpa_browser_profiles WHERE organization_id=?`, `DELETE FROM browser_rpa_environments WHERE organization_id=?`, `DELETE FROM delivery_controlled_executions WHERE organization_id=?`, `DELETE FROM delivery_remote_write_approvals WHERE organization_id=?`, `DELETE FROM delivery_controlled_change_sets WHERE organization_id=?`, `DELETE FROM projects WHERE organization_id=?`, `DELETE FROM organizations WHERE id=?`} {
 			_, _ = db.ExecContext(context.Background(), statement, org)
 		}
 	})
@@ -71,50 +71,50 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 		t.Fatalf("loaded approval schema=%q err=%v", loadedApproval.SchemaVersion, err)
 	}
 
-	computerUseRepo := computeruse.MySQLRepository{DB: db}
-	computerUseService := computeruse.Service{Repository: computerUseRepo, AuthorityProvider: ComputerUseAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_" + suffix, nil }}
-	environment, err := computerUseService.RegisterEnvironment(ctx, org, project, computeruse.ExecutionEnvironment{ID: "env_" + suffix, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, Mode: "local_visible", BrowserVersion: "integration", Region: "local", Healthy: true})
+	browserRpaRepo := browserautomation.MySQLRepository{DB: db}
+	browserRpaService := browserautomation.Service{Repository: browserRpaRepo, AuthorityProvider: BrowserRpaAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_" + suffix, nil }}
+	environment, err := browserRpaService.RegisterEnvironment(ctx, org, project, browserautomation.ExecutionEnvironment{ID: "env_" + suffix, Platform: browserautomation.PlatformOceanEngine, AccountID: binding.AccountReferenceID, Mode: "local_visible", BrowserVersion: "integration", Region: "local", Healthy: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err := computerUseService.RegisterBrowserProfile(ctx, org, project, computeruse.BrowserProfile{ID: "profile_" + suffix, EnvironmentID: environment.ID, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, State: "ready"})
+	profile, err := browserRpaService.RegisterBrowserProfile(ctx, org, project, browserautomation.BrowserProfile{ID: "profile_" + suffix, EnvironmentID: environment.ID, Platform: browserautomation.PlatformOceanEngine, AccountID: binding.AccountReferenceID, State: "ready"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy, err := computerUseService.RegisterSitePolicy(ctx, org, project, computeruse.SitePolicy{ID: "policy_" + suffix, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"promotion_create"}, AllowedPlatformProjects: []string{binding.ParentPlatformProjectID}})
+	policy, err := browserRpaService.RegisterSitePolicy(ctx, org, project, browserautomation.SitePolicy{ID: "policy_" + suffix, Platform: browserautomation.PlatformOceanEngine, AccountID: binding.AccountReferenceID, AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"promotion_create"}, AllowedPlatformProjects: []string{binding.ParentPlatformProjectID}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := computeruse.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: execution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "run-key-" + suffix, CreatedBy: "operator"}
-	run, replayed, err := computerUseService.CreateBoundRun(ctx, request)
+	request := browserautomation.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: browserautomation.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: execution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "run-key-" + suffix, CreatedBy: "operator"}
+	run, replayed, err := browserRpaService.CreateBoundRun(ctx, request)
 	if err != nil || replayed {
 		t.Fatalf("create run=%+v replayed=%t err=%v", run, replayed, err)
 	}
 	linked, err := deliveryRepo.GetControlledExecution(ctx, org, project, execution.ID)
-	if err != nil || linked.ComputerUseRunID != run.ID || linked.Status != "running" {
+	if err != nil || linked.BrowserRpaRunID != run.ID || linked.Status != "running" {
 		t.Fatalf("linked=%+v err=%v", linked, err)
 	}
-	replayedRun, replayed, err := computerUseService.CreateBoundRun(ctx, request)
+	replayedRun, replayed, err := browserRpaService.CreateBoundRun(ctx, request)
 	if err != nil || !replayed || replayedRun.ID != run.ID {
 		t.Fatalf("replay run=%+v replayed=%t err=%v", replayedRun, replayed, err)
 	}
-	resultStep := computeruse.RunStep{ID: "result_step_" + suffix, RunID: run.ID, Sequence: 1, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(computeruse.TakeoverResultObserved), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
-	listStep := computeruse.RunStep{ID: "list_step_" + suffix, RunID: run.ID, Sequence: 2, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(computeruse.TakeoverListConfirmed), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
-	if err := computerUseRepo.PutStep(ctx, org, project, resultStep); err != nil {
+	resultStep := browserautomation.RunStep{ID: "result_step_" + suffix, RunID: run.ID, Sequence: 1, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(browserautomation.TakeoverResultObserved), Status: browserautomation.StepSucceeded, Attempt: 1, Version: 1}
+	listStep := browserautomation.RunStep{ID: "list_step_" + suffix, RunID: run.ID, Sequence: 2, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(browserautomation.TakeoverListConfirmed), Status: browserautomation.StepSucceeded, Attempt: 1, Version: 1}
+	if err := browserRpaRepo.PutStep(ctx, org, project, resultStep); err != nil {
 		t.Fatal(err)
 	}
-	if err := computerUseRepo.PutStep(ctx, org, project, listStep); err != nil {
+	if err := browserRpaRepo.PutStep(ctx, org, project, listStep); err != nil {
 		t.Fatal(err)
 	}
-	resultEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: run.ID, StepID: resultStep.ID, FieldReadback: map[string]string{"platform_object_id": "platform_1", "platform_status": "pending_review"}, ObjectFingerprint: binding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now}
-	listEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: run.ID, StepID: listStep.ID, FieldReadback: map[string]string{"platform_object_id": "platform_1", "platform_status": "pending_review"}, ObjectFingerprint: binding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(time.Second)}
-	if err := computerUseRepo.AppendEvidence(ctx, resultEvidence); err != nil {
+	resultEvidence := browserautomation.Evidence{SchemaVersion: browserautomation.EvidenceSchemaV1, ID: "result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: run.ID, StepID: resultStep.ID, FieldReadback: map[string]string{"platform_object_id": "platform_1", "platform_status": "pending_review"}, ObjectFingerprint: binding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now}
+	listEvidence := browserautomation.Evidence{SchemaVersion: browserautomation.EvidenceSchemaV1, ID: "list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: run.ID, StepID: listStep.ID, FieldReadback: map[string]string{"platform_object_id": "platform_1", "platform_status": "pending_review"}, ObjectFingerprint: binding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(time.Second)}
+	if err := browserRpaRepo.AppendEvidence(ctx, resultEvidence); err != nil {
 		t.Fatal(err)
 	}
-	if err := computerUseRepo.AppendEvidence(ctx, listEvidence); err != nil {
+	if err := browserRpaRepo.AppendEvidence(ctx, listEvidence); err != nil {
 		t.Fatal(err)
 	}
-	mapping := PlatformEntityMapping{SchemaVersion: PlatformEntityMappingV1, ID: "mapping_" + suffix, OrganizationID: org, ProjectID: project, AccountReferenceID: binding.AccountReferenceID, PlanID: binding.PlanID, ConfigurationID: binding.ConfigurationID, BusinessExecutionID: execution.ID, ComputerUseRunID: run.ID, InternalObjectKind: "promotion", InternalObjectID: binding.ObjectFingerprint, PlatformObjectKind: "promotion", Status: PlatformEntityMappingPending, Version: 1, CreatedAt: now, UpdatedAt: now}
+	mapping := PlatformEntityMapping{SchemaVersion: PlatformEntityMappingV1, ID: "mapping_" + suffix, OrganizationID: org, ProjectID: project, AccountReferenceID: binding.AccountReferenceID, PlanID: binding.PlanID, ConfigurationID: binding.ConfigurationID, BusinessExecutionID: execution.ID, BrowserRpaRunID: run.ID, InternalObjectKind: "promotion", InternalObjectID: binding.ObjectFingerprint, PlatformObjectKind: "promotion", Status: PlatformEntityMappingPending, Version: 1, CreatedAt: now, UpdatedAt: now}
 	mapping, err = deliveryRepo.CreatePlatformEntityMapping(ctx, mapping)
 	if err != nil {
 		t.Fatal(err)
@@ -177,16 +177,16 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	calibrationIDCounter := 0
-	calibrationComputerUseService := computeruse.Service{Repository: computerUseRepo, AuthorityProvider: ComputerUseAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) {
+	calibrationBrowserRpaService := browserautomation.Service{Repository: browserRpaRepo, AuthorityProvider: BrowserRpaAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) {
 		calibrationIDCounter++
 		return fmt.Sprintf("%s_calibration_%d_%s", prefix, calibrationIDCounter, suffix), nil
 	}}
-	calibrationRun, replayed, err := calibrationComputerUseService.CreateBoundRun(ctx, computeruse.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: calibrationExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "calibration-run-key-" + suffix, CreatedBy: "operator"})
+	calibrationRun, replayed, err := calibrationBrowserRpaService.CreateBoundRun(ctx, browserautomation.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: browserautomation.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: calibrationExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "calibration-run-key-" + suffix, CreatedBy: "operator"})
 	if err != nil || replayed {
 		t.Fatalf("calibration run=%+v replayed=%t err=%v", calibrationRun, replayed, err)
 	}
-	calibrationRun, err = calibrationComputerUseService.ControlRun(ctx, org, project, calibrationRun.ID, calibrationRun.Version, computeruse.ControlCancel)
-	if err != nil || calibrationRun.State != computeruse.RunCancelled || calibrationRun.LeaseID != "" {
+	calibrationRun, err = calibrationBrowserRpaService.ControlRun(ctx, org, project, calibrationRun.ID, calibrationRun.Version, browserautomation.ControlCancel)
+	if err != nil || calibrationRun.State != browserautomation.RunCancelled || calibrationRun.LeaseID != "" {
 		t.Fatalf("cancelled calibration run=%+v err=%v", calibrationRun, err)
 	}
 	calibrationChange, err = deliveryRepo.GetControlledChangeSet(ctx, org, project, calibrationChange.ID)
@@ -240,25 +240,25 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutationComputerUseService := computeruse.Service{Repository: computerUseRepo, AuthorityProvider: ComputerUseAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_mutation_" + suffix, nil }}
-	mutationRun, replayed, err := mutationComputerUseService.CreateBoundRun(ctx, computeruse.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: mutationExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "mutation-run-key-" + suffix, CreatedBy: "operator"})
+	mutationBrowserRpaService := browserautomation.Service{Repository: browserRpaRepo, AuthorityProvider: BrowserRpaAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_mutation_" + suffix, nil }}
+	mutationRun, replayed, err := mutationBrowserRpaService.CreateBoundRun(ctx, browserautomation.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: browserautomation.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: mutationExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "mutation-run-key-" + suffix, CreatedBy: "operator"})
 	if err != nil || replayed || mutationRun.Authority.TargetMappingID != mapping.ID || mutationRun.Authority.PromotionMutation == nil || mutationRun.Authority.PromotionMutation.TargetStateHash != mutation.TargetStateHash {
 		t.Fatalf("mutation run=%+v replayed=%t err=%v", mutationRun, replayed, err)
 	}
-	mutationResultStep := computeruse.RunStep{ID: "mutation_result_step_" + suffix, RunID: mutationRun.ID, Sequence: 1, WorkflowStepID: mutationRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverResultObserved), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
-	mutationListStep := computeruse.RunStep{ID: "mutation_list_step_" + suffix, RunID: mutationRun.ID, Sequence: 2, WorkflowStepID: mutationRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverListConfirmed), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
-	if err := computerUseRepo.PutStep(ctx, org, project, mutationResultStep); err != nil {
+	mutationResultStep := browserautomation.RunStep{ID: "mutation_result_step_" + suffix, RunID: mutationRun.ID, Sequence: 1, WorkflowStepID: mutationRun.Authority.WorkflowStepID, Action: string(browserautomation.TakeoverResultObserved), Status: browserautomation.StepSucceeded, Attempt: 1, Version: 1}
+	mutationListStep := browserautomation.RunStep{ID: "mutation_list_step_" + suffix, RunID: mutationRun.ID, Sequence: 2, WorkflowStepID: mutationRun.Authority.WorkflowStepID, Action: string(browserautomation.TakeoverListConfirmed), Status: browserautomation.StepSucceeded, Attempt: 1, Version: 1}
+	if err := browserRpaRepo.PutStep(ctx, org, project, mutationResultStep); err != nil {
 		t.Fatal(err)
 	}
-	if err := computerUseRepo.PutStep(ctx, org, project, mutationListStep); err != nil {
+	if err := browserRpaRepo.PutStep(ctx, org, project, mutationListStep); err != nil {
 		t.Fatal(err)
 	}
-	mutationResultEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "mutation_result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: mutationRun.ID, StepID: mutationResultStep.ID, FieldReadback: map[string]string{"platform_object_id": mapping.PlatformObjectID, "platform_status": "pending_review", "target_state_hash": mutation.TargetStateHash}, ObjectFingerprint: mutationBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "mutation-result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(2 * time.Second)}
-	mutationListEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "mutation_list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: mutationRun.ID, StepID: mutationListStep.ID, FieldReadback: map[string]string{"platform_object_id": mapping.PlatformObjectID, "platform_status": "pending_review", "target_state_hash": mutation.TargetStateHash}, ObjectFingerprint: mutationBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "mutation-list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(3 * time.Second)}
-	if err := computerUseRepo.AppendEvidence(ctx, mutationResultEvidence); err != nil {
+	mutationResultEvidence := browserautomation.Evidence{SchemaVersion: browserautomation.EvidenceSchemaV1, ID: "mutation_result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: mutationRun.ID, StepID: mutationResultStep.ID, FieldReadback: map[string]string{"platform_object_id": mapping.PlatformObjectID, "platform_status": "pending_review", "target_state_hash": mutation.TargetStateHash}, ObjectFingerprint: mutationBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "mutation-result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(2 * time.Second)}
+	mutationListEvidence := browserautomation.Evidence{SchemaVersion: browserautomation.EvidenceSchemaV1, ID: "mutation_list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: mutationRun.ID, StepID: mutationListStep.ID, FieldReadback: map[string]string{"platform_object_id": mapping.PlatformObjectID, "platform_status": "pending_review", "target_state_hash": mutation.TargetStateHash}, ObjectFingerprint: mutationBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "mutation-list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(3 * time.Second)}
+	if err := browserRpaRepo.AppendEvidence(ctx, mutationResultEvidence); err != nil {
 		t.Fatal(err)
 	}
-	if err := computerUseRepo.AppendEvidence(ctx, mutationListEvidence); err != nil {
+	if err := browserRpaRepo.AppendEvidence(ctx, mutationListEvidence); err != nil {
 		t.Fatal(err)
 	}
 	updatedMapping, revision, err := deliveryRepo.ConfirmPlatformEntityMappingMutation(ctx, org, project, mapping.ID, mapping.Version, mutationExecution.ID, mutationResultEvidence.ID, mutationListEvidence.ID)
@@ -329,25 +329,25 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pauseComputerUseService := computeruse.Service{Repository: computerUseRepo, AuthorityProvider: ComputerUseAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_pause_" + suffix, nil }}
-	pauseRun, replayed, err := pauseComputerUseService.CreateBoundRun(ctx, computeruse.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: pauseExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "pause-run-key-" + suffix, CreatedBy: "operator"})
+	pauseBrowserRpaService := browserautomation.Service{Repository: browserRpaRepo, AuthorityProvider: BrowserRpaAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_pause_" + suffix, nil }}
+	pauseRun, replayed, err := pauseBrowserRpaService.CreateBoundRun(ctx, browserautomation.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: browserautomation.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: pauseExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "pause-run-key-" + suffix, CreatedBy: "operator"})
 	if err != nil || replayed || pauseRun.Authority.TargetMappingID != updatedMapping.ID || pauseRun.Authority.PromotionControl == nil || pauseRun.Authority.PromotionControl.TargetStateHash != pauseControl.TargetStateHash {
 		t.Fatalf("pause run=%+v replayed=%t err=%v", pauseRun, replayed, err)
 	}
-	pauseResultStep := computeruse.RunStep{ID: "pause_result_step_" + suffix, RunID: pauseRun.ID, Sequence: 1, WorkflowStepID: pauseRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverResultObserved), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
-	pauseListStep := computeruse.RunStep{ID: "pause_list_step_" + suffix, RunID: pauseRun.ID, Sequence: 2, WorkflowStepID: pauseRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverListConfirmed), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
-	if err := computerUseRepo.PutStep(ctx, org, project, pauseResultStep); err != nil {
+	pauseResultStep := browserautomation.RunStep{ID: "pause_result_step_" + suffix, RunID: pauseRun.ID, Sequence: 1, WorkflowStepID: pauseRun.Authority.WorkflowStepID, Action: string(browserautomation.TakeoverResultObserved), Status: browserautomation.StepSucceeded, Attempt: 1, Version: 1}
+	pauseListStep := browserautomation.RunStep{ID: "pause_list_step_" + suffix, RunID: pauseRun.ID, Sequence: 2, WorkflowStepID: pauseRun.Authority.WorkflowStepID, Action: string(browserautomation.TakeoverListConfirmed), Status: browserautomation.StepSucceeded, Attempt: 1, Version: 1}
+	if err := browserRpaRepo.PutStep(ctx, org, project, pauseResultStep); err != nil {
 		t.Fatal(err)
 	}
-	if err := computerUseRepo.PutStep(ctx, org, project, pauseListStep); err != nil {
+	if err := browserRpaRepo.PutStep(ctx, org, project, pauseListStep); err != nil {
 		t.Fatal(err)
 	}
-	pauseResultEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "pause_result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseResultStep.ID, FieldReadback: map[string]string{"platform_object_id": updatedMapping.PlatformObjectID, "platform_status": "paused", "target_state_hash": pauseControl.TargetStateHash}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "pause-result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(4 * time.Second)}
-	pauseListEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "pause_list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseListStep.ID, FieldReadback: map[string]string{"platform_object_id": updatedMapping.PlatformObjectID, "platform_status": "paused", "target_state_hash": pauseControl.TargetStateHash}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "pause-list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(5 * time.Second)}
-	if err := computerUseRepo.AppendEvidence(ctx, pauseResultEvidence); err != nil {
+	pauseResultEvidence := browserautomation.Evidence{SchemaVersion: browserautomation.EvidenceSchemaV1, ID: "pause_result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseResultStep.ID, FieldReadback: map[string]string{"platform_object_id": updatedMapping.PlatformObjectID, "platform_status": "paused", "target_state_hash": pauseControl.TargetStateHash}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "pause-result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(4 * time.Second)}
+	pauseListEvidence := browserautomation.Evidence{SchemaVersion: browserautomation.EvidenceSchemaV1, ID: "pause_list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseListStep.ID, FieldReadback: map[string]string{"platform_object_id": updatedMapping.PlatformObjectID, "platform_status": "paused", "target_state_hash": pauseControl.TargetStateHash}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "pause-list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(5 * time.Second)}
+	if err := browserRpaRepo.AppendEvidence(ctx, pauseResultEvidence); err != nil {
 		t.Fatal(err)
 	}
-	if err := computerUseRepo.AppendEvidence(ctx, pauseListEvidence); err != nil {
+	if err := browserRpaRepo.AppendEvidence(ctx, pauseListEvidence); err != nil {
 		t.Fatal(err)
 	}
 	pausedMapping, pauseRevision, err := deliveryRepo.ConfirmPlatformEntityMappingMutation(ctx, org, project, updatedMapping.ID, updatedMapping.Version, pauseExecution.ID, pauseResultEvidence.ID, pauseListEvidence.ID)
@@ -357,12 +357,12 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 
 	materialReference := ControlledMaterialReference{ReferenceID: "asset_test", AuthorizationEvidenceID: "restart_material_evidence_" + suffix}
 	landingReference := ControlledLandingPageReference{ReferenceID: "landing_test", AuthorizationEvidenceID: "restart_landing_evidence_" + suffix}
-	materialEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: materialReference.AuthorizationEvidenceID, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseListStep.ID, FieldReadback: map[string]string{"authorized_material_reference_id": materialReference.ReferenceID, "material_available": "true"}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "material-availability/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(6 * time.Second)}
-	landingEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: landingReference.AuthorizationEvidenceID, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseListStep.ID, FieldReadback: map[string]string{"authorized_landing_page_reference_id": landingReference.ReferenceID, "landing_page_available": "true"}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "landing-availability/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(7 * time.Second)}
-	if err := computerUseRepo.AppendEvidence(ctx, materialEvidence); err != nil {
+	materialEvidence := browserautomation.Evidence{SchemaVersion: browserautomation.EvidenceSchemaV1, ID: materialReference.AuthorizationEvidenceID, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseListStep.ID, FieldReadback: map[string]string{"authorized_material_reference_id": materialReference.ReferenceID, "material_available": "true"}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "material-availability/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(6 * time.Second)}
+	landingEvidence := browserautomation.Evidence{SchemaVersion: browserautomation.EvidenceSchemaV1, ID: landingReference.AuthorizationEvidenceID, OrganizationID: org, ProjectID: project, RunID: pauseRun.ID, StepID: pauseListStep.ID, FieldReadback: map[string]string{"authorized_landing_page_reference_id": landingReference.ReferenceID, "landing_page_available": "true"}, ObjectFingerprint: pauseBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "landing-availability/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(7 * time.Second)}
+	if err := browserRpaRepo.AppendEvidence(ctx, materialEvidence); err != nil {
 		t.Fatal(err)
 	}
-	if err := computerUseRepo.AppendEvidence(ctx, landingEvidence); err != nil {
+	if err := browserRpaRepo.AppendEvidence(ctx, landingEvidence); err != nil {
 		t.Fatal(err)
 	}
 	if err := deliveryRepo.ValidateControlledRestartReferences(ctx, org, project, binding.AccountReferenceID, []ControlledMaterialReference{materialReference}, landingReference); err != nil {
@@ -422,25 +422,25 @@ func TestMySQLComputerUseRunResolvesAndBindsDeliveryAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restartComputerUseService := computeruse.Service{Repository: computerUseRepo, AuthorityProvider: ComputerUseAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_restart_" + suffix, nil }}
-	restartRun, replayed, err := restartComputerUseService.CreateBoundRun(ctx, computeruse.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: computeruse.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: restartExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "restart-run-key-" + suffix, CreatedBy: "operator"})
+	restartBrowserRpaService := browserautomation.Service{Repository: browserRpaRepo, AuthorityProvider: BrowserRpaAuthorityProvider{Repository: deliveryRepo}, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_restart_" + suffix, nil }}
+	restartRun, replayed, err := restartBrowserRpaService.CreateBoundRun(ctx, browserautomation.CreateBoundRunRequest{OrganizationID: org, ProjectID: project, Platform: browserautomation.PlatformOceanEngine, AccountID: binding.AccountReferenceID, ExecutionID: restartExecution.ID, EnvironmentID: environment.ID, ProfileID: profile.ID, PolicyID: policy.ID, IdempotencyKey: "restart-run-key-" + suffix, CreatedBy: "operator"})
 	if err != nil || replayed || restartRun.Authority.TargetMappingID != pausedMapping.ID || restartRun.Authority.PromotionRestart == nil || restartRun.Authority.PromotionRestart.TargetStateHash != restart.TargetStateHash {
 		t.Fatalf("restart run=%+v replayed=%t err=%v", restartRun, replayed, err)
 	}
-	restartResultStep := computeruse.RunStep{ID: "restart_result_step_" + suffix, RunID: restartRun.ID, Sequence: 1, WorkflowStepID: restartRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverResultObserved), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
-	restartListStep := computeruse.RunStep{ID: "restart_list_step_" + suffix, RunID: restartRun.ID, Sequence: 2, WorkflowStepID: restartRun.Authority.WorkflowStepID, Action: string(computeruse.TakeoverListConfirmed), Status: computeruse.StepSucceeded, Attempt: 1, Version: 1}
-	if err := computerUseRepo.PutStep(ctx, org, project, restartResultStep); err != nil {
+	restartResultStep := browserautomation.RunStep{ID: "restart_result_step_" + suffix, RunID: restartRun.ID, Sequence: 1, WorkflowStepID: restartRun.Authority.WorkflowStepID, Action: string(browserautomation.TakeoverResultObserved), Status: browserautomation.StepSucceeded, Attempt: 1, Version: 1}
+	restartListStep := browserautomation.RunStep{ID: "restart_list_step_" + suffix, RunID: restartRun.ID, Sequence: 2, WorkflowStepID: restartRun.Authority.WorkflowStepID, Action: string(browserautomation.TakeoverListConfirmed), Status: browserautomation.StepSucceeded, Attempt: 1, Version: 1}
+	if err := browserRpaRepo.PutStep(ctx, org, project, restartResultStep); err != nil {
 		t.Fatal(err)
 	}
-	if err := computerUseRepo.PutStep(ctx, org, project, restartListStep); err != nil {
+	if err := browserRpaRepo.PutStep(ctx, org, project, restartListStep); err != nil {
 		t.Fatal(err)
 	}
-	restartResultEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "restart_result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: restartRun.ID, StepID: restartResultStep.ID, FieldReadback: map[string]string{"platform_object_id": pausedMapping.PlatformObjectID, "platform_status": "delivering", "target_state_hash": restart.TargetStateHash}, ObjectFingerprint: restartBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "restart-result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(8 * time.Second)}
-	restartListEvidence := computeruse.Evidence{SchemaVersion: computeruse.EvidenceSchemaV1, ID: "restart_list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: restartRun.ID, StepID: restartListStep.ID, FieldReadback: map[string]string{"platform_object_id": pausedMapping.PlatformObjectID, "platform_status": "delivering", "target_state_hash": restart.TargetStateHash}, ObjectFingerprint: restartBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "restart-list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(9 * time.Second)}
-	if err := computerUseRepo.AppendEvidence(ctx, restartResultEvidence); err != nil {
+	restartResultEvidence := browserautomation.Evidence{SchemaVersion: browserautomation.EvidenceSchemaV1, ID: "restart_result_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: restartRun.ID, StepID: restartResultStep.ID, FieldReadback: map[string]string{"platform_object_id": pausedMapping.PlatformObjectID, "platform_status": "delivering", "target_state_hash": restart.TargetStateHash}, ObjectFingerprint: restartBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "restart-result/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(8 * time.Second)}
+	restartListEvidence := browserautomation.Evidence{SchemaVersion: browserautomation.EvidenceSchemaV1, ID: "restart_list_evidence_" + suffix, OrganizationID: org, ProjectID: project, RunID: restartRun.ID, StepID: restartListStep.ID, FieldReadback: map[string]string{"platform_object_id": pausedMapping.PlatformObjectID, "platform_status": "delivering", "target_state_hash": restart.TargetStateHash}, ObjectFingerprint: restartBinding.ObjectFingerprint, SelectorVersion: "integration/v1", ActionVersion: "restart-list/v1", RedactionVersion: "computer-use-redaction/v1", CreatedAt: now.Add(9 * time.Second)}
+	if err := browserRpaRepo.AppendEvidence(ctx, restartResultEvidence); err != nil {
 		t.Fatal(err)
 	}
-	if err := computerUseRepo.AppendEvidence(ctx, restartListEvidence); err != nil {
+	if err := browserRpaRepo.AppendEvidence(ctx, restartListEvidence); err != nil {
 		t.Fatal(err)
 	}
 	resumedMapping, restartRevision, err := deliveryRepo.ConfirmPlatformEntityMappingMutation(ctx, org, project, pausedMapping.ID, pausedMapping.Version, restartExecution.ID, restartResultEvidence.ID, restartListEvidence.ID)

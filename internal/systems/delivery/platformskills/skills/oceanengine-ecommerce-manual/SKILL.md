@@ -5,8 +5,8 @@ description: Compile and run deterministic Ocean Engine operations with Playwrig
 
 # Ocean Engine Playwright RPA
 
-Run `scripts/oceanengine-playwright-rpa.ts`. Do not operate the page through
-free-form Computer Use. Compile each action from the frozen configuration and
+Production runs are driven by `scripts/browser-rpa-runner.ts` through the browser-rpa control plane; `scripts/oceanengine-playwright-rpa.ts` remains the calibration entry point. Do not operate the page through
+free-form visual UI automation. Compile each action from the frozen configuration and
 Manifest. Require one semantic locator to match exactly one element.
 
 Treat cookies products and assets as facts. Use their optional Ocean Engine ID
@@ -146,7 +146,7 @@ The subsequent 2026-08-16 Phase D field-calibration pass had explicit,
 session-scoped authority for reversible writes on one test project and unit.
 Field calibration does not create production `ChangeSet`, `Approval`,
 `Confirmation`, or `ControlledActionAttempt` records; those objects govern
-post-launch Computer Use execution. The batch budget editor rejected CNY 299
+post-launch browser-rpa execution. The batch budget editor rejected CNY 299
 with `预算不小于300元`; because both the baseline and the authorized maximum were
 CNY 300, the budget mutation was `blocked_by_input_constraint`. A different
 existing video was saved and read back, then the original audit-rejected video

@@ -47,7 +47,22 @@ type Config struct {
 	Strategy           Strategy
 	Research           Research
 	Miyun              Miyun
+	BrowserRPA         BrowserRPA
 	LocalIdentity      *LocalIdentity
+}
+
+// BrowserRPA configures the Playwright-based browser automation executor that
+// drives externally authenticated advertising-platform sessions for the
+// delivery control plane. It is disabled by default; the takeover-only
+// control plane remains the production baseline.
+type BrowserRPA struct {
+	Enabled               bool
+	Command               string
+	ScriptPath            string
+	EvidenceRoot          string
+	PrepareTimeoutSeconds int
+	SubmitTimeoutSeconds  int
+	CDPEndpointFallback   string
 }
 
 type Auth struct {
@@ -458,6 +473,14 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		assetsBucket = tosBucket
 		providerOutputBucket = tosBucket
 	}
+	browserRpaEnabled, err := strictBoolValueOr(lookup, "COOKIES_BROWSER_RPA_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	browserRpaCDPFallback := valueOr(lookup, "COOKIES_BROWSER_RPA_CDP_ENDPOINT", "")
+	if strings.TrimSpace(browserRpaCDPFallback) != "" && environment == EnvironmentProduction {
+		return Config{}, fmt.Errorf("COOKIES_BROWSER_RPA_CDP_ENDPOINT fallback is only permitted outside production; register the endpoint on the execution environment instead")
+	}
 	config := Config{
 		Environment: environment,
 		HTTPAddr:    valueOr(lookup, "COOKIES_HTTP_ADDR", ":8080"),
@@ -558,6 +581,15 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			DownloadAllowedHosts: splitCSV(valueOr(lookup, "COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS", "")),
 			MaxConcurrent:        intValueOr(lookup, "COOKIES_MIYUN_MAX_CONCURRENT", 1), RequestsPerSecond: intValueOr(lookup, "COOKIES_MIYUN_REQUESTS_PER_SECOND", 5),
 			CooldownSeconds: intValueOr(lookup, "COOKIES_MIYUN_COOLDOWN_SECONDS", 300),
+		},
+		BrowserRPA: BrowserRPA{
+			Enabled:               browserRpaEnabled,
+			Command:               valueOr(lookup, "COOKIES_BROWSER_RPA_TSX_COMMAND", "npx tsx"),
+			ScriptPath:            valueOr(lookup, "COOKIES_BROWSER_RPA_SCRIPT", "scripts/browser-rpa-runner.ts"),
+			EvidenceRoot:          valueOr(lookup, "COOKIES_BROWSER_RPA_EVIDENCE_ROOT", ".data/browser-rpa-evidence"),
+			PrepareTimeoutSeconds: intValueOr(lookup, "COOKIES_BROWSER_RPA_PREPARE_TIMEOUT_SECONDS", 180),
+			SubmitTimeoutSeconds:  intValueOr(lookup, "COOKIES_BROWSER_RPA_SUBMIT_TIMEOUT_SECONDS", 300),
+			CDPEndpointFallback:   browserRpaCDPFallback,
 		},
 		Provider: Provider{
 			ImageAdapter:      valueOr(lookup, "COOKIES_PROVIDER_IMAGE_ADAPTER", "fake"),

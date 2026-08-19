@@ -16,7 +16,7 @@ type controlledAuthorityRepository interface {
 	ApproveControlledChangeSet(context.Context, ControlledChangeSet, RemoteWriteApproval) (ControlledChangeSet, RemoteWriteApproval, error)
 	CreateControlledExecution(context.Context, ControlledExecution) (ControlledExecution, error)
 	GetControlledExecution(context.Context, contract.OrganizationID, contract.ProjectID, string) (ControlledExecution, error)
-	AttachComputerUseRun(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (ControlledExecution, error)
+	AttachBrowserRpaRun(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (ControlledExecution, error)
 	CreatePlatformEntityMapping(context.Context, PlatformEntityMapping) (PlatformEntityMapping, error)
 	GetPlatformEntityMapping(context.Context, contract.OrganizationID, contract.ProjectID, string) (PlatformEntityMapping, error)
 	ConfirmPlatformEntityMapping(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, string) (PlatformEntityMapping, error)
@@ -41,7 +41,7 @@ type ConfirmPlatformEntityMappingMutationRequest struct {
 
 type ConfirmPlatformEntityMappingChangeRequest = ConfirmPlatformEntityMappingMutationRequest
 
-func (s Service) AttachComputerUseRun(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string, expectedVersion int64, runID string) (ControlledExecution, error) {
+func (s Service) AttachBrowserRpaRun(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, executionID string, expectedVersion int64, runID string) (ControlledExecution, error) {
 	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
 		return ControlledExecution{}, err
 	}
@@ -52,7 +52,7 @@ func (s Service) AttachComputerUseRun(ctx context.Context, actor contract.ActorC
 	if !ok {
 		return ControlledExecution{}, ErrUnsupportedConfigurationWorkflow
 	}
-	return repo.AttachComputerUseRun(ctx, actor.OrganizationID, projectID, executionID, expectedVersion, runID, s.now())
+	return repo.AttachBrowserRpaRun(ctx, actor.OrganizationID, projectID, executionID, expectedVersion, runID, s.now())
 }
 
 func (s Service) CreatePendingPlatformEntityMapping(ctx context.Context, actor contract.ActorContext, value PlatformEntityMapping) (PlatformEntityMapping, error) {
@@ -514,7 +514,7 @@ func (s Service) CompileControlledRestartChangeSet(ctx context.Context, actor co
 		return ControlledChangeSet{}, false, err
 	}
 	pause := sourceChange.Binding.PromotionControl
-	if sourceExecution.Status != "succeeded" || sourceExecution.ComputerUseRunID != mapping.ComputerUseRunID || sourceChange.Status != ControlledChangeSetExecuted || sourceChange.Action != ControlledActionPausePromotion || pause == nil || sourceChange.Binding.AccountReferenceID != mapping.AccountReferenceID || sourceChange.Binding.PlanID != mapping.PlanID || sourceChange.Binding.ConfigurationID != mapping.ConfigurationID || sourceChange.Binding.ParentPlatformProjectID == "" || sourceChange.Binding.TargetMappingID != mapping.ID || sourceChange.Binding.TargetMappingVersion+1 != mapping.Version || sourceChange.Binding.TargetPlatformObjectID != mapping.PlatformObjectID || sourceChange.Binding.TargetPlatformObjectKind != mapping.PlatformObjectKind || pause.TargetPlatformStatus != mapping.PlatformStatus || pause.TargetStateHash != mapping.CurrentStateHash || request.CurrentDailyBudgetMinor != pause.CurrentDailyBudgetMinor || request.ApprovedDailyBudgetMinor != pause.CurrentDailyBudgetMinor {
+	if sourceExecution.Status != "succeeded" || sourceExecution.BrowserRpaRunID != mapping.BrowserRpaRunID || sourceChange.Status != ControlledChangeSetExecuted || sourceChange.Action != ControlledActionPausePromotion || pause == nil || sourceChange.Binding.AccountReferenceID != mapping.AccountReferenceID || sourceChange.Binding.PlanID != mapping.PlanID || sourceChange.Binding.ConfigurationID != mapping.ConfigurationID || sourceChange.Binding.ParentPlatformProjectID == "" || sourceChange.Binding.TargetMappingID != mapping.ID || sourceChange.Binding.TargetMappingVersion+1 != mapping.Version || sourceChange.Binding.TargetPlatformObjectID != mapping.PlatformObjectID || sourceChange.Binding.TargetPlatformObjectKind != mapping.PlatformObjectKind || pause.TargetPlatformStatus != mapping.PlatformStatus || pause.TargetStateHash != mapping.CurrentStateHash || request.CurrentDailyBudgetMinor != pause.CurrentDailyBudgetMinor || request.ApprovedDailyBudgetMinor != pause.CurrentDailyBudgetMinor {
 		return ControlledChangeSet{}, false, ErrApprovalContentMismatch
 	}
 	restart := ControlledPromotionRestart{

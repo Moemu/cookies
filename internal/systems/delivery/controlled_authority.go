@@ -547,7 +547,7 @@ type PlatformEntityMapping struct {
 	PlanID              string                      `json:"plan_id"`
 	ConfigurationID     string                      `json:"configuration_id"`
 	BusinessExecutionID string                      `json:"business_execution_id"`
-	ComputerUseRunID    string                      `json:"computer_use_run_id"`
+	BrowserRpaRunID     string                      `json:"browser_rpa_run_id"`
 	InternalObjectKind  string                      `json:"internal_object_kind"`
 	InternalObjectID    string                      `json:"internal_object_id"`
 	PlatformObjectKind  string                      `json:"platform_object_kind"`
@@ -570,7 +570,7 @@ type PlatformEntityMappingRevision struct {
 	Version             int64                   `json:"version"`
 	Action              ControlledAction        `json:"action"`
 	BusinessExecutionID string                  `json:"business_execution_id"`
-	ComputerUseRunID    string                  `json:"computer_use_run_id"`
+	BrowserRpaRunID     string                  `json:"browser_rpa_run_id"`
 	PlatformObjectID    string                  `json:"platform_object_id"`
 	PlatformStatus      string                  `json:"platform_status"`
 	PreviousStateAction ControlledAction        `json:"previous_state_action,omitempty"`
@@ -588,7 +588,7 @@ type ControlledExecution struct {
 	ProjectID             contract.ProjectID      `json:"project_id"`
 	ControlledChangeSetID string                  `json:"controlled_change_set_id"`
 	RemoteWriteApprovalID string                  `json:"remote_write_approval_id"`
-	ComputerUseRunID      string                  `json:"computer_use_run_id,omitempty"`
+	BrowserRpaRunID       string                  `json:"browser_rpa_run_id,omitempty"`
 	Status                string                  `json:"status"`
 	Version               int64                   `json:"version"`
 	CreatedBy             string                  `json:"created_by"`
@@ -609,7 +609,7 @@ func (e ControlledExecution) Validate() error {
 }
 
 func (m PlatformEntityMapping) Validate() error {
-	if m.SchemaVersion != PlatformEntityMappingV1 || m.ID == "" || m.OrganizationID == "" || m.ProjectID == "" || m.AccountReferenceID == "" || m.PlanID == "" || m.ConfigurationID == "" || m.BusinessExecutionID == "" || m.ComputerUseRunID == "" || m.InternalObjectKind == "" || m.InternalObjectID == "" || m.PlatformObjectKind == "" || m.Version < 1 || m.CreatedAt.IsZero() || m.UpdatedAt.IsZero() || (!m.CreatedAt.Equal(m.UpdatedAt) && m.UpdatedAt.Before(m.CreatedAt)) || (m.CurrentStateHash == "") != (m.CurrentStateAction == "") || (m.CurrentStateHash != "" && (!isLowercaseSHA256(m.CurrentStateHash) || !m.CurrentStateAction.ChangesExistingPromotion())) {
+	if m.SchemaVersion != PlatformEntityMappingV1 || m.ID == "" || m.OrganizationID == "" || m.ProjectID == "" || m.AccountReferenceID == "" || m.PlanID == "" || m.ConfigurationID == "" || m.BusinessExecutionID == "" || m.BrowserRpaRunID == "" || m.InternalObjectKind == "" || m.InternalObjectID == "" || m.PlatformObjectKind == "" || m.Version < 1 || m.CreatedAt.IsZero() || m.UpdatedAt.IsZero() || (!m.CreatedAt.Equal(m.UpdatedAt) && m.UpdatedAt.Before(m.CreatedAt)) || (m.CurrentStateHash == "") != (m.CurrentStateAction == "") || (m.CurrentStateHash != "" && (!isLowercaseSHA256(m.CurrentStateHash) || !m.CurrentStateAction.ChangesExistingPromotion())) {
 		return ErrInvalidRequest
 	}
 	switch m.Status {
