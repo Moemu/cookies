@@ -1,0 +1,10 @@
+{
+  "code": 0,
+  "data": {
+    "Rows": [
+      {"promotion_id": "promotion-unknown-001", "material_id": "material-unmapped-001", "value": "redacted"}
+    ]
+  },
+  "source": "synthetic_replay",
+  "quality": "mapping_incomplete"
+}

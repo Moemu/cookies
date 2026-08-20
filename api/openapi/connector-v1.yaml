@@ -1,0 +1,373 @@
+openapi: 3.1.0
+info:
+  title: Cookies Connector API
+  version: 1.0.0
+  description: Read-only, evidence-backed advertising data facts and synchronization status.
+servers:
+  - url: /
+security:
+  - cookiesAuth: []
+paths:
+  /api/platform/v1/connectors/accounts:
+    get:
+      operationId: listConnectorAccounts
+      summary: List authorized Ocean Engine accounts
+      description: Returns account metadata only. Cookie, CSRF, and credential values are never returned.
+      responses:
+        '200':
+          description: Account catalog.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/PlatformAccount'}}
+                additionalProperties: false
+        'default': {$ref: '#/components/responses/Problem'}
+  /api/platform/v1/connectors/accounts/{account_id}:
+    parameters:
+      - $ref: '#/components/parameters/AccountID'
+    get:
+      operationId: getConnectorAccount
+      summary: Get account metadata and connection status
+      responses:
+        '200':
+          description: Account metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlatformAccount'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/platform/v1/connectors/accounts/{account_id}/verify:
+    parameters:
+      - $ref: '#/components/parameters/AccountID'
+    post:
+      operationId: verifyConnectorAccount
+      summary: Verify an account using a read-only web_api request
+      description: Verification reads account metadata only and never performs a platform write.
+      responses:
+        '200':
+          description: Verification result.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlatformAccount'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/platform/v1/connectors/accounts/{account_id}/revoke:
+    parameters:
+      - $ref: '#/components/parameters/AccountID'
+    post:
+      operationId: revokeConnectorAccount
+      summary: Revoke a connector account connection
+      description: Revokes the local connection reference; it does not call an Ocean Engine write endpoint.
+      responses:
+        '200':
+          description: Revoked account metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlatformAccount'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/snapshots:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AccountRef'
+    get:
+      operationId: listConnectorSnapshots
+      summary: List account and object snapshots
+      description: Returns canonical object snapshots produced by a read-only connector sync. Credentials and raw secrets are never returned.
+      parameters:
+        - $ref: '#/components/parameters/Quality'
+        - $ref: '#/components/parameters/ObjectKind'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Object snapshots.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotPage'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/metrics:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AccountRef'
+    get:
+      operationId: listConnectorMetrics
+      summary: Query canonical metric windows
+      description: Returns facts with their source, quality, window, attribution, and evidence metadata. Empty reports are represented by schema-only sync batches, not fabricated zero facts.
+      parameters:
+        - name: start
+          in: query
+          required: true
+          schema: {type: string, format: date-time}
+        - name: end
+          in: query
+          required: true
+          schema: {type: string, format: date-time}
+        - $ref: '#/components/parameters/ObjectKind'
+        - $ref: '#/components/parameters/ExternalID'
+        - $ref: '#/components/parameters/Quality'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Metric windows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricPage'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/syncs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AccountRef'
+    post:
+      operationId: startConnectorSync
+      summary: Start a read-only connector synchronization
+      description: Starts synchronization for an authorized web_api session. The request contains no Cookie, CSRF token, or credential material.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartSyncRequest'
+      responses:
+        '202':
+          description: Synchronization accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncStatus'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/syncs/{sync_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AccountRef'
+      - $ref: '#/components/parameters/SyncID'
+    get:
+      operationId: getConnectorSync
+      summary: Get synchronization status
+      responses:
+        '200':
+          description: Synchronization status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    cookiesAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: session
+  parameters:
+    ProjectID:
+      name: project_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 255}
+    AccountRef:
+      name: account_ref
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 255}
+    SyncID:
+      name: sync_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 255}
+    ExternalID:
+      name: external_id
+      in: query
+      schema: {type: string, minLength: 1, maxLength: 255}
+    ObjectKind:
+      name: object_kind
+      in: query
+      schema: {$ref: '#/components/schemas/ObjectKind'}
+    Quality:
+      name: quality
+      in: query
+      schema: {$ref: '#/components/schemas/Quality'}
+    Cursor:
+      name: cursor
+      in: query
+      schema: {type: string, maxLength: 2048}
+    Limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 500}
+  schemas:
+    ObjectKind:
+      type: string
+      enum: [account, project, promotion, material]
+    Quality:
+      type: string
+      enum: [healthy, partial, delayed, blocked, mapping_incomplete]
+    ConnectorEnvelope:
+      type: object
+      required: [schema_version, source, platform, connection_type, account, quality]
+      properties:
+        schema_version: {type: string, const: oceanengine-connector/v1}
+        source: {type: string, const: connector}
+        platform: {type: string, const: ocean_engine}
+        connection_type: {type: string, const: web_api}
+        account: {$ref: '#/components/schemas/AccountRef'}
+        quality: {$ref: '#/components/schemas/Quality'}
+        quality_note: {type: string}
+        evidence:
+          type: array
+          items: {$ref: '#/components/schemas/EvidenceRef'}
+      additionalProperties: false
+    AccountID:
+      name: account_id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 255}
+    AccountRef:
+      type: object
+      required: [organization_id, project_id, external_id]
+      properties:
+        organization_id: {type: string, minLength: 1}
+        project_id: {type: string, minLength: 1}
+        external_id: {type: string, minLength: 1, description: Opaque platform identifier; preserve as a string.}
+      additionalProperties: false
+    PlatformAccount:
+      type: object
+      required: [id, organization_id, platform, external_id, status]
+      properties:
+        id: {type: string, minLength: 1}
+        organization_id: {type: string, minLength: 1}
+        platform: {type: string, const: ocean_engine}
+        external_id: {type: string, minLength: 1}
+        display_label: {type: string}
+        status: {type: string, enum: [pending, verified, revoked, blocked]}
+        verified_at: {type: string, format: date-time}
+        last_checked_at: {type: string, format: date-time}
+        connection_type: {type: string, const: web_api}
+        credential_ref_present: {type: boolean}
+      additionalProperties: false
+    EvidenceRef:
+      type: object
+      required: [batch_id, endpoint, request_hash, response_hash, observed_at, schema_version]
+      properties:
+        batch_id: {type: string, minLength: 1}
+        endpoint: {type: string, minLength: 1}
+        request_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        response_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        observed_at: {type: string, format: date-time}
+        schema_version: {type: string, minLength: 1}
+      additionalProperties: false
+    ObjectSnapshot:
+      allOf:
+        - $ref: '#/components/schemas/ConnectorEnvelope'
+        - type: object
+          required: [kind, external_id]
+          properties:
+            kind: {$ref: '#/components/schemas/ObjectKind'}
+            external_id: {type: string, minLength: 1}
+            parent_id: {type: string}
+            name_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+            aliases: {type: array, items: {type: string}}
+            raw: {type: object, additionalProperties: true}
+    MetricWindow:
+      allOf:
+        - $ref: '#/components/schemas/ConnectorEnvelope'
+        - type: object
+          required: [kind, external_id, start, end, granularity, metric_schema, attribution_window, counts]
+          properties:
+            kind: {$ref: '#/components/schemas/ObjectKind'}
+            external_id: {type: string, minLength: 1}
+            parent_id: {type: string}
+            start: {type: string, format: date-time}
+            end: {type: string, format: date-time}
+            granularity: {type: string, minLength: 1}
+            metric_schema: {type: string, minLength: 1}
+            attribution_window: {type: string, minLength: 1}
+            counts: {$ref: '#/components/schemas/MetricCounts'}
+            raw: {type: object, additionalProperties: true}
+    MetricCounts:
+      type: object
+      required: [spend_cents, impressions, clicks, conversions, deep_conversions]
+      properties:
+        spend_cents: {type: integer}
+        impressions: {type: integer, minimum: 0}
+        clicks: {type: integer, minimum: 0}
+        conversions: {type: integer, minimum: 0}
+        deep_conversions: {type: integer, minimum: 0}
+      additionalProperties: false
+    SnapshotPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/ObjectSnapshot'}}
+        next_cursor: {type: string}
+      additionalProperties: false
+    MetricPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/MetricWindow'}}
+        next_cursor: {type: string}
+      additionalProperties: false
+    StartSyncRequest:
+      type: object
+      required: [start, end]
+      properties:
+        start: {type: string, format: date-time}
+        end: {type: string, format: date-time}
+        object_kinds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {$ref: '#/components/schemas/ObjectKind'}
+        force: {type: boolean, default: false}
+      additionalProperties: false
+    SyncStatus:
+      type: object
+      required: [id, account, status, quality, window_start, window_end]
+      properties:
+        id: {type: string, minLength: 1}
+        account: {$ref: '#/components/schemas/AccountRef'}
+        status: {type: string, enum: [queued, running, completed, failed]}
+        quality: {$ref: '#/components/schemas/Quality'}
+        window_start: {type: string, format: date-time}
+        window_end: {type: string, format: date-time}
+        batch_id: {type: string}
+        quality_note: {type: string}
+        evidence: {type: array, items: {$ref: '#/components/schemas/EvidenceRef'}}
+      additionalProperties: false
+    Problem:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        request_id: {type: string}
+      additionalProperties: false
+  responses:
+    Problem:
+      description: Request failed.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Problem'}
+    Conflict:
+      description: Conflicting synchronization request.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Problem'}

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/oceanengine-connector/v1",
+  "title": "Ocean Engine Connector Contract",
+  "type": "object",
+  "required": ["schema_version", "source", "platform", "connection_type", "account", "quality"],
+  "properties": {
+    "schema_version": {"const": "oceanengine-connector/v1"},
+    "source": {"const": "connector"},
+    "platform": {"const": "ocean_engine"},
+    "connection_type": {"const": "web_api"},
+    "account": {"$ref": "#/$defs/account"},
+    "quality": {"$ref": "#/$defs/quality"},
+    "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
+  },
+  "$defs": {
+    "account": {
+      "type": "object",
+      "required": ["organization_id", "project_id", "external_id"],
+      "properties": {
+        "organization_id": {"type": "string", "minLength": 1},
+        "project_id": {"type": "string", "minLength": 1},
+        "external_id": {"type": "string", "minLength": 1, "description": "Opaque advertiser ID; never a numeric type."}
+      },
+      "additionalProperties": false
+    },
+    "quality": {
+      "type": "string",
+      "enum": ["healthy", "partial", "delayed", "blocked", "mapping_incomplete"]
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["batch_id", "endpoint", "request_hash", "response_hash", "observed_at", "schema_version"],
+      "properties": {
+        "batch_id": {"type": "string", "minLength": 1},
+        "endpoint": {"type": "string", "minLength": 1},
+        "request_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "response_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "schema_version": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
