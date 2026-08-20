@@ -70,6 +70,11 @@ type observatoryApplication interface {
 	ListObservatoryFeedback(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]delivery.DeliveryObservatoryFeedback, error)
 }
 
+type mechanisticSimulationApplication interface {
+	CreatePrelaunchMechanisticSimulation(context.Context, contract.ActorContext, contract.ProjectID, string, int, delivery.MechanisticSimulationRequest) (delivery.MechanisticSimulationEnvelope, error)
+	GetPrelaunchMechanisticSimulation(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.MechanisticSimulationResult, error)
+}
+
 type controlledAuthorityApplication interface {
 	CompileControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, delivery.CompileControlledChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
 	CompileMappedControlledChangeSet(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CompileMappedControlledChangeSetRequest) (delivery.ControlledChangeSet, bool, error)
@@ -103,6 +108,8 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("PATCH /api/delivery/v1/projects/{project_id}/plans/{plan_id}", server.updatePlan)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions", server.listPlanVersions)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}", server.getPlanVersion)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}/mechanistic-simulation-runs", server.createMechanisticSimulation)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/mechanistic-simulation-runs/{run_id}", server.getMechanisticSimulation)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/preflight", server.planPreflight)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/plans/{plan_id}/detail", server.getPlanDetail)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/execute", server.executePlan)
@@ -150,6 +157,55 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/tour-runs/{tour_action}", server.tourRunAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/tour-runs/{run_id}", server.getTourRun)
 	return server
+}
+
+func (s *Server) mechanisticSimulationApp() (mechanisticSimulationApplication, error) {
+	app, ok := s.app.(mechanisticSimulationApplication)
+	if !ok {
+		return nil, delivery.ErrUnsupportedConfigurationWorkflow
+	}
+	return app, nil
+}
+
+func (s *Server) createMechanisticSimulation(writer http.ResponseWriter, request *http.Request) {
+	var body delivery.MechanisticSimulationRequest
+	if !decode(writer, request, &body) {
+		return
+	}
+	version, err := strconv.Atoi(request.PathValue("version"))
+	if err != nil || version < 1 {
+		writeError(writer, request, delivery.ErrInvalidRequest)
+		return
+	}
+	app, err := s.mechanisticSimulationApp()
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	value, err := app.CreatePrelaunchMechanisticSimulation(request.Context(), mustActor(request), projectID(request), request.PathValue("plan_id"), version, body)
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	status := http.StatusCreated
+	if value.Replay || value.Result.Status == "platform_pending" {
+		status = http.StatusOK
+	}
+	writeJSON(writer, status, value)
+}
+
+func (s *Server) getMechanisticSimulation(writer http.ResponseWriter, request *http.Request) {
+	app, err := s.mechanisticSimulationApp()
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	value, err := app.GetPrelaunchMechanisticSimulation(request.Context(), mustActor(request), projectID(request), request.PathValue("run_id"))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
 }
 
 func (s *Server) observatoryApp() (observatoryApplication, error) {

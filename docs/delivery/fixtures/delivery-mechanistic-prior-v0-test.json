@@ -1,0 +1,60 @@
+{
+  "version": "delivery-mechanistic-test-prior/v0",
+  "review_pass_probability": {
+    "value": 0.9,
+    "source": "fixture://delivery-mechanistic-prior-v0-test",
+    "unit": "probability",
+    "scope": ["automated_tests_only"],
+    "uncertainty": "Artificial test prior. Not an industry benchmark."
+  },
+  "delivery_probability": {
+    "value": 0.85,
+    "source": "fixture://delivery-mechanistic-prior-v0-test",
+    "unit": "probability",
+    "scope": ["automated_tests_only"],
+    "uncertainty": "Artificial test prior. Not an industry benchmark."
+  },
+  "budget_utilization": {
+    "minimum": 0.4,
+    "mode": 0.75,
+    "maximum": 1.0,
+    "source": "fixture://delivery-mechanistic-prior-v0-test",
+    "unit": "ratio",
+    "scope": ["automated_tests_only"],
+    "uncertainty": "Artificial range."
+  },
+  "cpm": {
+    "minimum": 1400,
+    "mode": 2800,
+    "maximum": 4200,
+    "source": "fixture://delivery-mechanistic-prior-v0-test",
+    "unit": "CNY_minor_per_1000_impressions",
+    "scope": ["automated_tests_only"],
+    "uncertainty": "The mode preserves the old mock parameter only for compatibility tests."
+  },
+  "ctr": {
+    "minimum": 0.024,
+    "mode": 0.048,
+    "maximum": 0.072,
+    "source": "fixture://delivery-mechanistic-prior-v0-test",
+    "unit": "ratio",
+    "scope": ["automated_tests_only"],
+    "uncertainty": "The mode preserves the old mock parameter only for compatibility tests."
+  },
+  "cvr": {
+    "minimum": 0.026,
+    "mode": 0.052,
+    "maximum": 0.078,
+    "source": "fixture://delivery-mechanistic-prior-v0-test",
+    "unit": "ratio",
+    "scope": ["automated_tests_only"],
+    "uncertainty": "The mode preserves the old mock parameter only for compatibility tests."
+  },
+  "tracking_observable_rate": {
+    "value": 0.8,
+    "source": "fixture://delivery-mechanistic-prior-v0-test",
+    "unit": "probability",
+    "scope": ["automated_tests_only"],
+    "uncertainty": "Artificial test prior."
+  }
+}

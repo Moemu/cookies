@@ -165,6 +165,31 @@ func TestOpenAPIContractCoversProjectScopedMonitoringAlerts(t *testing.T) {
 	}
 }
 
+func TestOpenAPIContractCoversMechanisticSimulationV0(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join("..", "..", "..", "api", "openapi", "delivery-v1.yaml")
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read Delivery OpenAPI: %v", err)
+	}
+	contract := string(contents)
+	for _, expected := range []string{
+		"/api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}/mechanistic-simulation-runs:",
+		"/api/delivery/v1/projects/{project_id}/mechanistic-simulation-runs/{run_id}:",
+		"MechanisticSimulationRequest:",
+		"MechanisticSimulationResult:",
+		"delivery-mechanistic-simulation/v0",
+		"delivery-mechanistic-monte-carlo/v0",
+		"calibration_status: { type: string, const: assumption_driven }",
+		"requires_human_review: { type: boolean, const: true }",
+		"effect_basis: { type: string, enum: [predictive_association, rule_constraint] }",
+	} {
+		if !strings.Contains(contract, expected) {
+			t.Errorf("Mechanistic Simulation OpenAPI is missing %q", expected)
+		}
+	}
+}
+
 func TestOpenAPIContractCoversOwnerScopedDeliveryTour(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join("..", "..", "..", "api", "openapi", "delivery-v1.yaml")
