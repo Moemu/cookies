@@ -1,0 +1,272 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/shikanon/cookies/internal/platform/connector"
+	"github.com/shikanon/cookies/internal/platform/contract"
+)
+
+type Reader interface {
+	Snapshot(context.Context, connector.Query) (connector.CanonicalSnapshot, error)
+}
+type Syncer interface {
+	Sync(context.Context, connector.SyncRequest) (connector.SyncResult, error)
+}
+type SyncRunReader interface {
+	GetSync(context.Context, string, string, string, string) (connector.SyncRun, error)
+}
+type ProjectAuthorizer interface {
+	AuthorizeProject(context.Context, contract.ActorContext, contract.ProjectID) error
+}
+type AccountManager interface {
+	Register(context.Context, connector.RegisterAccountRequest) (connector.PlatformAccount, error)
+	List(context.Context, string, string) ([]connector.PlatformAccount, error)
+	Verify(context.Context, string, string, string) (connector.PlatformAccount, error)
+	Revoke(context.Context, string, string, string) (connector.PlatformAccount, error)
+}
+type Server struct {
+	reader     Reader
+	syncer     Syncer
+	authorizer ProjectAuthorizer
+	accounts   AccountManager
+	mux        *http.ServeMux
+}
+
+func New(reader Reader, syncer Syncer, authorizer ProjectAuthorizer, accounts AccountManager) *Server {
+	server := &Server{reader: reader, syncer: syncer, authorizer: authorizer, accounts: accounts, mux: http.NewServeMux()}
+	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/canonical-snapshots", server.snapshot)
+	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/syncs", server.sync)
+	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/syncs/{sync_id}", server.syncStatus)
+	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts", server.listAccounts)
+	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts", server.registerAccount)
+	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/verify", server.verifyAccount)
+	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/revoke", server.revokeAccount)
+	return server
+}
+func (s *Server) revokeAccount(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeSync)
+	if !ok || !s.authorize(r, actor) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	if s.accounts == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	value, err := s.accounts.Revoke(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref"))
+	if err != nil {
+		writeProblem(w, http.StatusNotFound, "CONNECTOR_ACCOUNT_NOT_FOUND")
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) listAccounts(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeRead)
+	if !ok || !s.authorize(r, actor) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	if s.accounts == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	values, err := s.accounts.List(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"))
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "CONNECTOR_READ_FAILED")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values})
+}
+func (s *Server) registerAccount(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeSync)
+	if !ok || !s.authorize(r, actor) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	if s.accounts == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	var body struct {
+		ExternalID   string `json:"external_id"`
+		DisplayLabel string `json:"display_label"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || strings.TrimSpace(body.ExternalID) == "" {
+		writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
+		return
+	}
+	value, err := s.accounts.Register(r.Context(), connector.RegisterAccountRequest{OrganizationID: string(actor.OrganizationID), ProjectID: r.PathValue("project_id"), ExternalID: body.ExternalID, DisplayLabel: body.DisplayLabel, CredentialRef: "insights-session://" + string(actor.OrganizationID) + "/" + r.PathValue("project_id")})
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "CONNECTOR_ACCOUNT_FAILED")
+		return
+	}
+	writeJSON(w, http.StatusCreated, value)
+}
+func (s *Server) verifyAccount(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeSync)
+	if !ok || !s.authorize(r, actor) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	if s.accounts == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	value, err := s.accounts.Verify(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref"))
+	if err != nil {
+		writeProblem(w, http.StatusConflict, "CONNECTOR_ACCOUNT_VERIFY_FAILED")
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) syncStatus(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeRead)
+	if !ok {
+		writeProblem(w, http.StatusForbidden, "SCOPE_REQUIRED")
+		return
+	}
+	if !s.authorize(r, actor) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	reader, ok := s.reader.(SyncRunReader)
+	if !ok {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	value, err := reader.GetSync(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"), connector.AnonymizeRef(r.PathValue("account_ref")), r.PathValue("sync_id"))
+	if err != nil {
+		writeProblem(w, http.StatusNotFound, "SYNC_NOT_FOUND")
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+
+func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeRead)
+	if !ok {
+		writeProblem(w, http.StatusForbidden, "SCOPE_REQUIRED")
+		return
+	}
+	if !s.authorize(r, actor) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	if s.reader == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	cutoff, err := time.Parse(time.RFC3339, strings.TrimSpace(r.URL.Query().Get("prediction_cutoff")))
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "INVALID_PREDICTION_CUTOFF")
+		return
+	}
+	query := connector.Query{OrganizationID: string(actor.OrganizationID), ProjectID: r.PathValue("project_id"), SourceRef: connector.AnonymizeRef(r.PathValue("account_ref")), PredictionCutoff: cutoff, IncludeDiagnosis: r.URL.Query().Get("include_diagnosis") == "true"}
+	if objectRef := strings.TrimSpace(r.URL.Query().Get("object_ref")); objectRef != "" {
+		query.ObjectRef = connector.AnonymizeRef(objectRef)
+	}
+	if value := r.URL.Query().Get("window_start"); value != "" {
+		query.WindowStart, err = time.Parse(time.RFC3339, value)
+		if err != nil {
+			writeProblem(w, http.StatusBadRequest, "INVALID_WINDOW")
+			return
+		}
+	}
+	if value := r.URL.Query().Get("window_end"); value != "" {
+		query.WindowEnd, err = time.Parse(time.RFC3339, value)
+		if err != nil {
+			writeProblem(w, http.StatusBadRequest, "INVALID_WINDOW")
+			return
+		}
+	}
+	if !query.WindowStart.IsZero() && !query.WindowEnd.IsZero() && !query.WindowEnd.After(query.WindowStart) {
+		writeProblem(w, http.StatusBadRequest, "INVALID_WINDOW")
+		return
+	}
+	value, err := s.reader.Snapshot(r.Context(), query)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "CONNECTOR_READ_FAILED")
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeSync)
+	if !ok {
+		writeProblem(w, http.StatusForbidden, "SCOPE_REQUIRED")
+		return
+	}
+	if !s.authorize(r, actor) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	if s.syncer == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	var body struct {
+		Start    time.Time `json:"start"`
+		End      time.Time `json:"end"`
+		TimeZone string    `json:"time_zone"`
+		Currency string    `json:"currency"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || !body.End.After(body.Start) {
+		writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
+		return
+	}
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" || len(key) > 191 {
+		writeProblem(w, http.StatusBadRequest, "IDEMPOTENCY_KEY_REQUIRED")
+		return
+	}
+	value, err := s.syncer.Sync(r.Context(), connector.SyncRequest{OrganizationID: string(actor.OrganizationID), ProjectID: r.PathValue("project_id"), AccountRef: r.PathValue("account_ref"), IdempotencyKey: key, WindowStart: body.Start, WindowEnd: body.End, TimeZone: body.TimeZone, Currency: body.Currency})
+	if err != nil {
+		status := http.StatusInternalServerError
+		code := "CONNECTOR_SYNC_FAILED"
+		if errors.Is(err, connector.ErrInvalidFact) {
+			status = http.StatusBadRequest
+			code = "INVALID_REQUEST"
+		}
+		writeProblem(w, status, code)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) authorize(r *http.Request, actor contract.ActorContext) bool {
+	if s.authorizer == nil {
+		return false
+	}
+	return s.authorizer.AuthorizeProject(r.Context(), actor, contract.ProjectID(r.PathValue("project_id"))) == nil
+}
+
+func actorFor(r *http.Request, scope string) (contract.ActorContext, bool) {
+	requestContext, ok := contract.RequestContextFrom(r.Context())
+	if !ok || requestContext.Actor.Validate() != nil || strings.TrimSpace(r.PathValue("project_id")) == "" {
+		return contract.ActorContext{}, false
+	}
+	return requestContext.Actor, requestContext.Actor.HasScope(contract.Scope(scope))
+}
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+func writeProblem(w http.ResponseWriter, status int, code string) {
+	writeJSON(w, status, map[string]any{"code": code, "message": http.StatusText(status), "status": strconv.Itoa(status)})
+}

@@ -1,6 +1,7 @@
 package oceanengine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,6 +47,7 @@ type Client struct {
 	UserAgent    string
 	AdvertiserID string
 	Delay        time.Duration
+	MaxAttempts  int
 }
 
 func NewClient(rawBaseURL, advertiserID string, session Session, httpClient *http.Client) (*Client, error) {
@@ -75,10 +77,28 @@ func newClient(rawBaseURL, advertiserID string, session Session, httpClient *htt
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
+	clientCopy := *httpClient
+	previousRedirect := clientCopy.CheckRedirect
+	clientCopy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !strings.EqualFold(req.URL.Host, base.Host) {
+			return ErrForbiddenEndpoint
+		}
+		if _, ok := readOnlyEndpoints[Endpoint{req.Method, req.URL.Path}]; !ok {
+			return ErrForbiddenEndpoint
+		}
+		if previousRedirect != nil {
+			return previousRedirect(req, via)
+		}
+		if len(via) >= 5 {
+			return fmt.Errorf("too many Ocean Engine redirects")
+		}
+		return nil
+	}
+	httpClient = &clientCopy
 	if strings.TrimSpace(session.CSRFToken) == "" {
 		session.CSRFToken = cookieValue(session.Cookies, "csrftoken")
 	}
-	return &Client{BaseURL: base, HTTPClient: httpClient, Session: session, AdvertiserID: advertiserID, UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0", Delay: 500 * time.Millisecond}, nil
+	return &Client{BaseURL: base, HTTPClient: httpClient, Session: session, AdvertiserID: advertiserID, UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0", Delay: 500 * time.Millisecond, MaxAttempts: 3}, nil
 }
 
 func cookieValue(header, name string) string {
@@ -99,6 +119,14 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 	}
 	if _, ok := readOnlyEndpoints[Endpoint{method, endpointPath}]; !ok {
 		return nil, fmt.Errorf("%w: %s %s", ErrForbiddenEndpoint, method, path)
+	}
+	bodyBytes := []byte(nil)
+	if body != nil {
+		var readErr error
+		bodyBytes, readErr = io.ReadAll(io.LimitReader(body, 8<<20))
+		if readErr != nil {
+			return nil, readErr
+		}
 	}
 	if c.Delay > 0 {
 		timer := time.NewTimer(c.Delay)
@@ -127,39 +155,78 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 		query.Set("aadvid", c.AdvertiserID)
 	}
 	u.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return nil, err
+	attempts := c.MaxAttempts
+	if attempts < 1 {
+		attempts = 1
 	}
-	req.Header.Set("User-Agent", c.UserAgent)
 	origin := c.BaseURL.Scheme + "://" + c.BaseURL.Host
-	req.Header.Set("Origin", origin)
-	if c.AdvertiserID != "" {
-		req.Header.Set("Referer", origin+"/promotion/promote-manage/ad?aadvid="+url.QueryEscape(c.AdvertiserID))
-	} else if strings.EqualFold(c.BaseURL.Host, "business.oceanengine.com") {
-		req.Header.Set("Referer", origin+"/")
+	for attempt := 1; attempt <= attempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(bodyBytes))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", c.UserAgent)
+		req.Header.Set("Origin", origin)
+		if c.AdvertiserID != "" {
+			req.Header.Set("Referer", origin+"/promotion/promote-manage/ad?aadvid="+url.QueryEscape(c.AdvertiserID))
+		} else if strings.EqualFold(c.BaseURL.Host, "business.oceanengine.com") {
+			req.Header.Set("Referer", origin+"/")
+		}
+		req.Header.Set("Cookie", c.Session.Cookies)
+		if c.Session.CSRFToken != "" {
+			req.Header.Set("x-csrftoken", c.Session.CSRFToken)
+		}
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		resp, requestErr := c.HTTPClient.Do(req)
+		if requestErr != nil {
+			if attempt < attempts {
+				if err := waitRetry(ctx, attempt); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			return nil, fmt.Errorf("oceanengine request failed: %w", requestErr)
+		}
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			_ = resp.Body.Close()
+			if attempt < attempts {
+				if err := waitRetry(ctx, attempt); err != nil {
+					return nil, err
+				}
+				continue
+			}
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("oceanengine HTTP status %d", resp.StatusCode)
+		}
+		var payload map[string]any
+		decodeErr := json.NewDecoder(resp.Body).Decode(&payload)
+		_ = resp.Body.Close()
+		if decodeErr != nil {
+			return nil, fmt.Errorf("decode Ocean Engine response: %w", decodeErr)
+		}
+		if code, ok := payload["code"].(float64); ok && code != 0 {
+			return nil, fmt.Errorf("%w: business code %.0f", ErrSessionInvalid, code)
+		}
+		return payload, nil
 	}
-	req.Header.Set("Cookie", c.Session.Cookies)
-	if c.Session.CSRFToken != "" {
-		req.Header.Set("x-csrftoken", c.Session.CSRFToken)
+	return nil, fmt.Errorf("oceanengine request attempts exhausted")
+}
+
+func waitRetry(ctx context.Context, attempt int) error {
+	delay := time.Duration(1<<uint(attempt-1)) * 100 * time.Millisecond
+	if delay > 2*time.Second {
+		delay = 2 * time.Second
 	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("oceanengine request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("oceanengine HTTP status %d", resp.StatusCode)
-	}
-	var payload map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode Ocean Engine response: %w", err)
-	}
-	if code, ok := payload["code"].(float64); ok && code != 0 {
-		return nil, fmt.Errorf("%w: business code %.0f", ErrSessionInvalid, code)
-	}
-	return payload, nil
 }

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cookies.local/contracts/connector-oceanengine-point-in-time-v1",
+  "title": "Ocean Engine Point-in-Time Canonical Snapshot",
+  "type": "object",
+  "required": ["dataset_version", "prediction_cutoff", "facts"],
+  "properties": {
+    "dataset_version": {"const": "connector-oceanengine-point-in-time-v1"},
+    "prediction_cutoff": {"type": "string", "format": "date-time"},
+    "facts": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/fact"}
+    }
+  },
+  "$defs": {
+    "fact": {
+      "type": "object",
+      "required": [
+        "organization_id", "project_id", "source_system", "source_ref",
+        "ingest_run_id", "schema_version", "payload_hash", "collected_at",
+        "available_at", "data_through", "valid_from", "quality_status",
+        "evidence_ref"
+      ],
+      "properties": {
+        "organization_id": {"type": "string", "minLength": 1},
+        "project_id": {"type": "string", "minLength": 1},
+        "source_system": {"const": "ocean_engine"},
+        "source_ref": {"type": "string", "minLength": 1},
+        "ingest_run_id": {"type": "string", "minLength": 1},
+        "schema_version": {"type": "string", "minLength": 1},
+        "payload_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "collected_at": {"type": "string", "format": "date-time"},
+        "available_at": {"type": "string", "format": "date-time"},
+        "data_through": {"type": "string", "format": "date-time"},
+        "valid_from": {"type": "string", "format": "date-time"},
+        "valid_to": {"type": ["string", "null"], "format": "date-time"},
+        "quality_status": {"enum": ["accept", "reject", "quarantine", "warning"]},
+        "evidence_ref": {"type": "string", "minLength": 1},
+        "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+        "amount_unit": {"type": "string", "minLength": 1},
+        "metric_definition_version": {"type": "string", "minLength": 1},
+        "window_start": {"type": "string", "format": "date-time"},
+        "window_end": {"type": "string", "format": "date-time"},
+        "granularity": {"type": "string", "minLength": 1},
+        "time_zone": {"type": "string", "minLength": 1},
+        "attribution_window": {"type": "string", "minLength": 1},
+        "eligible_as_prelaunch_feature": {"const": false}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
