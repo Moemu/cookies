@@ -10,7 +10,7 @@
     "id": { "type": "string", "minLength": 1 },
     "organization_id": { "type": "string", "minLength": 1 },
     "project_id": { "type": "string", "minLength": 1 },
-    "policy_version": { "const": "delivery-decision-policy/v1" },
+    "policy_version": { "enum": ["delivery-decision-policy/v1", "delivery-decision-policy/v2"] },
     "diagnostic": {
       "type": "object",
       "additionalProperties": false,
@@ -71,8 +71,13 @@
             }
           },
           "risks": { "type": "array", "items": { "type": "string" } },
-          "uncertainty": { "enum": ["low", "medium", "high"] }
-          ,"calibration_manifest": { "$ref": "delivery-platform-configuration-v2.json#/$defs/CalibrationManifestBinding" }
+          "uncertainty": { "enum": ["low", "medium", "high"] },
+          "calibration_manifest": { "$ref": "delivery-platform-configuration-v2.json#/$defs/CalibrationManifestBinding" },
+          "optimization_focus": { "type": "string" },
+          "proposed_action": { "type": "string" },
+          "action_magnitude_percent": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "scenario": { "type": "string" },
+          "scenario_probability": { "type": "number", "minimum": 0, "maximum": 1 }
         }
       }
     },

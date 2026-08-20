@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { deliveryAlertApi, deliveryExecutionApi } from '../src/api/delivery.ts'
 
-test('delivery alert client uses only project-scoped evaluate, list, and PATCH actions', async t => {
+test('delivery alert client keeps project-scoped historical actions', async t => {
   const originalFetch = globalThis.fetch
   const calls: Array<{ url: string; init?: RequestInit }> = []
   globalThis.fetch = async (url, init) => {
@@ -33,6 +33,24 @@ test('delivery alert client uses only project-scoped evaluate, list, and PATCH a
   assert.equal(listed.length, 2)
   assert.equal(listed[0].owner.displayName, '投手 A')
   assert.equal(updated.status, 'acknowledged')
+})
+
+test('delivery alert client inspects Connector facts without a simulation run', async t => {
+  const originalFetch = globalThis.fetch
+  let call: { url: string; init?: RequestInit } | undefined
+  globalThis.fetch = async (url, init) => {
+    call = { url: String(url), init }
+    return jsonResponse({ items: [], created_count: 0, reused_count: 0, source: 'connector', is_simulated: false, status: 'quarantined', status_reason: 'Attribution is not confirmed.', dataset_version: 'connector-oceanengine-point-in-time-v1', evaluated_at: now, evidence_refs: [] })
+  }
+  t.after(() => { globalThis.fetch = originalFetch })
+
+  const result = await deliveryAlertApi.inspect('project one', 'plan/1', 14)
+
+  assert.equal(call?.url, '/api/delivery/v1/projects/project%20one/alerts:inspect')
+  assert.equal(call?.init?.method, 'POST')
+  assert.deepEqual(JSON.parse(call?.init?.body as string), { plan_id: 'plan/1', window_days: 14 })
+  assert.equal(result.status, 'quarantined')
+  assert.equal(result.isSimulated, false)
 })
 
 const now = '2026-08-04T08:00:00.000Z'

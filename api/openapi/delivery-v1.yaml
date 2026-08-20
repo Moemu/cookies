@@ -1165,6 +1165,45 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}/mechanistic-simulation-run:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/PlanID'
+      - $ref: '#/components/parameters/PlanVersion'
+    get:
+      operationId: getLatestPrelaunchMechanisticSimulation
+      summary: Read the latest persisted simulation for one immutable plan version
+      responses:
+        '200':
+          description: Latest Mechanistic Simulation v0 result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MechanisticSimulationResult' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/alerts:inspect:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      operationId: inspectDeliveryConnectorMetrics
+      summary: Inspect post-launch Connector facts and persist eligible alerts
+      description: >-
+        The inspection reads point-in-time facts for the plan advertiser account.
+        Quarantined, stale, or incomplete metrics do not create business alerts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConnectorInspectionRequest' }
+      responses:
+        '200':
+          description: Connector quality status and eligible persisted alerts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConnectorInspectionResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/alerts:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -2343,6 +2382,11 @@ components:
           items: { type: string }
         uncertainty: { type: string, enum: [low, medium, high] }
         calibration_manifest: { $ref: '#/components/schemas/OceanEngineCalibrationManifestBinding' }
+        optimization_focus: { type: string }
+        proposed_action: { type: string }
+        action_magnitude_percent: { type: integer, minimum: 0, maximum: 100 }
+        scenario: { type: string }
+        scenario_probability: { type: number, minimum: 0, maximum: 1 }
     DeliveryDecision:
       type: object
       additionalProperties: false
@@ -2352,7 +2396,7 @@ components:
         id: { type: string }
         organization_id: { type: string }
         project_id: { type: string }
-        policy_version: { type: string, const: delivery-decision-policy/v1 }
+        policy_version: { type: string, enum: [delivery-decision-policy/v1, delivery-decision-policy/v2] }
         diagnostic:
           type: object
           additionalProperties: false
@@ -3118,7 +3162,7 @@ components:
         plan_id: { type: string }
         plan_version: { type: integer, minimum: 1 }
         schema_version: { type: string, const: delivery-mechanistic-simulation/v0 }
-        model_version: { type: string, const: delivery-mechanistic-monte-carlo/v0 }
+        model_version: { type: string, const: delivery-mechanistic-monte-carlo/v0.1 }
         prior_set_version: { type: string }
         prior_set: { $ref: '#/components/schemas/SimulationPriorSet' }
         manifest_binding: { $ref: '#/components/schemas/CalibrationManifestBinding' }
@@ -3321,25 +3365,25 @@ components:
     DeliveryMonitoringAlert:
       type: object
       additionalProperties: false
-      required: [id, organization_id, project_id, plan_id, execution_id, simulation_run_id, monitored_entity, type, rule_id, rule_version, fingerprint, severity, status, version, window, metric_definition, owner, evidence_refs, source, is_simulated, scenario, dataset_version, fixture_version, freshness, created_by, created_at, updated_at]
+      required: [id, organization_id, project_id, plan_id, execution_id, monitored_entity, type, rule_id, rule_version, fingerprint, severity, status, version, window, metric_definition, owner, evidence_refs, source, is_simulated, scenario, dataset_version, fixture_version, freshness, created_by, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         project_id: { type: string }
         plan_id: { type: string, minLength: 1 }
-        execution_id: { type: string, minLength: 1 }
+        execution_id: { type: string }
         simulation_run_id: { type: string, minLength: 1 }
         monitored_entity:
           type: object
           additionalProperties: false
           required: [type, id, advertiser_id]
           properties:
-            type: { type: string, const: delivery_plan }
+            type: { type: string, enum: [delivery_plan, platform_promotion] }
             id: { type: string }
             advertiser_id: { type: string }
         type: { $ref: '#/components/schemas/AlertType' }
         rule_id: { type: string }
-        rule_version: { type: string, const: v3 }
+        rule_version: { type: string, minLength: 1 }
         fingerprint: { type: string, minLength: 1 }
         severity: { $ref: '#/components/schemas/AlertSeverity' }
         status: { $ref: '#/components/schemas/AlertStatus' }
@@ -3350,10 +3394,10 @@ components:
           type: array
           minItems: 1
           items: { type: string }
-        source: { type: string, const: post_launch_simulator }
-        is_simulated: { type: boolean, const: true }
-        scenario: { $ref: '#/components/schemas/MonitoringFixture' }
-        dataset_version: { type: string, const: delivery-outcome-scenario/v1 }
+        source: { type: string, enum: [post_launch_simulator, demo_fixture, connector] }
+        is_simulated: { type: boolean }
+        scenario: { type: string, enum: [normal_day, anomaly_day, stale_data, insufficient_data, connector_inspection] }
+        dataset_version: { type: string, minLength: 1 }
         fixture_version: { type: string, minLength: 1 }
         acknowledged_at:
           oneOf:
@@ -3418,8 +3462,35 @@ components:
           oneOf:
             - { type: string, minLength: 1 }
             - { type: 'null' }
-        source: { type: string, const: post_launch_simulator }
-        is_simulated: { type: boolean, const: true }
+        source: { type: string, const: connector }
+        is_simulated: { type: boolean, const: false }
+    ConnectorInspectionRequest:
+      type: object
+      additionalProperties: false
+      required: [plan_id]
+      properties:
+        plan_id: { type: string, minLength: 1 }
+        window_days: { type: integer, minimum: 2, maximum: 90, default: 14 }
+    ConnectorInspectionResult:
+      type: object
+      additionalProperties: false
+      required: [items, created_count, reused_count, source, is_simulated, status, dataset_version, evaluated_at, evidence_refs]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DeliveryMonitoringAlert' }
+        created_count: { type: integer, minimum: 0 }
+        reused_count: { type: integer, minimum: 0 }
+        source: { type: string, const: connector }
+        is_simulated: { type: boolean, const: false }
+        status: { type: string, enum: [ready, insufficient_data, quarantined, stale, unavailable] }
+        status_reason: { type: string }
+        dataset_version: { type: string, minLength: 1 }
+        evaluated_at: { type: string, format: date-time }
+        data_through: { type: string, format: date-time }
+        evidence_refs:
+          type: array
+          items: { type: string }
     UpdateAlert:
       type: object
       additionalProperties: false

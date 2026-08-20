@@ -18,7 +18,7 @@
     "plan_id": { "type": "string" },
     "plan_version": { "type": "integer", "minimum": 1 },
     "schema_version": { "const": "delivery-mechanistic-simulation/v0" },
-    "model_version": { "const": "delivery-mechanistic-monte-carlo/v0" },
+    "model_version": { "const": "delivery-mechanistic-monte-carlo/v0.1" },
     "prior_set_version": { "type": "string", "minLength": 1 },
     "prior_set": { "type": "object" },
     "manifest_binding": {

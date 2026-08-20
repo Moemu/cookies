@@ -96,12 +96,16 @@ func TestDecisionWorkflowServiceDiagnosesThenCompilesWithoutAuthority(t *testing
 		t.Fatalf("blocked decision=%#v err=%v", blocked, err)
 	}
 	repository := service.Repository.(*memoryRepository)
-	repository.executions = append(repository.executions, ExecutionResult{ChangeSet: ChangeSet{PlanID: plan.ID}, Execution: Execution{ID: "execution-decision", OrganizationID: actor.OrganizationID, ProjectID: "project_a", Status: ExecutionSucceeded}})
-	repository.simulations = append(repository.simulations, OutcomeSimulationRun{ID: "simulation-decision", OrganizationID: actor.OrganizationID, ProjectID: "project_a", ExecutionID: "execution-decision", PlanID: plan.ID, PlanVersion: plan.CurrentVersionNumber, InputHash: strings.Repeat("a", 64)})
-	repository.metrics = append(repository.metrics,
-		DeliveryMetricSnapshot{ID: "decision-baseline", OrganizationID: actor.OrganizationID, ProjectID: "project_a", ExecutionID: "execution-decision", SimulationRunID: "simulation-decision", WindowSequence: 1, RawMetrics: RawMetrics{SpendCents: 10000, Conversions: 10}},
-		DeliveryMetricSnapshot{ID: "decision-current", OrganizationID: actor.OrganizationID, ProjectID: "project_a", ExecutionID: "execution-decision", SimulationRunID: "simulation-decision", WindowSequence: 2, RawMetrics: RawMetrics{SpendCents: 15000, Conversions: 10}},
-	)
+	baselineSpend, baselineImpressions, baselineClicks, baselineConversions := 10000.0, 1000.0, 100.0, 10.0
+	currentSpend, currentImpressions, currentClicks, currentConversions := 15000.0, 1000.0, 100.0, 10.0
+	repository.mechanisticSimulations = append(repository.mechanisticSimulations, MechanisticSimulationResult{
+		ID: "simulation-decision", OrganizationID: actor.OrganizationID, ProjectID: "project_a", PlanID: plan.ID, PlanVersion: plan.CurrentVersionNumber,
+		SchemaVersion: MechanisticSimulationSchemaVersion, PriorSetVersion: "prior/v1", PriorSet: SimulationPriorSet{CPM: SimulationRangePrior{Unit: "CNY_minor_per_1000_impressions"}}, InputSnapshotHash: strings.Repeat("a", 64), Status: "completed",
+		MetricWindows: []MechanisticMetricWindow{
+			{Sequence: 1, Start: time.Now(), End: time.Now().Add(24 * time.Hour), Metrics: map[string]SimulationQuantiles{"spend": {Available: true, P50: &baselineSpend}, "impressions": {Available: true, P50: &baselineImpressions}, "clicks": {Available: true, P50: &baselineClicks}, "true_conversions": {Available: true, P50: &baselineConversions}}},
+			{Sequence: 2, Start: time.Now().Add(24 * time.Hour), End: time.Now().Add(48 * time.Hour), Metrics: map[string]SimulationQuantiles{"spend": {Available: true, P50: &currentSpend}, "impressions": {Available: true, P50: &currentImpressions}, "clicks": {Available: true, P50: &currentClicks}, "true_conversions": {Available: true, P50: &currentConversions}}},
+		},
+	})
 	decision, err := service.GenerateDecision(ctx, actor, "project_a", plan.ID, plan.CurrentVersionNumber)
 	if err != nil || decision.Diagnostic.Code != "ready" || len(decision.Candidates) != 3 {
 		t.Fatalf("ready decision=%#v err=%v", decision, err)
@@ -897,6 +901,7 @@ type memoryRepository struct {
 	executions                  []ExecutionResult
 	metrics                     []DeliveryMetricSnapshot
 	simulations                 []OutcomeSimulationRun
+	mechanisticSimulations      []MechanisticSimulationResult
 	alerts                      map[string]DeliveryAlert
 	decisions                   map[string]DeliveryDecision
 	selections                  map[string]DecisionSelection
@@ -1390,6 +1395,32 @@ func (r *memoryRepository) GetLatestOutcomeSimulation(_ context.Context, organiz
 		}
 	}
 	return OutcomeSimulationRun{}, nil, ErrNotFound
+}
+func (r *memoryRepository) CreateOrGetMechanisticSimulation(_ context.Context, value MechanisticSimulationResult, _ string) (MechanisticSimulationResult, bool, error) {
+	for _, existing := range r.mechanisticSimulations {
+		if existing.ID == value.ID {
+			return existing, true, nil
+		}
+	}
+	r.mechanisticSimulations = append(r.mechanisticSimulations, value)
+	return value, false, nil
+}
+func (r *memoryRepository) GetMechanisticSimulation(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, id string) (MechanisticSimulationResult, error) {
+	for _, value := range r.mechanisticSimulations {
+		if value.OrganizationID == organizationID && value.ProjectID == projectID && value.ID == id {
+			return value, nil
+		}
+	}
+	return MechanisticSimulationResult{}, ErrNotFound
+}
+func (r *memoryRepository) GetLatestMechanisticSimulation(_ context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, planID string, version int) (MechanisticSimulationResult, error) {
+	for index := len(r.mechanisticSimulations) - 1; index >= 0; index-- {
+		value := r.mechanisticSimulations[index]
+		if value.OrganizationID == organizationID && value.ProjectID == projectID && value.PlanID == planID && value.PlanVersion == version {
+			return value, nil
+		}
+	}
+	return MechanisticSimulationResult{}, ErrNotFound
 }
 func (r *memoryRepository) UpsertAlert(_ context.Context, value DeliveryAlert) (DeliveryAlert, error) {
 	if r.alerts == nil {

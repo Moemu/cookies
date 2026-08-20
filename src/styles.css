@@ -2449,6 +2449,12 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .delivery-optimization-stale > span { display: grid; gap: 3px; }
 .delivery-optimization-stale b { font-size: 11px; }
 .delivery-optimization-stale small { color: #806b42; font-size: 9px; line-height: 1.5; }
+.delivery-optimization-history { border: 1px solid var(--line); background: var(--surface); }
+.delivery-optimization-history summary { cursor: pointer; padding: 12px 16px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.delivery-optimization-history > div { display: grid; border-top: 1px solid var(--line); }
+.delivery-optimization-history p { display: flex; justify-content: space-between; gap: 16px; margin: 0; padding: 10px 16px; font-size: 10px; }
+.delivery-optimization-history p + p { border-top: 1px solid var(--line); }
+.delivery-optimization-history p span { color: var(--muted); text-align: right; }
 .delivery-proposal-review { overflow: hidden; margin: 0 20px 20px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(20, 55, 92, .08); }
 .delivery-proposal-review-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 18px 20px; background: linear-gradient(135deg, #f4f9ff, #fff); border-bottom: 1px solid var(--line); }
 .delivery-proposal-review-heading > div { display: grid; gap: 5px; }

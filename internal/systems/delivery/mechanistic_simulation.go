@@ -17,7 +17,7 @@ import (
 
 const (
 	MechanisticSimulationSchemaVersion = "delivery-mechanistic-simulation/v0"
-	MechanisticSimulationModelVersion  = "delivery-mechanistic-monte-carlo/v0"
+	MechanisticSimulationModelVersion  = "delivery-mechanistic-monte-carlo/v0.1"
 	MechanisticThresholdVersion        = "delivery-mechanistic-scenarios/v0"
 	CalibrationStatusAssumptionDriven  = "assumption_driven"
 )
@@ -227,6 +227,7 @@ type MechanisticSimulationEnvelope struct {
 type mechanisticSimulationRepository interface {
 	CreateOrGetMechanisticSimulation(context.Context, MechanisticSimulationResult, string) (MechanisticSimulationResult, bool, error)
 	GetMechanisticSimulation(context.Context, contract.OrganizationID, contract.ProjectID, string) (MechanisticSimulationResult, error)
+	GetLatestMechanisticSimulation(context.Context, contract.OrganizationID, contract.ProjectID, string, int) (MechanisticSimulationResult, error)
 }
 
 func (s Service) mechanisticSimulations() (mechanisticSimulationRepository, error) {
@@ -308,6 +309,23 @@ func (s Service) GetPrelaunchMechanisticSimulation(ctx context.Context, actor co
 		return MechanisticSimulationResult{}, err
 	}
 	return repository.GetMechanisticSimulation(ctx, actor.OrganizationID, projectID, id)
+}
+
+func (s Service) GetLatestPrelaunchMechanisticSimulation(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID string, version int) (MechanisticSimulationResult, error) {
+	if err := s.ready(actor, projectID, ScopeRead); err != nil {
+		return MechanisticSimulationResult{}, err
+	}
+	if strings.TrimSpace(planID) == "" || version < 1 {
+		return MechanisticSimulationResult{}, ErrInvalidRequest
+	}
+	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
+		return MechanisticSimulationResult{}, err
+	}
+	repository, err := s.mechanisticSimulations()
+	if err != nil {
+		return MechanisticSimulationResult{}, err
+	}
+	return repository.GetLatestMechanisticSimulation(ctx, actor.OrganizationID, projectID, planID, version)
 }
 
 type mechanisticSample struct {
@@ -620,18 +638,27 @@ func draftMechanisticRecommendations(scenarios []SimulationScenarioProbability, 
 	makeDraft := func(kind, target, rationale string) SimulationRecommendationDraft {
 		return SimulationRecommendationDraft{RecommendationType: kind, TargetField: target, CurrentValue: "frozen_configuration", SuggestedRange: [2]float64{0, 0}, ExpectedEffectRange: [2]float64{0, 0}, Confidence: "low", EffectBasis: "rule_constraint", Rationale: rationale, EvidenceRefs: append([]string(nil), evidence...), Risks: []string{"Simulation assumptions can differ from platform outcomes."}, Guardrails: []string{"Do not execute automatically.", "Use a controlled test after human approval."}, RequiresHumanReview: true}
 	}
+	result := []SimulationRecommendationDraft{}
 	if probabilities["review_rejected"] >= .5 {
-		return []SimulationRecommendationDraft{makeDraft("review_compliance", "material_references", "Review the rejection reason or replace non-compliant material.")}
+		result = append(result, makeDraft("review_compliance", "material_references", "Review the rejection reason or replace non-compliant material."))
 	}
 	if probabilities["tracking_anomaly"] >= .5 {
-		return []SimulationRecommendationDraft{makeDraft("tracking_review", "monitoring_references", "Check tracking before budget or bid changes.")}
+		result = append(result, makeDraft("tracking_review", "monitoring_references", "Check tracking before budget or bid changes."))
 	}
-	result := []SimulationRecommendationDraft{}
 	if probabilities["under_delivery"] >= .5 {
 		result = append(result, makeDraft("delivery_review", "platform_configuration.payload.ocean_engine.project", "Review delivery constraints and use a controlled test."))
 	}
+	if probabilities["cost_pressure"] >= .5 {
+		result = append(result, makeDraft("cost_review", "platform_configuration.payload.ocean_engine.project.budget_and_bidding", "Review cost assumptions before increasing budget or bid."))
+	}
 	if probabilities["creative_fatigue"] >= .5 {
 		result = append(result, makeDraft("creative_test", "material_references", "Consider a controlled creative rotation test."))
+	}
+	if probabilities["zero_conversion"] >= .5 {
+		result = append(result, makeDraft("conversion_funnel_review", "platform_configuration.payload.ocean_engine.project.optimization_target_reference", "Check the conversion funnel before changing delivery settings."))
+	}
+	if probabilities["spend_spike"] >= .5 {
+		result = append(result, makeDraft("budget_pacing_review", "platform_configuration.payload.ocean_engine.project.budget_and_bidding.daily_budget_minor", "Review budget pacing before changing the daily budget."))
 	}
 	_ = input
 	return result

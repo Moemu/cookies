@@ -10,7 +10,18 @@ Delivery owns the controlled transition from an immutable CreativePackage to an 
 
 Delivery does not own Creative content, Provider jobs, project identity, post-launch analysis, or reusable experience rules.
 
-## Read-only insights consumer port
+## Simulation and monitoring boundaries
+
+The business monitoring page uses two independent paths.
+
+- Prelaunch simulation reads one immutable `PlanVersion`. It runs the Mechanistic Simulation v0 model with an explicit prior set. It does not require an Execution.
+- Post-launch inspection reads point-in-time Connector facts for the plan advertiser account. It persists only alerts from usable and fresh metric windows.
+
+Connector quality gates fail closed. `quarantine`, stale, and incomplete metric windows return an explicit status. They do not create business alerts. Connector alerts use `source=connector` and `is_simulated=false`.
+
+Decision policy v2 consumes the latest completed Mechanistic Simulation for the exact current `PlanVersion`. It selects the highest-probability scenario that has a recommendation draft. It creates three human-review action plans with low, medium, and high adjustment strength. Creative fatigue creates material-rotation test plans and keeps the budget unchanged. Cost pressure and budget pacing can create bounded budget controls. Each candidate freezes its scenario, probability, focus, action, and action range into the decision hash. Historical decisions remain readable but do not replace the latest current-version decision in the business page.
+
+## Historical insights consumer port
 
 Delivery consumes read-only object and metric facts through its own
 `InsightsConsumer` port. The port returns versioned account → project →
@@ -19,8 +30,8 @@ unit (platform promotion) → material mappings plus project-scoped `spend`, `im
 unit/currency, schema and definition versions, source (`mock`/`replay` or a
 future `connector`), freshness, quality, and evidence references.
 
-Until the Insights Connector publishes its stable contract, the API uses the
-versioned deterministic mock fixtures embedded in Delivery. Replay keeps the
+The historical fixture API uses versioned deterministic mock fixtures embedded
+in Delivery. It is not connected to the business monitoring page. Replay keeps the
 same fixture identities and scope. The current simulation adapter normalizes
 stored OutcomeSimulation windows into the same metric-fact DTO; `EvaluateAlerts`
 then calculates from those facts rather than reading Repository metrics.

@@ -57,6 +57,49 @@ func TestBuildDeliveryDecisionIsDeterministicAndExplainable(t *testing.T) {
 	}
 }
 
+func TestBuildDeliveryDecisionUsesCreativeFatigueForMaterialRotation(t *testing.T) {
+	input := validDecisionEngineInput(t)
+	input.Scenarios = []SimulationScenarioProbability{{Scenario: "steady", Probability: .76}, {Scenario: "creative_fatigue", Probability: .76}, {Scenario: "cost_pressure", Probability: .38}}
+	input.Recommendations = []SimulationRecommendationDraft{{RecommendationType: "creative_test", TargetField: "material_references", RequiresHumanReview: true}}
+	decision, err := BuildDeliveryDecision(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.PolicyVersion != DeliveryDecisionPolicyV2 || decision.Diagnostic.Code != "ready" {
+		t.Fatalf("unexpected scenario policy decision: %#v", decision)
+	}
+	actions := map[string]bool{}
+	for _, candidate := range decision.Candidates {
+		if candidate.OptimizationFocus != "material_rotation" || candidate.Scenario != "creative_fatigue" || candidate.ScenarioProbability != .76 || candidate.BudgetChangePercent != 0 {
+			t.Fatalf("creative fatigue produced a budget candidate: %#v", candidate)
+		}
+		actions[candidate.ProposedAction] = true
+	}
+	if len(actions) != 3 || !actions["controlled_material_rotation_test"] {
+		t.Fatalf("material rotation actions are not distinct: %#v", actions)
+	}
+}
+
+func TestBuildDeliveryDecisionUsesCostPressureForDistinctBudgetPlans(t *testing.T) {
+	input := validDecisionEngineInput(t)
+	input.Scenarios = []SimulationScenarioProbability{{Scenario: "cost_pressure", Probability: .8}}
+	input.Recommendations = []SimulationRecommendationDraft{{RecommendationType: "cost_review", RequiresHumanReview: true}}
+	decision, err := BuildDeliveryDecision(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := map[string]bool{}
+	for _, candidate := range decision.Candidates {
+		if candidate.OptimizationFocus != "cost_control" || candidate.BudgetChangePercent > 0 {
+			t.Fatalf("cost pressure produced an invalid candidate: %#v", candidate)
+		}
+		actions[candidate.ProposedAction] = true
+	}
+	if len(actions) != 3 {
+		t.Fatalf("cost candidates are duplicated: %#v", actions)
+	}
+}
+
 func TestCompileDeliveryWorkflowHardStopsRemoteWrite(t *testing.T) {
 	decision, err := BuildDeliveryDecision(validDecisionEngineInput(t))
 	if err != nil {

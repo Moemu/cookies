@@ -1,5 +1,7 @@
 # 投放效果情景模拟器计划
 
+> 历史文档。业务页面已停止使用该投后模拟器。上线前模拟使用 Mechanistic Simulation v0。上线后告警使用 Connector 巡检。
+
 > 2026-08-11：本文中的 `ManualActionPackage` 链路已被当前运行时废弃，仅保留为历史规划背景。活动闭环止于第二次人工审批，详见 [`architecture-and-implementation.md`](./architecture-and-implementation.md)。
 
 | 属性 | 内容 |

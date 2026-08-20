@@ -2,7 +2,9 @@ package delivery
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 const (
 	DeliveryDecisionSchemaV1         = "delivery-decision/v1"
 	DeliveryDecisionPolicyV1         = "delivery-decision-policy/v1"
+	DeliveryDecisionPolicyV2         = "delivery-decision-policy/v2"
 	CompiledDeliveryWorkflowSchemaV1 = "compiled-delivery-workflow/v1"
 	DeliveryWorkflowCompilerV1       = "oceanengine-workflow-compiler/v1"
 	OceanEngineCapabilityContractV01 = "oceanengine-capability/v0.1"
@@ -65,6 +68,11 @@ type DeliveryDecisionCandidate struct {
 	Risks               []string                   `json:"risks"`
 	Uncertainty         string                     `json:"uncertainty"`
 	CalibrationManifest CalibrationManifestBinding `json:"calibration_manifest"`
+	OptimizationFocus   string                     `json:"optimization_focus,omitempty"`
+	ProposedAction      string                     `json:"proposed_action,omitempty"`
+	ActionMagnitude     int64                      `json:"action_magnitude_percent,omitempty"`
+	Scenario            string                     `json:"scenario,omitempty"`
+	ScenarioProbability float64                    `json:"scenario_probability,omitempty"`
 }
 
 type DecisionDiagnostic struct {
@@ -109,6 +117,11 @@ func (d DeliveryDecision) canonicalPayload() any {
 		Risks               []string                   `json:"risks"`
 		Uncertainty         string                     `json:"uncertainty"`
 		CalibrationManifest CalibrationManifestBinding `json:"calibration_manifest"`
+		OptimizationFocus   string                     `json:"optimization_focus,omitempty"`
+		ProposedAction      string                     `json:"proposed_action,omitempty"`
+		ActionMagnitude     int64                      `json:"action_magnitude_percent,omitempty"`
+		Scenario            string                     `json:"scenario,omitempty"`
+		ScenarioProbability float64                    `json:"scenario_probability,omitempty"`
 	}
 	candidates := make([]canonicalCandidate, len(d.Candidates))
 	for index, candidate := range d.Candidates {
@@ -117,6 +130,7 @@ func (d DeliveryDecision) canonicalPayload() any {
 			ID: candidate.ID, Kind: candidate.Kind,
 			Target:              canonicalCandidateTarget{target.SchemaVersion, target.ConfigurationID, target.VersionNumber, target.Platform, target.ProfileVersion, target.Intent, target.CanonicalHash},
 			BudgetChangePercent: candidate.BudgetChangePercent, Rationale: candidate.Rationale, Constraints: candidate.Constraints, Risks: candidate.Risks, Uncertainty: candidate.Uncertainty, CalibrationManifest: candidate.CalibrationManifest,
+			OptimizationFocus: candidate.OptimizationFocus, ProposedAction: candidate.ProposedAction, ActionMagnitude: candidate.ActionMagnitude, Scenario: candidate.Scenario, ScenarioProbability: candidate.ScenarioProbability,
 		}
 	}
 	return struct {
@@ -135,7 +149,7 @@ func (d DeliveryDecision) ComputeCanonicalHash() (string, error) {
 }
 
 func (d DeliveryDecision) Validate() error {
-	if d.SchemaVersion != DeliveryDecisionSchemaV1 || d.PolicyVersion != DeliveryDecisionPolicyV1 || strings.TrimSpace(d.ID) == "" || d.OrganizationID == "" || d.ProjectID == "" ||
+	if d.SchemaVersion != DeliveryDecisionSchemaV1 || (d.PolicyVersion != DeliveryDecisionPolicyV1 && d.PolicyVersion != DeliveryDecisionPolicyV2) || strings.TrimSpace(d.ID) == "" || d.OrganizationID == "" || d.ProjectID == "" ||
 		strings.TrimSpace(d.Inputs.PlanID) == "" || d.Inputs.PlanVersion < 1 || !isLowercaseSHA256(d.Inputs.PlanCanonicalHash) ||
 		strings.TrimSpace(d.Inputs.IntentID) == "" || d.Inputs.IntentVersion < 1 || !isLowercaseSHA256(d.Inputs.IntentCanonicalHash) ||
 		strings.TrimSpace(d.Inputs.ConfigurationID) == "" || d.Inputs.ConfigurationVersion < 1 || !isLowercaseSHA256(d.Inputs.ConfigurationCanonicalHash) {
@@ -183,6 +197,9 @@ func (d DeliveryDecision) Validate() error {
 		if candidate.TargetConfiguration.ConfigurationID != d.Inputs.ConfigurationID || candidate.TargetConfiguration.VersionNumber != d.Inputs.ConfigurationVersion+1 || candidate.TargetConfiguration.Intent.IntentID != d.Inputs.IntentID || candidate.TargetConfiguration.Intent.VersionNumber != d.Inputs.IntentVersion || candidate.TargetConfiguration.Intent.CanonicalHash != d.Inputs.IntentCanonicalHash {
 			return ErrApprovalContentMismatch
 		}
+		if d.PolicyVersion == DeliveryDecisionPolicyV2 && (strings.TrimSpace(candidate.OptimizationFocus) == "" || strings.TrimSpace(candidate.ProposedAction) == "" || strings.TrimSpace(candidate.Scenario) == "" || candidate.ScenarioProbability < 0 || candidate.ScenarioProbability > 1 || candidate.ActionMagnitude < 0 || candidate.ActionMagnitude > 100) {
+			return ErrInvalidState
+		}
 		for _, constraint := range candidate.Constraints {
 			if !constraint.Passed {
 				return ErrInvalidState
@@ -196,16 +213,18 @@ func (d DeliveryDecision) Validate() error {
 }
 
 type DecisionEngineInput struct {
-	DecisionID     string
-	OrganizationID contract.OrganizationID
-	ProjectID      contract.ProjectID
-	Plan           DeliveryPlan
-	Simulation     OutcomeSimulationRun
-	Baseline       DeliveryMetricSnapshot
-	Current        DeliveryMetricSnapshot
-	Evidence       []string
-	CreatedBy      string
-	CreatedAt      time.Time
+	DecisionID      string
+	OrganizationID  contract.OrganizationID
+	ProjectID       contract.ProjectID
+	Plan            DeliveryPlan
+	Simulation      OutcomeSimulationRun
+	Baseline        DeliveryMetricSnapshot
+	Current         DeliveryMetricSnapshot
+	Scenarios       []SimulationScenarioProbability
+	Recommendations []SimulationRecommendationDraft
+	Evidence        []string
+	CreatedBy       string
+	CreatedAt       time.Time
 }
 
 // BuildDeliveryDecision is a pure, deterministic policy evaluation. Identity
@@ -235,25 +254,16 @@ func BuildDeliveryDecision(input DecisionEngineInput) (DeliveryDecision, error) 
 		return DeliveryDecision{}, err
 	}
 	cpaRatioBP := currentCPA * 10000 / maxInt64(1, baselineCPA)
-	balancedReduction := clampInt64((cpaRatioBP-10000)/1000, 5, 20)
-	reductions := []struct {
-		kind      DecisionCandidateKind
-		percent   int64
-		uncertain string
-	}{
-		{DecisionCandidateConservative, 20, "low"},
-		{DecisionCandidateBalanced, balancedReduction, "medium"},
-		{DecisionCandidateExploratory, 5, "high"},
-	}
-	candidates := make([]DeliveryDecisionCandidate, 0, len(reductions))
-	for _, option := range reductions {
+	options := scenarioDecisionOptions(input.Scenarios, input.Recommendations, cpaRatioBP)
+	candidates := make([]DeliveryDecisionCandidate, 0, len(options))
+	for _, option := range options {
 		target := cloneJSONPointer(configuration)
 		target.VersionNumber++
 		target.ConfigurationProvenance.Kind = ConfigurationGeneratedByDecisionEngine
 		target.ConfigurationProvenance.GeneratorRef = "delivery-decision-engine"
-		target.ConfigurationProvenance.PolicyVersion = DeliveryDecisionPolicyV1
+		target.ConfigurationProvenance.PolicyVersion = DeliveryDecisionPolicyV2
 		baseBudget := target.Payload.OceanEngine.Project.BudgetAndBidding.DailyBudgetMinor
-		targetBudget := baseBudget * (100 - option.percent) / 100
+		targetBudget := baseBudget * (100 + option.budgetChangePercent) / 100
 		if floor := intent.Payload.BudgetBoundary.MinimumDailyMinor; floor != nil && targetBudget < *floor {
 			targetBudget = *floor
 		}
@@ -273,8 +283,9 @@ func BuildDeliveryDecision(input DecisionEngineInput) (DeliveryDecision, error) 
 		candidates = append(candidates, DeliveryDecisionCandidate{
 			ID: candidateID, Kind: option.kind, TargetConfiguration: finalized, BudgetChangePercent: budgetChangePercent(baseBudget, targetBudget),
 			Rationale: []string{
+				fmt.Sprintf("scenario %s has probability %.4f", option.scenario, option.probability),
+				fmt.Sprintf("action %s uses magnitude %d%%", option.action, option.actionMagnitude),
 				fmt.Sprintf("current CPA is %.2fx the baseline CPA", float64(cpaRatioBP)/10000),
-				fmt.Sprintf("policy %s applies a %d%% budget reduction", DeliveryDecisionPolicyV1, option.percent),
 			},
 			Constraints: []DecisionConstraint{
 				{Code: "NON_NEGATIVE_BUDGET", Passed: finalized.Payload.OceanEngine.Project.BudgetAndBidding.DailyBudgetMinor >= 0, Explanation: "candidate daily budget cannot be negative"},
@@ -282,9 +293,10 @@ func BuildDeliveryDecision(input DecisionEngineInput) (DeliveryDecision, error) 
 				{Code: "INTENT_BUDGET_CEILING", Passed: candidateWithinIntentBudget(finalized.Payload.OceanEngine.Project.BudgetAndBidding.DailyBudgetMinor, intent.Payload.BudgetBoundary), Explanation: "candidate daily budget must not exceed the immutable intent budget ceiling"},
 				{Code: "REMOTE_WRITE_PROHIBITED_IN_PHASE_C", Passed: true, Explanation: "selection only prepares a local immutable configuration and workflow"},
 			},
-			Risks:               []string{"conversion volume may fall after budget reduction", "platform readback remains unverified until a later authorized phase"},
+			Risks:               append([]string(nil), option.risks...),
 			Uncertainty:         option.uncertain,
 			CalibrationManifest: finalized.Payload.OceanEngine.CalibrationManifest,
+			OptimizationFocus:   option.focus, ProposedAction: option.action, ActionMagnitude: option.actionMagnitude, Scenario: option.scenario, ScenarioProbability: option.probability,
 		})
 	}
 	for _, candidate := range candidates {
@@ -298,7 +310,7 @@ func BuildDeliveryDecision(input DecisionEngineInput) (DeliveryDecision, error) 
 	sort.Strings(evidence)
 	decision := DeliveryDecision{
 		SchemaVersion: DeliveryDecisionSchemaV1, ID: input.DecisionID, OrganizationID: input.OrganizationID, ProjectID: input.ProjectID,
-		PolicyVersion: DeliveryDecisionPolicyV1, Diagnostic: DecisionDiagnostic{Code: "ready", Explanation: "immutable facts satisfy the single-variable decision policy", NextAction: "select or modify one candidate"},
+		PolicyVersion: DeliveryDecisionPolicyV2, Diagnostic: DecisionDiagnostic{Code: "ready", Explanation: "the latest mechanistic scenarios produced three reviewable action plans", NextAction: "select or modify one candidate"},
 		Inputs: DecisionInputBindings{
 			PlanID: input.Plan.ID, PlanVersion: input.Plan.CurrentVersionNumber, PlanCanonicalHash: input.Plan.CurrentVersion.CanonicalHash,
 			IntentID: intent.IntentID, IntentVersion: intent.VersionNumber, IntentCanonicalHash: intent.CanonicalHash,
@@ -320,6 +332,66 @@ func BuildDeliveryDecision(input DecisionEngineInput) (DeliveryDecision, error) 
 	return decision, nil
 }
 
+type scenarioDecisionOption struct {
+	kind                DecisionCandidateKind
+	budgetChangePercent int64
+	uncertain           string
+	focus               string
+	action              string
+	actionMagnitude     int64
+	scenario            string
+	probability         float64
+	risks               []string
+}
+
+func scenarioDecisionOptions(scenarios []SimulationScenarioProbability, recommendations []SimulationRecommendationDraft, cpaRatioBP int64) []scenarioDecisionOption {
+	probabilities := make(map[string]float64, len(scenarios))
+	for _, scenario := range scenarios {
+		probabilities[scenario.Scenario] = scenario.Probability
+	}
+	recommendationScenario := map[string]string{
+		"review_compliance": "review_rejected", "tracking_review": "tracking_anomaly", "delivery_review": "under_delivery",
+		"cost_review": "cost_pressure", "creative_test": "creative_fatigue", "conversion_funnel_review": "zero_conversion", "budget_pacing_review": "spend_spike",
+	}
+	dominant, recommendationType, dominantProbability := "steady", "maintain_and_observe", probabilities["steady"]
+	for _, recommendation := range recommendations {
+		scenario := recommendationScenario[recommendation.RecommendationType]
+		if scenario == "" {
+			continue
+		}
+		if probability := probabilities[scenario]; probability > dominantProbability || recommendationType == "maintain_and_observe" {
+			dominant, recommendationType, dominantProbability = scenario, recommendation.RecommendationType, probability
+		}
+	}
+	baseRisks := []string{"Simulation assumptions can differ from platform outcomes.", "Platform readback remains unverified until a later authorized phase."}
+	makeOptions := func(focus, conservativeAction, balancedAction, exploratoryAction string, magnitudes [3]int64, budgetChanges [3]int64) []scenarioDecisionOption {
+		return []scenarioDecisionOption{
+			{DecisionCandidateConservative, budgetChanges[0], "low", focus, conservativeAction, magnitudes[0], dominant, dominantProbability, baseRisks},
+			{DecisionCandidateBalanced, budgetChanges[1], "medium", focus, balancedAction, magnitudes[1], dominant, dominantProbability, baseRisks},
+			{DecisionCandidateExploratory, budgetChanges[2], "high", focus, exploratoryAction, magnitudes[2], dominant, dominantProbability, baseRisks},
+		}
+	}
+	switch recommendationType {
+	case "creative_test":
+		return makeOptions("material_rotation", "prepare_material_rotation", "controlled_material_rotation_test", "expanded_material_rotation_test", [3]int64{10, 20, 30}, [3]int64{})
+	case "tracking_review":
+		return makeOptions("tracking_integrity", "verify_primary_conversion_event", "audit_tracking_chain", "parallel_tracking_validation", [3]int64{25, 50, 100}, [3]int64{})
+	case "delivery_review":
+		return makeOptions("delivery_constraints", "review_delivery_restrictions", "controlled_constraint_test", "expanded_constraint_test", [3]int64{25, 50, 100}, [3]int64{})
+	case "review_compliance":
+		return makeOptions("review_compliance", "review_rejection_reason", "replace_flagged_material", "prepare_compliant_material_set", [3]int64{25, 50, 100}, [3]int64{})
+	case "conversion_funnel_review":
+		return makeOptions("conversion_funnel", "verify_conversion_event", "audit_conversion_funnel", "controlled_funnel_test", [3]int64{25, 50, 100}, [3]int64{-5, -10, -20})
+	case "budget_pacing_review":
+		return makeOptions("budget_pacing", "limit_budget_pacing", "tighten_budget_pacing", "strong_budget_pacing_control", [3]int64{5, 10, 20}, [3]int64{-5, -10, -20})
+	case "cost_review":
+		balancedReduction := clampInt64((cpaRatioBP-10000)/100, 10, 15)
+		return makeOptions("cost_control", "limited_cost_control", "cpa_weighted_cost_control", "strong_cost_control", [3]int64{5, balancedReduction, 20}, [3]int64{-5, -balancedReduction, -20})
+	default:
+		return makeOptions("maintain_and_observe", "observe_short_window", "observe_full_horizon", "prepare_controlled_test", [3]int64{25, 50, 100}, [3]int64{})
+	}
+}
+
 func budgetChangePercent(base, target int64) int64 {
 	if base <= 0 {
 		return 0
@@ -338,7 +410,7 @@ func BuildBlockedDeliveryDecision(decisionID string, organizationID contract.Org
 		return DeliveryDecision{}, ErrInvalidState
 	}
 	decision := DeliveryDecision{
-		SchemaVersion: DeliveryDecisionSchemaV1, ID: decisionID, OrganizationID: organizationID, ProjectID: projectID, PolicyVersion: DeliveryDecisionPolicyV1,
+		SchemaVersion: DeliveryDecisionSchemaV1, ID: decisionID, OrganizationID: organizationID, ProjectID: projectID, PolicyVersion: DeliveryDecisionPolicyV2,
 		Diagnostic: DecisionDiagnostic{Code: code, Explanation: explanation, NextAction: nextAction},
 		Inputs: DecisionInputBindings{
 			PlanID: plan.ID, PlanVersion: plan.CurrentVersionNumber, PlanCanonicalHash: plan.CurrentVersion.CanonicalHash,
@@ -791,64 +863,91 @@ func (s Service) GenerateDecision(ctx context.Context, actor contract.ActorConte
 	if !candidateAboveIntentBudgetFloor(currentBudget, plan.CurrentVersion.DeliveryIntent.Payload.BudgetBoundary) || !candidateWithinIntentBudget(currentBudget, plan.CurrentVersion.DeliveryIntent.Payload.BudgetBoundary) {
 		return persistBlocked("platform_pending", "the current platform budget is outside the immutable intent boundary", "create a corrected platform configuration version")
 	}
-	executions, err := s.Repository.ListExecutions(ctx, actor.OrganizationID, projectID, 100)
+	simulationRepository, err := s.mechanisticSimulations()
 	if err != nil {
 		return DeliveryDecision{}, err
 	}
-	var sourceExecution *ExecutionResult
-	for index := range executions {
-		candidate := &executions[index]
-		if candidate.ChangeSet.PlanID == plan.ID && candidate.Execution.Status == ExecutionSucceeded {
-			sourceExecution = candidate
-			break
+	simulation, err := simulationRepository.GetLatestMechanisticSimulation(ctx, actor.OrganizationID, projectID, plan.ID, plan.CurrentVersionNumber)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return persistBlocked("insufficient_data", "no mechanistic simulation is available for the current plan version", "run the prelaunch probability simulation")
 		}
-	}
-	if sourceExecution == nil {
-		return persistBlocked("insufficient_data", "no succeeded rehearsal is available for the current plan", "complete a local platform-operation rehearsal")
-	}
-	simulationRepository, err := s.outcomeSimulations()
-	if err != nil {
 		return DeliveryDecision{}, err
 	}
-	simulation, _, err := simulationRepository.GetLatestOutcomeSimulation(ctx, actor.OrganizationID, projectID, sourceExecution.Execution.ID)
+	if simulation.Status != "completed" {
+		return persistBlocked("platform_pending", "the mechanistic simulation cannot resolve all required platform references", "resolve the pending platform references and run the simulation again")
+	}
+	if len(simulation.MetricWindows) < 2 {
+		return persistBlocked("insufficient_data", "at least two mechanistic metric windows are required", "run a simulation with a prediction horizon of at least two days")
+	}
+	baseline, err := mechanisticDecisionMetric(simulation, simulation.MetricWindows[0], actor.Principal.ID)
 	if err != nil {
-		return persistBlocked("insufficient_data", "no outcome simulation is available for the current rehearsal", "run an outcome simulation")
+		return persistBlocked("insufficient_data", "the first mechanistic window has no usable median metrics", "review the explicit priors and run the simulation again")
 	}
-	metrics, err := s.Repository.ListMetricSnapshots(ctx, actor.OrganizationID, projectID, sourceExecution.Execution.ID, 100)
+	current, err := mechanisticDecisionMetric(simulation, simulation.MetricWindows[len(simulation.MetricWindows)-1], actor.Principal.ID)
 	if err != nil {
-		return DeliveryDecision{}, err
-	}
-	boundMetrics := make([]DeliveryMetricSnapshot, 0, len(metrics))
-	for _, metric := range metrics {
-		if metric.SimulationRunID == simulation.ID {
-			boundMetrics = append(boundMetrics, metric)
-		}
-	}
-	if len(boundMetrics) < 2 {
-		return persistBlocked("insufficient_data", "at least two immutable metric windows are required", "persist baseline and current metric windows")
-	}
-	sort.Slice(boundMetrics, func(i, j int) bool { return boundMetrics[i].WindowSequence < boundMetrics[j].WindowSequence })
-	baseline, current := boundMetrics[0], boundMetrics[len(boundMetrics)-1]
-	if !current.DataThrough.IsZero() && s.now().Sub(current.DataThrough) > 72*time.Hour {
-		return persistBlocked("stale_data", "the latest metric window is older than the decision policy freshness window", "collect a fresh metric window")
+		return persistBlocked("insufficient_data", "the latest mechanistic window has no usable median metrics", "review the explicit priors and run the simulation again")
 	}
 	evidence := []string{
-		"simulation://execution/" + sourceExecution.Execution.ID,
-		"simulation://run/" + simulation.ID,
-		"simulation://metric/" + baseline.ID,
-		"simulation://metric/" + current.ID,
+		"mechanistic-simulation://run/" + simulation.ID,
+		"mechanistic-simulation://window/" + baseline.ID,
+		"mechanistic-simulation://window/" + current.ID,
 	}
 	if ref := strings.TrimSpace(plan.CurrentVersion.PlatformConfiguration.FactProvenance.SnapshotRef); ref != "" {
 		evidence = append(evidence, ref)
 	}
 	decision, err := BuildDeliveryDecision(DecisionEngineInput{
-		DecisionID: decisionID, OrganizationID: actor.OrganizationID, ProjectID: projectID, Plan: plan, Simulation: simulation,
-		Baseline: baseline, Current: current, Evidence: evidence, CreatedBy: actor.Principal.ID, CreatedAt: s.now(),
+		DecisionID: decisionID, OrganizationID: actor.OrganizationID, ProjectID: projectID, Plan: plan,
+		Simulation: OutcomeSimulationRun{ID: simulation.ID, PlanID: simulation.PlanID, PlanVersion: simulation.PlanVersion, InputHash: simulation.InputSnapshotHash},
+		Baseline:   baseline, Current: current, Scenarios: simulation.ScenarioProbabilities, Recommendations: simulation.RecommendationDrafts,
+		Evidence: evidence, CreatedBy: actor.Principal.ID, CreatedAt: s.now(),
 	})
 	if err != nil {
 		return DeliveryDecision{}, err
 	}
 	return repository.CreateDecision(ctx, decision)
+}
+
+func mechanisticDecisionMetric(simulation MechanisticSimulationResult, window MechanisticMetricWindow, actor string) (DeliveryMetricSnapshot, error) {
+	median := func(name string) (int64, error) {
+		metric, ok := window.Metrics[name]
+		if !ok || !metric.Available || metric.P50 == nil || !finite(*metric.P50) || *metric.P50 < 0 {
+			return 0, ErrInvalidState
+		}
+		return int64(math.Round(*metric.P50)), nil
+	}
+	spend, err := median("spend")
+	if err != nil {
+		return DeliveryMetricSnapshot{}, err
+	}
+	impressions, err := median("impressions")
+	if err != nil {
+		return DeliveryMetricSnapshot{}, err
+	}
+	clicks, err := median("clicks")
+	if err != nil {
+		return DeliveryMetricSnapshot{}, err
+	}
+	conversions, err := median("true_conversions")
+	if err != nil {
+		return DeliveryMetricSnapshot{}, err
+	}
+	id := fmt.Sprintf("%s-window-%d", simulation.ID, window.Sequence)
+	currency := strings.TrimSpace(simulation.PriorSet.CPM.Unit)
+	if separator := strings.Index(currency, "_"); separator > 0 {
+		currency = currency[:separator]
+	}
+	if currency == "" {
+		return DeliveryMetricSnapshot{}, ErrInvalidState
+	}
+	return DeliveryMetricSnapshot{
+		ID: id, OrganizationID: simulation.OrganizationID, ProjectID: simulation.ProjectID, SimulationRunID: simulation.ID, PlanID: simulation.PlanID,
+		Source: "mechanistic_simulation", IsSimulated: true, DatasetVersion: simulation.SchemaVersion, FixtureVersion: simulation.PriorSetVersion,
+		WindowSequence: window.Sequence, DataThrough: window.End, Currency: currency, WindowStart: window.Start, WindowEnd: window.End,
+		RawMetrics:       RawMetrics{Impressions: impressions, Clicks: clicks, Conversions: conversions, SpendCents: spend},
+		CalculationBasis: MetricCalculationBasis{Formula: "mechanistic simulation P50 projection", AppliedFactors: []OutcomeSimulationFactor{}, ScenarioEvidence: append([]string(nil), simulation.EvidenceRefs...)},
+		CreatedBy:        actor, CreatedAt: window.End,
+	}, nil
 }
 
 func (s Service) ListDecisions(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, limit int) ([]DeliveryDecision, error) {
