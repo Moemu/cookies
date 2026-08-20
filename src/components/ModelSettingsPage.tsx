@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Check, CircleAlert, KeyRound, LockKeyhole, RotateCcw, Save, ShieldCheck, Trash2 } from 'lucide-react'
 import { useModelConfig } from '../context/ModelConfigContext'
 import { MiyunConnectionSettings } from './MiyunConnectionSettings'
+import { OceanEngineSessionSettings } from './OceanEngineSessionSettings'
 
 function formatCheckedAt(value?: string) {
   if (!value) return '尚未检查'
@@ -52,6 +53,7 @@ export function ModelSettingsPage() {
     </header>
 
     <MiyunConnectionSettings/>
+    <OceanEngineSessionSettings/>
 
     <div className="model-settings-layout">
       <aside className="provider-index" aria-label="模型服务商">

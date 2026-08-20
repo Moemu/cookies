@@ -3273,7 +3273,7 @@ export type ApiAttachExperimentAssetResult = {
  * 哪一段」是设置本身的属性——前端另写一张表，加一个组就要改两处，漏改的那一处
  * 会让新组在页面上凭空消失。
  */
-export type ApiSettingsView = '' | 'thresholds' | 'health' | 'dictionary' | 'permission'
+export type ApiSettingsView = '' | 'thresholds' | 'health' | 'dictionary' | 'permission' | 'ocean-engine-session'
 
 export type ApiSettingGroup = {
   key: string
@@ -5693,6 +5693,15 @@ export type ApiMiyunConnection = {
   session_expires_at?: string; last_verified_at?: string; last_successful_request_at?: string; cooldown_until?: string
   last_error_kind?: string; last_error_code?: string; last_error_at?: string; version: number; created_by: string; created_at: string; updated_at: string
 }
+export type ApiOceanEngineSession = {
+  id: string; organization_id: string; project_id: string
+  status: 'unverified' | 'ready' | 'auth_required' | 'disabled'
+  credential_ref_present: boolean
+  last_verified_at?: string; last_successful_request_at?: string
+  cooldown_until?: string; last_error_kind?: string; last_error_code?: string; last_error_at?: string
+  version: number; created_by: string; created_at: string; updated_at: string
+}
+
 export type ApiMiyunAssetVersionRef = { asset_id: string; version: number }
 export type ApiMediaUnderstandingArtifact = {
   id: string
@@ -6554,6 +6563,9 @@ export const api = {
     request<{ items: ApiThresholdSet[] }>(
       `${insightProjectPath(projectId)}/thresholds/history?limit=${limit}`,
     ),
+  getOceanEngineSession: (projectId: string) => request<ApiOceanEngineSession>(`${insightProjectPath(projectId)}/ocean-engine-session`),
+  updateOceanEngineSession: (projectId: string, body: { session: string; expected_version?: number }) => request<ApiOceanEngineSession>(`${insightProjectPath(projectId)}/ocean-engine-session`, 'PUT', body),
+  verifyOceanEngineSession: (projectId: string, expectedVersion: number) => request<ApiOceanEngineSession>(`${insightProjectPath(projectId)}/ocean-engine-session:verify`, 'POST', { expected_version: expectedVersion }),
   getMiyunConnection: (projectId: string) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`),
   updateMiyunConnection: (projectId: string, body: { session: string; session_expires_at?: string; expected_version?: number }) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`, 'PUT', body),
   verifyMiyunConnection: (projectId: string, expectedVersion: number) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection:verify`, 'POST', { expected_version: expectedVersion }),
