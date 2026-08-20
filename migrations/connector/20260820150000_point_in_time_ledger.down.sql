@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS connector_conversion_revisions;
+DROP TABLE IF EXISTS connector_platform_diagnosis_snapshots;
+DROP TABLE IF EXISTS connector_platform_status_events;
+DROP TABLE IF EXISTS connector_material_metric_windows;
+DROP TABLE IF EXISTS connector_material_bindings;
+DROP TABLE IF EXISTS connector_metric_windows;
+DROP TABLE IF EXISTS connector_configuration_change_events;
+DROP TABLE IF EXISTS connector_configuration_snapshots;
+DROP TABLE IF EXISTS connector_object_snapshots;
+DROP TABLE IF EXISTS connector_raw_snapshots;
+DROP TABLE IF EXISTS connector_sync_runs;

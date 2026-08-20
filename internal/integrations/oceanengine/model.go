@@ -13,6 +13,7 @@ type ObjectKind string
 
 const (
 	ObjectAccount   ObjectKind = "account"
+	ObjectCampaign  ObjectKind = "campaign"
 	ObjectProject   ObjectKind = "project"
 	ObjectPromotion ObjectKind = "promotion"
 	ObjectMaterial  ObjectKind = "material"
@@ -31,7 +32,7 @@ const (
 type AccountRef struct {
 	OrganizationID string `json:"organization_id"`
 	ProjectID      string `json:"project_id"`
-	ExternalID     string `json:"external_id"`
+	SourceRef      string `json:"source_ref"`
 }
 
 type EvidenceRef struct {
@@ -102,7 +103,7 @@ type SyncBatch struct {
 }
 
 func (k ObjectKind) Valid() bool {
-	return k == ObjectAccount || k == ObjectProject || k == ObjectPromotion || k == ObjectMaterial
+	return k == ObjectAccount || k == ObjectCampaign || k == ObjectProject || k == ObjectPromotion || k == ObjectMaterial
 }
 
 func (q QualityStatus) Valid() bool {

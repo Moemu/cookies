@@ -16,11 +16,11 @@
   "$defs": {
     "account": {
       "type": "object",
-      "required": ["organization_id", "project_id", "external_id"],
+      "required": ["organization_id", "project_id", "source_ref"],
       "properties": {
         "organization_id": {"type": "string", "minLength": 1},
         "project_id": {"type": "string", "minLength": 1},
-        "external_id": {"type": "string", "minLength": 1, "description": "Opaque advertiser ID; never a numeric type."}
+        "source_ref": {"type": "string", "minLength": 1, "description": "Local or anonymized Connector reference; never a raw advertiser ID."}
       },
       "additionalProperties": false
     },
