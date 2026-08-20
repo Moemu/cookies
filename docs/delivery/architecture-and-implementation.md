@@ -70,6 +70,10 @@ CompiledWorkflow 显式绑定平台、账户引用、配置身份与 hash，以�
 
 OutcomeSimulation 只接受已成功平台操作演练所绑定的 v2 PlanVersion 和 ChangeSet。相同输入、情景与稳定 seed 产生确定性指标窗口和事件。Decision 必须引用同一 SimulationRun、Execution 和指标窗口，并把指标业务内容纳入 canonical hash；旧 Recommendation 仅供 Tour 历史演示。
 
+该 Execution 绑定路径现在是历史 Tour 兼容路径。上线前 Mechanistic Simulation v0 使用独立端口、存储和 API。它直接绑定不可变 PlanVersion、DeliveryIntent、OceanEngineConfiguration 和校准 Manifest。它不要求 Execution、Approval 或 Browser RPA Run。
+
+Mechanistic Simulation v0 只接受显式 prior。它使用稳定 seed 和有容量上限的 Monte Carlo。输出始终标记 `is_simulated=true` 和 `calibration_status=assumption_driven`。该版本不读取 Connector 历史数据，也不声明真实校准或因果效果。完整契约见 [`mechanistic-simulation-v0.md`](./mechanistic-simulation-v0.md)。
+
 ## Tour
 
 黄金路径固定为八步：

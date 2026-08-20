@@ -39,6 +39,43 @@ func TestDeliveryHTTPExposesPlanAndControlledActions(t *testing.T) {
 	}
 }
 
+func TestMechanisticSimulationHTTPUsesPlanVersionWithoutExecution(t *testing.T) {
+	app := &mechanisticApplicationStub{applicationStub: applicationStub{}}
+	server := New(app)
+	response := httptest.NewRecorder()
+	request := authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/plans/plan_1/versions/2/mechanistic-simulation-runs", `{
+		"stable_seed":"seed","sample_count":100,"prediction_horizon_days":1,"review_state":"unknown",
+		"prior_set":{"version":"prior/v0"}
+	}`)
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || app.planID != "plan_1" || app.version != 2 || app.request.StableSeed != "seed" || !strings.Contains(response.Body.String(), `"calibration_status":"assumption_driven"`) {
+		t.Fatalf("create status=%d plan=%q version=%d request=%+v body=%s", response.Code, app.planID, app.version, app.request, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet, "/api/delivery/v1/projects/project_1/mechanistic-simulation-runs/run_1", ""))
+	if response.Code != http.StatusOK || app.runID != "run_1" || !strings.Contains(response.Body.String(), `"is_simulated":true`) {
+		t.Fatalf("get status=%d run=%q body=%s", response.Code, app.runID, response.Body.String())
+	}
+}
+
+type mechanisticApplicationStub struct {
+	applicationStub
+	planID  string
+	version int
+	runID   string
+	request delivery.MechanisticSimulationRequest
+}
+
+func (s *mechanisticApplicationStub) CreatePrelaunchMechanisticSimulation(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, planID string, version int, request delivery.MechanisticSimulationRequest) (delivery.MechanisticSimulationEnvelope, error) {
+	s.planID, s.version, s.request = planID, version, request
+	return delivery.MechanisticSimulationEnvelope{Result: delivery.MechanisticSimulationResult{ID: "run_1", SchemaVersion: delivery.MechanisticSimulationSchemaVersion, ModelVersion: delivery.MechanisticSimulationModelVersion, CalibrationStatus: delivery.CalibrationStatusAssumptionDriven, IsSimulated: true, Status: "completed"}}, nil
+}
+
+func (s *mechanisticApplicationStub) GetPrelaunchMechanisticSimulation(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, runID string) (delivery.MechanisticSimulationResult, error) {
+	s.runID = runID
+	return delivery.MechanisticSimulationResult{ID: runID, SchemaVersion: delivery.MechanisticSimulationSchemaVersion, ModelVersion: delivery.MechanisticSimulationModelVersion, CalibrationStatus: delivery.CalibrationStatusAssumptionDriven, IsSimulated: true, Status: "completed"}, nil
+}
+
 func TestPlatformEntityMappingHTTPKeepsPlatformValuesServerOwnedAndRequiresTwoReadbacks(t *testing.T) {
 	createdAt := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	app := &mappingApplicationStub{applicationStub: applicationStub{}, mapping: delivery.PlatformEntityMapping{SchemaVersion: delivery.PlatformEntityMappingV1, ID: "mapping_1", OrganizationID: "org_1", ProjectID: "project_1", AccountReferenceID: "account_1", PlanID: "plan_1", ConfigurationID: "configuration_1", BusinessExecutionID: "execution_1", BrowserRpaRunID: "run_1", InternalObjectKind: "promotion", InternalObjectID: "draft_1", PlatformObjectKind: "promotion", Status: delivery.PlatformEntityMappingPending, Version: 1, CreatedAt: createdAt, UpdatedAt: createdAt}, controlledChange: delivery.ControlledChangeSet{SchemaVersion: delivery.ControlledChangeSetSchemaV1, ID: "change_mutation"}}

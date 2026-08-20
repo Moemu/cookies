@@ -124,6 +124,49 @@ paths:
               schema: { $ref: '#/components/schemas/PreflightResult' }
         '404': { $ref: '#/components/responses/Problem' }
         default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}/mechanistic-simulation-runs:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/PlanID'
+      - $ref: '#/components/parameters/PlanVersion'
+    post:
+      operationId: createDeliveryMechanisticSimulationRun
+      summary: Run an assumption-driven prelaunch mechanistic simulation
+      description: >-
+        Consumes one immutable PlanVersion, DeliveryIntent, OceanEngineConfiguration,
+        frozen calibration Manifest binding, explicit prior set, and stable seed.
+        It does not require or create an Execution, Approval, Browser RPA Run, or remote action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MechanisticSimulationRequest' }
+      responses:
+        '200':
+          description: Deterministic replay or stable platform_pending result.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MechanisticSimulationEnvelope' } } }
+        '201':
+          description: New assumption-driven simulation result.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MechanisticSimulationEnvelope' } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+  /api/delivery/v1/projects/{project_id}/mechanistic-simulation-runs/{run_id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: run_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getDeliveryMechanisticSimulationRun
+      summary: Read one project-scoped mechanistic simulation result
+      responses:
+        '200':
+          description: Stored assumption-driven simulation result.
+          content: { application/json: { schema: { $ref: '#/components/schemas/MechanisticSimulationResult' } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
   /api/delivery/v1/projects/{project_id}/plans/{plan_id}/configuration:compile:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -2942,6 +2985,164 @@ components:
     OutcomeSimulationScenario:
       type: string
       enum: [steady, cost_pressure, under_delivery, creative_fatigue, tracking_anomaly, review_rejected]
+    SimulationProbabilityPrior:
+      type: object
+      additionalProperties: false
+      required: [value, source, unit, scope, uncertainty]
+      properties:
+        value: { type: number, minimum: 0, maximum: 1 }
+        source: { type: string, minLength: 1 }
+        unit: { type: string, const: probability }
+        scope: { type: array, minItems: 1, items: { type: string } }
+        uncertainty: { type: string, minLength: 1 }
+    SimulationRangePrior:
+      type: object
+      additionalProperties: false
+      required: [minimum, mode, maximum, source, unit, scope, uncertainty]
+      properties:
+        minimum: { type: number, minimum: 0 }
+        mode: { type: number, minimum: 0 }
+        maximum: { type: number, minimum: 0 }
+        source: { type: string, minLength: 1 }
+        unit: { type: string, minLength: 1 }
+        scope: { type: array, minItems: 1, items: { type: string } }
+        uncertainty: { type: string, minLength: 1 }
+    SimulationFatiguePrior:
+      type: object
+      additionalProperties: false
+      required: [enabled, daily_rate, source, unit, scope, uncertainty]
+      properties:
+        enabled: { type: boolean }
+        daily_rate: { type: number, minimum: 0, maximum: 1 }
+        source: { type: string, minLength: 1 }
+        unit: { type: string, const: ratio_per_day }
+        scope: { type: array, minItems: 1, items: { type: string } }
+        uncertainty: { type: string, minLength: 1 }
+    SimulationPriorSet:
+      type: object
+      additionalProperties: false
+      required: [version, review_pass_probability, delivery_probability, budget_utilization, cpm, ctr, cvr, tracking_observable_rate]
+      properties:
+        version: { type: string, minLength: 1 }
+        review_pass_probability: { $ref: '#/components/schemas/SimulationProbabilityPrior' }
+        delivery_probability: { $ref: '#/components/schemas/SimulationProbabilityPrior' }
+        budget_utilization: { $ref: '#/components/schemas/SimulationRangePrior' }
+        cpm: { $ref: '#/components/schemas/SimulationRangePrior' }
+        ctr: { $ref: '#/components/schemas/SimulationRangePrior' }
+        cvr: { $ref: '#/components/schemas/SimulationRangePrior' }
+        tracking_observable_rate: { $ref: '#/components/schemas/SimulationProbabilityPrior' }
+        creative_fatigue: { $ref: '#/components/schemas/SimulationFatiguePrior' }
+    MechanisticSimulationRequest:
+      type: object
+      additionalProperties: false
+      required: [stable_seed, sample_count, prediction_horizon_days, review_state, prior_set]
+      properties:
+        stable_seed: { type: string, minLength: 1, maxLength: 128 }
+        sample_count:
+          type: integer
+          minimum: 100
+          maximum: 100000
+          description: sample_count multiplied by prediction_horizon_days cannot exceed 500000.
+        prediction_horizon_days: { type: integer, minimum: 1, maximum: 31 }
+        review_state: { type: string, enum: [unknown, approved, rejected] }
+        prior_set: { $ref: '#/components/schemas/SimulationPriorSet' }
+    SimulationQuantiles:
+      type: object
+      additionalProperties: false
+      required: [available, unit]
+      properties:
+        available: { type: boolean }
+        unit: { type: string }
+        p10: { type: number }
+        p50: { type: number }
+        p90: { type: number }
+        mean: { type: number }
+    MechanisticMetricWindow:
+      type: object
+      additionalProperties: false
+      required: [sequence, start, end, timezone, metrics]
+      properties:
+        sequence: { type: integer, minimum: 1 }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        timezone: { type: string }
+        metrics:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/SimulationQuantiles' }
+    SimulationScenarioProbability:
+      type: object
+      additionalProperties: false
+      required: [scenario, threshold_version, probability, status, evidence_refs, limitations]
+      properties:
+        scenario: { type: string, enum: [steady, under_delivery, cost_pressure, creative_fatigue, tracking_anomaly, review_rejected, zero_conversion, spend_spike] }
+        threshold_version: { type: string }
+        probability: { type: number, minimum: 0, maximum: 1 }
+        status: { type: string, enum: [simulated, suspected, known_state] }
+        evidence_refs: { type: array, items: { type: string } }
+        limitations: { type: array, items: { type: string } }
+    SimulationRecommendationDraft:
+      type: object
+      additionalProperties: false
+      required: [recommendation_type, target_field, current_value, suggested_range, expected_effect_range, confidence, effect_basis, rationale, evidence_refs, risks, guardrails, requires_human_review]
+      properties:
+        recommendation_type: { type: string }
+        target_field: { type: string }
+        current_value: {}
+        suggested_range: { type: array, minItems: 2, maxItems: 2, items: { type: number } }
+        expected_effect_range: { type: array, minItems: 2, maxItems: 2, items: { type: number } }
+        confidence: { type: string }
+        effect_basis: { type: string, enum: [predictive_association, rule_constraint] }
+        rationale: { type: string }
+        evidence_refs: { type: array, items: { type: string } }
+        risks: { type: array, items: { type: string } }
+        guardrails: { type: array, items: { type: string } }
+        requires_human_review: { type: boolean, const: true }
+    MechanisticSimulationAlert:
+      type: object
+      additionalProperties: false
+      required: [type, severity, probability, evidence_refs, limitations]
+      properties:
+        type: { type: string, enum: [under_delivery, cost_pressure, creative_fatigue, tracking_anomaly, review_rejected, zero_conversion, spend_spike] }
+        severity: { type: string, enum: [critical, high, medium, low] }
+        probability: { type: number, minimum: 0, maximum: 1 }
+        evidence_refs: { type: array, items: { type: string } }
+        limitations: { type: array, items: { type: string } }
+    MechanisticSimulationResult:
+      type: object
+      additionalProperties: false
+      required: [id, organization_id, project_id, plan_id, plan_version, schema_version, model_version, prior_set_version, prior_set, manifest_binding, input_snapshot_hash, stable_seed, prediction_horizon, sample_count, metric_windows, scenario_probabilities, alerts, recommendation_drafts, assumptions, limitations, evidence_refs, status, is_simulated, calibration_status]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        project_id: { type: string }
+        plan_id: { type: string }
+        plan_version: { type: integer, minimum: 1 }
+        schema_version: { type: string, const: delivery-mechanistic-simulation/v0 }
+        model_version: { type: string, const: delivery-mechanistic-monte-carlo/v0 }
+        prior_set_version: { type: string }
+        prior_set: { $ref: '#/components/schemas/SimulationPriorSet' }
+        manifest_binding: { $ref: '#/components/schemas/CalibrationManifestBinding' }
+        input_snapshot_hash: { $ref: '#/components/schemas/CanonicalHash' }
+        stable_seed: { type: string }
+        prediction_horizon: { type: string, pattern: '^P([1-9]|[12][0-9]|3[01])D$' }
+        sample_count: { type: integer, minimum: 100, maximum: 100000 }
+        metric_windows: { type: array, items: { $ref: '#/components/schemas/MechanisticMetricWindow' } }
+        scenario_probabilities: { type: array, items: { $ref: '#/components/schemas/SimulationScenarioProbability' } }
+        alerts: { type: array, items: { $ref: '#/components/schemas/MechanisticSimulationAlert' } }
+        recommendation_drafts: { type: array, items: { $ref: '#/components/schemas/SimulationRecommendationDraft' } }
+        assumptions: { type: array, items: { type: string } }
+        limitations: { type: array, items: { type: string } }
+        evidence_refs: { type: array, items: { type: string } }
+        status: { type: string, enum: [completed, platform_pending, blocked] }
+        is_simulated: { type: boolean, const: true }
+        calibration_status: { type: string, const: assumption_driven }
+    MechanisticSimulationEnvelope:
+      type: object
+      additionalProperties: false
+      required: [result, replay]
+      properties:
+        result: { $ref: '#/components/schemas/MechanisticSimulationResult' }
+        replay: { type: boolean }
     CreateOutcomeSimulationRequest:
       type: object
       additionalProperties: false
