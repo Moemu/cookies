@@ -85,3 +85,48 @@ func TestClientMapsBusinessFailureToSessionInvalid(t *testing.T) {
 		t.Fatalf("expected session invalid, got %v", err)
 	}
 }
+
+func TestClientRetriesTransientReadOnlyResponse(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "123", Session{Cookies: "session=x"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	if _, err = client.AccountInfo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts=%d", attempts)
+	}
+}
+
+func TestClientRejectsRedirectToUnknownPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ad/api/account/info" {
+			http.Redirect(w, r, "/ad/api/promotion/ads/update", http.StatusFound)
+			return
+		}
+		t.Fatalf("redirect reached forbidden path %s", r.URL.Path)
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "123", Session{Cookies: "session=x"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	_, err = client.AccountInfo(context.Background())
+	if err == nil || !strings.Contains(err.Error(), ErrForbiddenEndpoint.Error()) {
+		t.Fatalf("redirect error=%v", err)
+	}
+}

@@ -19,9 +19,10 @@ The protocol client permits only allow-listed GET requests and proven read-only 
 It supports account verification, Promotion listing, configuration, material, diagnosis, and metrics.
 Unknown paths and write methods return `ErrForbiddenEndpoint`.
 
-## Remaining operational gaps
+## Runtime status and remaining evidence gaps
 
-- The shared ledger has an in-memory reference implementation and SQL schema.
-- Runtime MySQL wiring and scheduled synchronization remain disabled.
-- Live credentials are not available. Tests use synthetic, redacted facts.
-- Platform metric definitions and attribution maturity require formal confirmation.
+- The shared ledger has memory and MySQL implementations.
+- The authenticated runtime exposes account registration, verification, sync, sync status, and point-in-time reads.
+- Synchronization uses only allow-listed read-only GET and query POST operations.
+- Live credentials are not available. Protocol and orchestration tests use synthetic, redacted facts.
+- Platform metric definitions and attribution maturity require formal confirmation. Until then, collected metric windows stay quarantined.

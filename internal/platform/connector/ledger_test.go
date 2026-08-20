@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -60,7 +61,7 @@ func TestSnapshotEnforcesKnowledgeTime(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	snapshot, err := ledger.Snapshot(Query{OrganizationID: "org_1", ProjectID: "project_1", PredictionCutoff: baseTime.Add(time.Hour)})
+	snapshot, err := ledger.Snapshot(context.Background(), Query{OrganizationID: "org_1", ProjectID: "project_1", PredictionCutoff: baseTime.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,9 +84,24 @@ func TestConfigurationChangesAreDeterministic(t *testing.T) {
 	if len(changes) != 1 || changes[0].FieldPath != "budget" {
 		t.Fatalf("changes=%#v", changes)
 	}
+	if changes[0].OldValue != 100 || changes[0].NewValue != 200 {
+		t.Fatalf("change values=%#v", changes[0])
+	}
 	again := diffConfigurations(before, after)
 	if again[0].ID != changes[0].ID || again[0].PayloadHash != changes[0].PayloadHash {
 		t.Fatal("change hash is not deterministic")
+	}
+}
+
+func TestConfigurationChangeUsesStableNestedFieldPath(t *testing.T) {
+	before := ConfigurationSnapshot{FactHeader: header("before-nested", baseTime), ID: "before-nested", ObjectRef: "promotion_opaque", Values: map[string]any{"targeting": map[string]any{"region": "north", "age": 18}}}
+	after := before
+	after.ID = "after-nested"
+	after.AvailableAt = baseTime.Add(time.Hour)
+	after.Values = map[string]any{"targeting": map[string]any{"region": "south", "age": 18}}
+	changes := diffConfigurations(before, after)
+	if len(changes) != 1 || changes[0].FieldPath != "targeting.region" || changes[0].OldValue != "north" || changes[0].NewValue != "south" {
+		t.Fatalf("changes=%#v", changes)
 	}
 }
 
@@ -105,7 +121,7 @@ func TestMetricRevisionPreservesOriginal(t *testing.T) {
 	if _, err := ledger.AppendMetric(revision); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := ledger.Snapshot(Query{OrganizationID: "org_1", ProjectID: "project_1", PredictionCutoff: baseTime.Add(2 * time.Hour)})
+	snapshot, err := ledger.Snapshot(context.Background(), Query{OrganizationID: "org_1", ProjectID: "project_1", PredictionCutoff: baseTime.Add(2 * time.Hour)})
 	if err != nil || len(snapshot.Metrics) != 2 {
 		t.Fatalf("revision history missing: %#v error=%v", snapshot.Metrics, err)
 	}
@@ -141,7 +157,7 @@ func TestMetricAndDiagnosisHardRules(t *testing.T) {
 
 func TestRawEvidenceRejectsSensitivePlaintext(t *testing.T) {
 	ledger := NewLedger()
-	value := RawSnapshot{Header: header("raw", baseTime), ID: "raw-1", Endpoint: "/read", RequestHash: canonicalHash("request"), EncryptedEvidence: []byte("Cookie=session-secret")}
+	value := RawSnapshot{Header: header("raw", baseTime), ID: "raw-1", Endpoint: "/read", RequestHash: canonicalHash("request"), EncryptedEvidence: []byte("Cookie=session-secret"), KeyVersion: "v1"}
 	if _, err := ledger.AppendRaw(value); !errors.Is(err, ErrSensitiveValue) {
 		t.Fatalf("sensitive raw error=%v", err)
 	}
@@ -179,6 +195,16 @@ func TestPrelaunchProjectionRemovesDiagnosisAndRawPlatformRefs(t *testing.T) {
 	}
 }
 
+func TestPrelaunchProjectionRemovesQuarantinedFacts(t *testing.T) {
+	accepted := MetricWindow{FactHeader: header("accepted", baseTime)}
+	quarantined := MetricWindow{FactHeader: header("quarantined", baseTime)}
+	quarantined.QualityStatus = QualityQuarantine
+	projection := (CanonicalSnapshot{Metrics: []MetricWindow{accepted, quarantined}}).PrelaunchProjection()
+	if len(projection.Metrics) != 1 || projection.Metrics[0].PayloadHash != accepted.PayloadHash {
+		t.Fatalf("metrics=%#v", projection.Metrics)
+	}
+}
+
 func TestMetricQualityDoesNotAssumeConversionsAreBelowClicks(t *testing.T) {
 	value := MetricWindow{WindowStart: baseTime, WindowEnd: baseTime.Add(time.Hour), MetricDefinitionVersion: "v1", Currency: "CNY", AmountUnit: "fen", Metrics: map[string]int64{"spend": 10, "impressions": 100, "clicks": 1, "conversions": 2}}
 	if issues := AssessMetric(value, true, true, true); len(issues) != 0 {
@@ -187,5 +213,19 @@ func TestMetricQualityDoesNotAssumeConversionsAreBelowClicks(t *testing.T) {
 	value.Metrics["impressions"] = 0
 	if issues := AssessMetric(value, false, true, true); len(issues) != 2 || issues[0].Disposition != QualityQuarantine || issues[1].Disposition != QualityWarning {
 		t.Fatalf("quality issues=%#v", issues)
+	}
+}
+
+func TestMetricQualityWarnsOnRevisionRegressionAndDerivedRateMismatch(t *testing.T) {
+	previous := MetricWindow{Metrics: map[string]int64{"spend": 100, "impressions": 100, "clicks": 10, "conversions": 3}}
+	current := MetricWindow{Metrics: map[string]int64{"spend": 90, "impressions": 100, "clicks": 10, "conversions": 2}}
+	issues := append(AssessMetricRevision(previous, current), AssessDerivedRates(current, map[string]float64{"ctr": 0.2, "cvr": 0.2})...)
+	if len(issues) != 3 {
+		t.Fatalf("issues=%#v", issues)
+	}
+	for _, issue := range issues {
+		if issue.Disposition != QualityWarning {
+			t.Fatalf("issue=%#v", issue)
+		}
 	}
 }

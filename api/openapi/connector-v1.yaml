@@ -8,121 +8,6 @@ servers:
 security:
   - cookiesAuth: []
 paths:
-  /api/platform/v1/connectors/accounts:
-    get:
-      operationId: listConnectorAccounts
-      summary: List authorized Ocean Engine accounts
-      description: Returns account metadata only. Cookie, CSRF, and credential values are never returned.
-      responses:
-        '200':
-          description: Account catalog.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [items]
-                properties:
-                  items: {type: array, items: {$ref: '#/components/schemas/PlatformAccount'}}
-                additionalProperties: false
-        'default': {$ref: '#/components/responses/Problem'}
-  /api/platform/v1/connectors/accounts/{account_id}:
-    parameters:
-      - $ref: '#/components/parameters/AccountID'
-    get:
-      operationId: getConnectorAccount
-      summary: Get account metadata and connection status
-      responses:
-        '200':
-          description: Account metadata.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/PlatformAccount'}
-        '404': {$ref: '#/components/responses/NotFound'}
-  /api/platform/v1/connectors/accounts/{account_id}/verify:
-    parameters:
-      - $ref: '#/components/parameters/AccountID'
-    post:
-      operationId: verifyConnectorAccount
-      summary: Verify an account using a read-only web_api request
-      description: Verification reads account metadata only and never performs a platform write.
-      responses:
-        '200':
-          description: Verification result.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/PlatformAccount'}
-        '404': {$ref: '#/components/responses/NotFound'}
-  /api/platform/v1/connectors/accounts/{account_id}/revoke:
-    parameters:
-      - $ref: '#/components/parameters/AccountID'
-    post:
-      operationId: revokeConnectorAccount
-      summary: Revoke a connector account connection
-      description: Revokes the local connection reference; it does not call an Ocean Engine write endpoint.
-      responses:
-        '200':
-          description: Revoked account metadata.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/PlatformAccount'}
-        '404': {$ref: '#/components/responses/NotFound'}
-  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/snapshots:
-    parameters:
-      - $ref: '#/components/parameters/ProjectID'
-      - $ref: '#/components/parameters/AccountRef'
-    get:
-      operationId: listConnectorSnapshots
-      summary: List account and object snapshots
-      description: Returns canonical object snapshots produced by a read-only connector sync. Credentials and raw secrets are never returned.
-      parameters:
-        - $ref: '#/components/parameters/Quality'
-        - $ref: '#/components/parameters/ObjectKind'
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: Object snapshots.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SnapshotPage'
-        '400':
-          $ref: '#/components/responses/Problem'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/metrics:
-    parameters:
-      - $ref: '#/components/parameters/ProjectID'
-      - $ref: '#/components/parameters/AccountRef'
-    get:
-      operationId: listConnectorMetrics
-      summary: Query canonical metric windows
-      description: Returns facts with their source, quality, window, attribution, and evidence metadata. Empty reports are represented by schema-only sync batches, not fabricated zero facts.
-      parameters:
-        - name: start
-          in: query
-          required: true
-          schema: {type: string, format: date-time}
-        - name: end
-          in: query
-          required: true
-          schema: {type: string, format: date-time}
-        - $ref: '#/components/parameters/ObjectKind'
-        - $ref: '#/components/parameters/ExternalID'
-        - $ref: '#/components/parameters/Quality'
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: Metric windows.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MetricPage'
-        '400':
-          $ref: '#/components/responses/Problem'
-        '404':
-          $ref: '#/components/responses/NotFound'
   /api/connector/v1/projects/{project_id}/accounts/{account_ref}/syncs:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -131,6 +16,11 @@ paths:
       operationId: startConnectorSync
       summary: Start a read-only connector synchronization
       description: Starts synchronization for an authorized web_api session. The request contains no Cookie, CSRF token, or credential material.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 191}
       requestBody:
         required: true
         content:
@@ -138,12 +28,12 @@ paths:
             schema:
               $ref: '#/components/schemas/StartSyncRequest'
       responses:
-        '202':
-          description: Synchronization accepted.
+        '200':
+          description: Synchronous read-only synchronization completed or replayed.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SyncStatus'
+                $ref: '#/components/schemas/SyncResult'
         '400':
           $ref: '#/components/responses/Problem'
         '409':
@@ -165,6 +55,68 @@ paths:
                 $ref: '#/components/schemas/SyncStatus'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/connector/v1/projects/{project_id}/accounts:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      operationId: listProjectConnectorAccounts
+      summary: List safe local Connector account metadata
+      responses:
+        '200':
+          description: Account metadata without raw platform IDs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/PlatformAccount'}}
+    post:
+      operationId: registerProjectConnectorAccount
+      summary: Register an Ocean Engine account for read-only verification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [external_id]
+              properties:
+                external_id: {type: string, minLength: 1, maxLength: 191, writeOnly: true}
+                display_label: {type: string, maxLength: 255}
+              additionalProperties: false
+      responses:
+        '201':
+          description: Safe local account metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlatformAccount'}
+  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/verify:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AccountRef'
+    post:
+      operationId: verifyProjectConnectorAccount
+      summary: Verify an account through an allow-listed read-only request
+      responses:
+        '200':
+          description: Verified safe local account metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlatformAccount'}
+  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/revoke:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AccountRef'
+    post:
+      operationId: revokeProjectConnectorAccount
+      summary: Revoke the local connection without a remote platform write
+      responses:
+        '200':
+          description: Revoked safe local account metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlatformAccount'}
   /api/connector/v1/projects/{project_id}/accounts/{account_ref}/canonical-snapshots:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -216,10 +168,6 @@ components:
       in: path
       required: true
       schema: {type: string, minLength: 1, maxLength: 255}
-    ExternalID:
-      name: external_id
-      in: query
-      schema: {type: string, minLength: 1, maxLength: 255}
     ObjectKind:
       name: object_kind
       in: query
@@ -239,7 +187,7 @@ components:
   schemas:
     ObjectKind:
       type: string
-      enum: [account, project, promotion, material]
+      enum: [account, campaign, project, promotion, material]
     Quality:
       type: string
       enum: [healthy, partial, delayed, blocked, mapping_incomplete]
@@ -258,27 +206,22 @@ components:
           type: array
           items: {$ref: '#/components/schemas/EvidenceRef'}
       additionalProperties: false
-    AccountID:
-      name: account_id
-      in: path
-      required: true
-      schema: {type: string, minLength: 1, maxLength: 255}
     AccountRef:
       type: object
-      required: [organization_id, project_id, external_id]
+      required: [organization_id, project_id, source_ref]
       properties:
         organization_id: {type: string, minLength: 1}
         project_id: {type: string, minLength: 1}
-        external_id: {type: string, minLength: 1, description: Opaque platform identifier; preserve as a string.}
+        source_ref: {type: string, minLength: 1, description: Local or anonymized Connector reference.}
       additionalProperties: false
     PlatformAccount:
       type: object
-      required: [id, organization_id, platform, external_id, status]
+      required: [id, organization_id, project_id, platform, status]
       properties:
         id: {type: string, minLength: 1}
         organization_id: {type: string, minLength: 1}
         platform: {type: string, const: ocean_engine}
-        external_id: {type: string, minLength: 1}
+        project_id: {type: string, minLength: 1}
         display_label: {type: string}
         status: {type: string, enum: [pending, verified, revoked, blocked]}
         verified_at: {type: string, format: date-time}
@@ -353,6 +296,8 @@ components:
       properties:
         start: {type: string, format: date-time}
         end: {type: string, format: date-time}
+        time_zone: {type: string, minLength: 1}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
         object_kinds:
           type: array
           minItems: 1
@@ -362,17 +307,26 @@ components:
       additionalProperties: false
     SyncStatus:
       type: object
-      required: [id, account, status, quality, window_start, window_end]
+      required: [id, organization_id, project_id, account_ref, status, started_at, attempt]
       properties:
         id: {type: string, minLength: 1}
-        account: {$ref: '#/components/schemas/AccountRef'}
+        organization_id: {type: string, minLength: 1}
+        project_id: {type: string, minLength: 1}
+        account_ref: {type: string, minLength: 1, description: Local or anonymized Connector account reference.}
         status: {type: string, enum: [queued, running, completed, failed]}
-        quality: {$ref: '#/components/schemas/Quality'}
-        window_start: {type: string, format: date-time}
-        window_end: {type: string, format: date-time}
-        batch_id: {type: string}
-        quality_note: {type: string}
-        evidence: {type: array, items: {$ref: '#/components/schemas/EvidenceRef'}}
+        cursor: {type: string}
+        attempt: {type: integer, minimum: 1}
+        started_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time}
+      additionalProperties: false
+    SyncResult:
+      type: object
+      required: [run_id, replayed, object_count, metric_count]
+      properties:
+        run_id: {type: string, minLength: 1}
+        replayed: {type: boolean}
+        object_count: {type: integer, minimum: 0}
+        metric_count: {type: integer, minimum: 0}
       additionalProperties: false
     FactHeader:
       type: object
@@ -402,13 +356,40 @@ components:
         objects: {type: array, items: {$ref: '#/components/schemas/FactHeader'}}
         configurations: {type: array, items: {$ref: '#/components/schemas/FactHeader'}}
         configuration_changes: {type: array, items: {$ref: '#/components/schemas/FactHeader'}}
-        metric_windows: {type: array, items: {$ref: '#/components/schemas/FactHeader'}}
+        metric_windows: {type: array, items: {$ref: '#/components/schemas/MetricFact'}}
         material_bindings: {type: array, items: {$ref: '#/components/schemas/FactHeader'}}
-        material_metric_windows: {type: array, items: {$ref: '#/components/schemas/FactHeader'}}
+        material_metric_windows: {type: array, items: {$ref: '#/components/schemas/MetricFact'}}
         platform_status_events: {type: array, items: {$ref: '#/components/schemas/FactHeader'}}
         platform_diagnoses: {type: array, items: {$ref: '#/components/schemas/FactHeader'}}
-        conversion_revisions: {type: array, items: {$ref: '#/components/schemas/FactHeader'}}
+        conversion_revisions: {type: array, items: {$ref: '#/components/schemas/MetricFact'}}
       additionalProperties: false
+    MetricFact:
+      allOf:
+        - $ref: '#/components/schemas/FactHeader'
+        - type: object
+          required: [object_ref, window_start, window_end, granularity, time_zone, attribution_window, metric_definition_version, currency, amount_unit, metrics]
+          properties:
+            object_ref: {type: string, minLength: 1}
+            window_start: {type: string, format: date-time}
+            window_end: {type: string, format: date-time}
+            granularity: {type: string, minLength: 1}
+            time_zone: {type: string, minLength: 1}
+            attribution_window: {type: string, minLength: 1}
+            metric_definition_version: {type: string, minLength: 1}
+            currency: {type: string, pattern: '^[A-Z]{3}$'}
+            amount_unit: {type: string, minLength: 1}
+            metrics:
+              type: object
+              additionalProperties: {type: integer}
+            quality_issues:
+              type: array
+              items:
+                type: object
+                required: [disposition, code]
+                properties:
+                  disposition: {type: string, enum: [reject, quarantine, warning]}
+                  code: {type: string, minLength: 1}
+                additionalProperties: false
     Problem:
       type: object
       required: [code, message]

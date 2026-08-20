@@ -35,6 +35,8 @@ import (
 	"github.com/shikanon/cookies/internal/platform/browserautomation/plancompile"
 	"github.com/shikanon/cookies/internal/platform/browserautomation/rparunner"
 	"github.com/shikanon/cookies/internal/platform/config"
+	"github.com/shikanon/cookies/internal/platform/connector"
+	connectorhttp "github.com/shikanon/cookies/internal/platform/connector/httpapi"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/database"
 	"github.com/shikanon/cookies/internal/platform/httpserver"
@@ -95,6 +97,7 @@ func main() {
 				"strategy.approve", "strategy.package.read", "creative.read", "creative.write",
 				"delivery.read", "delivery.write", "delivery.approve", "delivery.execute",
 				"insights.read", "insights.write", "insights.confirm",
+				connector.ScopeRead, connector.ScopeSync,
 			}),
 		}
 		actor = &adminActor
@@ -607,6 +610,23 @@ func main() {
 	}
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 		httpserver.DomainMount{Pattern: "/api/insights/v1/", Handler: insightshttp.New(insightsService)})
+	if cfg.OceanEngine.Enabled && sessionCipher != nil {
+		connectorRepository := connector.MySQLRepository{DB: db}
+		connectorSync := connector.Synchronizer{
+			Writer: connectorRepository,
+			Readers: oceanEngineConnectorReaderFactory{
+				sessions: insightsService.OceanEngineSessions,
+				cipher:   sessionCipher,
+				baseURL:  cfg.OceanEngine.BusinessBaseURL,
+				client:   &http.Client{Timeout: 30 * time.Second},
+				accounts: connectorRepository,
+			},
+			Cipher: sessionCipher,
+		}
+		connectorAccounts := connector.AccountService{Store: connectorRepository, Probe: oceanEngineAccountProbe{sessions: insightsService.OceanEngineSessions, cipher: sessionCipher, baseURL: cfg.OceanEngine.BusinessBaseURL, client: &http.Client{Timeout: 30 * time.Second}}}
+		dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
+			httpserver.DomainMount{Pattern: "/api/connector/v1/", Handler: connectorhttp.New(connectorRepository, connectorSync, projectStore, connectorAccounts)})
+	}
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
 	if knowledgeService.DocumentScheduler != nil || knowledgeService.Scheduler != nil || knowledgeService.VisionScheduler != nil {

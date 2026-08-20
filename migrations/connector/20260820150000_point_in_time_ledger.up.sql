@@ -81,6 +81,8 @@ CREATE TABLE connector_configuration_change_events (
   field_path VARCHAR(512) NOT NULL,
   old_value_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   new_value_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  old_value_json JSON NOT NULL,
+  new_value_json JSON NOT NULL,
   before_snapshot_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   after_snapshot_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   observed_at DATETIME(6) NOT NULL,
@@ -109,6 +111,7 @@ CREATE TABLE connector_metric_windows (
   currency CHAR(3) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   amount_unit VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
   metrics_json JSON NOT NULL,
+  quality_issues_json JSON NOT NULL,
   revision_of VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NULL,
   collected_at DATETIME(6) NOT NULL, available_at DATETIME(6) NOT NULL, data_through DATETIME(6) NOT NULL,
   valid_from DATETIME(6) NOT NULL, valid_to DATETIME(6) NULL,
@@ -123,6 +126,9 @@ CREATE TABLE connector_material_bindings LIKE connector_object_snapshots;
 ALTER TABLE connector_material_bindings ADD COLUMN material_ref VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, ADD COLUMN promotion_ref VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NOT NULL;
 
 CREATE TABLE connector_material_metric_windows LIKE connector_metric_windows;
+ALTER TABLE connector_material_metric_windows
+  ADD COLUMN material_ref VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  ADD COLUMN promotion_ref VARCHAR(191) CHARACTER SET ascii COLLATE ascii_bin NOT NULL;
 
 CREATE TABLE connector_platform_status_events LIKE connector_object_snapshots;
 ALTER TABLE connector_platform_status_events ADD COLUMN platform_status VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, ADD COLUMN status_reason VARCHAR(512) NOT NULL DEFAULT '';
@@ -131,3 +137,6 @@ CREATE TABLE connector_platform_diagnosis_snapshots LIKE connector_object_snapsh
 ALTER TABLE connector_platform_diagnosis_snapshots ADD COLUMN eligible_as_prelaunch_feature BOOLEAN NOT NULL DEFAULT FALSE, ADD CONSTRAINT chk_connector_diagnosis_prelaunch CHECK (eligible_as_prelaunch_feature = FALSE);
 
 CREATE TABLE connector_conversion_revisions LIKE connector_metric_windows;
+ALTER TABLE connector_conversion_revisions
+  ADD COLUMN original_window_id VARCHAR(96) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  ADD COLUMN revision_number INT UNSIGNED NOT NULL;

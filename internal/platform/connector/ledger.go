@@ -3,6 +3,7 @@
 package connector
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,6 +18,8 @@ import (
 const (
 	DatasetVersion = "connector-oceanengine-point-in-time-v1"
 	SourceSystem   = "ocean_engine"
+	ScopeRead      = "connector.read"
+	ScopeSync      = "connector.sync"
 )
 
 var (
@@ -80,6 +83,7 @@ type SyncRun struct {
 	CompletedAt    time.Time `json:"completed_at,omitempty"`
 	Cursor         string    `json:"cursor,omitempty"`
 	Attempt        int       `json:"attempt"`
+	Status         string    `json:"status"`
 }
 
 // RawSnapshot contains encrypted or strictly redacted evidence. It has no JSON
@@ -90,6 +94,7 @@ type RawSnapshot struct {
 	Endpoint          string     `json:"-"`
 	RequestHash       string     `json:"-"`
 	EncryptedEvidence []byte     `json:"-"`
+	KeyVersion        string     `json:"-"`
 }
 
 type ObjectSnapshot struct {
@@ -115,6 +120,8 @@ type ConfigurationChangeEvent struct {
 	FieldPath        string    `json:"field_path"`
 	OldValueHash     string    `json:"old_value_hash"`
 	NewValueHash     string    `json:"new_value_hash"`
+	OldValue         any       `json:"old_value"`
+	NewValue         any       `json:"new_value"`
 	BeforeSnapshotID string    `json:"before_snapshot_id"`
 	AfterSnapshotID  string    `json:"after_snapshot_id"`
 	ObservedAt       time.Time `json:"observed_at"`
@@ -133,6 +140,7 @@ type MetricWindow struct {
 	Currency                string           `json:"currency"`
 	AmountUnit              string           `json:"amount_unit"`
 	Metrics                 map[string]int64 `json:"metrics"`
+	QualityIssues           []QualityIssue   `json:"quality_issues,omitempty"`
 	RevisionOf              string           `json:"revision_of,omitempty"`
 }
 
@@ -189,6 +197,14 @@ type CanonicalSnapshot struct {
 // object references. It is the only supported training export boundary.
 func (s CanonicalSnapshot) PrelaunchProjection() CanonicalSnapshot {
 	s.Diagnoses = nil
+	s.Objects = filterTrainable(s.Objects, func(value ObjectSnapshot) QualityDisposition { return value.QualityStatus })
+	s.Configurations = filterTrainable(s.Configurations, func(value ConfigurationSnapshot) QualityDisposition { return value.QualityStatus })
+	s.Changes = filterTrainable(s.Changes, func(value ConfigurationChangeEvent) QualityDisposition { return value.QualityStatus })
+	s.Metrics = filterTrainable(s.Metrics, func(value MetricWindow) QualityDisposition { return value.QualityStatus })
+	s.Bindings = filterTrainable(s.Bindings, func(value MaterialBinding) QualityDisposition { return value.QualityStatus })
+	s.MaterialMetrics = filterTrainable(s.MaterialMetrics, func(value MaterialMetricWindow) QualityDisposition { return value.QualityStatus })
+	s.ConversionRevisions = filterTrainable(s.ConversionRevisions, func(value ConversionRevision) QualityDisposition { return value.QualityStatus })
+	s.Statuses = filterTrainable(s.Statuses, func(value PlatformStatusEvent) QualityDisposition { return value.QualityStatus })
 	for index := range s.Objects {
 		s.Objects[index].SourceRef = opaqueRef(s.Objects[index].SourceRef)
 		s.Objects[index].ObjectRef = opaqueRef(s.Objects[index].ObjectRef)
@@ -226,6 +242,16 @@ func (s CanonicalSnapshot) PrelaunchProjection() CanonicalSnapshot {
 		s.Statuses[index].ObjectRef = opaqueRef(s.Statuses[index].ObjectRef)
 	}
 	return s
+}
+
+func filterTrainable[T any](values []T, status func(T) QualityDisposition) []T {
+	result := make([]T, 0, len(values))
+	for _, value := range values {
+		if disposition := status(value); disposition == QualityAccept || disposition == QualityWarning {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func opaqueRef(value string) string {
@@ -268,10 +294,61 @@ func AssessMetric(value MetricWindow, attributionMature, configurationResolved, 
 	return issues
 }
 
+func AssessMetricRevision(previous, current MetricWindow) []QualityIssue {
+	issues := []QualityIssue{}
+	if current.Metrics["spend"] < previous.Metrics["spend"] {
+		issues = append(issues, QualityIssue{QualityWarning, "spend_regressed"})
+	}
+	if current.Metrics["conversions"] < previous.Metrics["conversions"] {
+		issues = append(issues, QualityIssue{QualityWarning, "conversions_regressed"})
+	}
+	return issues
+}
+
+func AssessDerivedRates(value MetricWindow, derived map[string]float64) []QualityIssue {
+	issues := []QualityIssue{}
+	if value.Metrics["impressions"] > 0 {
+		calculated := float64(value.Metrics["clicks"]) / float64(value.Metrics["impressions"])
+		if rate, ok := derived["ctr"]; ok && absFloat(rate-calculated) > 0.000001 {
+			issues = append(issues, QualityIssue{QualityWarning, "derived_ctr_mismatch"})
+		}
+	}
+	if value.Metrics["clicks"] > 0 {
+		calculated := float64(value.Metrics["conversions"]) / float64(value.Metrics["clicks"])
+		if rate, ok := derived["cvr"]; ok && absFloat(rate-calculated) > 0.000001 {
+			issues = append(issues, QualityIssue{QualityWarning, "derived_cvr_mismatch"})
+		}
+	}
+	return issues
+}
+
+func absFloat(value float64) float64 {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func qualityDisposition(issues []QualityIssue) QualityDisposition {
+	result := QualityAccept
+	for _, issue := range issues {
+		if issue.Disposition == QualityReject {
+			return QualityReject
+		}
+		if issue.Disposition == QualityQuarantine {
+			result = QualityQuarantine
+		} else if issue.Disposition == QualityWarning && result == QualityAccept {
+			result = QualityWarning
+		}
+	}
+	return result
+}
+
 type Query struct {
 	OrganizationID   string
 	ProjectID        string
 	ObjectRef        string
+	SourceRef        string
 	WindowStart      time.Time
 	WindowEnd        time.Time
 	PredictionCutoff time.Time
@@ -300,6 +377,9 @@ func NewLedger() *Ledger {
 func (l *Ledger) StartSync(value SyncRun) (bool, error) {
 	if value.ID == "" || value.OrganizationID == "" || value.ProjectID == "" || value.AccountRef == "" || value.StartedAt.IsZero() || value.Attempt < 1 {
 		return false, ErrInvalidFact
+	}
+	if value.Status == "" {
+		value.Status = "running"
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -331,12 +411,13 @@ func (l *Ledger) CompleteSync(id, cursor string, completedAt time.Time) error {
 		return ErrImmutableConflict
 	}
 	value.CompletedAt, value.Cursor = completedAt, cursor
+	value.Status = "completed"
 	l.runs[id] = value
 	return nil
 }
 
 type SnapshotReader interface {
-	Snapshot(Query) (CanonicalSnapshot, error)
+	Snapshot(context.Context, Query) (CanonicalSnapshot, error)
 }
 
 var _ SnapshotReader = (*Ledger)(nil)
@@ -362,7 +443,7 @@ func (l *Ledger) AppendRaw(value RawSnapshot) (bool, error) {
 	if err := value.Header.validate(); err != nil {
 		return false, err
 	}
-	if value.ID == "" || value.Endpoint == "" || value.RequestHash == "" || len(value.EncryptedEvidence) == 0 {
+	if value.ID == "" || value.Endpoint == "" || value.RequestHash == "" || len(value.EncryptedEvidence) == 0 || value.KeyVersion == "" {
 		return false, ErrInvalidFact
 	}
 	if containsSensitiveText(string(value.EncryptedEvidence)) {
@@ -440,11 +521,12 @@ func (l *Ledger) AppendConfiguration(value ConfigurationSnapshot) ([]Configurati
 }
 
 func diffConfigurations(before, after ConfigurationSnapshot) []ConfigurationChangeEvent {
+	beforeValues, afterValues := flattenConfiguration(before.Values), flattenConfiguration(after.Values)
 	keys := map[string]struct{}{}
-	for key := range before.Values {
+	for key := range beforeValues {
 		keys[key] = struct{}{}
 	}
-	for key := range after.Values {
+	for key := range afterValues {
 		keys[key] = struct{}{}
 	}
 	ordered := make([]string, 0, len(keys))
@@ -454,14 +536,47 @@ func diffConfigurations(before, after ConfigurationSnapshot) []ConfigurationChan
 	sort.Strings(ordered)
 	result := make([]ConfigurationChangeEvent, 0)
 	for _, key := range ordered {
-		oldHash, newHash := canonicalHash(before.Values[key]), canonicalHash(after.Values[key])
+		oldHash, newHash := canonicalHash(beforeValues[key]), canonicalHash(afterValues[key])
 		if oldHash == newHash {
 			continue
 		}
 		id := canonicalHash([]string{before.ID, after.ID, key, oldHash, newHash})
 		header := after.FactHeader
 		header.PayloadHash = canonicalHash([]string{id, oldHash, newHash})
-		result = append(result, ConfigurationChangeEvent{FactHeader: header, ID: id, ObjectRef: after.ObjectRef, FieldPath: key, OldValueHash: oldHash, NewValueHash: newHash, BeforeSnapshotID: before.ID, AfterSnapshotID: after.ID, ObservedAt: after.AvailableAt})
+		result = append(result, ConfigurationChangeEvent{FactHeader: header, ID: id, ObjectRef: after.ObjectRef, FieldPath: key, OldValueHash: oldHash, NewValueHash: newHash, OldValue: beforeValues[key], NewValue: afterValues[key], BeforeSnapshotID: before.ID, AfterSnapshotID: after.ID, ObservedAt: after.AvailableAt})
+	}
+	return result
+}
+
+func flattenConfiguration(values map[string]any) map[string]any {
+	result := map[string]any{}
+	var walk func(string, any)
+	walk = func(path string, value any) {
+		nested, ok := value.(map[string]any)
+		if !ok || len(nested) == 0 {
+			result[path] = value
+			return
+		}
+		keys := make([]string, 0, len(nested))
+		for key := range nested {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			next := key
+			if path != "" {
+				next = path + "." + key
+			}
+			walk(next, nested[key])
+		}
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		walk(key, values[key])
 	}
 	return result
 }
@@ -561,10 +676,15 @@ func visible(h FactHeader, q Query) bool {
 	if h.OrganizationID != q.OrganizationID || h.ProjectID != q.ProjectID || h.AvailableAt.After(q.PredictionCutoff) || h.QualityStatus == QualityReject {
 		return false
 	}
+	if q.SourceRef != "" && h.SourceRef != q.SourceRef {
+		return false
+	}
 	return true
 }
 
-func (l *Ledger) Snapshot(q Query) (CanonicalSnapshot, error) {
+func AnonymizeRef(value string) string { return opaqueRef(value) }
+
+func (l *Ledger) Snapshot(_ context.Context, q Query) (CanonicalSnapshot, error) {
 	if q.OrganizationID == "" || q.ProjectID == "" || q.PredictionCutoff.IsZero() {
 		return CanonicalSnapshot{}, ErrInvalidFact
 	}

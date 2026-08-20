@@ -329,6 +329,7 @@ func adminScopes() []contract.Scope {
 		"strategy.approve", "strategy.package.read", "creative.read", "creative.write",
 		"delivery.read", "delivery.write", "delivery.approve", "delivery.execute",
 		"insights.read", "insights.write", "insights.confirm",
+		"connector.read", "connector.sync",
 		"knowledge.document_vision.reconcile",
 	}
 	return contract.ScopesFromStrings(values)
@@ -343,6 +344,7 @@ func memberScopes() []contract.Scope {
 		"strategy.approve", "strategy.package.read", "creative.read", "creative.write",
 		"delivery.read", "delivery.write", "delivery.approve", "delivery.execute",
 		"insights.read", "insights.write", "insights.confirm",
+		"connector.read", "connector.sync",
 	}
 	return contract.ScopesFromStrings(values)
 }
@@ -351,7 +353,7 @@ func auditorScopes() []contract.Scope {
 	return contract.ScopesFromStrings([]string{
 		"identity.profile.write", "organization.read", "organization.members.read", "project.members.read",
 		"project.read", "assets.read", "provider.read", "strategy.read",
-		"strategy.package.read", "creative.read", "delivery.read", "insights.read",
+		"strategy.package.read", "creative.read", "delivery.read", "insights.read", "connector.read",
 	})
 }
 
