@@ -1,0 +1,13 @@
+{
+  "code": 0,
+  "data": {
+    "StatsData": {
+      "Rows": [{"material_id": "material-opaque-001", "clicks": 12, "impressions": 120}],
+      "TotalCount": 1,
+      "MetricSchema": "mock.material.v1"
+    }
+  },
+  "source": "synthetic_replay",
+  "quality": "partial",
+  "query_window": {"start": "2026-08-01T00:00:00Z", "end": "2026-08-02T00:00:00Z"}
+}

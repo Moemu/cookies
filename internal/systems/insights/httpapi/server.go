@@ -18,6 +18,9 @@ import (
 )
 
 type Application interface {
+	GetOceanEngineSession(context.Context, contract.ActorContext, contract.ProjectID) (insights.OceanEngineSession, error)
+	UpdateOceanEngineSession(context.Context, contract.ActorContext, contract.ProjectID, insights.UpdateOceanEngineSessionRequest) (insights.OceanEngineSession, error)
+	VerifyOceanEngineSession(context.Context, contract.ActorContext, contract.ProjectID, insights.VerifyOceanEngineSessionRequest) (insights.OceanEngineSession, error)
 	GetMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID) (insights.MiyunConnection, error)
 	UpdateMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID, insights.UpdateMiyunConnectionRequest) (insights.MiyunConnection, error)
 	VerifyMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID, insights.VerifyMiyunConnectionRequest) (insights.MiyunConnection, error)
@@ -179,6 +182,7 @@ func New(app Application) *Server {
 	server.registerConnectorRoutes()
 	server.registerExperimentRoutes()
 	server.registerMiyunRoutes()
+	server.registerOceanEngineSessionRoutes()
 	return server
 }
 

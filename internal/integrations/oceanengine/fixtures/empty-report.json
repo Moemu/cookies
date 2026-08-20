@@ -1,0 +1,12 @@
+{
+  "code": 0,
+  "data": {
+    "StatsData": {
+      "Rows": [],
+      "TotalCount": 0,
+      "MetricSchema": "mock.metric.v1"
+    }
+  },
+  "source": "synthetic_replay",
+  "quality": "healthy"
+}

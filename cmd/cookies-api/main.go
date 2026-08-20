@@ -519,7 +519,18 @@ func main() {
 		creativeService.AINativeVoiceoverFitter = creative.ModelAINativeVoiceoverFitter{Text: textProvider, ModelAlias: cfg.Strategy.TextModelAlias}
 	}
 	var miyunCipher insights.MiyunSecretCipher
+	var sessionCipher insights.SecretCipher
 	var miyunPages insights.MiyunPageClient
+	var oceanEngineVerifier insights.OceanEngineSessionVerifier
+	if cfg.OceanEngine.Enabled {
+		cipher, cipherErr := insights.NewAESGCMSecretCipher(cfg.OceanEngine.MasterKey, cfg.OceanEngine.MasterKeyVersion)
+		if cipherErr != nil {
+			log.Fatalf("configure Ocean Engine session encryption: %v", cipherErr)
+		}
+		sessionCipher = cipher
+		oceanEngineVerifier = oceanEngineSessionVerifier{baseURL: cfg.OceanEngine.BusinessBaseURL, client: &http.Client{Timeout: 30 * time.Second}}
+		log.Printf("Ocean Engine read-only session verification configured: base_url=%s", cfg.OceanEngine.BaseURL)
+	}
 	var miyunVerifier insights.MiyunConnectionVerifier
 	var miyunImports insights.MiyunAuthorizedImporter
 	var miyunPreviews insights.MiyunAuthorizedPreviewer
@@ -582,6 +593,9 @@ func main() {
 		MiyunReturns:        miyunReturnImportAdapter{imports: assets.ExternalImportService{Repository: assetRepository, Projects: projectService, Upload: *uploadService, QuarantineBucket: cfg.ObjectStorage.QuarantineBucket}, uploads: *uploadService},
 		MiyunPreviews:       miyunPreviews,
 		MiyunSecrets:        miyunCipher,
+		SessionSecrets:      sessionCipher,
+		OceanEngineSessions: insights.MySQLRepository{DB: db},
+		OceanEngineVerifier: oceanEngineVerifier,
 		MiyunVerifier:       miyunVerifier,
 		MiyunCooldown:       time.Duration(cfg.Miyun.CooldownSeconds) * time.Second,
 	}

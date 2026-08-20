@@ -1,0 +1,10 @@
+{
+  "code": 0,
+  "data": {
+    "promotion_id": "900719925474099312345",
+    "project_id": "project-opaque-001",
+    "material_ids": ["material-opaque-001"],
+    "aliases": ["promotion_id", "promotionId"]
+  },
+  "source": "synthetic_replay"
+}

@@ -60,6 +60,80 @@ const miyunConnectionSelect = `SELECT id, organization_id, project_id, status,
 	last_verified_at, last_successful_request_at, cooldown_until, last_error_kind, last_error_code, last_error_at,
 	version, created_by, created_at, updated_at FROM insight_miyun_connections`
 
+const oceanEngineSessionSelect = `SELECT id, organization_id, project_id, status, session_ciphertext, session_key_version, last_verified_at, last_successful_request_at, last_error_kind, last_error_code, last_error_at, version, created_by, created_at, updated_at FROM insight_ocean_engine_sessions`
+
+func (r MySQLRepository) CreateOceanEngineSession(ctx context.Context, value OceanEngineSession) (OceanEngineSession, error) {
+	if err := value.Validate(); err != nil {
+		return OceanEngineSession{}, err
+	}
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO insight_ocean_engine_sessions (
+		id, organization_id, project_id, status, session_ciphertext, session_key_version,
+		last_verified_at, last_successful_request_at, last_error_kind, last_error_code, last_error_at,
+		version, created_by, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.OrganizationID, value.ProjectID, value.Status, value.SessionCiphertext, value.SessionKeyVersion,
+		value.LastVerifiedAt, value.LastSuccessfulRequestAt, nullableString(value.LastErrorKind), nullableString(value.LastErrorCode), value.LastErrorAt,
+		value.Version, value.CreatedBy, value.CreatedAt, value.UpdatedAt)
+	if isDuplicateKey(err) {
+		return OceanEngineSession{}, fmt.Errorf("%w: Ocean Engine session identity already exists", ErrInvalidState)
+	}
+	return value, err
+}
+
+func (r MySQLRepository) GetProjectOceanEngineSession(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID) (OceanEngineSession, error) {
+	value, err := scanOceanEngineSession(r.DB.QueryRowContext(ctx, oceanEngineSessionSelect+` WHERE organization_id = ? AND project_id = ? LIMIT 1`, organizationID, projectID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return OceanEngineSession{}, ErrNotFound
+	}
+	return value, err
+}
+
+func (r MySQLRepository) UpdateOceanEngineSession(ctx context.Context, value OceanEngineSession, expectedVersion int64) (OceanEngineSession, error) {
+	if err := value.Validate(); err != nil || expectedVersion < 1 {
+		return OceanEngineSession{}, ErrInvalidRequest
+	}
+	result, err := r.DB.ExecContext(ctx, `UPDATE insight_ocean_engine_sessions SET status = ?, session_ciphertext = ?, session_key_version = ?, last_verified_at = ?, last_successful_request_at = ?, last_error_kind = ?, last_error_code = ?, last_error_at = ?, version = version + 1, updated_at = ? WHERE organization_id = ? AND project_id = ? AND id = ? AND version = ?`, value.Status, value.SessionCiphertext, value.SessionKeyVersion, value.LastVerifiedAt, value.LastSuccessfulRequestAt, nullableString(value.LastErrorKind), nullableString(value.LastErrorCode), value.LastErrorAt, value.UpdatedAt, value.OrganizationID, value.ProjectID, value.ID, expectedVersion)
+	if err != nil {
+		return OceanEngineSession{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return OceanEngineSession{}, err
+	}
+	if affected == 0 {
+		return OceanEngineSession{}, ErrVersionConflict
+	}
+	value.Version = expectedVersion + 1
+	return value, nil
+}
+
+func scanOceanEngineSession(row rowScanner) (OceanEngineSession, error) {
+	var value OceanEngineSession
+	var verifiedAt, successfulAt, errorAt sql.NullTime
+	var errorKind, errorCode sql.NullString
+	err := row.Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.Status, &value.SessionCiphertext, &value.SessionKeyVersion, &verifiedAt, &successfulAt, &errorKind, &errorCode, &errorAt, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
+	if err != nil {
+		return OceanEngineSession{}, err
+	}
+	if verifiedAt.Valid {
+		value.LastVerifiedAt = &verifiedAt.Time
+	}
+	if successfulAt.Valid {
+		value.LastSuccessfulRequestAt = &successfulAt.Time
+	}
+	if errorAt.Valid {
+		value.LastErrorAt = &errorAt.Time
+	}
+	if errorKind.Valid {
+		value.LastErrorKind = errorKind.String
+	}
+	if errorCode.Valid {
+		value.LastErrorCode = errorCode.String
+	}
+	value.CredentialRefPresent = len(value.SessionCiphertext) > 0
+	return value, nil
+}
+
 func (r MySQLRepository) CreateMiyunConnection(ctx context.Context, value MiyunConnection) (MiyunConnection, error) {
 	if err := value.Validate(); err != nil {
 		return MiyunConnection{}, err

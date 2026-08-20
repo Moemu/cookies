@@ -31,12 +31,13 @@ const (
 	PlatformXiaohongshu Platform = "xiaohongshu"
 	PlatformWechat      Platform = "wechat"
 	PlatformTencentAds  Platform = "tencent_ads"
+	PlatformOceanEngine Platform = "ocean_engine"
 	PlatformOther       Platform = "other"
 )
 
 func (p Platform) valid() bool {
 	switch p {
-	case PlatformDouyin, PlatformKuaishou, PlatformXiaohongshu, PlatformWechat, PlatformTencentAds, PlatformOther:
+	case PlatformDouyin, PlatformKuaishou, PlatformXiaohongshu, PlatformWechat, PlatformTencentAds, PlatformOceanEngine, PlatformOther:
 		return true
 	}
 	return false
@@ -54,6 +55,8 @@ func (p Platform) Label() string {
 		return "公众号"
 	case PlatformTencentAds:
 		return "腾讯广告"
+	case PlatformOceanEngine:
+		return "巨量引擎"
 	case PlatformOther:
 		return "其他"
 	}
@@ -68,12 +71,13 @@ const (
 	IngestServiceAccount IngestMode = "service_account" // 服务账号/API Key
 	IngestFileImport     IngestMode = "file_import"     // 授权报表导入
 	IngestComputerUse    IngestMode = "computer_use"    // 页面读取，受控补充
+	IngestWebAPI         IngestMode = "web_api"         // 经授权的私有只读 Web API 会话
 	IngestBusiness       IngestMode = "business"        // 业务转化源
 )
 
 func (m IngestMode) valid() bool {
 	switch m {
-	case IngestAPI, IngestServiceAccount, IngestFileImport, IngestComputerUse, IngestBusiness:
+	case IngestAPI, IngestServiceAccount, IngestFileImport, IngestComputerUse, IngestWebAPI, IngestBusiness:
 		return true
 	}
 	return false
@@ -89,6 +93,8 @@ func (m IngestMode) Label() string {
 		return "报表导入"
 	case IngestComputerUse:
 		return "页面读取"
+	case IngestWebAPI:
+		return "私有只读 Web API"
 	case IngestBusiness:
 		return "业务转化源"
 	}
