@@ -761,6 +761,15 @@ func (s *applicationStub) ManualImportMiyunMaterial(_ context.Context, _ contrac
 	s.miyunIdempotencyKey = key
 	return s.miyunManual, s.miyunErr
 }
+func (s *applicationStub) GetOceanEngineSession(context.Context, contract.ActorContext, contract.ProjectID) (insights.OceanEngineSession, error) {
+	return insights.OceanEngineSession{ID: "oceanenginesession_1", CredentialRefPresent: true}, s.miyunErr
+}
+func (s *applicationStub) UpdateOceanEngineSession(context.Context, contract.ActorContext, contract.ProjectID, insights.UpdateOceanEngineSessionRequest) (insights.OceanEngineSession, error) {
+	return insights.OceanEngineSession{ID: "oceanenginesession_1", CredentialRefPresent: true}, s.miyunErr
+}
+func (s *applicationStub) VerifyOceanEngineSession(context.Context, contract.ActorContext, contract.ProjectID, insights.VerifyOceanEngineSessionRequest) (insights.OceanEngineSession, error) {
+	return insights.OceanEngineSession{ID: "oceanenginesession_1", CredentialRefPresent: true}, s.miyunErr
+}
 func (s *applicationStub) GetMiyunConnection(context.Context, contract.ActorContext, contract.ProjectID) (insights.MiyunConnection, error) {
 	return insights.MiyunConnection{ID: "miyunconnection_1"}, s.miyunErr
 }

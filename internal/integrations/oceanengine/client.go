@@ -31,6 +31,7 @@ var readOnlyEndpoints = map[Endpoint]struct{}{
 	{http.MethodGet, "/ad/api/account/info"}:                               {},
 	{http.MethodGet, "/superior/api/v2/account/info"}:                      {},
 	{http.MethodGet, "/ad/api/account/conf"}:                               {},
+	{http.MethodGet, "/api/ebp/ebp_info/get_global_info"}:                  {},
 }
 
 type Session struct {
@@ -48,17 +49,46 @@ type Client struct {
 }
 
 func NewClient(rawBaseURL, advertiserID string, session Session, httpClient *http.Client) (*Client, error) {
+	client, err := newClient(rawBaseURL, advertiserID, session, httpClient)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(advertiserID) == "" {
+		return nil, fmt.Errorf("advertiser ID and in-memory cookie session are required")
+	}
+	return client, nil
+}
+
+// NewSessionClient creates a read-only client for session verification.
+func NewSessionClient(rawBaseURL string, session Session, httpClient *http.Client) (*Client, error) {
+	return newClient(rawBaseURL, "", session, httpClient)
+}
+
+func newClient(rawBaseURL, advertiserID string, session Session, httpClient *http.Client) (*Client, error) {
 	base, err := url.Parse(strings.TrimRight(rawBaseURL, "/"))
 	if err != nil || base.Scheme == "" || base.Host == "" {
 		return nil, fmt.Errorf("invalid Ocean Engine base URL")
 	}
-	if strings.TrimSpace(advertiserID) == "" || strings.TrimSpace(session.Cookies) == "" {
-		return nil, fmt.Errorf("advertiser ID and in-memory cookie session are required")
+	if strings.TrimSpace(session.Cookies) == "" {
+		return nil, fmt.Errorf("in-memory cookie session is required")
 	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Client{BaseURL: base, HTTPClient: httpClient, Session: session, AdvertiserID: advertiserID, UserAgent: "cookies-oceanengine-connector/1", Delay: 500 * time.Millisecond}, nil
+	if strings.TrimSpace(session.CSRFToken) == "" {
+		session.CSRFToken = cookieValue(session.Cookies, "csrftoken")
+	}
+	return &Client{BaseURL: base, HTTPClient: httpClient, Session: session, AdvertiserID: advertiserID, UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0", Delay: 500 * time.Millisecond}, nil
+}
+
+func cookieValue(header, name string) string {
+	for _, part := range strings.Split(header, ";") {
+		key, value, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), name) {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader, contentType string) (map[string]any, error) {
@@ -93,15 +123,22 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 			}
 		}
 	}
-	query.Set("aadvid", c.AdvertiserID)
+	if c.AdvertiserID != "" {
+		query.Set("aadvid", c.AdvertiserID)
+	}
 	u.RawQuery = query.Encode()
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", c.UserAgent)
-	req.Header.Set("Origin", "https://ad.oceanengine.com")
-	req.Header.Set("Referer", "https://ad.oceanengine.com/promotion/promote-manage/ad?aadvid="+url.QueryEscape(c.AdvertiserID))
+	origin := c.BaseURL.Scheme + "://" + c.BaseURL.Host
+	req.Header.Set("Origin", origin)
+	if c.AdvertiserID != "" {
+		req.Header.Set("Referer", origin+"/promotion/promote-manage/ad?aadvid="+url.QueryEscape(c.AdvertiserID))
+	} else if strings.EqualFold(c.BaseURL.Host, "business.oceanengine.com") {
+		req.Header.Set("Referer", origin+"/")
+	}
 	req.Header.Set("Cookie", c.Session.Cookies)
 	if c.Session.CSRFToken != "" {
 		req.Header.Set("x-csrftoken", c.Session.CSRFToken)

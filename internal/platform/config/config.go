@@ -47,6 +47,7 @@ type Config struct {
 	Strategy           Strategy
 	Research           Research
 	Miyun              Miyun
+	OceanEngine        OceanEngine
 	BrowserRPA         BrowserRPA
 	LocalIdentity      *LocalIdentity
 }
@@ -184,6 +185,15 @@ type Miyun struct {
 	MaxConcurrent        int
 	RequestsPerSecond    int
 	CooldownSeconds      int
+}
+
+// OceanEngine controls the read-only private web API session verifier.
+type OceanEngine struct {
+	Enabled          bool
+	BaseURL          string
+	BusinessBaseURL  string
+	MasterKey        string
+	MasterKeyVersion string
 }
 
 // Provider contains only local composition choices. Credentials are read from
@@ -452,6 +462,10 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	oceanEngineEnabled, err := strictBoolValueOr(lookup, "COOKIES_OCEAN_ENGINE_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	generatePromptDefault := "strategy.generate.v2"
 	conversationPromptDefault := "strategy.conversation.v3"
 	revisePromptDefault := "strategy.revise.v2"
@@ -581,6 +595,13 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			DownloadAllowedHosts: splitCSV(valueOr(lookup, "COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS", "")),
 			MaxConcurrent:        intValueOr(lookup, "COOKIES_MIYUN_MAX_CONCURRENT", 1), RequestsPerSecond: intValueOr(lookup, "COOKIES_MIYUN_REQUESTS_PER_SECOND", 5),
 			CooldownSeconds: intValueOr(lookup, "COOKIES_MIYUN_COOLDOWN_SECONDS", 300),
+		},
+		OceanEngine: OceanEngine{
+			Enabled:          oceanEngineEnabled,
+			BaseURL:          valueOr(lookup, "COOKIES_OCEAN_ENGINE_BASE_URL", "https://ad.oceanengine.com"),
+			BusinessBaseURL:  valueOr(lookup, "COOKIES_OCEAN_ENGINE_BUSINESS_BASE_URL", "https://business.oceanengine.com"),
+			MasterKey:        valueOr(lookup, "COOKIES_OCEAN_ENGINE_MASTER_KEY", ""),
+			MasterKeyVersion: valueOr(lookup, "COOKIES_OCEAN_ENGINE_MASTER_KEY_VERSION", "v1"),
 		},
 		BrowserRPA: BrowserRPA{
 			Enabled:               browserRpaEnabled,
@@ -816,6 +837,16 @@ func (c Config) Validate() error {
 			if strings.TrimSpace(host) == "" || strings.ContainsAny(host, "/@?#") {
 				return fmt.Errorf("COOKIES_MIYUN_DOWNLOAD_ALLOWED_HOSTS must contain hostnames only")
 			}
+		}
+	}
+	if c.OceanEngine.Enabled {
+		endpoint, err := url.Parse(strings.TrimSpace(c.OceanEngine.BaseURL))
+		if err != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil {
+			return fmt.Errorf("COOKIES_OCEAN_ENGINE_BASE_URL must be an absolute HTTPS URL")
+		}
+		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(c.OceanEngine.MasterKey))
+		if err != nil || len(key) != 32 || strings.TrimSpace(c.OceanEngine.MasterKeyVersion) == "" {
+			return fmt.Errorf("COOKIES_OCEAN_ENGINE_MASTER_KEY must be a base64-encoded 32-byte key with a version")
 		}
 	}
 	if c.Provider.ImageAdapter != "fake" && c.Provider.ImageAdapter != "ark_image" && c.Provider.ImageAdapter != "openai_image" && c.Provider.ImageAdapter != "adapter_gateway" {

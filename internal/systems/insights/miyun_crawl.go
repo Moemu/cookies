@@ -122,10 +122,13 @@ type MiyunAuthorizedImporter interface {
 	ImportMiyunMaterial(context.Context, MiyunAuthorizedImportRequest) (MiyunAuthorizedImportResult, error)
 }
 
-type MiyunSecretCipher interface {
+type SecretCipher interface {
 	Encrypt([]byte) ([]byte, string, error)
 	Decrypt([]byte, string) ([]byte, error)
 }
+
+// MiyunSecretCipher is retained as a compatibility alias for existing Miyun wiring.
+type MiyunSecretCipher = SecretCipher
 
 type MiyunMaterialImportCompletion struct {
 	Material        MiyunMaterial

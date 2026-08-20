@@ -543,7 +543,10 @@ type Service struct {
 	MiyunReturns        MiyunReturnAssetImporter
 	MiyunPreviews       MiyunAuthorizedPreviewer
 	MiyunSecrets        MiyunSecretCipher
+	SessionSecrets      SecretCipher
 	MiyunVerifier       MiyunConnectionVerifier
+	OceanEngineSessions OceanEngineSessionRepository
+	OceanEngineVerifier OceanEngineSessionVerifier
 	MiyunCooldown       time.Duration
 	// Assets backs 分析素材库 and 内容分析. It is a separate interface from
 	// Repository because the two lifecycles share nothing but the module.

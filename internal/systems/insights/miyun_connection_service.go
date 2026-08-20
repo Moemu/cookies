@@ -35,15 +35,15 @@ type MiyunConnectionVerifier interface {
 	VerifyMiyunConnection(context.Context, []byte) error
 }
 
-type AESGCMMiyunSecretCipher struct {
+type AESGCMSecretCipher struct {
 	AEAD       cipher.AEAD
 	KeyVersion string
 }
 
-func NewAESGCMMiyunSecretCipher(encodedKey, keyVersion string) (*AESGCMMiyunSecretCipher, error) {
+func NewAESGCMSecretCipher(encodedKey, keyVersion string) (*AESGCMSecretCipher, error) {
 	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encodedKey))
 	if err != nil || len(key) != 32 || strings.TrimSpace(keyVersion) == "" {
-		return nil, fmt.Errorf("Miyun master key must be a base64-encoded 32-byte key with a version")
+		return nil, fmt.Errorf("session master key must be a base64-encoded 32-byte key with a version")
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -53,10 +53,16 @@ func NewAESGCMMiyunSecretCipher(encodedKey, keyVersion string) (*AESGCMMiyunSecr
 	if err != nil {
 		return nil, err
 	}
-	return &AESGCMMiyunSecretCipher{AEAD: aead, KeyVersion: strings.TrimSpace(keyVersion)}, nil
+	return &AESGCMSecretCipher{AEAD: aead, KeyVersion: strings.TrimSpace(keyVersion)}, nil
 }
 
-func (c *AESGCMMiyunSecretCipher) Encrypt(plaintext []byte) ([]byte, string, error) {
+type AESGCMMiyunSecretCipher = AESGCMSecretCipher
+
+func NewAESGCMMiyunSecretCipher(encodedKey, keyVersion string) (*AESGCMMiyunSecretCipher, error) {
+	return NewAESGCMSecretCipher(encodedKey, keyVersion)
+}
+
+func (c *AESGCMSecretCipher) Encrypt(plaintext []byte) ([]byte, string, error) {
 	if c == nil || c.AEAD == nil || len(plaintext) == 0 {
 		return nil, "", fmt.Errorf("Miyun cipher and plaintext are required")
 	}
@@ -67,7 +73,7 @@ func (c *AESGCMMiyunSecretCipher) Encrypt(plaintext []byte) ([]byte, string, err
 	return c.AEAD.Seal(nonce, nonce, plaintext, nil), c.KeyVersion, nil
 }
 
-func (c *AESGCMMiyunSecretCipher) Decrypt(ciphertext []byte, keyVersion string) ([]byte, error) {
+func (c *AESGCMSecretCipher) Decrypt(ciphertext []byte, keyVersion string) ([]byte, error) {
 	if c == nil || c.AEAD == nil || keyVersion != c.KeyVersion || len(ciphertext) <= c.AEAD.NonceSize() {
 		return nil, fmt.Errorf("Miyun ciphertext cannot be decrypted with the configured key version")
 	}

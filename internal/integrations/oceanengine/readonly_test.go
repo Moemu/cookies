@@ -7,6 +7,28 @@ import (
 	"testing"
 )
 
+func TestGlobalInfoUsesEnterpriseReadOnlyEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/ebp/ebp_info/get_global_info" || r.URL.RawQuery != "" {
+			t.Errorf("unexpected enterprise request: %s %s", r.Method, r.URL.RequestURI())
+		}
+		if r.Header.Get("Cookie") != "session=x; csrftoken=csrf" || r.Header.Get("x-csrftoken") != "csrf" {
+			t.Errorf("session headers not forwarded")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"data":{}}`))
+	}))
+	defer server.Close()
+	client, err := NewSessionClient(server.URL, Session{Cookies: "session=x; csrftoken=csrf"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	if _, err := client.GlobalInfo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReaderMethodsAndFlattenRows(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/ad/api/agw/statistics_sophonx/statQuery" {

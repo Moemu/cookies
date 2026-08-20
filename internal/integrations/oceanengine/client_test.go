@@ -19,6 +19,28 @@ func TestClientRejectsNonReadOnlyEndpoint(t *testing.T) {
 	}
 }
 
+func TestClientDerivesCSRFHeaderAndUsesBrowserUserAgent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cookie") != "session=x; csrftoken=csrf" || r.Header.Get("x-csrftoken") != "csrf" {
+			t.Errorf("session headers not derived from cookie: cookie=%q csrf=%q", r.Header.Get("Cookie"), r.Header.Get("x-csrftoken"))
+		}
+		if !strings.HasPrefix(r.Header.Get("User-Agent"), "Mozilla/5.0") {
+			t.Errorf("expected browser user agent, got %q", r.Header.Get("User-Agent"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer server.Close()
+	client, err := NewSessionClient(server.URL, Session{Cookies: "session=x; csrftoken=csrf"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	if _, err := client.AccountInfo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClientSetsSessionHeadersAndChecksBusinessCode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/ad/api/account/info" {

@@ -83,6 +83,10 @@ func (c *Client) AccountInfo(ctx context.Context) (map[string]any, error) {
 	return c.getJSON(ctx, "/ad/api/account/info")
 }
 
+func (c *Client) GlobalInfo(ctx context.Context) (map[string]any, error) {
+	return c.getJSON(ctx, "/api/ebp/ebp_info/get_global_info")
+}
+
 func (c *Client) getJSON(ctx context.Context, path string) (map[string]any, error) {
 	return c.do(ctx, http.MethodGet, path, nil, "")
 }
