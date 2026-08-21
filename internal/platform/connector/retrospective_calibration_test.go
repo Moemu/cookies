@@ -71,3 +71,21 @@ func TestRetrospectiveCalibrationRejectsReplayBeyondKnowledgeCutoff(t *testing.T
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestHierarchicalHurdleCanPassStrictTimeHoldout(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cases := make([]RetrospectiveCalibrationCase, 0, 100)
+	for day := 0; day < 100; day++ {
+		cutoff := base.AddDate(0, 0, day)
+		cases = append(cases, RetrospectiveCalibrationCase{CaseID: cutoff.Format("20060102"), ProjectRef: "anon_project", PredictionCutoff: cutoff, HorizonEnd: cutoff.Add(24 * time.Hour), History: RetrospectiveMetricTotals{SpendMinor: 1000, Impressions: 10000, Clicks: 100}, HistoryActivity: RetrospectiveMetricActivity{ObservedWindows: 7, SpendPositiveWindows: 1, ImpressionPositiveWindows: 1, ClickPositiveWindows: 1}, BaselinePrediction: RetrospectiveMetricEstimate{SpendMinor: 500, Impressions: 5000, Clicks: 50}, Observed: RetrospectiveMetricTotals{SpendMinor: 200, Impressions: 2000, Clicks: 20}})
+	}
+	calibration, evaluation, predictions := calibrateAndEvaluateRetrospectiveHurdle(cases, base.AddDate(0, 0, 70))
+	if calibration.Status != "evaluated" || calibration.TrainingCaseCount != 70 || calibration.HoldoutCaseCount != 30 || len(predictions) != 30 {
+		t.Fatalf("calibration=%#v predictions=%d", calibration, len(predictions))
+	}
+	baseline := evaluateRetrospectiveCases(cases[70:], "trailing_mean_baseline", "time_holdout", nil)
+	selection := selectRetrospectiveModel(append(baseline, evaluation...))
+	if !selection.HoldoutGatePassed || selection.SelectedModel != RetrospectiveHurdleModelVersion {
+		t.Fatalf("selection=%#v evaluation=%#v", selection, evaluation)
+	}
+}

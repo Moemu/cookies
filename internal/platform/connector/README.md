@@ -34,3 +34,5 @@ from `COOKIES_CALIBRATION_EXPORT_KEY_BASE64`.
 origin dataset from anonymous daily metric windows. It excludes current
 configuration, platform diagnosis, and immature conversion labels. It uses a
 time holdout and never applies a candidate calibration to the simulator.
+The hierarchical hurdle challenger models activity and positive magnitude
+separately. Relative improvement alone cannot pass its absolute readiness gate.

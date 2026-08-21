@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const RetrospectiveCalibrationSchemaVersion = "delivery-retrospective-calibration/v1"
+const RetrospectiveCalibrationSchemaVersion = "delivery-retrospective-calibration/v2"
 
 type RetrospectiveCalibrationBuilder struct {
 	Reader SnapshotReader
@@ -40,6 +40,7 @@ type RetrospectiveCalibrationResult struct {
 	Policy            RetrospectiveCalibrationPolicy      `json:"policy"`
 	Summary           RetrospectiveCalibrationSummary     `json:"summary"`
 	Calibration       []RetrospectiveCalibrationParameter `json:"calibration"`
+	HurdleCalibration RetrospectiveHurdleCalibration      `json:"hurdle_calibration"`
 	Evaluation        []RetrospectiveMetricEvaluation     `json:"evaluation"`
 	ModelSelection    RetrospectiveModelSelection         `json:"model_selection"`
 	Cases             []RetrospectiveCalibrationCase      `json:"cases"`
@@ -69,24 +70,26 @@ type RetrospectiveCalibrationSummary struct {
 }
 
 type RetrospectiveCalibrationCase struct {
-	CaseID             string                      `json:"case_id"`
-	AccountRef         string                      `json:"account_ref"`
-	ProjectRef         string                      `json:"project_ref"`
-	PromotionRef       string                      `json:"promotion_ref"`
-	CookiesPlanBinding CalibrationPlanBinding      `json:"cookies_plan_binding"`
-	PredictionCutoff   time.Time                   `json:"prediction_cutoff"`
-	HistoryStart       time.Time                   `json:"history_start"`
-	HorizonEnd         time.Time                   `json:"horizon_end"`
-	HistoryWindowCount int                         `json:"history_window_count"`
-	LabelWindowCount   int                         `json:"label_window_count"`
-	History            RetrospectiveMetricTotals   `json:"history"`
-	BaselinePrediction RetrospectiveMetricEstimate `json:"baseline_prediction"`
-	Observed           RetrospectiveMetricTotals   `json:"observed"`
-	EligibleMetrics    []string                    `json:"eligible_metrics"`
-	ExcludedMetrics    map[string]string           `json:"excluded_metrics"`
-	FeatureWindowRefs  []string                    `json:"feature_window_refs"`
-	LabelWindowRefs    []string                    `json:"label_window_refs"`
-	QualityStatus      string                      `json:"quality_status"`
+	CaseID             string                         `json:"case_id"`
+	AccountRef         string                         `json:"account_ref"`
+	ProjectRef         string                         `json:"project_ref"`
+	PromotionRef       string                         `json:"promotion_ref"`
+	CookiesPlanBinding CalibrationPlanBinding         `json:"cookies_plan_binding"`
+	PredictionCutoff   time.Time                      `json:"prediction_cutoff"`
+	HistoryStart       time.Time                      `json:"history_start"`
+	HorizonEnd         time.Time                      `json:"horizon_end"`
+	HistoryWindowCount int                            `json:"history_window_count"`
+	LabelWindowCount   int                            `json:"label_window_count"`
+	History            RetrospectiveMetricTotals      `json:"history"`
+	HistoryActivity    RetrospectiveMetricActivity    `json:"history_activity"`
+	BaselinePrediction RetrospectiveMetricEstimate    `json:"baseline_prediction"`
+	HurdlePrediction   *RetrospectiveHurdlePrediction `json:"hurdle_prediction,omitempty"`
+	Observed           RetrospectiveMetricTotals      `json:"observed"`
+	EligibleMetrics    []string                       `json:"eligible_metrics"`
+	ExcludedMetrics    map[string]string              `json:"excluded_metrics"`
+	FeatureWindowRefs  []string                       `json:"feature_window_refs"`
+	LabelWindowRefs    []string                       `json:"label_window_refs"`
+	QualityStatus      string                         `json:"quality_status"`
 }
 
 type RetrospectiveMetricTotals struct {
@@ -202,6 +205,15 @@ func (b RetrospectiveCalibrationBuilder) Build(ctx context.Context, request Retr
 	holdoutStart := retrospectiveHoldoutStart(result.Cases, request.ReplayEnd.UTC())
 	result.Policy.HoldoutStart = holdoutStart
 	result.Calibration, result.Evaluation = calibrateAndEvaluateRetrospectiveCases(result.Cases, holdoutStart)
+	var hurdleEvaluation []RetrospectiveMetricEvaluation
+	var hurdlePredictions map[string]RetrospectiveHurdlePrediction
+	result.HurdleCalibration, hurdleEvaluation, hurdlePredictions = calibrateAndEvaluateRetrospectiveHurdle(result.Cases, holdoutStart)
+	result.Evaluation = append(result.Evaluation, hurdleEvaluation...)
+	for index := range result.Cases {
+		if prediction, ok := hurdlePredictions[result.Cases[index].CaseID]; ok {
+			result.Cases[index].HurdlePrediction = &prediction
+		}
+	}
 	result.ModelSelection = selectRetrospectiveModel(result.Evaluation)
 	return result, nil
 }
@@ -254,7 +266,7 @@ func (b RetrospectiveCalibrationBuilder) buildRetrospectiveCase(request Retrospe
 		delete(excluded, "conversions")
 	}
 	caseID := "retrocase_" + canonicalHash([]any{accountRef, projectRef, promotionRef, cutoff, request.LookbackDays, request.HorizonDays, featureRefs, labelRefs})
-	return RetrospectiveCalibrationCase{CaseID: caseID, AccountRef: accountRef, ProjectRef: projectRef, PromotionRef: promotionRef, CookiesPlanBinding: CalibrationPlanBinding{State: "unbound_historical", PlanID: nil, PlanVersion: nil}, PredictionCutoff: cutoff, HistoryStart: historyStart, HorizonEnd: horizonEnd, HistoryWindowCount: len(history), LabelWindowCount: len(labels), History: historyTotals, BaselinePrediction: prediction, Observed: observed, EligibleMetrics: eligible, ExcludedMetrics: excluded, FeatureWindowRefs: featureRefs, LabelWindowRefs: labelRefs, QualityStatus: "retrospective_baseline_only"}, "", nil
+	return RetrospectiveCalibrationCase{CaseID: caseID, AccountRef: accountRef, ProjectRef: projectRef, PromotionRef: promotionRef, CookiesPlanBinding: CalibrationPlanBinding{State: "unbound_historical", PlanID: nil, PlanVersion: nil}, PredictionCutoff: cutoff, HistoryStart: historyStart, HorizonEnd: horizonEnd, HistoryWindowCount: len(history), LabelWindowCount: len(labels), History: historyTotals, HistoryActivity: retrospectiveMetricActivity(history), BaselinePrediction: prediction, Observed: observed, EligibleMetrics: eligible, ExcludedMetrics: excluded, FeatureWindowRefs: featureRefs, LabelWindowRefs: labelRefs, QualityStatus: "retrospective_baseline_only"}, "", nil
 }
 
 func isRetrospectiveAtomicWindow(metric MetricWindow) bool {
@@ -422,13 +434,13 @@ func evaluateRetrospectiveCases(cases []RetrospectiveCalibrationCase, model, spl
 }
 
 func selectRetrospectiveModel(evaluations []RetrospectiveMetricEvaluation) RetrospectiveModelSelection {
-	result := RetrospectiveModelSelection{SelectedModel: "trailing_mean_baseline", CandidateModel: "calibrated_scale_v1", CandidateStatus: "rejected", AppliedToSimulator: false, Reasons: []string{}}
+	result := RetrospectiveModelSelection{SelectedModel: "trailing_mean_baseline", CandidateModel: "hierarchical_hurdle_v2", CandidateStatus: "rejected", AppliedToSimulator: false, Reasons: []string{}}
 	baseline, candidate := map[string]RetrospectiveMetricEvaluation{}, map[string]RetrospectiveMetricEvaluation{}
 	for _, value := range evaluations {
 		switch value.Model {
 		case "trailing_mean_baseline":
 			baseline[value.Metric] = value
-		case "calibrated_scale_v1":
+		case "hierarchical_hurdle_v2":
 			candidate[value.Metric] = value
 		}
 	}
@@ -446,6 +458,12 @@ func selectRetrospectiveModel(evaluations []RetrospectiveMetricEvaluation) Retro
 		}
 		if *challenger.WAPE >= *base.WAPE {
 			result.Reasons = append(result.Reasons, metric+":holdout_wape_not_improved")
+		}
+		if *challenger.WAPE > 1 {
+			result.Reasons = append(result.Reasons, metric+":holdout_wape_above_readiness_limit")
+		}
+		if math.Abs(challenger.MeanBias) > math.Abs(base.MeanBias)*1.05 {
+			result.Reasons = append(result.Reasons, metric+":absolute_bias_regressed")
 		}
 	}
 	if len(result.Reasons) == 0 {

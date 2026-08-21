@@ -261,4 +261,14 @@ go run ./cmd/cookies-delivery-calibration backtest `
 
 首个 challenger 只拟合每个原子指标的倍率。它必须在留出集上改善所有合格指标的 WAPE。否则，报告设置 `candidate_status=rejected`。程序不会自动修改模拟器参数。
 
+`hierarchical_hurdle_v2` 先估计次日是否有量，再估计有量时的规模。它使用账号先验和匿名 Project 先验。训练集内的输出倍率不能读取留出标签。
+
+Hurdle challenger 必须满足全部门禁：
+
+- 所有合格指标的留出 WAPE 都必须改善。
+- 所有合格指标的留出 WAPE 都必须不高于 100%。
+- 所有合格指标的绝对偏差不能恶化 5% 以上。
+
+相对改善但未通过绝对门槛时，程序仍拒绝候选模型。
+
 所有对象和指标窗口引用使用 HMAC 匿名化。输出不包含平台原始 ID、自由文本、Cookie 或当前配置值。
