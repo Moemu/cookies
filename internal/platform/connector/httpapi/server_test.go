@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +20,10 @@ func (r *readerStub) Snapshot(_ context.Context, q connector.Query) (connector.C
 	return connector.CanonicalSnapshot{DatasetVersion: connector.DatasetVersion, PredictionCutoff: q.PredictionCutoff}, nil
 }
 
-type syncerStub struct{ request connector.SyncRequest }
+type syncerStub struct {
+	mu      sync.Mutex
+	request connector.SyncRequest
+}
 type authorizerStub struct{ err error }
 type sessionManagerStub struct{ plaintext string }
 type accountManagerStub struct{ verifyErr error }
@@ -50,8 +54,16 @@ func (a authorizerStub) AuthorizeProject(context.Context, contract.ActorContext,
 }
 
 func (s *syncerStub) Sync(_ context.Context, r connector.SyncRequest) (connector.SyncResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.request = r
 	return connector.SyncResult{RunID: "sync_opaque"}, nil
+}
+
+func (s *syncerStub) lastRequest() connector.SyncRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.request
 }
 func request(method, path, body, scope string) *http.Request {
 	value := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -109,8 +121,9 @@ func TestSyncRequiresIdempotencyAndPassesNoCredentialMaterial(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	if syncer.request.IdempotencyKey != "sync-request-1" || syncer.request.AccountRef != "account-1" || !syncer.request.WindowEnd.After(syncer.request.WindowStart) {
-		t.Fatalf("request=%#v", syncer.request)
+	syncedRequest := syncer.lastRequest()
+	if syncedRequest.IdempotencyKey != "sync-request-1" || syncedRequest.AccountRef != "account-1" || !syncedRequest.WindowEnd.After(syncedRequest.WindowStart) {
+		t.Fatalf("request=%#v", syncedRequest)
 	}
 	if strings.Contains(strings.ToLower(response.Body.String()), "token") || strings.Contains(strings.ToLower(response.Body.String()), "cookie") {
 		t.Fatalf("sensitive response=%s", response.Body.String())
@@ -134,11 +147,16 @@ func TestOrganizationSyncAndSessionDoNotRequireProjectOrReturnCredential(t *test
 	syncRequest.Header.Set("Idempotency-Key", "org-sync-1")
 	syncResponse := httptest.NewRecorder()
 	server.ServeHTTP(syncResponse, syncRequest)
-	for attempt := 0; attempt < 100 && syncer.request.OrganizationID == ""; attempt++ {
+	var syncedRequest connector.SyncRequest
+	for attempt := 0; attempt < 100; attempt++ {
+		syncedRequest = syncer.lastRequest()
+		if syncedRequest.OrganizationID != "" {
+			break
+		}
 		time.Sleep(time.Millisecond)
 	}
-	if syncResponse.Code != http.StatusAccepted || syncer.request.ProjectID != "" || syncer.request.OrganizationID != "org_1" {
-		t.Fatalf("status=%d request=%#v body=%s", syncResponse.Code, syncer.request, syncResponse.Body.String())
+	if syncResponse.Code != http.StatusAccepted || syncedRequest.ProjectID != "" || syncedRequest.OrganizationID != "org_1" {
+		t.Fatalf("status=%d request=%#v body=%s", syncResponse.Code, syncedRequest, syncResponse.Body.String())
 	}
 }
 
