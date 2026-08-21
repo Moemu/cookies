@@ -29,3 +29,8 @@ counts after a read-only sync. `cookies-delivery-calibration export` reads two
 knowledge-time snapshots and creates Plan-independent `CalibrationCase` values.
 The command accepts only a local `oeacct_` account ID. Its HMAC key comes only
 from `COOKIES_CALIBRATION_EXPORT_KEY_BASE64`.
+
+`cookies-delivery-calibration backtest` builds a retrospective-only rolling
+origin dataset from anonymous daily metric windows. It excludes current
+configuration, platform diagnosis, and immature conversion labels. It uses a
+time holdout and never applies a candidate calibration to the simulator.

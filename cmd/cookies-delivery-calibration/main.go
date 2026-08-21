@@ -51,6 +51,8 @@ func main() {
 		err = runAudit(ctx, repository, os.Args[2:])
 	case "export":
 		err = runExport(ctx, repository, os.Args[2:])
+	case "backtest":
+		err = runBacktest(ctx, repository, os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -58,6 +60,51 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func runBacktest(ctx context.Context, reader connector.SnapshotReader, args []string) error {
+	flags := flag.NewFlagSet("backtest", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	common := commonFlags{}
+	bindCommon(flags, &common)
+	knowledgeText := flags.String("knowledge-cutoff", "", "RFC3339 Connector knowledge cutoff")
+	startText := flags.String("replay-start", "", "RFC3339 first rolling prediction cutoff")
+	endText := flags.String("replay-end", "", "RFC3339 exclusive replay label boundary")
+	lookbackDays := flags.Int("lookback-days", 14, "history window in days")
+	horizonDays := flags.Int("horizon-days", 7, "prediction horizon in days")
+	stepDays := flags.Int("step-days", 7, "days between rolling cutoffs")
+	minimumHistory := flags.Int("minimum-history-windows", 7, "minimum observed history windows per case")
+	keyVersion := flags.String("key-version", "", "non-secret export key version")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	knowledge, err := parseTime(*knowledgeText, "knowledge-cutoff")
+	if err != nil {
+		return err
+	}
+	replayStart, err := parseTime(*startText, "replay-start")
+	if err != nil {
+		return err
+	}
+	replayEnd, err := parseTime(*endText, "replay-end")
+	if err != nil {
+		return err
+	}
+	accountRef, err := validateCommon(common)
+	if err != nil {
+		return err
+	}
+	key, err := readExportKey()
+	if err != nil {
+		return err
+	}
+	defer clear(key)
+	builder := connector.RetrospectiveCalibrationBuilder{Reader: reader, Key: key}
+	result, err := builder.Build(ctx, connector.RetrospectiveCalibrationRequest{OrganizationID: common.organization, ProjectID: common.project, AccountRef: accountRef, KnowledgeCutoff: knowledge, ReplayStart: replayStart, ReplayEnd: replayEnd, LookbackDays: *lookbackDays, HorizonDays: *horizonDays, StepDays: *stepDays, MinimumHistoryWindows: *minimumHistory, KeyVersion: strings.TrimSpace(*keyVersion)})
+	if err != nil {
+		return fmt.Errorf("build retrospective calibration backtest: %w", err)
+	}
+	return writeJSON(common.output, result)
 }
 
 func runAudit(ctx context.Context, reader connector.SnapshotReader, args []string) error {
@@ -181,5 +228,5 @@ func writeJSON(path string, value any) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: cookies-delivery-calibration <audit|export> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: cookies-delivery-calibration <audit|export|backtest> [flags]")
 }

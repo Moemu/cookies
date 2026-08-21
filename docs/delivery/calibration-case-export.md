@@ -231,3 +231,34 @@ go run ./cmd/cookies-delivery-calibration export `
 新数据不能使用旧路由。系统不能创建占位 Project。
 
 首次运行不能直接训练模型。Owner 必须先确认指标定义和归因窗口。
+
+## 回溯式滚动回测
+
+`backtest` 使用已经同步的历史每日指标。它不创建 Cookies Project、Plan 或执行记录。
+
+```powershell
+go run ./cmd/cookies-delivery-calibration backtest `
+  -organization <cookies-organization-id> `
+  -account <connector-local-account-id> `
+  -knowledge-cutoff <当前-Connector-知识时间> `
+  -replay-start <第一个预测截点> `
+  -replay-end <最后标签边界> `
+  -lookback-days 7 `
+  -horizon-days 1 `
+  -step-days 1 `
+  -minimum-history-windows 2 `
+  -key-version <非秘密密钥版本> `
+  -output retrospective-calibration.json
+```
+
+该命令使用滚动时间截点。历史窗口必须结束于预测截点之前。标签窗口必须从预测截点开始。
+
+报告明确设置 `retrospective_only=true`。历史最终指标在原预测日期并未被 Cookies 观察到。因此，该报告不是生产 point-in-time 验证。
+
+回测只允许消耗、曝光和点击进入首版评估。归因成熟前，转化不能进入评估。当前配置快照也不能回填为历史特征。
+
+程序按实际存在案例的预测日期切分数据。较早 80% 日期用于拟合。较晚 20% 日期只用于留出评估。
+
+首个 challenger 只拟合每个原子指标的倍率。它必须在留出集上改善所有合格指标的 WAPE。否则，报告设置 `candidate_status=rejected`。程序不会自动修改模拟器参数。
+
+所有对象和指标窗口引用使用 HMAC 匿名化。输出不包含平台原始 ID、自由文本、Cookie 或当前配置值。
