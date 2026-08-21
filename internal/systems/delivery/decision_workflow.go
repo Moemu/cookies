@@ -351,7 +351,7 @@ func scenarioDecisionOptions(scenarios []SimulationScenarioProbability, recommen
 	}
 	recommendationScenario := map[string]string{
 		"review_compliance": "review_rejected", "tracking_review": "tracking_anomaly", "delivery_review": "under_delivery",
-		"cost_review": "cost_pressure", "creative_test": "creative_fatigue", "conversion_funnel_review": "zero_conversion", "budget_pacing_review": "spend_spike",
+		"cost_review": "cost_pressure", "creative_test": "creative_fatigue", "portfolio_test": "creative_fatigue", "conversion_funnel_review": "zero_conversion", "budget_pacing_review": "spend_spike",
 	}
 	dominant, recommendationType, dominantProbability := "steady", "maintain_and_observe", probabilities["steady"]
 	for _, recommendation := range recommendations {
@@ -372,8 +372,8 @@ func scenarioDecisionOptions(scenarios []SimulationScenarioProbability, recommen
 		}
 	}
 	switch recommendationType {
-	case "creative_test":
-		return makeOptions("material_rotation", "prepare_material_rotation", "controlled_material_rotation_test", "expanded_material_rotation_test", [3]int64{10, 20, 30}, [3]int64{})
+	case "creative_test", "portfolio_test":
+		return makeOptions("parallel_material_portfolio", "observe_existing_portfolio", "launch_controlled_parallel_test", "expand_parallel_test_and_prune_mature_losers", [3]int64{0, 20, 30}, [3]int64{})
 	case "tracking_review":
 		return makeOptions("tracking_integrity", "verify_primary_conversion_event", "audit_tracking_chain", "parallel_tracking_validation", [3]int64{25, 50, 100}, [3]int64{})
 	case "delivery_review":

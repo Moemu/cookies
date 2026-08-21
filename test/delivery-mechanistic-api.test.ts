@@ -8,7 +8,7 @@ test('mechanistic simulation uses a frozen plan version and explicit priors', as
   globalThis.fetch = async (url, init) => {
     request = { url: String(url), init }
     return new Response(JSON.stringify({ result: {
-      id: 'run_1', plan_id: 'plan/1', plan_version: 3, model_version: 'delivery-mechanistic-monte-carlo/v0.1',
+      id: 'run_1', plan_id: 'plan/1', plan_version: 3, model_version: 'delivery-mechanistic-monte-carlo/v0.2',
       prior_set_version: 'operator/v1', stable_seed: 'stable', prediction_horizon: 'P7D', sample_count: 5000,
       status: 'completed', is_simulated: true, calibration_status: 'assumption_driven', metric_windows: [],
       scenario_probabilities: [], alerts: [], recommendation_drafts: [], assumptions: [], limitations: [], evidence_refs: [],
@@ -33,7 +33,7 @@ test('mechanistic simulation restores the latest result for one plan version', a
   globalThis.fetch = async input => {
     url = String(input)
     return new Response(JSON.stringify({
-      id: 'latest_run', plan_id: 'plan/1', plan_version: 3, model_version: 'delivery-mechanistic-monte-carlo/v0.1', prior_set_version: 'operator/v1', stable_seed: 'stable', prediction_horizon: 'P7D', sample_count: 5000, status: 'completed', is_simulated: true, calibration_status: 'assumption_driven', metric_windows: [], scenario_probabilities: [], alerts: [], recommendation_drafts: [], assumptions: [], limitations: [], evidence_refs: [],
+      id: 'latest_run', plan_id: 'plan/1', plan_version: 3, model_version: 'delivery-mechanistic-monte-carlo/v0.2', prior_set_version: 'operator/v1', stable_seed: 'stable', prediction_horizon: 'P7D', sample_count: 5000, status: 'completed', is_simulated: true, calibration_status: 'assumption_driven', metric_windows: [], scenario_probabilities: [], alerts: [], recommendation_drafts: [], assumptions: [], limitations: [], evidence_refs: [],
     }), { headers: { 'Content-Type': 'application/json' } })
   }
   t.after(() => { globalThis.fetch = originalFetch })

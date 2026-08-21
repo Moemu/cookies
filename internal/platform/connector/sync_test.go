@@ -33,7 +33,7 @@ func (testReader) ListPage(_ context.Context, r oceanengine.ListRequest) (map[st
 	if r.Page > 1 {
 		return map[string]any{"data": map[string]any{"ads": []any{}, "pagination": map[string]any{"total_page": 1.0}}}, nil
 	}
-	return map[string]any{"data": map[string]any{"ads": []any{map[string]any{"promotion_id": "raw-promotion-1", "project_id": "raw-project-1", "status": "active"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+	return map[string]any{"data": map[string]any{"ads": []any{map[string]any{"promotion_id": "raw-promotion-1", "project_id": "raw-project-1", "promotion_object": map[string]any{"product_id": "raw-product-1"}, "status": "active"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
 }
 func (testReader) PromotionConfiguration(context.Context, string) (map[string]any, error) {
 	return map[string]any{"budget": 100.0, "landing_url": "https://secret.test/?token=x"}, nil
@@ -123,7 +123,7 @@ func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ObjectCount != 4 || result.MetricCount != 1 || writer.completed != "completed" {
+	if result.ObjectCount != 5 || result.MetricCount != 1 || writer.completed != "completed" {
 		t.Fatalf("result=%#v completed=%s", result, writer.completed)
 	}
 	if len(writer.raw) != 7 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
@@ -134,6 +134,9 @@ func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	}
 	if _, ok := writer.objects[0].State["advertiser_id"]; ok {
 		t.Fatal("raw account identity leaked in canonical state")
+	}
+	if writer.objects[1].State["product_ref"] == "raw-product-1" || writer.objects[1].State["product_ref"] == "" {
+		t.Fatal("promotion did not retain an opaque product cohort reference")
 	}
 	if _, ok := writer.configs[0].Values["landing_url"]; ok {
 		t.Fatal("tracking URL leaked into canonical configuration")

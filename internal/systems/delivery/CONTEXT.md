@@ -19,7 +19,9 @@ The business monitoring page uses two independent paths.
 
 Connector quality gates fail closed. `quarantine`, stale, and incomplete metric windows return an explicit status. They do not create business alerts. Connector alerts use `source=connector` and `is_simulated=false`.
 
-Decision policy v2 consumes the latest completed Mechanistic Simulation for the exact current `PlanVersion`. It selects the highest-probability scenario that has a recommendation draft. It creates three human-review action plans with low, medium, and high adjustment strength. Creative fatigue creates material-rotation test plans and keeps the budget unchanged. Cost pressure and budget pacing can create bounded budget controls. Each candidate freezes its scenario, probability, focus, action, and action range into the decision hash. Historical decisions remain readable but do not replace the latest current-version decision in the business page.
+Decision policy v2 consumes the latest completed Mechanistic Simulation for the exact current `PlanVersion`. It selects the highest-probability scenario that has a recommendation draft. It creates three human-review action plans with low, medium, and high adjustment strength. Creative risk creates parallel project or promotion portfolio plans. It protects stable delivery objects and permits pruning only after a mature observation window. It does not rotate material on a stable object. Cost pressure and budget pacing can create bounded budget controls. Each candidate freezes its scenario, probability, focus, action, and action range into the decision hash. Historical decisions remain readable but do not replace the latest current-version decision in the business page.
+
+Historical Connector calibration uses `delivery-calibration-case/v1`. A case can remain explicitly unbound from cookies Plan identity. The export uses a separate HMAC key, removes raw platform identity and free text, excludes post-launch diagnosis from prelaunch features, and treats operational retention or pause as an observed decision rather than a material-quality label.
 
 ## Historical insights consumer port
 

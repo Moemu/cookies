@@ -57,10 +57,10 @@ func TestBuildDeliveryDecisionIsDeterministicAndExplainable(t *testing.T) {
 	}
 }
 
-func TestBuildDeliveryDecisionUsesCreativeFatigueForMaterialRotation(t *testing.T) {
+func TestBuildDeliveryDecisionUsesCreativeFatigueForParallelPortfolio(t *testing.T) {
 	input := validDecisionEngineInput(t)
 	input.Scenarios = []SimulationScenarioProbability{{Scenario: "steady", Probability: .76}, {Scenario: "creative_fatigue", Probability: .76}, {Scenario: "cost_pressure", Probability: .38}}
-	input.Recommendations = []SimulationRecommendationDraft{{RecommendationType: "creative_test", TargetField: "material_references", RequiresHumanReview: true}}
+	input.Recommendations = []SimulationRecommendationDraft{{RecommendationType: "portfolio_test", TargetField: "parallel_project_promotion_portfolio", RequiresHumanReview: true}}
 	decision, err := BuildDeliveryDecision(input)
 	if err != nil {
 		t.Fatal(err)
@@ -70,13 +70,13 @@ func TestBuildDeliveryDecisionUsesCreativeFatigueForMaterialRotation(t *testing.
 	}
 	actions := map[string]bool{}
 	for _, candidate := range decision.Candidates {
-		if candidate.OptimizationFocus != "material_rotation" || candidate.Scenario != "creative_fatigue" || candidate.ScenarioProbability != .76 || candidate.BudgetChangePercent != 0 {
+		if candidate.OptimizationFocus != "parallel_material_portfolio" || candidate.Scenario != "creative_fatigue" || candidate.ScenarioProbability != .76 || candidate.BudgetChangePercent != 0 {
 			t.Fatalf("creative fatigue produced a budget candidate: %#v", candidate)
 		}
 		actions[candidate.ProposedAction] = true
 	}
-	if len(actions) != 3 || !actions["controlled_material_rotation_test"] {
-		t.Fatalf("material rotation actions are not distinct: %#v", actions)
+	if len(actions) != 3 || !actions["launch_controlled_parallel_test"] || !actions["expand_parallel_test_and_prune_mature_losers"] {
+		t.Fatalf("parallel portfolio actions are not distinct: %#v", actions)
 	}
 }
 

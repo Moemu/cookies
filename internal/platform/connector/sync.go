@@ -158,7 +158,15 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 		observedAt, _ := promotion["_collected_at"].(time.Time)
 		delete(promotion, "_evidence_ref")
 		delete(promotion, "_collected_at")
+		productRef := firstNestedString(promotion,
+			[]string{"promotion_object", "product_id"},
+			[]string{"promotion_object", "unique_product_id"},
+			[]string{"promotion_object", "product_platform_id"},
+		)
 		state := redactCanonical(promotion)
+		if productRef != "" {
+			state["product_ref"] = opaqueRef(productRef)
+		}
 		header := s.header(request, runID, evidenceRef, canonicalHash(state), observedAt, platformValidTime(promotion, observedAt))
 		objectID := "obj_" + canonicalHash([]string{evidenceRef, promotionRef, header.PayloadHash})
 		createdObject, appendObjectErr := s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: header, ID: objectID, ObjectKind: "promotion", ObjectRef: opaqueRef(promotionRef), ParentRef: opaqueRef(firstString(promotion, "project_id", "projectId")), State: state})
@@ -185,6 +193,21 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 			}
 			if createdParent {
 				result.ObjectCount++
+			}
+		}
+		if productRef != "" {
+			key := "product:" + productRef
+			if _, ok := seenParents[key]; !ok {
+				seenParents[key] = struct{}{}
+				productState := map[string]any{"observed_from": "promotion_object"}
+				productHeader := s.header(request, runID, evidenceRef, canonicalHash(productState), observedAt, observedAt)
+				createdProduct, productErr := s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: productHeader, ID: "obj_" + canonicalHash([]string{evidenceRef, "product", productRef}), ObjectKind: "product", ObjectRef: opaqueRef(productRef), State: productState})
+				if productErr != nil {
+					return result, productErr
+				}
+				if createdProduct {
+					result.ObjectCount++
+				}
 			}
 		}
 		configuration, readErr := reader.PromotionConfiguration(ctx, promotionRef)
@@ -447,6 +470,24 @@ func redactCanonical(value map[string]any) map[string]any {
 		}
 	}
 	return result
+}
+
+func firstNestedString(value map[string]any, paths ...[]string) string {
+	for _, path := range paths {
+		var current any = value
+		for _, key := range path {
+			mapped, ok := current.(map[string]any)
+			if !ok {
+				current = nil
+				break
+			}
+			current = mapped[key]
+		}
+		if text, ok := current.(string); ok && strings.TrimSpace(text) != "" {
+			return strings.TrimSpace(text)
+		}
+	}
+	return ""
 }
 func collectStringIDs(values map[string]any, keys ...string) []string {
 	found := map[string]struct{}{}

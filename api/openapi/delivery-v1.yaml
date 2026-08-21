@@ -3162,7 +3162,7 @@ components:
         plan_id: { type: string }
         plan_version: { type: integer, minimum: 1 }
         schema_version: { type: string, const: delivery-mechanistic-simulation/v0 }
-        model_version: { type: string, const: delivery-mechanistic-monte-carlo/v0.1 }
+        model_version: { type: string, const: delivery-mechanistic-monte-carlo/v0.2 }
         prior_set_version: { type: string }
         prior_set: { $ref: '#/components/schemas/SimulationPriorSet' }
         manifest_binding: { $ref: '#/components/schemas/CalibrationManifestBinding' }

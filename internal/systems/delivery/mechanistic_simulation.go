@@ -17,7 +17,7 @@ import (
 
 const (
 	MechanisticSimulationSchemaVersion = "delivery-mechanistic-simulation/v0"
-	MechanisticSimulationModelVersion  = "delivery-mechanistic-monte-carlo/v0.1"
+	MechanisticSimulationModelVersion  = "delivery-mechanistic-monte-carlo/v0.2"
 	MechanisticThresholdVersion        = "delivery-mechanistic-scenarios/v0"
 	CalibrationStatusAssumptionDriven  = "assumption_driven"
 )
@@ -652,7 +652,7 @@ func draftMechanisticRecommendations(scenarios []SimulationScenarioProbability, 
 		result = append(result, makeDraft("cost_review", "platform_configuration.payload.ocean_engine.project.budget_and_bidding", "Review cost assumptions before increasing budget or bid."))
 	}
 	if probabilities["creative_fatigue"] >= .5 {
-		result = append(result, makeDraft("creative_test", "material_references", "Consider a controlled creative rotation test."))
+		result = append(result, makeDraft("portfolio_test", "parallel_project_promotion_portfolio", "Launch parallel projects or promotions with distinct materials; protect stable delivery objects and prune only after a mature observation window."))
 	}
 	if probabilities["zero_conversion"] >= .5 {
 		result = append(result, makeDraft("conversion_funnel_review", "platform_configuration.payload.ocean_engine.project.optimization_target_reference", "Check the conversion funnel before changing delivery settings."))

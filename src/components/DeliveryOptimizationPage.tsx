@@ -131,12 +131,13 @@ function scenarioCopyLabel(value: string) {
 }
 
 function candidateFocusLabel(value?: string) {
-  return ({ material_rotation: '素材轮换', tracking_integrity: '追踪完整性', delivery_constraints: '跑量约束', review_compliance: '审核合规', conversion_funnel: '转化漏斗', budget_pacing: '预算节奏', cost_control: '成本控制', maintain_and_observe: '保持并观察' } as Record<string, string>)[value ?? ''] ?? value ?? '预算控制'
+  return ({ parallel_material_portfolio: '并行素材组合', material_rotation: '并行素材组合（旧结果）', tracking_integrity: '追踪完整性', delivery_constraints: '跑量约束', review_compliance: '审核合规', conversion_funnel: '转化漏斗', budget_pacing: '预算节奏', cost_control: '成本控制', maintain_and_observe: '保持并观察' } as Record<string, string>)[value ?? ''] ?? value ?? '预算控制'
 }
 
 function candidateActionLabel(value?: string) {
   return ({
-    prepare_material_rotation: '准备小流量素材轮换', controlled_material_rotation_test: '执行受控素材轮换测试', expanded_material_rotation_test: '扩大素材轮换测试',
+    observe_existing_portfolio: '保护现有跑量对象并等待成熟窗口', launch_controlled_parallel_test: '新建并行项目或单元进行受控跑量', expand_parallel_test_and_prune_mature_losers: '扩大并行跑量，并在窗口成熟后淘汰低效对象',
+    prepare_material_rotation: '准备并行素材测试（旧结果）', controlled_material_rotation_test: '执行并行素材测试（旧结果）', expanded_material_rotation_test: '扩大并行素材测试（旧结果）',
     verify_primary_conversion_event: '核对主转化事件', audit_tracking_chain: '审计完整追踪链路', parallel_tracking_validation: '执行并行追踪验证',
     review_delivery_restrictions: '检查跑量限制', controlled_constraint_test: '执行受控约束测试', expanded_constraint_test: '扩大约束测试',
     review_rejection_reason: '检查审核拒绝原因', replace_flagged_material: '替换风险素材', prepare_compliant_material_set: '准备合规素材组',
@@ -162,11 +163,11 @@ function decisionDiagnosticDetail(decision: DeliveryDecision) {
 }
 
 function mechanisticRecommendationLabel(value: string) {
-  return ({ review_compliance: '审核合规方案', tracking_review: '追踪链路检查方案', delivery_review: '跑量约束检查方案', cost_review: '成本控制方案', creative_test: '素材轮换测试方案', conversion_funnel_review: '转化漏斗检查方案', budget_pacing_review: '预算节奏检查方案' } as Record<string, string>)[value] ?? value
+  return ({ review_compliance: '审核合规方案', tracking_review: '追踪链路检查方案', delivery_review: '跑量约束检查方案', cost_review: '成本控制方案', creative_test: '并行素材测试方案（旧结果）', portfolio_test: '并行跑量与淘汰方案', conversion_funnel_review: '转化漏斗检查方案', budget_pacing_review: '预算节奏检查方案' } as Record<string, string>)[value] ?? value
 }
 
 function mechanisticRationaleLabel(value: string) {
-  return ({ 'Review the rejection reason or replace non-compliant material.': '检查审核拒绝原因，并替换不合规素材。', 'Check tracking before budget or bid changes.': '在调整预算或出价前，先检查转化追踪链路。', 'Review delivery constraints and use a controlled test.': '检查定向、出价和库存约束，并使用受控测试验证。', 'Review cost assumptions before increasing budget or bid.': '提高预算或出价前，先复核成本先验和成本边界。', 'Consider a controlled creative rotation test.': '运行受控的素材轮换测试。', 'Check the conversion funnel before changing delivery settings.': '调整投放设置前，先检查转化漏斗。', 'Review budget pacing before changing the daily budget.': '调整日预算前，先检查预算消耗节奏。', 'Simulation assumptions can differ from platform outcomes.': '模拟假设可能与平台实际结果不同。', 'Do not execute automatically.': '禁止自动执行。', 'Use a controlled test after human approval.': '人工批准后使用受控测试。' } as Record<string, string>)[value] ?? value
+  return ({ 'Review the rejection reason or replace non-compliant material.': '检查审核拒绝原因，并替换不合规素材。', 'Check tracking before budget or bid changes.': '在调整预算或出价前，先检查转化追踪链路。', 'Review delivery constraints and use a controlled test.': '检查定向、出价和库存约束，并使用受控测试验证。', 'Review cost assumptions before increasing budget or bid.': '提高预算或出价前，先复核成本先验和成本边界。', 'Consider a controlled creative rotation test.': '使用并行项目或单元测试不同素材，不修改现有跑量对象。', 'Launch parallel projects or promotions with distinct materials; protect stable delivery objects and prune only after a mature observation window.': '为同一商品新建并行项目或单元。使用不同素材跑量。保护稳定对象，只在观察窗口成熟后淘汰低效对象。', 'Check the conversion funnel before changing delivery settings.': '调整投放设置前，先检查转化漏斗。', 'Review budget pacing before changing the daily budget.': '调整日预算前，先检查预算消耗节奏。', 'Simulation assumptions can differ from platform outcomes.': '模拟假设可能与平台实际结果不同。', 'Do not execute automatically.': '禁止自动执行。', 'Use a controlled test after human approval.': '人工批准后使用受控测试。' } as Record<string, string>)[value] ?? value
 }
 
 function mechanisticTargetLabel(value: string) {

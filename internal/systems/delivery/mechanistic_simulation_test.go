@@ -147,3 +147,13 @@ func TestMechanisticZeroTrackingRateSuppressesBudgetDrafts(t *testing.T) {
 		}
 	}
 }
+
+func TestMechanisticCreativeRiskUsesParallelPortfolioNotRotation(t *testing.T) {
+	drafts := draftMechanisticRecommendations([]SimulationScenarioProbability{{Scenario: "creative_fatigue", Probability: .8}}, mechanisticTestInput(30000), []string{"simulation://test"})
+	if len(drafts) != 1 || drafts[0].RecommendationType != "portfolio_test" || drafts[0].TargetField != "parallel_project_promotion_portfolio" {
+		t.Fatalf("unexpected creative recommendation: %#v", drafts)
+	}
+	if strings.Contains(strings.ToLower(drafts[0].Rationale), "rotation") {
+		t.Fatalf("creative recommendation still instructs rotation: %#v", drafts[0])
+	}
+}

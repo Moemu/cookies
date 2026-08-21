@@ -75,7 +75,7 @@ PlanVersion + 三段配置 + 策略/创意引用 + 情景假设
 | `under_delivery` | 消耗率和曝光不足 | 验证跑量诊断 |
 | `cost_worsening` | CPA 上升但仍有转化 | 验证预算/出价/定向建议 |
 | `zero_conversion` | 有点击但无转化 | 验证转化诊断，不与追踪异常混淆 |
-| `creative_fatigue` | CTR/CVR 随窗口衰减 | 验证素材替换建议 |
+| `creative_fatigue` | CTR/CVR 随窗口衰减 | 验证并行项目/单元跑量与成熟窗口淘汰建议；禁止默认素材轮换 |
 | `tracking_anomaly` | 转化指标不可用 | 验证质量门禁；不得生成确定性优化结论 |
 
 审核拒绝属于平台事件情景，不应伪装成指标模型输出。

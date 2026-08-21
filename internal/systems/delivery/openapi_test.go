@@ -181,7 +181,7 @@ func TestOpenAPIContractCoversMechanisticSimulationV0(t *testing.T) {
 		"MechanisticSimulationRequest:",
 		"MechanisticSimulationResult:",
 		"delivery-mechanistic-simulation/v0",
-		"delivery-mechanistic-monte-carlo/v0.1",
+		"delivery-mechanistic-monte-carlo/v0.2",
 		"calibration_status: { type: string, const: assumption_driven }",
 		"requires_human_review: { type: boolean, const: true }",
 		"effect_basis: { type: string, enum: [predictive_association, rule_constraint] }",
