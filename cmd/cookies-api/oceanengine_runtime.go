@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -36,27 +38,48 @@ func (v oceanEngineSessionVerifier) VerifyOceanEngineSession(ctx context.Context
 var _ insights.OceanEngineSessionVerifier = oceanEngineSessionVerifier{}
 
 type oceanEngineConnectorReaderFactory struct {
-	sessions insights.OceanEngineSessionRepository
-	cipher   insights.SecretCipher
-	baseURL  string
-	client   *http.Client
-	accounts interface {
+	sessions        insights.OceanEngineSessionRepository
+	accountSessions connector.AccountSessionStore
+	cipher          insights.SecretCipher
+	baseURL         string
+	client          *http.Client
+	accounts        interface {
 		ResolveExternalAccountID(context.Context, string, string, string) (string, error)
 	}
 }
 
 func (f oceanEngineConnectorReaderFactory) Open(ctx context.Context, request connector.SyncRequest) (oceanengine.Reader, func(), error) {
-	if f.sessions == nil || f.cipher == nil {
+	if f.cipher == nil {
 		return nil, nil, fmt.Errorf("Ocean Engine session access is not configured")
 	}
-	session, err := f.sessions.GetProjectOceanEngineSession(ctx, contract.OrganizationID(request.OrganizationID), contract.ProjectID(request.ProjectID))
-	if err != nil {
-		return nil, nil, err
+	var ciphertext []byte
+	var keyVersion string
+	if request.ProjectID == "" {
+		if f.accountSessions == nil {
+			return nil, nil, fmt.Errorf("Ocean Engine account session access is not configured")
+		}
+		session, err := f.accountSessions.GetAccountSession(ctx, request.OrganizationID, request.AccountRef)
+		if err != nil {
+			return nil, nil, err
+		}
+		if session.Status != connector.AccountSessionReady {
+			return nil, nil, fmt.Errorf("Ocean Engine account session is not ready")
+		}
+		ciphertext, keyVersion = session.SessionCiphertext, session.SessionKeyVersion
+	} else {
+		if f.sessions == nil {
+			return nil, nil, fmt.Errorf("Ocean Engine Project session access is not configured")
+		}
+		session, err := f.sessions.GetProjectOceanEngineSession(ctx, contract.OrganizationID(request.OrganizationID), contract.ProjectID(request.ProjectID))
+		if err != nil {
+			return nil, nil, err
+		}
+		if session.Status != insights.OceanEngineSessionReady {
+			return nil, nil, fmt.Errorf("Ocean Engine session is not ready")
+		}
+		ciphertext, keyVersion = session.SessionCiphertext, session.SessionKeyVersion
 	}
-	if session.Status != insights.OceanEngineSessionReady {
-		return nil, nil, fmt.Errorf("Ocean Engine session is not ready")
-	}
-	plaintext, err := f.cipher.Decrypt(session.SessionCiphertext, session.SessionKeyVersion)
+	plaintext, err := f.cipher.Decrypt(ciphertext, keyVersion)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -87,37 +110,82 @@ func (f oceanEngineConnectorReaderFactory) Open(ctx context.Context, request con
 var _ connector.ReaderFactory = oceanEngineConnectorReaderFactory{}
 
 type oceanEngineAccountProbe struct {
-	sessions insights.OceanEngineSessionRepository
-	cipher   insights.SecretCipher
-	baseURL  string
-	client   *http.Client
+	sessions        insights.OceanEngineSessionRepository
+	accountSessions connector.AccountSessionStore
+	cipher          insights.SecretCipher
+	baseURL         string
+	client          *http.Client
 }
 
-func (p oceanEngineAccountProbe) Verify(ctx context.Context, organizationID, projectID, externalID string) error {
-	session, err := p.sessions.GetProjectOceanEngineSession(ctx, contract.OrganizationID(organizationID), contract.ProjectID(projectID))
-	if err != nil {
-		return err
+func (p oceanEngineAccountProbe) Verify(ctx context.Context, organizationID, projectID, accountID, externalID string) (int64, error) {
+	var ciphertext []byte
+	var keyVersion string
+	var sessionVersion int64
+	if projectID == "" {
+		if p.accountSessions == nil {
+			return 0, fmt.Errorf("Ocean Engine account session access is not configured")
+		}
+		session, err := p.accountSessions.GetAccountSession(ctx, organizationID, accountID)
+		if err != nil {
+			return 0, err
+		}
+		if session.Status == connector.AccountSessionDisabled {
+			return 0, fmt.Errorf("Ocean Engine account session is disabled")
+		}
+		ciphertext, keyVersion, sessionVersion = session.SessionCiphertext, session.SessionKeyVersion, session.Version
+	} else {
+		if p.sessions == nil {
+			return 0, fmt.Errorf("Ocean Engine Project session access is not configured")
+		}
+		session, err := p.sessions.GetProjectOceanEngineSession(ctx, contract.OrganizationID(organizationID), contract.ProjectID(projectID))
+		if err != nil {
+			return 0, err
+		}
+		if session.Status != insights.OceanEngineSessionReady {
+			return 0, fmt.Errorf("Ocean Engine session is not ready")
+		}
+		ciphertext, keyVersion = session.SessionCiphertext, session.SessionKeyVersion
 	}
-	if session.Status != insights.OceanEngineSessionReady {
-		return fmt.Errorf("Ocean Engine session is not ready")
-	}
-	plaintext, err := p.cipher.Decrypt(session.SessionCiphertext, session.SessionKeyVersion)
+	plaintext, err := p.cipher.Decrypt(ciphertext, keyVersion)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	client, err := oceanengine.NewClient(p.baseURL, externalID, oceanengine.Session{Cookies: string(plaintext)}, p.client)
 	for index := range plaintext {
 		plaintext[index] = 0
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { client.Session.Cookies = ""; client.Session.CSRFToken = "" }()
 	_, err = client.AccountInfo(ctx)
 	if err != nil {
-		return fmt.Errorf("Ocean Engine account verification failed")
+		var statusErr oceanengine.HTTPStatusError
+		var redirectErr oceanengine.RedirectBlockedError
+		if errors.Is(err, oceanengine.ErrSessionInvalid) || errors.As(err, &statusErr) && (statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden) || errors.As(err, &redirectErr) && (redirectErr.Reason == "authentication_required" || redirectErr.Reason == "account_context_required") {
+			return 0, fmt.Errorf("%w", connector.ErrAccountSessionInvalid)
+		}
+		category := "upstream_error"
+		switch {
+		case errors.As(err, &statusErr):
+			category = fmt.Sprintf("http_%d", statusErr.StatusCode)
+		case errors.Is(err, context.DeadlineExceeded):
+			category = "timeout"
+		case errors.As(err, &redirectErr):
+			category = "redirect_" + redirectErr.Reason
+		case errors.Is(err, oceanengine.ErrForbiddenEndpoint):
+			category = "forbidden_redirect"
+		case strings.Contains(err.Error(), "decode Ocean Engine response"):
+			category = "invalid_response"
+		}
+		if redirectErr.PathShape != "" {
+			log.Printf("Ocean Engine account verification failed: category=%s path_shape=%s", category, redirectErr.PathShape)
+		} else {
+			log.Printf("Ocean Engine account verification failed: category=%s", category)
+		}
+		return 0, fmt.Errorf("Ocean Engine account verification failed")
 	}
-	return nil
+	return sessionVersion, nil
 }
 
 var _ connector.AccountProbe = oceanEngineAccountProbe{}

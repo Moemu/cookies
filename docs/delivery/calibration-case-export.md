@@ -130,3 +130,104 @@ CTR、CPC、CVR 和 CPA 必须在评估时重新计算。
 JSON Schema 位于 `docs/delivery/schemas/delivery-calibration-case-v1.json`。
 
 有效示例位于 `docs/delivery/fixtures/delivery-calibration-case-v1-valid.json`。
+
+## 运维命令
+
+命令入口为：
+
+```text
+go run ./cmd/cookies-delivery-calibration
+```
+
+命令只读取 Connector 数据库。命令不会访问平台写接口。
+
+`-account` 必须使用 Connector 返回的本地 `oeacct_` ID。命令拒绝原始平台账号 ID。
+
+### 同步后的质量审计
+
+```powershell
+go run ./cmd/cookies-delivery-calibration audit `
+  -organization <cookies-organization-id> `
+  -account <connector-local-account-id> `
+  -cutoff 2026-08-21T00:00:00Z `
+  -output calibration-audit.json
+```
+
+审计报告只包含数量、覆盖率、质量状态和时间范围。报告不包含平台对象 ID。
+
+程序拒绝覆盖已有输出文件。运行新审计时，使用新的输出文件名。
+
+### 生成校准案例
+
+导出密钥必须是 32 字节随机值。运行环境必须通过 Base64 环境变量提供密钥：
+
+```text
+COOKIES_CALIBRATION_EXPORT_KEY_BASE64
+```
+
+命令行、配置文件和仓库不能包含该密钥。
+
+```powershell
+go run ./cmd/cookies-delivery-calibration export `
+  -organization <cookies-organization-id> `
+  -account <connector-local-account-id> `
+  -prediction-cutoff 2026-08-01T00:00:00Z `
+  -label-cutoff 2026-08-10T00:00:00Z `
+  -horizon-days 7 `
+  -key-version calibration-export-local-v1 `
+  -output calibration-export.json
+```
+
+`label-cutoff` 不能早于预测周期结束时间。
+
+程序读取两个 Connector 截面：
+
+1. 特征截面截止于 `prediction-cutoff`。
+2. 标签截面截止于 `label-cutoff`。
+
+程序为每个可导出的推广单元生成一个案例。程序按商品引用建立商品组合。
+
+缺少平台项目关系、配置快照或指标窗口时，程序跳过推广单元。审计报告记录跳过原因。
+
+商品关系、素材绑定或必需特征缺失时，程序生成 `quarantined` 案例。
+
+归因未确认时，程序生成 `quarantined` 案例。程序不会把这些案例加入可训练集合。
+
+## 配置字段映射
+
+导出器只使用已知 Connector 配置字段。导出器不从名称或诊断文本猜测配置。
+
+| 校准特征 | Connector 字段顺序 | 单位规则 |
+| --- | --- | --- |
+| `budget_minor` | `budget_minor`；`campaign_budget`；`budget_amount`；`budget` | `*_minor` 保持原值；其他字段按元转为分 |
+| `bid_minor` | `bid_minor`；`project_bid`；`ad_bid`；`deep_cpa_bid`；`bid` | `*_minor` 保持原值；其他字段按元转为分 |
+| `currency` | `currency` | Connector 从同步请求写入配置快照；缺失时隔离案例 |
+| `charging_mode` | `charging_mode`；`ad_pricing_name`；`ad_pricing` | 保持受控枚举值 |
+| `optimization_target` | `optimization_target`；`external_action_name`；`external_action` | 保持受控枚举值 |
+| `delivery_mode` | `delivery_mode`；`delivery_scene_name` | 保持受控枚举值 |
+
+不能解析的金额、`-` 和 `--` 都按缺失值处理。程序不会把它们解释为零。
+
+## 首次真实数据运行顺序
+
+1. 通过 `POST /api/connector/v1/accounts` 登记 Organization 级账号。
+2. 记录响应中的本地 `oeacct_` ID。
+3. 通过 `PUT /api/connector/v1/accounts/{account_ref}/session` 提交只读会话。
+4. 通过 `POST /api/connector/v1/accounts/{account_ref}/verify` 验证只读会话。
+5. 通过 `POST /api/connector/v1/accounts/{account_ref}/syncs` 同步 90 至 180 天。
+6. 同步请求必须使用稳定幂等键。
+7. 运行 `audit`。
+8. 检查商品、配置、素材和指标覆盖率。
+9. 修正 Connector 字段证据问题。
+10. 使用独立导出密钥运行 `export`。
+11. 只将 `accepted` 案例加入校准数据集。
+
+账号、会话、同步和校准都不要求 cookies Project 或 Plan。
+
+会话请求体包含凭据。受控客户端不能记录该请求体。服务端只保存加密值。
+
+旧 `/api/connector/v1/projects/{project_id}/...` 路由只用于兼容已有 Project 级连接。
+
+新数据不能使用旧路由。系统不能创建占位 Project。
+
+首次运行不能直接训练模型。Owner 必须先确认指标定义和归因窗口。

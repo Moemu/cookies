@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS connector_ocean_engine_account_sessions;

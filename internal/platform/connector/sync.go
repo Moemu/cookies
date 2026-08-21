@@ -3,7 +3,9 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +23,7 @@ type ReaderFactory interface {
 
 type SyncWriter interface {
 	StartSync(context.Context, SyncRun) (bool, error)
+	UpdateSyncCursor(context.Context, string, string) error
 	CompleteSync(context.Context, string, string, string, time.Time) error
 	AppendRaw(context.Context, RawSnapshot) (bool, error)
 	AppendObject(context.Context, ObjectSnapshot) (bool, error)
@@ -63,8 +66,32 @@ type Synchronizer struct {
 	MaxPages  int
 }
 
+func SyncRunID(request SyncRequest) string {
+	return "sync_" + canonicalHash([]string{request.OrganizationID, request.ProjectID, request.AccountRef, request.IdempotencyKey})
+}
+
+func SyncErrorCategory(err error) string {
+	var businessErr oceanengine.BusinessCodeError
+	var statusErr oceanengine.HTTPStatusError
+	var redirectErr oceanengine.RedirectBlockedError
+	switch {
+	case errors.As(err, &businessErr):
+		return fmt.Sprintf("business_%d", businessErr.Code)
+	case errors.As(err, &statusErr):
+		return fmt.Sprintf("http_%d", statusErr.StatusCode)
+	case errors.As(err, &redirectErr):
+		return "redirect_" + redirectErr.Reason
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, ErrInvalidFact):
+		return "invalid_fact"
+	default:
+		return "platform_read_failed"
+	}
+}
+
 func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result SyncResult, resultErr error) {
-	if s.Writer == nil || s.Readers == nil || s.Cipher == nil || request.OrganizationID == "" || request.ProjectID == "" || request.AccountRef == "" || request.IdempotencyKey == "" || !request.WindowEnd.After(request.WindowStart) {
+	if s.Writer == nil || s.Readers == nil || s.Cipher == nil || request.OrganizationID == "" || request.AccountRef == "" || request.IdempotencyKey == "" || !request.WindowEnd.After(request.WindowStart) {
 		return result, ErrInvalidFact
 	}
 	if request.TimeZone == "" {
@@ -77,7 +104,7 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 	if s.Now != nil {
 		now = s.Now().UTC()
 	}
-	runID := "sync_" + canonicalHash([]string{request.OrganizationID, request.ProjectID, request.AccountRef, request.IdempotencyKey})
+	runID := SyncRunID(request)
 	created, err := s.Writer.StartSync(ctx, SyncRun{ID: runID, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, AccountRef: opaqueRef(request.AccountRef), StartedAt: now, Attempt: 1})
 	if err != nil {
 		return result, err
@@ -105,6 +132,10 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 	if closeReader != nil {
 		defer closeReader()
 	}
+	cursor = "account_info"
+	if err = s.Writer.UpdateSyncCursor(ctx, runID, cursor); err != nil {
+		return result, err
+	}
 	account, err := reader.AccountInfo(ctx)
 	if err != nil {
 		return result, err
@@ -129,8 +160,12 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 	}
 	promotions := []map[string]any{}
 	seenParents := map[string]struct{}{}
+	materialParents := map[string]map[string]struct{}{}
 	for page := 1; page <= maxPages; page++ {
 		cursor = fmt.Sprintf("promotion_page:%d", page)
+		if err = s.Writer.UpdateSyncCursor(ctx, runID, cursor); err != nil {
+			return result, err
+		}
 		payload, readErr := reader.ListPage(ctx, oceanengine.ListRequest{Start: request.WindowStart.Format("2006-01-02"), End: request.WindowEnd.Format("2006-01-02"), Page: page, Limit: limit})
 		if readErr != nil {
 			return result, readErr
@@ -149,10 +184,14 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 			break
 		}
 	}
-	for _, promotion := range promotions {
+	for promotionIndex, promotion := range promotions {
 		promotionRef := firstString(promotion, "promotion_id", "promotionId", "id")
 		if promotionRef == "" {
 			continue
+		}
+		cursor = fmt.Sprintf("promotion_detail:%d/%d", promotionIndex+1, len(promotions))
+		if err = s.Writer.UpdateSyncCursor(ctx, runID, cursor); err != nil {
+			return result, err
 		}
 		evidenceRef, _ := promotion["_evidence_ref"].(string)
 		observedAt, _ := promotion["_collected_at"].(time.Time)
@@ -219,6 +258,7 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 			return result, storeErr
 		}
 		values := redactCanonical(configuration)
+		values["currency"] = request.Currency
 		configHeader := s.header(request, runID, configurationRawID, canonicalHash(values), configurationObservedAt, platformValidTime(configuration, configurationObservedAt))
 		config := ConfigurationSnapshot{FactHeader: configHeader, ID: "cfg_" + canonicalHash([]string{configurationRawID, promotionRef, configHeader.PayloadHash}), ObjectRef: opaqueRef(promotionRef), Values: values}
 		previous, found, latestErr := s.Writer.LatestConfiguration(ctx, request.OrganizationID, request.ProjectID, config.SourceRef, config.ObjectRef, config.AvailableAt)
@@ -244,6 +284,10 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 			return result, storeErr
 		}
 		for _, materialRef := range collectStringIDs(materials, "material_ids", "material_id") {
+			if materialParents[materialRef] == nil {
+				materialParents[materialRef] = map[string]struct{}{}
+			}
+			materialParents[materialRef][promotionRef] = struct{}{}
 			materialState := map[string]any{"observed_from": "promotion_materials"}
 			materialHeader := s.header(request, runID, materialRawID, canonicalHash(materialState), materialObservedAt, materialObservedAt)
 			createdMaterial, materialErr := s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: materialHeader, ID: "obj_" + canonicalHash([]string{materialRawID, "material", materialRef}), ObjectKind: "material", ObjectRef: opaqueRef(materialRef), ParentRef: opaqueRef(promotionRef), State: materialState})
@@ -282,73 +326,90 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 			}
 		}
 	}
-	metricRequest := oceanengine.StatQueryRequest{DatasetKey: "promotion", Dimensions: []string{"promotion_id", "stat_time_day"}, Metrics: []string{"stat_cost", "show_cnt", "click_cnt", "convert_cnt"}, StartTime: request.WindowStart.Format(time.RFC3339), EndTime: request.WindowEnd.Format(time.RFC3339), Limit: 500}
-	for page := 0; page < maxPages; page++ {
-		metricRequest.Offset = page * metricRequest.Limit
-		cursor = fmt.Sprintf("metric_offset:%d", metricRequest.Offset)
-		metricsPayload, readErr := reader.StatQueryPage(ctx, metricRequest)
-		if readErr != nil {
-			return result, readErr
-		}
-		metricRawID, metricObservedAt, storeErr := s.storeRaw(ctx, request, runID, "metric_window", map[string]any{"dataset": "promotion", "start": request.WindowStart, "end": request.WindowEnd, "offset": metricRequest.Offset, "limit": metricRequest.Limit}, metricsPayload)
-		if storeErr != nil {
-			return result, storeErr
-		}
-		rows := metricRows(metricsPayload)
-		for _, row := range rows {
-			metric, ok := normalizeMetricRow(row, request, runID, metricRawID, metricObservedAt)
-			if !ok {
-				continue
+	metricWindows := completeMetricWindows(request, now, 7)
+	if len(metricWindows) == 0 {
+		return result, ErrInvalidFact
+	}
+	for windowIndex, window := range metricWindows {
+		metricRequest := oceanengine.StatQueryRequest{DatasetKey: "basic_ad_data", Dimensions: []string{"cdp_promotion_id", "stat_time_day"}, Metrics: []string{"stat_cost", "show_cnt", "click_cnt", "convert_cnt"}, StartTime: window.Start, EndTime: window.End, Limit: 500, Extra: map[string]any{"is_fill_zero": "true"}}
+		for page := 0; page < maxPages; page++ {
+			metricRequest.Offset = page * metricRequest.Limit
+			cursor = fmt.Sprintf("metric_window:%d/%d:offset:%d", windowIndex+1, len(metricWindows), metricRequest.Offset)
+			if err = s.Writer.UpdateSyncCursor(ctx, runID, cursor); err != nil {
+				return result, err
 			}
-			previous, revisionNumber, found, latestErr := s.Writer.LatestMetric(ctx, request.OrganizationID, request.ProjectID, metric.SourceRef, metric.ObjectRef, metric.WindowStart, metric.WindowEnd, metric.AttributionWindow, metric.MetricDefinitionVersion, metric.AvailableAt)
-			if latestErr != nil {
-				return result, latestErr
+			metricsPayload, readErr := reader.StatQueryPage(ctx, metricRequest)
+			if readErr != nil {
+				return result, readErr
 			}
-			if found && previous.PayloadHash != metric.PayloadHash {
-				metric.RevisionOf = previous.ID
-				metric.QualityIssues = append(metric.QualityIssues, AssessMetricRevision(previous, metric)...)
-				metric.QualityStatus = qualityDisposition(metric.QualityIssues)
+			metricRawID, metricObservedAt, storeErr := s.storeRaw(ctx, request, runID, "metric_window", map[string]any{"dataset": "promotion", "start": window.Start, "end": window.End, "offset": metricRequest.Offset, "limit": metricRequest.Limit}, metricsPayload)
+			if storeErr != nil {
+				return result, storeErr
 			}
-			createdMetric, appendErr := s.Writer.AppendMetric(ctx, metric)
-			if appendErr != nil {
-				return result, appendErr
-			}
-			if createdMetric {
-				result.MetricCount++
-			}
-			if found && previous.Metrics["conversions"] != metric.Metrics["conversions"] {
-				revision := ConversionRevision{MetricWindow: metric, OriginalWindowID: previous.ID, RevisionNumber: revisionNumber + 1}
-				if _, appendErr = s.Writer.AppendConversionRevision(ctx, revision); appendErr != nil {
+			rows := metricRows(metricsPayload)
+			for _, row := range rows {
+				metric, ok := normalizeMetricRow(row, request, runID, metricRawID, metricObservedAt)
+				if !ok {
+					continue
+				}
+				previous, revisionNumber, found, latestErr := s.Writer.LatestMetric(ctx, request.OrganizationID, request.ProjectID, metric.SourceRef, metric.ObjectRef, metric.WindowStart, metric.WindowEnd, metric.AttributionWindow, metric.MetricDefinitionVersion, metric.AvailableAt)
+				if latestErr != nil {
+					return result, latestErr
+				}
+				if found && previous.PayloadHash != metric.PayloadHash {
+					metric.RevisionOf = previous.ID
+					metric.QualityIssues = append(metric.QualityIssues, AssessMetricRevision(previous, metric)...)
+					metric.QualityStatus = qualityDisposition(metric.QualityIssues)
+				}
+				createdMetric, appendErr := s.Writer.AppendMetric(ctx, metric)
+				if appendErr != nil {
 					return result, appendErr
 				}
+				if createdMetric {
+					result.MetricCount++
+				}
+				if found && previous.Metrics["conversions"] != metric.Metrics["conversions"] {
+					revision := ConversionRevision{MetricWindow: metric, OriginalWindowID: previous.ID, RevisionNumber: revisionNumber + 1}
+					if _, appendErr = s.Writer.AppendConversionRevision(ctx, revision); appendErr != nil {
+						return result, appendErr
+					}
+				}
+			}
+			if len(rows) < metricRequest.Limit {
+				break
 			}
 		}
-		if len(rows) < metricRequest.Limit {
-			break
-		}
 	}
-	materialRequest := oceanengine.StatQueryRequest{DatasetKey: "material", Dimensions: []string{"promotion_id", "material_id", "stat_time_day"}, Metrics: []string{"stat_cost", "show_cnt", "click_cnt", "convert_cnt"}, StartTime: request.WindowStart.Format(time.RFC3339), EndTime: request.WindowEnd.Format(time.RFC3339), Limit: 500}
+	materialWindow := metricWindows[len(metricWindows)-1]
+	materialRequest := oceanengine.StatQueryRequest{DatasetKey: "ad_material_data", Dimensions: []string{"stat_time_day", "material_id", "image_mode"}, Metrics: []string{"stat_cost", "show_cnt", "click_cnt", "convert_cnt"}, StartTime: materialWindow.Start, EndTime: materialWindow.End, Limit: 500}
 	for page := 0; page < maxPages; page++ {
 		materialRequest.Offset = page * materialRequest.Limit
 		cursor = fmt.Sprintf("material_metric_offset:%d", materialRequest.Offset)
+		if err = s.Writer.UpdateSyncCursor(ctx, runID, cursor); err != nil {
+			return result, err
+		}
 		payload, readErr := reader.StatQueryPage(ctx, materialRequest)
 		if readErr != nil {
 			return result, readErr
 		}
-		rawID, materialMetricObservedAt, storeErr := s.storeRaw(ctx, request, runID, "material_metric_window", map[string]any{"dataset": "material", "start": request.WindowStart, "end": request.WindowEnd, "offset": materialRequest.Offset, "limit": materialRequest.Limit}, payload)
+		rawID, materialMetricObservedAt, storeErr := s.storeRaw(ctx, request, runID, "material_metric_window", map[string]any{"dataset": "material", "start": materialWindow.Start, "end": materialWindow.End, "offset": materialRequest.Offset, "limit": materialRequest.Limit}, payload)
 		if storeErr != nil {
 			return result, storeErr
 		}
 		rows := metricRows(payload)
 		for _, row := range rows {
-			metric, ok := normalizeMetricRow(row, request, runID, rawID, materialMetricObservedAt)
-			if !ok {
-				continue
-			}
 			dimensions, _ := row["Dimensions"].(map[string]any)
 			materialRef := firstString(dimensions, "material_id")
-			promotionRef := firstString(dimensions, "promotion_id")
-			if materialRef == "" || promotionRef == "" {
+			parents := materialParents[materialRef]
+			if materialRef == "" || len(parents) != 1 {
+				continue
+			}
+			promotionRef := ""
+			for value := range parents {
+				promotionRef = value
+			}
+			metric, ok := normalizeMetricRowForObject(row, request, runID, rawID, materialMetricObservedAt, materialRef)
+			if !ok {
 				continue
 			}
 			metric.ID = "material_metric_" + canonicalHash([]string{rawID, materialRef, promotionRef, metric.WindowStart.String(), metric.PayloadHash})
@@ -367,6 +428,39 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 	}
 	status, cursor = "completed", "complete"
 	return result, nil
+}
+
+type metricQueryWindow struct {
+	Start string
+	End   string
+}
+
+func completeMetricWindows(request SyncRequest, now time.Time, maxDays int) []metricQueryWindow {
+	location, err := time.LoadLocation(request.TimeZone)
+	if err != nil {
+		location = time.FixedZone("Asia/Shanghai", 8*60*60)
+	}
+	localNow := now.In(location)
+	lastCompleteDayEnd := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, location).Add(-time.Second)
+	end := request.WindowEnd.In(location)
+	if end.After(lastCompleteDayEnd) {
+		end = lastCompleteDayEnd
+	}
+	localStart := request.WindowStart.In(location)
+	start := time.Date(localStart.Year(), localStart.Month(), localStart.Day(), 0, 0, 0, 0, location)
+	if end.Before(start) || maxDays < 1 {
+		return nil
+	}
+	result := []metricQueryWindow{}
+	for cursor := start; !cursor.After(end); {
+		windowEnd := cursor.AddDate(0, 0, maxDays).Add(-time.Second)
+		if windowEnd.After(end) {
+			windowEnd = end
+		}
+		result = append(result, metricQueryWindow{Start: cursor.Format("2006-01-02 15:04:05"), End: windowEnd.Format("2006-01-02 15:04:05")})
+		cursor = windowEnd.Add(time.Second)
+	}
+	return result
 }
 
 func (s Synchronizer) header(request SyncRequest, runID, evidenceRef, payloadHash string, collected, valid time.Time) FactHeader {
@@ -418,6 +512,13 @@ func firstString(values map[string]any, keys ...string) string {
 		}
 		if number, ok := values[key].(float64); ok {
 			return fmt.Sprintf("%.0f", number)
+		}
+		if nested, ok := values[key].(map[string]any); ok {
+			for _, nestedKey := range []string{"ValueStr", "value_str", "Value", "value"} {
+				if value := firstString(nested, nestedKey); value != "" {
+					return value
+				}
+			}
 		}
 	}
 	return ""
@@ -534,10 +635,18 @@ func metricRows(payload map[string]any) []map[string]any {
 func normalizeMetricRow(row map[string]any, request SyncRequest, runID, evidenceRef string, collected time.Time) (MetricWindow, bool) {
 	dimensions, _ := row["Dimensions"].(map[string]any)
 	metrics, _ := row["Metrics"].(map[string]any)
-	objectRef := firstString(dimensions, "promotion_id")
+	objectRef := firstString(dimensions, "cdp_promotion_id", "promotion_id")
 	if objectRef == "" {
-		objectRef = firstString(row, "promotion_id")
+		objectRef = firstString(row, "cdp_promotion_id", "promotion_id")
 	}
+	return normalizeMetricRowValues(dimensions, metrics, request, runID, evidenceRef, collected, objectRef)
+}
+func normalizeMetricRowForObject(row map[string]any, request SyncRequest, runID, evidenceRef string, collected time.Time, objectRef string) (MetricWindow, bool) {
+	dimensions, _ := row["Dimensions"].(map[string]any)
+	metrics, _ := row["Metrics"].(map[string]any)
+	return normalizeMetricRowValues(dimensions, metrics, request, runID, evidenceRef, collected, objectRef)
+}
+func normalizeMetricRowValues(dimensions, metrics map[string]any, request SyncRequest, runID, evidenceRef string, collected time.Time, objectRef string) (MetricWindow, bool) {
 	if objectRef == "" {
 		return MetricWindow{}, false
 	}
@@ -548,13 +657,13 @@ func normalizeMetricRow(row map[string]any, request SyncRequest, runID, evidence
 			end = parsed.AddDate(0, 0, 1)
 		}
 	}
-	counts := map[string]int64{"spend": int64(numberValue(metrics["stat_cost"])), "impressions": int64(numberValue(metrics["show_cnt"])), "clicks": int64(numberValue(metrics["click_cnt"])), "conversions": int64(numberValue(metrics["convert_cnt"]))}
+	counts := map[string]int64{"spend": int64(math.Round(numberValue(metrics["stat_cost"]) * 100)), "impressions": int64(numberValue(metrics["show_cnt"])), "clicks": int64(numberValue(metrics["click_cnt"])), "conversions": int64(numberValue(metrics["convert_cnt"]))}
 	payloadHash := canonicalHash(map[string]any{"object": objectRef, "start": start, "end": end, "metrics": counts})
 	header := FactHeader{OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, SourceSystem: SourceSystem, SourceRef: opaqueRef(request.AccountRef), IngestRunID: runID, SchemaVersion: DatasetVersion, PayloadHash: payloadHash, CollectedAt: collected, AvailableAt: collected, DataThrough: request.WindowEnd, ValidFrom: start, QualityStatus: QualityQuarantine, EvidenceRef: evidenceRef}
 	value := MetricWindow{FactHeader: header, ID: "metric_" + canonicalHash([]string{evidenceRef, objectRef, start.String(), end.String(), payloadHash}), ObjectRef: opaqueRef(objectRef), WindowStart: start, WindowEnd: end, Granularity: "day", TimeZone: request.TimeZone, AttributionWindow: "platform_default_unconfirmed", MetricDefinitionVersion: "oceanengine-atomic-v1", Currency: request.Currency, AmountUnit: "fen", Metrics: counts}
 	value.QualityIssues = AssessMetric(value, false, true, true)
 	derived := map[string]float64{}
-	for _, key := range []string{"ctr", "cvr"} {
+	for _, key := range []string{"ctr", "conversion_rate"} {
 		if _, ok := metrics[key]; ok {
 			derived[key] = numberValue(metrics[key])
 		}
@@ -574,6 +683,12 @@ func numberValue(value any) float64 {
 		var parsed json.Number = json.Number(number)
 		value, _ := parsed.Float64()
 		return value
+	case map[string]any:
+		for _, key := range []string{"Value", "value", "ValueStr", "value_str"} {
+			if nested, ok := number[key]; ok {
+				return numberValue(nested)
+			}
+		}
 	}
 	return 0
 }

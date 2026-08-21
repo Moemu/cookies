@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-test("巨量会话设置只提交受控输入并仅展示安全元数据", () => {
+test("巨量 Connector 由 Organization 持有且只提交受控输入", () => {
   const settings = readFileSync(
     new URL("../src/components/OceanEngineSessionSettings.tsx", import.meta.url),
     "utf8",
@@ -19,13 +19,17 @@ test("巨量会话设置只提交受控输入并仅展示安全元数据", () =>
     new URL("../src/data/navigation.ts", import.meta.url),
     "utf8",
   );
-  assert.match(settings, /inputRef = useRef<HTMLInputElement>/);
+  assert.match(settings, /externalIDRef = useRef<HTMLInputElement>/);
+  assert.match(settings, /sessionInputRef = useRef<HTMLInputElement>/);
   assert.match(settings, /type="password"/);
   assert.match(settings, /autoComplete="off"/);
-  assert.match(settings, /api\.updateOceanEngineSession/);
-  assert.match(settings, /inputRef\.current\) inputRef\.current\.value = ''/);
-  assert.match(settings, /api\.verifyOceanEngineSession/);
-  assert.match(settings, /ocean_engine \/ web_api/);
+  assert.match(settings, /api\.registerConnectorAccount/);
+  assert.match(settings, /api\.updateConnectorAccountSession/);
+  assert.match(settings, /sessionInputRef\.current\) sessionInputRef\.current\.value = ''/);
+  assert.match(settings, /api\.verifyConnectorAccount/);
+  assert.match(settings, /api\.syncConnectorAccount/);
+  assert.match(settings, /不需要业务 Project 或 Plan/);
+  assert.doesNotMatch(settings, /useProject/);
   assert.doesNotMatch(settings, /useState\([^)]*session/i);
   assert.doesNotMatch(settings, /localStorage|sessionStorage/);
   assert.doesNotMatch(settings, /computer_use|Playwright/);

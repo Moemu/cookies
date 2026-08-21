@@ -24,7 +24,7 @@ func TestMySQLRepositoryAppendAndPointInTimeRead(t *testing.T) {
 	repository := MySQLRepository{DB: db}
 	suffix := time.Now().UTC().Format("150405.000000000")
 	org, project, run := "org_"+suffix, "project_"+suffix, "run_"+suffix
-	cleanup := []string{"connector_conversion_revisions", "connector_platform_diagnosis_snapshots", "connector_platform_status_events", "connector_material_metric_windows", "connector_material_bindings", "connector_metric_windows", "connector_configuration_change_events", "connector_configuration_snapshots", "connector_object_snapshots", "connector_raw_snapshots", "connector_sync_runs", "platform_account_connections", "platform_accounts"}
+	cleanup := []string{"connector_conversion_revisions", "connector_platform_diagnosis_snapshots", "connector_platform_status_events", "connector_material_metric_windows", "connector_material_bindings", "connector_metric_windows", "connector_configuration_change_events", "connector_configuration_snapshots", "connector_object_snapshots", "connector_raw_snapshots", "connector_sync_runs", "connector_ocean_engine_account_sessions", "platform_account_connections", "platform_accounts"}
 	defer func() {
 		for _, table := range cleanup {
 			_, _ = db.ExecContext(context.Background(), `DELETE FROM `+table+` WHERE organization_id=?`, org)

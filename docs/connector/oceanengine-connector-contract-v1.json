@@ -16,10 +16,10 @@
   "$defs": {
     "account": {
       "type": "object",
-      "required": ["organization_id", "project_id", "source_ref"],
+      "required": ["organization_id", "source_ref"],
       "properties": {
         "organization_id": {"type": "string", "minLength": 1},
-        "project_id": {"type": "string", "minLength": 1},
+        "project_id": {"type": "string", "minLength": 1, "description": "Optional legacy consumer Project scope."},
         "source_ref": {"type": "string", "minLength": 1, "description": "Local or anonymized Connector reference; never a raw advertiser ID."}
       },
       "additionalProperties": false

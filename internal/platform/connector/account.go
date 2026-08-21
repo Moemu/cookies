@@ -3,15 +3,19 @@ package connector
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
 
+var ErrAccountSessionInvalid = errors.New("connector account session is invalid")
+var ErrAccountVerificationUnavailable = errors.New("connector account verification is unavailable")
+
 type PlatformAccount struct {
 	ID                   string     `json:"id"`
 	OrganizationID       string     `json:"organization_id"`
-	ProjectID            string     `json:"project_id"`
+	ProjectID            string     `json:"project_id,omitempty"`
 	Platform             string     `json:"platform"`
 	DisplayLabel         string     `json:"display_label"`
 	Status               string     `json:"status"`
@@ -27,7 +31,10 @@ type RegisterAccountRequest struct {
 	CredentialRef  string
 }
 type AccountProbe interface {
-	Verify(context.Context, string, string, string) error
+	Verify(context.Context, string, string, string, string) (int64, error)
+}
+type AccountSessionState interface {
+	MarkAccountSessionVerified(context.Context, string, string, int64, time.Time) (OceanEngineAccountSession, error)
 }
 type AccountStore interface {
 	RegisterAccount(context.Context, RegisterAccountRequest) (PlatformAccount, error)
@@ -37,14 +44,15 @@ type AccountStore interface {
 	RevokeAccount(context.Context, string, string, string, time.Time) (PlatformAccount, error)
 }
 type AccountService struct {
-	Store AccountStore
-	Probe AccountProbe
-	Now   func() time.Time
+	Store    AccountStore
+	Probe    AccountProbe
+	Sessions AccountSessionState
+	Now      func() time.Time
 }
 
 func (s AccountService) Register(ctx context.Context, request RegisterAccountRequest) (PlatformAccount, error) {
 	externalID, credentialRef := strings.TrimSpace(request.ExternalID), strings.TrimSpace(request.CredentialRef)
-	if s.Store == nil || request.OrganizationID == "" || request.ProjectID == "" || externalID == "" || len(externalID) > 191 || credentialRef == "" || len(credentialRef) > 191 || strings.ContainsAny(externalID, "\r\n\t") || containsSensitiveText(credentialRef) {
+	if s.Store == nil || request.OrganizationID == "" || externalID == "" || len(externalID) > 191 || credentialRef == "" || len(credentialRef) > 191 || strings.ContainsAny(externalID, "\r\n\t") || containsSensitiveText(credentialRef) {
 		return PlatformAccount{}, ErrInvalidFact
 	}
 	request.ExternalID, request.CredentialRef = externalID, credentialRef
@@ -64,12 +72,24 @@ func (s AccountService) Verify(ctx context.Context, organizationID, projectID, a
 	if err != nil {
 		return PlatformAccount{}, err
 	}
-	if err = s.Probe.Verify(ctx, organizationID, projectID, externalID); err != nil {
-		return PlatformAccount{}, err
+	sessionVersion, err := s.Probe.Verify(ctx, organizationID, projectID, accountID, externalID)
+	if err != nil {
+		if errors.Is(err, ErrAccountSessionInvalid) {
+			return PlatformAccount{}, err
+		}
+		return PlatformAccount{}, fmt.Errorf("%w: %v", ErrAccountVerificationUnavailable, err)
 	}
 	now := time.Now().UTC()
 	if s.Now != nil {
 		now = s.Now().UTC()
+	}
+	if projectID == "" {
+		if s.Sessions == nil {
+			return PlatformAccount{}, ErrInvalidFact
+		}
+		if _, err = s.Sessions.MarkAccountSessionVerified(ctx, organizationID, accountID, sessionVersion, now); err != nil {
+			return PlatformAccount{}, err
+		}
 	}
 	return s.Store.MarkAccountVerified(ctx, organizationID, projectID, accountID, now)
 }

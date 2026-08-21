@@ -2,11 +2,21 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/shikanon/cookies/internal/integrations/oceanengine"
 )
+
+func TestSyncErrorCategoryDoesNotExposeResponseData(t *testing.T) {
+	if got := SyncErrorCategory(fmt.Errorf("read metrics: %w", oceanengine.BusinessCodeError{Code: 401})); got != "business_401" {
+		t.Fatalf("unexpected business category %q", got)
+	}
+	if got := SyncErrorCategory(oceanengine.HTTPStatusError{StatusCode: 503}); got != "http_503" {
+		t.Fatalf("unexpected HTTP category %q", got)
+	}
+}
 
 type testCipher struct{}
 
@@ -24,7 +34,9 @@ func (f testFactory) Open(context.Context, SyncRequest) (oceanengine.Reader, fun
 	return f.reader, func() {}, nil
 }
 
-type testReader struct{}
+type testReader struct {
+	statRequests *[]oceanengine.StatQueryRequest
+}
 
 func (testReader) AccountInfo(context.Context) (map[string]any, error) {
 	return map[string]any{"advertiser_id": "raw-account-1", "name": "demo"}, nil
@@ -44,8 +56,16 @@ func (testReader) PromotionMaterials(context.Context, string, bool) (map[string]
 func (testReader) Attributes(context.Context, []string, string) (map[string]any, error) {
 	return map[string]any{"diagnosis": "stable"}, nil
 }
-func (testReader) StatQueryPage(context.Context, oceanengine.StatQueryRequest) (map[string]any, error) {
-	return map[string]any{"data": map[string]any{"StatsData": map[string]any{"Rows": []any{map[string]any{"Dimensions": map[string]any{"promotion_id": "raw-promotion-1", "stat_time_day": "2026-08-19"}, "Metrics": map[string]any{"stat_cost": 100.0, "show_cnt": 1000.0, "click_cnt": 10.0, "convert_cnt": 2.0}}}}}}, nil
+func (r testReader) StatQueryPage(_ context.Context, request oceanengine.StatQueryRequest) (map[string]any, error) {
+	if r.statRequests != nil {
+		*r.statRequests = append(*r.statRequests, request)
+	}
+	dimensions := map[string]any{"cdp_promotion_id": map[string]any{"Value": "raw-promotion-1"}, "stat_time_day": map[string]any{"ValueStr": "2026-08-19"}}
+	if request.DatasetKey == "ad_material_data" {
+		dimensions = map[string]any{"material_id": map[string]any{"Value": "raw-material-1"}, "stat_time_day": map[string]any{"ValueStr": "2026-08-19"}, "image_mode": map[string]any{"Value": "video"}}
+	}
+	metrics := map[string]any{"stat_cost": map[string]any{"Value": 100.0}, "show_cnt": map[string]any{"Value": 1000.0}, "click_cnt": map[string]any{"Value": 10.0}, "convert_cnt": map[string]any{"Value": 2.0}}
+	return map[string]any{"data": map[string]any{"StatsData": map[string]any{"Rows": []any{map[string]any{"Dimensions": dimensions, "Metrics": metrics}}}}}, nil
 }
 
 type testWriter struct {
@@ -66,6 +86,10 @@ func (w *testWriter) StartSync(context.Context, SyncRun) (bool, error) {
 	}
 	w.started = true
 	return true, nil
+}
+func (w *testWriter) UpdateSyncCursor(_ context.Context, _, cursor string) error {
+	w.completed = cursor
+	return nil
 }
 func (w *testWriter) CompleteSync(_ context.Context, _, _, status string, _ time.Time) error {
 	w.completed = status
@@ -118,12 +142,13 @@ func (w *testWriter) LatestMetric(context.Context, string, string, string, strin
 func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	writer := &testWriter{}
 	now := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
-	syncer := Synchronizer{Writer: writer, Readers: testFactory{reader: testReader{}}, Cipher: testCipher{}, Now: func() time.Time { return now }}
+	statRequests := []oceanengine.StatQueryRequest{}
+	syncer := Synchronizer{Writer: writer, Readers: testFactory{reader: testReader{statRequests: &statRequests}}, Cipher: testCipher{}, Now: func() time.Time { return now }}
 	result, err := syncer.Sync(context.Background(), SyncRequest{OrganizationID: "org_1", ProjectID: "project_1", AccountRef: "raw-account-1", IdempotencyKey: "request-1", WindowStart: now.AddDate(0, 0, -1), WindowEnd: now, TimeZone: "Asia/Shanghai", Currency: "CNY"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ObjectCount != 5 || result.MetricCount != 1 || writer.completed != "completed" {
+	if result.ObjectCount != 5 || result.MetricCount != 2 || writer.completed != "completed" {
 		t.Fatalf("result=%#v completed=%s", result, writer.completed)
 	}
 	if len(writer.raw) != 7 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
@@ -146,6 +171,18 @@ func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	}
 	if writer.metrics[0].QualityStatus != QualityQuarantine || len(writer.metrics[0].QualityIssues) == 0 {
 		t.Fatalf("metric quality=%s issues=%#v", writer.metrics[0].QualityStatus, writer.metrics[0].QualityIssues)
+	}
+	if writer.metrics[0].Metrics["spend"] != 10000 || writer.metrics[0].AmountUnit != "fen" {
+		t.Fatalf("spend was not normalized from yuan to fen: %#v", writer.metrics[0])
+	}
+	if writer.configs[0].Values["currency"] != "CNY" {
+		t.Fatalf("configuration currency was not retained: %#v", writer.configs[0].Values)
+	}
+	if len(statRequests) != 2 || statRequests[0].DatasetKey != "basic_ad_data" || statRequests[0].Host != "" || statRequests[0].StartTime != "2026-08-19 00:00:00" || statRequests[0].EndTime != "2026-08-19 23:59:59" {
+		t.Fatalf("promotion metric request=%#v", statRequests)
+	}
+	if statRequests[1].DatasetKey != "ad_material_data" || statRequests[1].Dimensions[1] != "material_id" {
+		t.Fatalf("material metric request=%#v", statRequests[1])
 	}
 	if string(writer.raw[0].EncryptedEvidence) == "" || writer.raw[0].KeyVersion != "test-v1" {
 		t.Fatal("raw evidence was not encrypted")

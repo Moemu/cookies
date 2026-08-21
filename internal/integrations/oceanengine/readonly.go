@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -80,7 +81,25 @@ func (c *Client) StatQueryPage(ctx context.Context, request StatQueryRequest) (m
 }
 
 func (c *Client) AccountInfo(ctx context.Context) (map[string]any, error) {
-	return c.getJSON(ctx, "/ad/api/account/info")
+	paths := []string{"/ad/api/account/info", "/superior/api/v2/account/info", "/ad/api/account/conf"}
+	var value map[string]any
+	var err error
+	for index, path := range paths {
+		value, err = c.getJSON(ctx, path)
+		if err == nil || index == len(paths)-1 || !accountInfoFallbackAllowed(err) {
+			return value, err
+		}
+	}
+	return value, err
+}
+
+func accountInfoFallbackAllowed(err error) bool {
+	var statusErr HTTPStatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.StatusCode == http.StatusNotFound || statusErr.StatusCode == http.StatusMethodNotAllowed
+	}
+	var redirectErr RedirectBlockedError
+	return errors.As(err, &redirectErr)
 }
 
 func (c *Client) GlobalInfo(ctx context.Context) (map[string]any, error) {

@@ -29,7 +29,7 @@ func (r MySQLRepository) db() (*sql.DB, error) {
 }
 
 func (r MySQLRepository) StartSync(ctx context.Context, value SyncRun) (bool, error) {
-	if value.ID == "" || value.OrganizationID == "" || value.ProjectID == "" || value.AccountRef == "" || value.StartedAt.IsZero() || value.Attempt < 1 {
+	if value.ID == "" || value.OrganizationID == "" || value.AccountRef == "" || value.StartedAt.IsZero() || value.Attempt < 1 {
 		return false, ErrInvalidFact
 	}
 	db, err := r.db()
@@ -71,6 +71,28 @@ func (r MySQLRepository) CompleteSync(ctx context.Context, id, cursor, status st
 		return nil
 	}
 	return ErrImmutableConflict
+}
+
+func (r MySQLRepository) UpdateSyncCursor(ctx context.Context, id, cursor string) error {
+	if id == "" || cursor == "" {
+		return ErrInvalidFact
+	}
+	db, err := r.db()
+	if err != nil {
+		return err
+	}
+	result, err := db.ExecContext(ctx, `UPDATE connector_sync_runs SET cursor_ref=? WHERE id=? AND status='running' AND completed_at IS NULL`, cursor, id)
+	if err != nil {
+		return fmt.Errorf("update connector sync cursor: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrImmutableConflict
+	}
+	return nil
 }
 
 func (r MySQLRepository) GetSync(ctx context.Context, organizationID, projectID, accountRef, id string) (SyncRun, error) {
@@ -351,7 +373,7 @@ func nullable(value string) any {
 }
 
 func (r MySQLRepository) Snapshot(ctx context.Context, q Query) (CanonicalSnapshot, error) {
-	if q.OrganizationID == "" || q.ProjectID == "" || q.PredictionCutoff.IsZero() {
+	if q.OrganizationID == "" || q.PredictionCutoff.IsZero() {
 		return CanonicalSnapshot{}, ErrInvalidFact
 	}
 	result := CanonicalSnapshot{DatasetVersion: DatasetVersion, PredictionCutoff: q.PredictionCutoff}

@@ -534,7 +534,7 @@ func main() {
 		}
 		sessionCipher = cipher
 		oceanEngineVerifier = oceanEngineSessionVerifier{baseURL: cfg.OceanEngine.BusinessBaseURL, client: &http.Client{Timeout: 30 * time.Second}}
-		log.Printf("Ocean Engine read-only session verification configured: base_url=%s", cfg.OceanEngine.BaseURL)
+		log.Printf("Ocean Engine read-only session verification configured: base_url=%s", cfg.OceanEngine.BusinessBaseURL)
 	}
 	var miyunVerifier insights.MiyunConnectionVerifier
 	var miyunImports insights.MiyunAuthorizedImporter
@@ -616,17 +616,19 @@ func main() {
 		connectorSync := connector.Synchronizer{
 			Writer: connectorRepository,
 			Readers: oceanEngineConnectorReaderFactory{
-				sessions: insightsService.OceanEngineSessions,
-				cipher:   sessionCipher,
-				baseURL:  cfg.OceanEngine.BusinessBaseURL,
-				client:   &http.Client{Timeout: 30 * time.Second},
-				accounts: connectorRepository,
+				sessions:        insightsService.OceanEngineSessions,
+				accountSessions: connectorRepository,
+				cipher:          sessionCipher,
+				baseURL:         cfg.OceanEngine.BaseURL,
+				client:          &http.Client{Timeout: 30 * time.Second},
+				accounts:        connectorRepository,
 			},
 			Cipher: sessionCipher,
 		}
-		connectorAccounts := connector.AccountService{Store: connectorRepository, Probe: oceanEngineAccountProbe{sessions: insightsService.OceanEngineSessions, cipher: sessionCipher, baseURL: cfg.OceanEngine.BusinessBaseURL, client: &http.Client{Timeout: 30 * time.Second}}}
+		connectorAccountSessions := connector.AccountSessionService{Store: connectorRepository, Cipher: sessionCipher}
+		connectorAccounts := connector.AccountService{Store: connectorRepository, Sessions: connectorRepository, Probe: oceanEngineAccountProbe{sessions: insightsService.OceanEngineSessions, accountSessions: connectorRepository, cipher: sessionCipher, baseURL: cfg.OceanEngine.BaseURL, client: &http.Client{Timeout: 30 * time.Second}}}
 		dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
-			httpserver.DomainMount{Pattern: "/api/connector/v1/", Handler: connectorhttp.New(connectorRepository, connectorSync, projectStore, connectorAccounts)})
+			httpserver.DomainMount{Pattern: "/api/connector/v1/", Handler: connectorhttp.New(connectorRepository, connectorSync, projectStore, connectorAccounts, connectorAccountSessions)})
 	}
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()

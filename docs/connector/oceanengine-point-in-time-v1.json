@@ -16,14 +16,14 @@
     "fact": {
       "type": "object",
       "required": [
-        "organization_id", "project_id", "source_system", "source_ref",
+        "organization_id", "source_system", "source_ref",
         "ingest_run_id", "schema_version", "payload_hash", "collected_at",
         "available_at", "data_through", "valid_from", "quality_status",
         "evidence_ref"
       ],
       "properties": {
         "organization_id": {"type": "string", "minLength": 1},
-        "project_id": {"type": "string", "minLength": 1},
+        "project_id": {"type": "string", "description": "Empty for Organization-scoped Connector facts."},
         "source_system": {"const": "ocean_engine"},
         "source_ref": {"type": "string", "minLength": 1},
         "ingest_run_id": {"type": "string", "minLength": 1},
