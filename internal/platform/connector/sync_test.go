@@ -38,6 +38,24 @@ type testReader struct {
 	statRequests *[]oceanengine.StatQueryRequest
 }
 
+type metricsOnlyReader struct{ testReader }
+
+func (metricsOnlyReader) AccountInfo(context.Context) (map[string]any, error) {
+	return nil, fmt.Errorf("inventory read is not permitted")
+}
+func (metricsOnlyReader) ListPage(context.Context, oceanengine.ListRequest) (map[string]any, error) {
+	return nil, fmt.Errorf("inventory read is not permitted")
+}
+func (metricsOnlyReader) PromotionConfiguration(context.Context, string) (map[string]any, error) {
+	return nil, fmt.Errorf("inventory read is not permitted")
+}
+func (metricsOnlyReader) PromotionMaterials(context.Context, string, bool) (map[string]any, error) {
+	return nil, fmt.Errorf("inventory read is not permitted")
+}
+func (metricsOnlyReader) Attributes(context.Context, []string, string) (map[string]any, error) {
+	return nil, fmt.Errorf("inventory read is not permitted")
+}
+
 func (testReader) AccountInfo(context.Context) (map[string]any, error) {
 	return map[string]any{"advertiser_id": "raw-account-1", "name": "demo"}, nil
 }
@@ -214,5 +232,39 @@ func TestSynchronizerReplaysIdempotencyKeyWithoutRemoteRead(t *testing.T) {
 	result, err := syncer.Sync(context.Background(), SyncRequest{OrganizationID: "org_1", ProjectID: "project_1", AccountRef: "account", IdempotencyKey: "same", WindowStart: baseTime.Add(-time.Hour), WindowEnd: baseTime})
 	if err != nil || !result.Replayed || len(writer.raw) != 0 {
 		t.Fatalf("result=%#v error=%v", result, err)
+	}
+}
+
+func TestSynchronizerMetricsOnlySkipsInventory(t *testing.T) {
+	writer := &testWriter{}
+	now := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
+	statRequests := []oceanengine.StatQueryRequest{}
+	syncer := Synchronizer{Writer: writer, Readers: testFactory{reader: metricsOnlyReader{testReader{statRequests: &statRequests}}}, Cipher: testCipher{}, Now: func() time.Time { return now }}
+	result, err := syncer.Sync(context.Background(), SyncRequest{OrganizationID: "org_1", AccountRef: "account", IdempotencyKey: "metrics", WindowStart: now.AddDate(0, 0, -14), WindowEnd: now, Mode: SyncModeMetricsOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ObjectCount != 0 || result.MetricCount == 0 || len(writer.objects) != 0 || len(writer.configs) != 0 {
+		t.Fatalf("metrics-only result=%#v objects=%d configs=%d", result, len(writer.objects), len(writer.configs))
+	}
+	if len(statRequests) != 15 || statRequests[0].StartTime != statRequests[0].EndTime[:10]+" 00:00:00" || statRequests[0].EndTime[11:] != "23:59:59" {
+		t.Fatalf("metrics-only requests do not use 14 stable daily windows: %#v", statRequests)
+	}
+}
+
+func TestSyncRunIDIncludesMode(t *testing.T) {
+	request := SyncRequest{OrganizationID: "org_1", AccountRef: "account", IdempotencyKey: "same"}
+	full := SyncRunID(request)
+	request.Mode = SyncModeMetricsOnly
+	if full == SyncRunID(request) {
+		t.Fatal("sync mode did not change the run ID")
+	}
+}
+
+func TestSynchronizerRejectsUnknownMode(t *testing.T) {
+	syncer := Synchronizer{Writer: &testWriter{}, Readers: testFactory{reader: testReader{}}, Cipher: testCipher{}}
+	_, err := syncer.Sync(context.Background(), SyncRequest{OrganizationID: "org_1", AccountRef: "account", IdempotencyKey: "bad", WindowStart: baseTime.Add(-time.Hour), WindowEnd: baseTime, Mode: "unknown"})
+	if err != ErrInvalidFact {
+		t.Fatalf("error=%v", err)
 	}
 }

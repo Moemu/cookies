@@ -612,6 +612,7 @@ func main() {
 	}
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 		httpserver.DomainMount{Pattern: "/api/insights/v1/", Handler: insightshttp.New(insightsService)})
+	var connectorPatrol *connector.PatrolRunner
 	if cfg.OceanEngine.Enabled && sessionCipher != nil {
 		connectorSync := connector.Synchronizer{
 			Writer: connectorRepository,
@@ -627,11 +628,23 @@ func main() {
 		}
 		connectorAccountSessions := connector.AccountSessionService{Store: connectorRepository, Cipher: sessionCipher}
 		connectorAccounts := connector.AccountService{Store: connectorRepository, Sessions: connectorRepository, Probe: oceanEngineAccountProbe{sessions: insightsService.OceanEngineSessions, accountSessions: connectorRepository, cipher: sessionCipher, baseURL: cfg.OceanEngine.BaseURL, client: &http.Client{Timeout: 30 * time.Second}}}
+		if cfg.OceanEngine.PatrolEnabled {
+			connectorPatrol = &connector.PatrolRunner{Sessions: connectorRepository, Syncer: connectorSync, LookbackDays: cfg.OceanEngine.PatrolLookbackDays, Timeout: 15 * time.Minute}
+		}
 		dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 			httpserver.DomainMount{Pattern: "/api/connector/v1/", Handler: connectorhttp.New(connectorRepository, connectorSync, projectStore, connectorAccounts, connectorAccountSessions)})
 	}
 	workerContext, stopWorkers := context.WithCancel(context.Background())
 	defer stopWorkers()
+	if connectorPatrol != nil {
+		startPeriodicWorker(workerContext, "ocean-engine-metric-patrol", time.Duration(cfg.OceanEngine.PatrolIntervalHours)*time.Hour, func(ctx context.Context) error {
+			result, err := connectorPatrol.RunOnce(ctx)
+			if err == nil {
+				log.Printf("ocean-engine-metric-patrol completed: accounts=%d completed=%d", result.AccountCount, result.Completed)
+			}
+			return err
+		})
+	}
 	if knowledgeService.DocumentScheduler != nil || knowledgeService.Scheduler != nil || knowledgeService.VisionScheduler != nil {
 		knowledgeReconciler := knowledge.JobStateReconciler{Service: knowledgeService, Limit: 20}
 		startWorker(workerContext, "knowledge-job-reconcile", knowledgeReconciler.RunOnce)
@@ -1474,6 +1487,30 @@ func startWorker(ctx context.Context, name string, runOnce func(context.Context)
 			case <-ctx.Done():
 				return
 			case <-time.After(250 * time.Millisecond):
+			}
+		}
+	}()
+}
+
+func startPeriodicWorker(ctx context.Context, name string, interval time.Duration, runOnce func(context.Context) error) {
+	if interval <= 0 {
+		return
+	}
+	go func() {
+		run := func() {
+			if err := runOnce(ctx); err != nil && ctx.Err() == nil {
+				log.Printf("%s worker error: %v", name, err)
+			}
+		}
+		run()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				run()
 			}
 		}
 	}()

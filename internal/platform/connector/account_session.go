@@ -42,6 +42,10 @@ type AccountSessionStore interface {
 	MarkAccountSessionVerified(context.Context, string, string, int64, time.Time) (OceanEngineAccountSession, error)
 }
 
+type ReadyAccountSessionSource interface {
+	ListReadyAccountSessions(context.Context, int) ([]OceanEngineAccountSession, error)
+}
+
 type AccountSessionService struct {
 	Store  AccountSessionStore
 	Cipher AccountSessionCipher
@@ -87,6 +91,35 @@ func (r MySQLRepository) GetAccountSession(ctx context.Context, organizationID, 
 		value.LastVerifiedAt = &verified.Time
 	}
 	return value, nil
+}
+
+func (r MySQLRepository) ListReadyAccountSessions(ctx context.Context, limit int) ([]OceanEngineAccountSession, error) {
+	db, err := r.db()
+	if err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id,organization_id,account_id,status,last_verified_at,version,created_at,updated_at FROM connector_ocean_engine_account_sessions WHERE status='ready' ORDER BY organization_id,account_id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]OceanEngineAccountSession, 0)
+	for rows.Next() {
+		var value OceanEngineAccountSession
+		var verified sql.NullTime
+		if err = rows.Scan(&value.ID, &value.OrganizationID, &value.AccountID, &value.Status, &verified, &value.Version, &value.CreatedAt, &value.UpdatedAt); err != nil {
+			return nil, err
+		}
+		value.CredentialRefPresent = true
+		if verified.Valid {
+			value.LastVerifiedAt = &verified.Time
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
 }
 
 func (r MySQLRepository) PutAccountSession(ctx context.Context, value OceanEngineAccountSession, expectedVersion int64) (OceanEngineAccountSession, error) {

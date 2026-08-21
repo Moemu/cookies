@@ -296,10 +296,11 @@ func (s *Server) syncWithScope(w http.ResponseWriter, r *http.Request, organizat
 		return
 	}
 	var body struct {
-		Start    time.Time `json:"start"`
-		End      time.Time `json:"end"`
-		TimeZone string    `json:"time_zone"`
-		Currency string    `json:"currency"`
+		Start    time.Time          `json:"start"`
+		End      time.Time          `json:"end"`
+		TimeZone string             `json:"time_zone"`
+		Currency string             `json:"currency"`
+		SyncMode connector.SyncMode `json:"sync_mode"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
 	decoder.DisallowUnknownFields()
@@ -307,12 +308,16 @@ func (s *Server) syncWithScope(w http.ResponseWriter, r *http.Request, organizat
 		writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
 		return
 	}
+	if !body.SyncMode.Valid() {
+		writeProblem(w, http.StatusBadRequest, "INVALID_SYNC_MODE")
+		return
+	}
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if key == "" || len(key) > 191 {
 		writeProblem(w, http.StatusBadRequest, "IDEMPOTENCY_KEY_REQUIRED")
 		return
 	}
-	request := connector.SyncRequest{OrganizationID: organizationID, ProjectID: projectID, AccountRef: r.PathValue("account_ref"), IdempotencyKey: key, WindowStart: body.Start, WindowEnd: body.End, TimeZone: body.TimeZone, Currency: body.Currency}
+	request := connector.SyncRequest{OrganizationID: organizationID, ProjectID: projectID, AccountRef: r.PathValue("account_ref"), IdempotencyKey: key, WindowStart: body.Start, WindowEnd: body.End, TimeZone: body.TimeZone, Currency: body.Currency, Mode: body.SyncMode}
 	runID := connector.SyncRunID(request)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)

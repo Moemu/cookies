@@ -189,11 +189,14 @@ type Miyun struct {
 
 // OceanEngine controls the read-only private web API session verifier.
 type OceanEngine struct {
-	Enabled          bool
-	BaseURL          string
-	BusinessBaseURL  string
-	MasterKey        string
-	MasterKeyVersion string
+	Enabled             bool
+	BaseURL             string
+	BusinessBaseURL     string
+	MasterKey           string
+	MasterKeyVersion    string
+	PatrolEnabled       bool
+	PatrolIntervalHours int
+	PatrolLookbackDays  int
 }
 
 // Provider contains only local composition choices. Credentials are read from
@@ -466,6 +469,10 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	oceanEnginePatrolEnabled, err := strictBoolValueOr(lookup, "COOKIES_OCEAN_ENGINE_PATROL_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
 	generatePromptDefault := "strategy.generate.v2"
 	conversationPromptDefault := "strategy.conversation.v3"
 	revisePromptDefault := "strategy.revise.v2"
@@ -597,11 +604,14 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			CooldownSeconds: intValueOr(lookup, "COOKIES_MIYUN_COOLDOWN_SECONDS", 300),
 		},
 		OceanEngine: OceanEngine{
-			Enabled:          oceanEngineEnabled,
-			BaseURL:          valueOr(lookup, "COOKIES_OCEAN_ENGINE_BASE_URL", "https://ad.oceanengine.com"),
-			BusinessBaseURL:  valueOr(lookup, "COOKIES_OCEAN_ENGINE_BUSINESS_BASE_URL", "https://business.oceanengine.com"),
-			MasterKey:        valueOr(lookup, "COOKIES_OCEAN_ENGINE_MASTER_KEY", ""),
-			MasterKeyVersion: valueOr(lookup, "COOKIES_OCEAN_ENGINE_MASTER_KEY_VERSION", "v1"),
+			Enabled:             oceanEngineEnabled,
+			BaseURL:             valueOr(lookup, "COOKIES_OCEAN_ENGINE_BASE_URL", "https://ad.oceanengine.com"),
+			BusinessBaseURL:     valueOr(lookup, "COOKIES_OCEAN_ENGINE_BUSINESS_BASE_URL", "https://business.oceanengine.com"),
+			MasterKey:           valueOr(lookup, "COOKIES_OCEAN_ENGINE_MASTER_KEY", ""),
+			MasterKeyVersion:    valueOr(lookup, "COOKIES_OCEAN_ENGINE_MASTER_KEY_VERSION", "v1"),
+			PatrolEnabled:       oceanEnginePatrolEnabled,
+			PatrolIntervalHours: intValueOr(lookup, "COOKIES_OCEAN_ENGINE_PATROL_INTERVAL_HOURS", 24),
+			PatrolLookbackDays:  intValueOr(lookup, "COOKIES_OCEAN_ENGINE_PATROL_LOOKBACK_DAYS", 14),
 		},
 		BrowserRPA: BrowserRPA{
 			Enabled:               browserRpaEnabled,
@@ -847,6 +857,12 @@ func (c Config) Validate() error {
 		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(c.OceanEngine.MasterKey))
 		if err != nil || len(key) != 32 || strings.TrimSpace(c.OceanEngine.MasterKeyVersion) == "" {
 			return fmt.Errorf("COOKIES_OCEAN_ENGINE_MASTER_KEY must be a base64-encoded 32-byte key with a version")
+		}
+		if c.OceanEngine.PatrolEnabled && (c.OceanEngine.PatrolIntervalHours < 1 || c.OceanEngine.PatrolIntervalHours > 168) {
+			return fmt.Errorf("COOKIES_OCEAN_ENGINE_PATROL_INTERVAL_HOURS must be from 1 through 168")
+		}
+		if c.OceanEngine.PatrolEnabled && (c.OceanEngine.PatrolLookbackDays < 2 || c.OceanEngine.PatrolLookbackDays > 30) {
+			return fmt.Errorf("COOKIES_OCEAN_ENGINE_PATROL_LOOKBACK_DAYS must be from 2 through 30")
 		}
 	}
 	if c.Provider.ImageAdapter != "fake" && c.Provider.ImageAdapter != "ark_image" && c.Provider.ImageAdapter != "openai_image" && c.Provider.ImageAdapter != "adapter_gateway" {

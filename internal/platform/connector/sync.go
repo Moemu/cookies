@@ -48,6 +48,26 @@ type SyncRequest struct {
 	WindowEnd      time.Time
 	TimeZone       string
 	Currency       string
+	Mode           SyncMode
+}
+
+type SyncMode string
+
+const (
+	SyncModeFull        SyncMode = "full"
+	SyncModeMetricsOnly SyncMode = "metrics_only"
+)
+
+func (m SyncMode) normalized() SyncMode {
+	if m == "" {
+		return SyncModeFull
+	}
+	return m
+}
+
+func (m SyncMode) Valid() bool {
+	value := m.normalized()
+	return value == SyncModeFull || value == SyncModeMetricsOnly
 }
 
 type SyncResult struct {
@@ -67,7 +87,7 @@ type Synchronizer struct {
 }
 
 func SyncRunID(request SyncRequest) string {
-	return "sync_" + canonicalHash([]string{request.OrganizationID, request.ProjectID, request.AccountRef, request.IdempotencyKey})
+	return "sync_" + canonicalHash([]string{request.OrganizationID, request.ProjectID, request.AccountRef, request.IdempotencyKey, string(request.Mode.normalized())})
 }
 
 func SyncErrorCategory(err error) string {
@@ -92,6 +112,10 @@ func SyncErrorCategory(err error) string {
 
 func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result SyncResult, resultErr error) {
 	if s.Writer == nil || s.Readers == nil || s.Cipher == nil || request.OrganizationID == "" || request.AccountRef == "" || request.IdempotencyKey == "" || !request.WindowEnd.After(request.WindowStart) {
+		return result, ErrInvalidFact
+	}
+	request.Mode = request.Mode.normalized()
+	if !request.Mode.Valid() {
 		return result, ErrInvalidFact
 	}
 	if request.TimeZone == "" {
@@ -132,24 +156,6 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 	if closeReader != nil {
 		defer closeReader()
 	}
-	cursor = "account_info"
-	if err = s.Writer.UpdateSyncCursor(ctx, runID, cursor); err != nil {
-		return result, err
-	}
-	account, err := reader.AccountInfo(ctx)
-	if err != nil {
-		return result, err
-	}
-	rawID, accountObservedAt, err := s.storeRaw(ctx, request, runID, "account_info", map[string]any{"account": request.AccountRef}, account)
-	if err != nil {
-		return result, err
-	}
-	accountState := redactCanonical(account)
-	accountHeader := s.header(request, runID, rawID, canonicalHash(accountState), accountObservedAt, accountObservedAt)
-	if _, err = s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: accountHeader, ID: "obj_" + canonicalHash([]string{rawID, "account"}), ObjectKind: "account", ObjectRef: opaqueRef(request.AccountRef), State: accountState}); err != nil {
-		return result, err
-	}
-	result.ObjectCount++
 	limit := s.PageLimit
 	if limit < 1 {
 		limit = 50
@@ -158,173 +164,197 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 	if maxPages < 1 {
 		maxPages = 1000
 	}
-	promotions := []map[string]any{}
-	seenParents := map[string]struct{}{}
 	materialParents := map[string]map[string]struct{}{}
-	for page := 1; page <= maxPages; page++ {
-		cursor = fmt.Sprintf("promotion_page:%d", page)
+	if request.Mode == SyncModeFull {
+		cursor = "account_info"
 		if err = s.Writer.UpdateSyncCursor(ctx, runID, cursor); err != nil {
 			return result, err
 		}
-		payload, readErr := reader.ListPage(ctx, oceanengine.ListRequest{Start: request.WindowStart.Format("2006-01-02"), End: request.WindowEnd.Format("2006-01-02"), Page: page, Limit: limit})
-		if readErr != nil {
-			return result, readErr
-		}
-		pageRawID, pageObservedAt, storeErr := s.storeRaw(ctx, request, runID, "promotion_list", map[string]any{"page": page, "limit": limit, "start": request.WindowStart, "end": request.WindowEnd}, payload)
-		if storeErr != nil {
-			return result, storeErr
-		}
-		items, totalPages := promotionItems(payload)
-		for _, item := range items {
-			item["_evidence_ref"] = pageRawID
-			item["_collected_at"] = pageObservedAt
-			promotions = append(promotions, item)
-		}
-		if len(items) == 0 || totalPages == 0 || page >= totalPages {
-			break
-		}
-	}
-	for promotionIndex, promotion := range promotions {
-		promotionRef := firstString(promotion, "promotion_id", "promotionId", "id")
-		if promotionRef == "" {
-			continue
-		}
-		cursor = fmt.Sprintf("promotion_detail:%d/%d", promotionIndex+1, len(promotions))
-		if err = s.Writer.UpdateSyncCursor(ctx, runID, cursor); err != nil {
+		account, err := reader.AccountInfo(ctx)
+		if err != nil {
 			return result, err
 		}
-		evidenceRef, _ := promotion["_evidence_ref"].(string)
-		observedAt, _ := promotion["_collected_at"].(time.Time)
-		delete(promotion, "_evidence_ref")
-		delete(promotion, "_collected_at")
-		productRef := firstNestedString(promotion,
-			[]string{"promotion_object", "product_id"},
-			[]string{"promotion_object", "unique_product_id"},
-			[]string{"promotion_object", "product_platform_id"},
-		)
-		state := redactCanonical(promotion)
-		if productRef != "" {
-			state["product_ref"] = opaqueRef(productRef)
+		rawID, accountObservedAt, err := s.storeRaw(ctx, request, runID, "account_info", map[string]any{"account": request.AccountRef}, account)
+		if err != nil {
+			return result, err
 		}
-		header := s.header(request, runID, evidenceRef, canonicalHash(state), observedAt, platformValidTime(promotion, observedAt))
-		objectID := "obj_" + canonicalHash([]string{evidenceRef, promotionRef, header.PayloadHash})
-		createdObject, appendObjectErr := s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: header, ID: objectID, ObjectKind: "promotion", ObjectRef: opaqueRef(promotionRef), ParentRef: opaqueRef(firstString(promotion, "project_id", "projectId")), State: state})
-		if appendObjectErr != nil {
-			return result, appendObjectErr
+		accountState := redactCanonical(account)
+		accountHeader := s.header(request, runID, rawID, canonicalHash(accountState), accountObservedAt, accountObservedAt)
+		if _, err = s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: accountHeader, ID: "obj_" + canonicalHash([]string{rawID, "account"}), ObjectKind: "account", ObjectRef: opaqueRef(request.AccountRef), State: accountState}); err != nil {
+			return result, err
 		}
-		if createdObject {
-			result.ObjectCount++
+		result.ObjectCount++
+		promotions := []map[string]any{}
+		seenParents := map[string]struct{}{}
+		for page := 1; page <= maxPages; page++ {
+			cursor = fmt.Sprintf("promotion_page:%d", page)
+			if err = s.Writer.UpdateSyncCursor(ctx, runID, cursor); err != nil {
+				return result, err
+			}
+			payload, readErr := reader.ListPage(ctx, oceanengine.ListRequest{Start: request.WindowStart.Format("2006-01-02"), End: request.WindowEnd.Format("2006-01-02"), Page: page, Limit: limit})
+			if readErr != nil {
+				return result, readErr
+			}
+			pageRawID, pageObservedAt, storeErr := s.storeRaw(ctx, request, runID, "promotion_list", map[string]any{"page": page, "limit": limit, "start": request.WindowStart, "end": request.WindowEnd}, payload)
+			if storeErr != nil {
+				return result, storeErr
+			}
+			items, totalPages := promotionItems(payload)
+			for _, item := range items {
+				item["_evidence_ref"] = pageRawID
+				item["_collected_at"] = pageObservedAt
+				promotions = append(promotions, item)
+			}
+			if len(items) == 0 || totalPages == 0 || page >= totalPages {
+				break
+			}
 		}
-		for _, parent := range []struct{ kind, ref string }{{"project", firstString(promotion, "project_id", "projectId")}, {"campaign", firstString(promotion, "campaign_id", "campaignId")}} {
-			if parent.ref == "" {
+		for promotionIndex, promotion := range promotions {
+			promotionRef := firstString(promotion, "promotion_id", "promotionId", "id")
+			if promotionRef == "" {
 				continue
 			}
-			key := parent.kind + ":" + parent.ref
-			if _, ok := seenParents[key]; ok {
-				continue
+			cursor = fmt.Sprintf("promotion_detail:%d/%d", promotionIndex+1, len(promotions))
+			if err = s.Writer.UpdateSyncCursor(ctx, runID, cursor); err != nil {
+				return result, err
 			}
-			seenParents[key] = struct{}{}
-			parentState := map[string]any{"observed_from": "promotion_list"}
-			parentHeader := s.header(request, runID, evidenceRef, canonicalHash(parentState), observedAt, observedAt)
-			createdParent, parentErr := s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: parentHeader, ID: "obj_" + canonicalHash([]string{evidenceRef, parent.kind, parent.ref}), ObjectKind: parent.kind, ObjectRef: opaqueRef(parent.ref), State: parentState})
-			if parentErr != nil {
-				return result, parentErr
+			evidenceRef, _ := promotion["_evidence_ref"].(string)
+			observedAt, _ := promotion["_collected_at"].(time.Time)
+			delete(promotion, "_evidence_ref")
+			delete(promotion, "_collected_at")
+			productRef := firstNestedString(promotion,
+				[]string{"promotion_object", "product_id"},
+				[]string{"promotion_object", "unique_product_id"},
+				[]string{"promotion_object", "product_platform_id"},
+			)
+			state := redactCanonical(promotion)
+			if productRef != "" {
+				state["product_ref"] = opaqueRef(productRef)
 			}
-			if createdParent {
+			header := s.header(request, runID, evidenceRef, canonicalHash(state), observedAt, platformValidTime(promotion, observedAt))
+			objectID := "obj_" + canonicalHash([]string{evidenceRef, promotionRef, header.PayloadHash})
+			createdObject, appendObjectErr := s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: header, ID: objectID, ObjectKind: "promotion", ObjectRef: opaqueRef(promotionRef), ParentRef: opaqueRef(firstString(promotion, "project_id", "projectId")), State: state})
+			if appendObjectErr != nil {
+				return result, appendObjectErr
+			}
+			if createdObject {
 				result.ObjectCount++
 			}
-		}
-		if productRef != "" {
-			key := "product:" + productRef
-			if _, ok := seenParents[key]; !ok {
-				seenParents[key] = struct{}{}
-				productState := map[string]any{"observed_from": "promotion_object"}
-				productHeader := s.header(request, runID, evidenceRef, canonicalHash(productState), observedAt, observedAt)
-				createdProduct, productErr := s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: productHeader, ID: "obj_" + canonicalHash([]string{evidenceRef, "product", productRef}), ObjectKind: "product", ObjectRef: opaqueRef(productRef), State: productState})
-				if productErr != nil {
-					return result, productErr
+			for _, parent := range []struct{ kind, ref string }{{"project", firstString(promotion, "project_id", "projectId")}, {"campaign", firstString(promotion, "campaign_id", "campaignId")}} {
+				if parent.ref == "" {
+					continue
 				}
-				if createdProduct {
+				key := parent.kind + ":" + parent.ref
+				if _, ok := seenParents[key]; ok {
+					continue
+				}
+				seenParents[key] = struct{}{}
+				parentState := map[string]any{"observed_from": "promotion_list"}
+				parentHeader := s.header(request, runID, evidenceRef, canonicalHash(parentState), observedAt, observedAt)
+				createdParent, parentErr := s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: parentHeader, ID: "obj_" + canonicalHash([]string{evidenceRef, parent.kind, parent.ref}), ObjectKind: parent.kind, ObjectRef: opaqueRef(parent.ref), State: parentState})
+				if parentErr != nil {
+					return result, parentErr
+				}
+				if createdParent {
 					result.ObjectCount++
 				}
 			}
-		}
-		configuration, readErr := reader.PromotionConfiguration(ctx, promotionRef)
-		if readErr != nil {
-			return result, readErr
-		}
-		configurationRawID, configurationObservedAt, storeErr := s.storeRaw(ctx, request, runID, "promotion_configuration", map[string]any{"promotion_ref": opaqueRef(promotionRef)}, configuration)
-		if storeErr != nil {
-			return result, storeErr
-		}
-		values := redactCanonical(configuration)
-		values["currency"] = request.Currency
-		configHeader := s.header(request, runID, configurationRawID, canonicalHash(values), configurationObservedAt, platformValidTime(configuration, configurationObservedAt))
-		config := ConfigurationSnapshot{FactHeader: configHeader, ID: "cfg_" + canonicalHash([]string{configurationRawID, promotionRef, configHeader.PayloadHash}), ObjectRef: opaqueRef(promotionRef), Values: values}
-		previous, found, latestErr := s.Writer.LatestConfiguration(ctx, request.OrganizationID, request.ProjectID, config.SourceRef, config.ObjectRef, config.AvailableAt)
-		if latestErr != nil {
-			return result, latestErr
-		}
-		if _, err = s.Writer.AppendConfiguration(ctx, config); err != nil {
-			return result, err
-		}
-		if found {
-			for _, change := range diffConfigurations(previous, config) {
-				if _, err = s.Writer.AppendChange(ctx, change); err != nil {
+			if productRef != "" {
+				key := "product:" + productRef
+				if _, ok := seenParents[key]; !ok {
+					seenParents[key] = struct{}{}
+					productState := map[string]any{"observed_from": "promotion_object"}
+					productHeader := s.header(request, runID, evidenceRef, canonicalHash(productState), observedAt, observedAt)
+					createdProduct, productErr := s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: productHeader, ID: "obj_" + canonicalHash([]string{evidenceRef, "product", productRef}), ObjectKind: "product", ObjectRef: opaqueRef(productRef), State: productState})
+					if productErr != nil {
+						return result, productErr
+					}
+					if createdProduct {
+						result.ObjectCount++
+					}
+				}
+			}
+			configuration, readErr := reader.PromotionConfiguration(ctx, promotionRef)
+			if readErr != nil {
+				return result, readErr
+			}
+			configurationRawID, configurationObservedAt, storeErr := s.storeRaw(ctx, request, runID, "promotion_configuration", map[string]any{"promotion_ref": opaqueRef(promotionRef)}, configuration)
+			if storeErr != nil {
+				return result, storeErr
+			}
+			values := redactCanonical(configuration)
+			values["currency"] = request.Currency
+			configHeader := s.header(request, runID, configurationRawID, canonicalHash(values), configurationObservedAt, platformValidTime(configuration, configurationObservedAt))
+			config := ConfigurationSnapshot{FactHeader: configHeader, ID: "cfg_" + canonicalHash([]string{configurationRawID, promotionRef, configHeader.PayloadHash}), ObjectRef: opaqueRef(promotionRef), Values: values}
+			previous, found, latestErr := s.Writer.LatestConfiguration(ctx, request.OrganizationID, request.ProjectID, config.SourceRef, config.ObjectRef, config.AvailableAt)
+			if latestErr != nil {
+				return result, latestErr
+			}
+			if _, err = s.Writer.AppendConfiguration(ctx, config); err != nil {
+				return result, err
+			}
+			if found {
+				for _, change := range diffConfigurations(previous, config) {
+					if _, err = s.Writer.AppendChange(ctx, change); err != nil {
+						return result, err
+					}
+				}
+			}
+			materials, readErr := reader.PromotionMaterials(ctx, promotionRef, true)
+			if readErr != nil {
+				return result, readErr
+			}
+			materialRawID, materialObservedAt, storeErr := s.storeRaw(ctx, request, runID, "promotion_materials", map[string]any{"promotion_ref": opaqueRef(promotionRef)}, materials)
+			if storeErr != nil {
+				return result, storeErr
+			}
+			for _, materialRef := range collectStringIDs(materials, "material_ids", "material_id") {
+				if materialParents[materialRef] == nil {
+					materialParents[materialRef] = map[string]struct{}{}
+				}
+				materialParents[materialRef][promotionRef] = struct{}{}
+				materialState := map[string]any{"observed_from": "promotion_materials"}
+				materialHeader := s.header(request, runID, materialRawID, canonicalHash(materialState), materialObservedAt, materialObservedAt)
+				createdMaterial, materialErr := s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: materialHeader, ID: "obj_" + canonicalHash([]string{materialRawID, "material", materialRef}), ObjectKind: "material", ObjectRef: opaqueRef(materialRef), ParentRef: opaqueRef(promotionRef), State: materialState})
+				if materialErr != nil {
+					return result, materialErr
+				}
+				if createdMaterial {
+					result.ObjectCount++
+				}
+				bindingHeader := s.header(request, runID, materialRawID, canonicalHash([]string{materialRef, promotionRef}), materialObservedAt, materialObservedAt)
+				binding := MaterialBinding{FactHeader: bindingHeader, ID: "binding_" + canonicalHash([]string{materialRawID, materialRef, promotionRef}), MaterialRef: opaqueRef(materialRef), PromotionRef: opaqueRef(promotionRef)}
+				if _, err = s.Writer.AppendBinding(ctx, binding); err != nil {
+					return result, err
+				}
+			}
+			attributes, readErr := reader.Attributes(ctx, []string{promotionRef}, runID)
+			if readErr != nil {
+				return result, readErr
+			}
+			attributeRawID, attributeObservedAt, storeErr := s.storeRaw(ctx, request, runID, "promotion_attributes", map[string]any{"promotion_ref": opaqueRef(promotionRef)}, attributes)
+			if storeErr != nil {
+				return result, storeErr
+			}
+			diagnosis := redactCanonical(attributes)
+			diagnosisHeader := s.header(request, runID, attributeRawID, canonicalHash(diagnosis), attributeObservedAt, attributeObservedAt)
+			if _, err = s.Writer.AppendDiagnosis(ctx, PlatformDiagnosisSnapshot{FactHeader: diagnosisHeader, ID: "diagnosis_" + canonicalHash([]string{attributeRawID, promotionRef}), ObjectRef: opaqueRef(promotionRef), EligibleAsPrelaunchFeature: false, Diagnosis: diagnosis}); err != nil {
+				return result, err
+			}
+			statusValue := firstString(promotion, "status", "promotion_status", "delivery_status")
+			if statusValue != "" {
+				statusHeader := s.header(request, runID, evidenceRef, canonicalHash(statusValue), observedAt, observedAt)
+				if _, err = s.Writer.AppendStatus(ctx, PlatformStatusEvent{FactHeader: statusHeader, ID: "status_" + canonicalHash([]string{evidenceRef, promotionRef, statusValue}), ObjectRef: opaqueRef(promotionRef), Status: statusValue}); err != nil {
 					return result, err
 				}
 			}
 		}
-		materials, readErr := reader.PromotionMaterials(ctx, promotionRef, true)
-		if readErr != nil {
-			return result, readErr
-		}
-		materialRawID, materialObservedAt, storeErr := s.storeRaw(ctx, request, runID, "promotion_materials", map[string]any{"promotion_ref": opaqueRef(promotionRef)}, materials)
-		if storeErr != nil {
-			return result, storeErr
-		}
-		for _, materialRef := range collectStringIDs(materials, "material_ids", "material_id") {
-			if materialParents[materialRef] == nil {
-				materialParents[materialRef] = map[string]struct{}{}
-			}
-			materialParents[materialRef][promotionRef] = struct{}{}
-			materialState := map[string]any{"observed_from": "promotion_materials"}
-			materialHeader := s.header(request, runID, materialRawID, canonicalHash(materialState), materialObservedAt, materialObservedAt)
-			createdMaterial, materialErr := s.Writer.AppendObject(ctx, ObjectSnapshot{FactHeader: materialHeader, ID: "obj_" + canonicalHash([]string{materialRawID, "material", materialRef}), ObjectKind: "material", ObjectRef: opaqueRef(materialRef), ParentRef: opaqueRef(promotionRef), State: materialState})
-			if materialErr != nil {
-				return result, materialErr
-			}
-			if createdMaterial {
-				result.ObjectCount++
-			}
-			bindingHeader := s.header(request, runID, materialRawID, canonicalHash([]string{materialRef, promotionRef}), materialObservedAt, materialObservedAt)
-			binding := MaterialBinding{FactHeader: bindingHeader, ID: "binding_" + canonicalHash([]string{materialRawID, materialRef, promotionRef}), MaterialRef: opaqueRef(materialRef), PromotionRef: opaqueRef(promotionRef)}
-			if _, err = s.Writer.AppendBinding(ctx, binding); err != nil {
-				return result, err
-			}
-		}
-		attributes, readErr := reader.Attributes(ctx, []string{promotionRef}, runID)
-		if readErr != nil {
-			return result, readErr
-		}
-		attributeRawID, attributeObservedAt, storeErr := s.storeRaw(ctx, request, runID, "promotion_attributes", map[string]any{"promotion_ref": opaqueRef(promotionRef)}, attributes)
-		if storeErr != nil {
-			return result, storeErr
-		}
-		diagnosis := redactCanonical(attributes)
-		diagnosisHeader := s.header(request, runID, attributeRawID, canonicalHash(diagnosis), attributeObservedAt, attributeObservedAt)
-		if _, err = s.Writer.AppendDiagnosis(ctx, PlatformDiagnosisSnapshot{FactHeader: diagnosisHeader, ID: "diagnosis_" + canonicalHash([]string{attributeRawID, promotionRef}), ObjectRef: opaqueRef(promotionRef), EligibleAsPrelaunchFeature: false, Diagnosis: diagnosis}); err != nil {
-			return result, err
-		}
-		statusValue := firstString(promotion, "status", "promotion_status", "delivery_status")
-		if statusValue != "" {
-			statusHeader := s.header(request, runID, evidenceRef, canonicalHash(statusValue), observedAt, observedAt)
-			if _, err = s.Writer.AppendStatus(ctx, PlatformStatusEvent{FactHeader: statusHeader, ID: "status_" + canonicalHash([]string{evidenceRef, promotionRef, statusValue}), ObjectRef: opaqueRef(promotionRef), Status: statusValue}); err != nil {
-				return result, err
-			}
-		}
 	}
-	metricWindows := completeMetricWindows(request, now, 7)
+	metricWindowDays := 7
+	if request.Mode == SyncModeMetricsOnly {
+		metricWindowDays = 1
+	}
+	metricWindows := completeMetricWindows(request, now, metricWindowDays)
 	if len(metricWindows) == 0 {
 		return result, ErrInvalidFact
 	}

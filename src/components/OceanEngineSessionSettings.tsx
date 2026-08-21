@@ -28,10 +28,10 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : '连接操作失败。请稍后重试。'
 }
 
-function initialSyncWindow() {
+function syncWindow(days: number) {
   const end = new Date()
   const start = new Date(end)
-  start.setUTCDate(start.getUTCDate() - 180)
+  start.setUTCDate(start.getUTCDate() - days)
   return { start: start.toISOString(), end: end.toISOString() }
 }
 
@@ -154,32 +154,33 @@ export function OceanEngineSessionSettings() {
     }
   }
 
-  const syncHistory = async () => {
+  const runSync = async (days: number, mode: 'full' | 'metrics_only') => {
     if (!selectedAccountID || session?.status !== 'ready') return
     setBusy(true); setNotice('')
     try {
-      const window = initialSyncWindow()
-      const idempotencyKey = `organization-history-${selectedAccountID}-${crypto.randomUUID()}`
-      const result = await api.syncConnectorAccount(selectedAccountID, { ...window, time_zone: 'Asia/Shanghai', currency: 'CNY' }, idempotencyKey)
-      setNotice('只读同步已进入后台。页面将持续读取同步状态。')
+      const window = syncWindow(days)
+      const operation = mode === 'metrics_only' ? '指标巡检' : '历史同步'
+      const idempotencyKey = `organization-${mode}-${selectedAccountID}-${crypto.randomUUID()}`
+      const result = await api.syncConnectorAccount(selectedAccountID, { ...window, time_zone: 'Asia/Shanghai', currency: 'CNY', sync_mode: mode }, idempotencyKey)
+      setNotice(`${operation}已进入后台。页面将持续读取同步状态。`)
       for (let attempt = 0; attempt < 1_350; attempt += 1) {
         await wait(2_000)
         try {
           const status = await api.getConnectorSync(selectedAccountID, result.run_id)
           if (status.status === 'completed') {
-            setNotice('只读同步已完成。对象快照和指标窗口已经写入 Connector。')
+            setNotice(mode === 'metrics_only' ? '指标巡检已完成。指标窗口和转换修订已经写入 Connector。' : '历史同步已完成。对象快照和指标窗口已经写入 Connector。')
             return
           }
           if (status.status === 'failed') {
-            setNotice(`只读同步失败。最后阶段：${status.cursor || '尚未取得平台数据'}。`)
+            setNotice(`${operation}失败。最后阶段：${status.cursor || '尚未取得平台数据'}。`)
             return
           }
-          setNotice(`只读同步正在后台运行。当前阶段：${status.cursor || '准备平台读取'}。`)
+          setNotice(`${operation}正在后台运行。当前阶段：${status.cursor || '准备平台读取'}。`)
         } catch (error) {
           if (!(error instanceof ApiRequestError && error.status === 404)) throw error
         }
       }
-      setNotice('同步仍在后台运行。请稍后刷新页面查看状态。')
+      setNotice(`${operation}仍在后台运行。请稍后刷新页面查看状态。`)
     } catch (error) {
       setNotice(errorMessage(error))
     } finally {
@@ -224,7 +225,7 @@ export function OceanEngineSessionSettings() {
         </section>
 
         <section className={`oe-sync-card ${session?.status === 'ready' ? 'ready' : ''}`} aria-labelledby="oe-sync-section-title">
-          <div className="oe-sync-icon"><Database size={20} aria-hidden="true" /></div><div className="oe-sync-copy"><span>03 · 数据读取</span><h3 id="oe-sync-section-title">历史数据同步</h3><p>{session?.status === 'ready' ? '连接已就绪。同步会读取最近 180 天的完整自然日数据。' : '完成只读验证后，系统才允许同步历史数据。'}</p><div className="oe-sync-facts"><span>只读请求</span><span>7 天分窗</span><span>后台运行</span></div></div><button className="primary-button" type="button" onClick={() => void syncHistory()} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步最近 180 天</button>
+          <div className="oe-sync-icon"><Database size={20} aria-hidden="true" /></div><div className="oe-sync-copy"><span>03 · 数据读取</span><h3 id="oe-sync-section-title">历史同步与每日巡检</h3><p>{session?.status === 'ready' ? '首次同步读取完整对象。巡检按自然日读取最近 14 天指标，并记录转换修订。' : '完成只读验证后，系统才允许读取数据。'}</p><div className="oe-sync-facts"><span>只读请求</span><span>单日窗口</span><span>转换修订</span></div></div><div className="oe-sync-actions"><button className="secondary-button" type="button" onClick={() => void runSync(14, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><RefreshCw size={15} aria-hidden="true" />巡检最近 14 天</button><button className="primary-button" type="button" onClick={() => void runSync(180, 'full')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步最近 180 天</button></div>
         </section>
       </div>
       {notice ? <p className="miyun-settings-notice" role="status" aria-live="polite">{notice}</p> : null}
