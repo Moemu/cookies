@@ -297,9 +297,7 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 			if createdMaterial {
 				result.ObjectCount++
 			}
-			bindingHeader := s.header(request, runID, materialRawID, canonicalHash([]string{materialRef, promotionRef, request.WindowStart.Format(time.RFC3339), request.WindowEnd.Format(time.RFC3339)}), materialObservedAt, request.WindowStart)
-			bindingValidTo := request.WindowEnd
-			bindingHeader.ValidTo = &bindingValidTo
+			bindingHeader := s.header(request, runID, materialRawID, canonicalHash([]string{materialRef, promotionRef}), materialObservedAt, materialObservedAt)
 			binding := MaterialBinding{FactHeader: bindingHeader, ID: "binding_" + canonicalHash([]string{materialRawID, materialRef, promotionRef}), MaterialRef: opaqueRef(materialRef), PromotionRef: opaqueRef(promotionRef)}
 			if _, err = s.Writer.AppendBinding(ctx, binding); err != nil {
 				return result, err

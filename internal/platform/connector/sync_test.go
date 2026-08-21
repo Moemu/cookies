@@ -166,6 +166,9 @@ func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	if writer.objects[0].ObjectRef == "raw-account-1" || writer.objects[1].ObjectRef == "raw-promotion-1" || writer.bindings[0].MaterialRef == "raw-material-1" {
 		t.Fatal("raw platform identity leaked")
 	}
+	if writer.bindings[0].ValidTo != nil || !writer.bindings[0].ValidFrom.Equal(now) {
+		t.Fatalf("observed active binding has an invalid interval: %#v", writer.bindings[0])
+	}
 	if _, ok := writer.objects[0].State["advertiser_id"]; ok {
 		t.Fatal("raw account identity leaked in canonical state")
 	}
