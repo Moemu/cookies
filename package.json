@@ -9,6 +9,8 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "tsx --test test/*.test.ts",
     "contract:check": "tsx --test test/strategy-creative-contracts.test.ts test/delivery-platform-configuration-contract.test.ts test/controlled-browser-rpa-contract.test.ts test/delivery-calibration-case-contract.test.ts && go test ./internal/platform/contract ./internal/platform/browserautomation ./internal/platform/connector ./internal/integrations/strategycreative ./internal/systems/delivery",
+    "browser-rpa:edge": "tsx scripts/browser-rpa-edge-session.ts",
+    "test:browser-rpa:edge": "tsx --test test/browser-rpa-edge-session.test.ts",
     "calibration:check": "node scripts/verify-oceanengine-calibration-manifest.mjs",
     "bundle:check": "node scripts/check-frontend-bundle-budget.mjs",
     "go:migrate": "go run ./cmd/cookies-migrate",
