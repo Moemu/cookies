@@ -236,6 +236,16 @@ go run ./cmd/cookies-delivery-calibration export `
 
 `backtest` 使用已经同步的历史每日指标。它不创建 Cookies Project、Plan 或执行记录。
 
+回测以历史指标中的推广单元引用建立案例。当前对象清单缺少该单元时，程序仍保留指标案例。此时程序设置：
+
+```text
+project_ref = ""
+lineage_status = project_relationship_unavailable
+quality_status = retrospective_lineage_limited
+```
+
+程序不能为这类案例创建或猜测 Project。模型只对它们使用账号级先验。
+
 ```powershell
 go run ./cmd/cookies-delivery-calibration backtest `
   -organization <cookies-organization-id> `
@@ -276,6 +286,7 @@ go run ./cmd/cookies-delivery-calibration backtest `
 
 Hurdle challenger 必须满足全部门禁：
 
+- 训练集必须为每个合格指标提供至少 10 个正值案例。
 - 所有合格指标的留出 WAPE 都必须改善。
 - 所有合格指标的留出 WAPE 都必须不高于 100%。
 - 所有合格指标的绝对偏差不能恶化 5% 以上。
@@ -297,5 +308,7 @@ Hurdle challenger 必须满足全部门禁：
 - 指标正值均值低于训练集的 0.67 倍或高于 1.5 倍。
 
 任一风险出现时，报告设置 `diagnostics.status=distribution_shift_detected`。该状态阻止候选模型通过就绪门禁。它不能放宽其他门禁。
+
+设置页提供“补齐近 180 天日级指标”。该操作使用 `metrics_only`。它不重复读取对象详情，也不调用平台写接口。
 
 所有对象和指标窗口引用使用 HMAC 匿名化。输出不包含平台原始 ID、自由文本、Cookie 或当前配置值。

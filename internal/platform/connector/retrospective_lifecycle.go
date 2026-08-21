@@ -25,18 +25,19 @@ type RetrospectiveLifecycleSignal struct {
 }
 
 type RetrospectiveLifecycleCalibration struct {
-	ModelVersion           string                               `json:"model_version"`
-	Status                 string                               `json:"status"`
-	TrainingCaseCount      int                                  `json:"training_case_count"`
-	HoldoutCaseCount       int                                  `json:"holdout_case_count"`
-	ActivityPriorStrength  float64                              `json:"activity_prior_strength"`
-	MagnitudePriorStrength float64                              `json:"magnitude_prior_strength"`
-	SegmentPriorStrength   float64                              `json:"segment_prior_strength"`
-	SegmentWeightCap       float64                              `json:"segment_weight_cap"`
-	GlobalPriors           []RetrospectiveHurdlePrior           `json:"global_priors"`
-	ProjectPriors          []RetrospectiveProjectHurdlePrior    `json:"project_priors"`
-	SegmentPriors          []RetrospectiveLifecycleSegmentPrior `json:"segment_priors"`
-	OutputScales           []RetrospectiveCalibrationParameter  `json:"output_scales"`
+	ModelVersion                 string                               `json:"model_version"`
+	Status                       string                               `json:"status"`
+	TrainingCaseCount            int                                  `json:"training_case_count"`
+	HoldoutCaseCount             int                                  `json:"holdout_case_count"`
+	MinimumPositiveTrainingCases int                                  `json:"minimum_positive_training_cases"`
+	ActivityPriorStrength        float64                              `json:"activity_prior_strength"`
+	MagnitudePriorStrength       float64                              `json:"magnitude_prior_strength"`
+	SegmentPriorStrength         float64                              `json:"segment_prior_strength"`
+	SegmentWeightCap             float64                              `json:"segment_weight_cap"`
+	GlobalPriors                 []RetrospectiveHurdlePrior           `json:"global_priors"`
+	ProjectPriors                []RetrospectiveProjectHurdlePrior    `json:"project_priors"`
+	SegmentPriors                []RetrospectiveLifecycleSegmentPrior `json:"segment_priors"`
+	OutputScales                 []RetrospectiveCalibrationParameter  `json:"output_scales"`
 }
 
 type RetrospectiveLifecycleSegmentPrior struct {
@@ -174,11 +175,12 @@ func calibrateAndEvaluateRetrospectiveLifecycle(cases []RetrospectiveCalibration
 	const segmentStrength = 4.0
 	const segmentWeightCap = 0.7
 	const segmentFullWeightCases = 20.0
+	const minimumPositiveTrainingCases = 10
 	metrics := []string{"spend_minor", "impressions", "clicks"}
 	training, holdout := make([]RetrospectiveCalibrationCase, 0), make([]RetrospectiveCalibrationCase, 0)
 	for _, value := range cases {
 		if value.HorizonEnd.Sub(value.PredictionCutoff) != 24*time.Hour {
-			return RetrospectiveLifecycleCalibration{ModelVersion: RetrospectiveLifecycleHurdleModelVersion, Status: "unsupported_horizon", ActivityPriorStrength: activityStrength, MagnitudePriorStrength: magnitudeStrength, SegmentPriorStrength: segmentStrength, SegmentWeightCap: segmentWeightCap}, nil, map[string]RetrospectiveHurdlePrediction{}
+			return RetrospectiveLifecycleCalibration{ModelVersion: RetrospectiveLifecycleHurdleModelVersion, Status: "unsupported_horizon", MinimumPositiveTrainingCases: minimumPositiveTrainingCases, ActivityPriorStrength: activityStrength, MagnitudePriorStrength: magnitudeStrength, SegmentPriorStrength: segmentStrength, SegmentWeightCap: segmentWeightCap}, nil, map[string]RetrospectiveHurdlePrediction{}
 		}
 		if value.PredictionCutoff.Before(holdoutStart) {
 			training = append(training, value)
@@ -189,7 +191,8 @@ func calibrateAndEvaluateRetrospectiveLifecycle(cases []RetrospectiveCalibration
 	calibration := RetrospectiveLifecycleCalibration{
 		ModelVersion: RetrospectiveLifecycleHurdleModelVersion, Status: "insufficient_cases",
 		TrainingCaseCount: len(training), HoldoutCaseCount: len(holdout),
-		ActivityPriorStrength: activityStrength, MagnitudePriorStrength: magnitudeStrength,
+		MinimumPositiveTrainingCases: minimumPositiveTrainingCases,
+		ActivityPriorStrength:        activityStrength, MagnitudePriorStrength: magnitudeStrength,
 		SegmentPriorStrength: segmentStrength, SegmentWeightCap: segmentWeightCap,
 		GlobalPriors: []RetrospectiveHurdlePrior{}, ProjectPriors: []RetrospectiveProjectHurdlePrior{},
 		SegmentPriors: []RetrospectiveLifecycleSegmentPrior{}, OutputScales: []RetrospectiveCalibrationParameter{},
@@ -206,7 +209,7 @@ func calibrateAndEvaluateRetrospectiveLifecycle(cases []RetrospectiveCalibration
 		segmentStats[metric] = map[string]*hurdleStats{}
 	}
 	for _, value := range training {
-		if projectStats[value.ProjectRef] == nil {
+		if value.ProjectRef != "" && projectStats[value.ProjectRef] == nil {
 			projectStats[value.ProjectRef] = map[string]*hurdleStats{}
 			for _, metric := range metrics {
 				projectStats[value.ProjectRef][metric] = &hurdleStats{}
@@ -215,7 +218,9 @@ func calibrateAndEvaluateRetrospectiveLifecycle(cases []RetrospectiveCalibration
 		for _, metric := range metrics {
 			actual, _, _ := retrospectiveMetricPair(value, metric)
 			addHurdleObservation(globalStats[metric], actual)
-			addHurdleObservation(projectStats[value.ProjectRef][metric], actual)
+			if value.ProjectRef != "" {
+				addHurdleObservation(projectStats[value.ProjectRef][metric], actual)
+			}
 			segmentKey := lifecycleSegmentKey(value, metric)
 			if segmentStats[metric][segmentKey] == nil {
 				segmentStats[metric][segmentKey] = &hurdleStats{}
@@ -229,6 +234,12 @@ func calibrateAndEvaluateRetrospectiveLifecycle(cases []RetrospectiveCalibration
 		prior := globalHurdlePrior(metric, *globalStats[metric])
 		globalPriors[metric] = prior
 		calibration.GlobalPriors = append(calibration.GlobalPriors, prior)
+	}
+	for _, metric := range metrics {
+		if globalStats[metric].active < minimumPositiveTrainingCases {
+			calibration.Status = "insufficient_positive_training_cases"
+			return calibration, nil, map[string]RetrospectiveHurdlePrediction{}
+		}
 	}
 	projectPriors := map[string]map[string]RetrospectiveHurdlePrior{}
 	projectRefs := make([]string, 0, len(projectStats))

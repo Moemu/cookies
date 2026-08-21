@@ -42,3 +42,8 @@ account priors. A passing report still requires a separate simulator change.
 Backtest diagnostics compare training and holdout coverage, activity, positive
 magnitude, and unseen Promotion share. They use labels only after evaluation.
 The prediction path cannot consume these diagnostics.
+Retrospective backtests retain metric-only Promotions after they leave the
+current inventory. Missing Project lineage stays empty. The backtest does not
+create or infer a Project, and these cases use only account-level priors.
+Each hurdle model requires at least ten positive training cases per eligible
+metric. A larger all-zero training set cannot satisfy this readiness boundary.

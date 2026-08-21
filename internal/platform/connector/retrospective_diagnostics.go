@@ -113,7 +113,9 @@ func retrospectiveSplitDiagnostics(cases []RetrospectiveCalibrationCase, trainin
 	cutoffDates, projects, promotions := map[string]int{}, map[string]struct{}{}, map[string]struct{}{}
 	for _, value := range cases {
 		cutoffDates[value.PredictionCutoff.UTC().Format("2006-01-02")]++
-		projects[value.ProjectRef] = struct{}{}
+		if value.ProjectRef != "" {
+			projects[value.ProjectRef] = struct{}{}
+		}
 		promotions[value.PromotionRef] = struct{}{}
 		if trainingPromotions != nil {
 			if _, ok := trainingPromotions[value.PromotionRef]; !ok {

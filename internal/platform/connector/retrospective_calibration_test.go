@@ -27,20 +27,38 @@ func TestRetrospectiveCalibrationBuildsLeakageMarkedRollingCases(t *testing.T) {
 		metricHeader.ValidFrom = windowStart
 		metricHeader.DataThrough = windowEnd
 		metricHeader.QualityStatus = QualityQuarantine
-		snapshot.Metrics = append(snapshot.Metrics, MetricWindow{FactHeader: metricHeader, ID: "raw_metric_" + windowStart.Format("20060102"), ObjectRef: "ref_promotion", WindowStart: windowStart, WindowEnd: windowEnd, Granularity: "day", TimeZone: "Asia/Shanghai", AttributionWindow: "unknown", MetricDefinitionVersion: "oceanengine-stat-v1", Currency: "CNY", AmountUnit: "fen", Metrics: map[string]int64{"spend": 100, "impressions": 1000, "clicks": 10, "conversions": 1}, QualityIssues: []QualityIssue{{Disposition: QualityQuarantine, Code: "attribution_immature"}}})
+		metric := MetricWindow{FactHeader: metricHeader, ID: "raw_metric_" + windowStart.Format("20060102"), ObjectRef: "ref_promotion", WindowStart: windowStart, WindowEnd: windowEnd, Granularity: "day", TimeZone: "Asia/Shanghai", AttributionWindow: "unknown", MetricDefinitionVersion: "oceanengine-stat-v1", Currency: "CNY", AmountUnit: "fen", Metrics: map[string]int64{"spend": 100, "impressions": 1000, "clicks": 10, "conversions": 1}, QualityIssues: []QualityIssue{{Disposition: QualityQuarantine, Code: "attribution_immature"}}}
+		snapshot.Metrics = append(snapshot.Metrics, metric)
+		metric.ID = "raw_historical_only_metric_" + windowStart.Format("20060102")
+		metric.ObjectRef = "ref_historical_only_promotion"
+		snapshot.Metrics = append(snapshot.Metrics, metric)
 	}
 	builder := RetrospectiveCalibrationBuilder{Reader: retrospectiveSnapshotReader{snapshot: snapshot}, Key: []byte("0123456789abcdef0123456789abcdef"), Now: func() time.Time { return available.Add(time.Hour) }}
 	result, err := builder.Build(context.Background(), RetrospectiveCalibrationRequest{OrganizationID: "org", AccountRef: "ref_account", KnowledgeCutoff: available, ReplayStart: base.AddDate(0, 0, 7), ReplayEnd: base.AddDate(0, 0, 21), LookbackDays: 7, HorizonDays: 2, StepDays: 2, MinimumHistoryWindows: 7, KeyVersion: "test-v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.RetrospectiveOnly || len(result.Cases) != 7 || result.Policy.ConfigurationUsage != "excluded_current_snapshot_not_historical" {
+	if !result.RetrospectiveOnly || len(result.Cases) != 14 || result.Policy.ConfigurationUsage != "excluded_current_snapshot_not_historical" {
 		t.Fatalf("result summary=%#v policy=%#v", result.Summary, result.Policy)
+	}
+	if result.Summary.MetricPromotionCount != 2 || result.Summary.InventoryMatchedMetricPromotionCount != 1 || result.Summary.LineageLimitedCaseCount != 7 {
+		t.Fatalf("historical metric lineage summary=%#v", result.Summary)
 	}
 	if result.SchemaVersion != RetrospectiveCalibrationSchemaVersion || result.Diagnostics.UsedForPrediction {
 		t.Fatalf("invalid diagnostics boundary: schema=%s diagnostics=%#v", result.SchemaVersion, result.Diagnostics)
 	}
-	first := result.Cases[0]
+	var first RetrospectiveCalibrationCase
+	lineageLimited := 0
+	for _, value := range result.Cases {
+		if value.LineageStatus == "project_relationship_available" {
+			first = value
+		} else if value.LineageStatus == "project_relationship_unavailable" && value.ProjectRef == "" && value.QualityStatus == "retrospective_lineage_limited" {
+			lineageLimited++
+		}
+	}
+	if lineageLimited != 7 {
+		t.Fatalf("lineage-limited cases=%d", lineageLimited)
+	}
 	if first.CookiesPlanBinding.State != "unbound_historical" || first.CookiesPlanBinding.PlanID != nil || first.BaselinePrediction.Conversions != nil || first.History.Conversions != nil || first.Observed.Conversions != nil || first.HistoryWindowCount != 7 || first.LabelWindowCount != 2 {
 		t.Fatalf("case=%#v", first)
 	}
@@ -59,7 +77,7 @@ func TestRetrospectiveCalibrationBuildsLeakageMarkedRollingCases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"raw_promotion_object", "raw_metric_", "current_configuration_must_not_be_used", "ref_promotion", "ref_project"} {
+	for _, forbidden := range []string{"raw_promotion_object", "raw_metric_", "raw_historical_only_metric_", "current_configuration_must_not_be_used", "ref_promotion", "ref_historical_only_promotion", "ref_project"} {
 		if strings.Contains(string(encoded), forbidden) {
 			t.Fatalf("raw Connector lineage leaked: %s", forbidden)
 		}
@@ -155,5 +173,22 @@ func TestRetrospectiveDiagnosticsDetectTemporalAndCohortShift(t *testing.T) {
 	selection := selectRetrospectiveModel(evaluations, diagnostics)
 	if selection.HoldoutGatePassed || selection.CandidateStatus != "rejected" {
 		t.Fatalf("distribution shift did not block promotion: %#v", selection)
+	}
+}
+
+func TestLifecycleHurdleRejectsTrainingWithoutPositiveOutcomes(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cases := make([]RetrospectiveCalibrationCase, 0, 60)
+	for day := 0; day < 60; day++ {
+		cutoff := base.AddDate(0, 0, day)
+		observed := RetrospectiveMetricTotals{}
+		if day >= 30 {
+			observed = RetrospectiveMetricTotals{SpendMinor: 100, Impressions: 100, Clicks: 10}
+		}
+		cases = append(cases, RetrospectiveCalibrationCase{CaseID: cutoff.Format("20060102"), PredictionCutoff: cutoff, HorizonEnd: cutoff.Add(24 * time.Hour), HistoryActivity: RetrospectiveMetricActivity{ObservedWindows: 1}, Observed: observed})
+	}
+	calibration, evaluation, predictions := calibrateAndEvaluateRetrospectiveLifecycle(cases, base.AddDate(0, 0, 30))
+	if calibration.Status != "insufficient_positive_training_cases" || calibration.MinimumPositiveTrainingCases != 10 || len(evaluation) != 0 || len(predictions) != 0 {
+		t.Fatalf("calibration=%#v evaluation=%#v predictions=%#v", calibration, evaluation, predictions)
 	}
 }

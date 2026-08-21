@@ -16,15 +16,16 @@ type RetrospectiveMetricActivity struct {
 }
 
 type RetrospectiveHurdleCalibration struct {
-	ModelVersion           string                              `json:"model_version"`
-	Status                 string                              `json:"status"`
-	TrainingCaseCount      int                                 `json:"training_case_count"`
-	HoldoutCaseCount       int                                 `json:"holdout_case_count"`
-	ActivityPriorStrength  float64                             `json:"activity_prior_strength"`
-	MagnitudePriorStrength float64                             `json:"magnitude_prior_strength"`
-	GlobalPriors           []RetrospectiveHurdlePrior          `json:"global_priors"`
-	ProjectPriors          []RetrospectiveProjectHurdlePrior   `json:"project_priors"`
-	OutputScales           []RetrospectiveCalibrationParameter `json:"output_scales"`
+	ModelVersion                 string                              `json:"model_version"`
+	Status                       string                              `json:"status"`
+	TrainingCaseCount            int                                 `json:"training_case_count"`
+	HoldoutCaseCount             int                                 `json:"holdout_case_count"`
+	MinimumPositiveTrainingCases int                                 `json:"minimum_positive_training_cases"`
+	ActivityPriorStrength        float64                             `json:"activity_prior_strength"`
+	MagnitudePriorStrength       float64                             `json:"magnitude_prior_strength"`
+	GlobalPriors                 []RetrospectiveHurdlePrior          `json:"global_priors"`
+	ProjectPriors                []RetrospectiveProjectHurdlePrior   `json:"project_priors"`
+	OutputScales                 []RetrospectiveCalibrationParameter `json:"output_scales"`
 }
 
 type RetrospectiveHurdlePrior struct {
@@ -76,10 +77,11 @@ func retrospectiveMetricActivity(values []MetricWindow) RetrospectiveMetricActiv
 func calibrateAndEvaluateRetrospectiveHurdle(cases []RetrospectiveCalibrationCase, holdoutStart time.Time) (RetrospectiveHurdleCalibration, []RetrospectiveMetricEvaluation, map[string]RetrospectiveHurdlePrediction) {
 	const activityStrength = 3.0
 	const magnitudeStrength = 3.0
+	const minimumPositiveTrainingCases = 10
 	training, holdout := make([]RetrospectiveCalibrationCase, 0), make([]RetrospectiveCalibrationCase, 0)
 	for _, value := range cases {
 		if value.HorizonEnd.Sub(value.PredictionCutoff) != 24*time.Hour {
-			return RetrospectiveHurdleCalibration{ModelVersion: RetrospectiveHurdleModelVersion, Status: "unsupported_horizon", ActivityPriorStrength: activityStrength, MagnitudePriorStrength: magnitudeStrength}, nil, map[string]RetrospectiveHurdlePrediction{}
+			return RetrospectiveHurdleCalibration{ModelVersion: RetrospectiveHurdleModelVersion, Status: "unsupported_horizon", MinimumPositiveTrainingCases: minimumPositiveTrainingCases, ActivityPriorStrength: activityStrength, MagnitudePriorStrength: magnitudeStrength}, nil, map[string]RetrospectiveHurdlePrediction{}
 		}
 		if value.PredictionCutoff.Before(holdoutStart) {
 			training = append(training, value)
@@ -87,7 +89,7 @@ func calibrateAndEvaluateRetrospectiveHurdle(cases []RetrospectiveCalibrationCas
 			holdout = append(holdout, value)
 		}
 	}
-	calibration := RetrospectiveHurdleCalibration{ModelVersion: RetrospectiveHurdleModelVersion, Status: "insufficient_cases", TrainingCaseCount: len(training), HoldoutCaseCount: len(holdout), ActivityPriorStrength: activityStrength, MagnitudePriorStrength: magnitudeStrength, GlobalPriors: []RetrospectiveHurdlePrior{}, ProjectPriors: []RetrospectiveProjectHurdlePrior{}}
+	calibration := RetrospectiveHurdleCalibration{ModelVersion: RetrospectiveHurdleModelVersion, Status: "insufficient_cases", TrainingCaseCount: len(training), HoldoutCaseCount: len(holdout), MinimumPositiveTrainingCases: minimumPositiveTrainingCases, ActivityPriorStrength: activityStrength, MagnitudePriorStrength: magnitudeStrength, GlobalPriors: []RetrospectiveHurdlePrior{}, ProjectPriors: []RetrospectiveProjectHurdlePrior{}}
 	if len(training) < 30 || len(holdout) < 30 {
 		return calibration, nil, map[string]RetrospectiveHurdlePrediction{}
 	}
@@ -98,7 +100,7 @@ func calibrateAndEvaluateRetrospectiveHurdle(cases []RetrospectiveCalibrationCas
 		globalStats[metric] = &hurdleStats{}
 	}
 	for _, value := range training {
-		if projectStats[value.ProjectRef] == nil {
+		if value.ProjectRef != "" && projectStats[value.ProjectRef] == nil {
 			projectStats[value.ProjectRef] = map[string]*hurdleStats{}
 			for _, metric := range metrics {
 				projectStats[value.ProjectRef][metric] = &hurdleStats{}
@@ -107,7 +109,9 @@ func calibrateAndEvaluateRetrospectiveHurdle(cases []RetrospectiveCalibrationCas
 		for _, metric := range metrics {
 			actual, _, _ := retrospectiveMetricPair(value, metric)
 			addHurdleObservation(globalStats[metric], actual)
-			addHurdleObservation(projectStats[value.ProjectRef][metric], actual)
+			if value.ProjectRef != "" {
+				addHurdleObservation(projectStats[value.ProjectRef][metric], actual)
+			}
 		}
 	}
 	globalPriors := map[string]RetrospectiveHurdlePrior{}
@@ -115,6 +119,12 @@ func calibrateAndEvaluateRetrospectiveHurdle(cases []RetrospectiveCalibrationCas
 		prior := globalHurdlePrior(metric, *globalStats[metric])
 		globalPriors[metric] = prior
 		calibration.GlobalPriors = append(calibration.GlobalPriors, prior)
+	}
+	for _, metric := range metrics {
+		if globalStats[metric].active < minimumPositiveTrainingCases {
+			calibration.Status = "insufficient_positive_training_cases"
+			return calibration, nil, map[string]RetrospectiveHurdlePrediction{}
+		}
 	}
 	projectPriors := map[string]map[string]RetrospectiveHurdlePrior{}
 	projectRefs := make([]string, 0, len(projectStats))

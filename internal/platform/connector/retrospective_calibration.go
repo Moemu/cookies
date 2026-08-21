@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const RetrospectiveCalibrationSchemaVersion = "delivery-retrospective-calibration/v4"
+const RetrospectiveCalibrationSchemaVersion = "delivery-retrospective-calibration/v6"
 
 type RetrospectiveCalibrationBuilder struct {
 	Reader SnapshotReader
@@ -63,12 +63,15 @@ type RetrospectiveCalibrationPolicy struct {
 }
 
 type RetrospectiveCalibrationSummary struct {
-	PromotionCount      int            `json:"promotion_count"`
-	MetricWindowCount   int            `json:"metric_window_count"`
-	CandidateFoldCount  int            `json:"candidate_fold_count"`
-	ExportedCaseCount   int            `json:"exported_case_count"`
-	SkippedCaseCounts   map[string]int `json:"skipped_case_counts"`
-	ConversionCaseCount int            `json:"conversion_case_count"`
+	PromotionCount                       int            `json:"promotion_count"`
+	MetricPromotionCount                 int            `json:"metric_promotion_count"`
+	InventoryMatchedMetricPromotionCount int            `json:"inventory_matched_metric_promotion_count"`
+	MetricWindowCount                    int            `json:"metric_window_count"`
+	CandidateFoldCount                   int            `json:"candidate_fold_count"`
+	ExportedCaseCount                    int            `json:"exported_case_count"`
+	LineageLimitedCaseCount              int            `json:"lineage_limited_case_count"`
+	SkippedCaseCounts                    map[string]int `json:"skipped_case_counts"`
+	ConversionCaseCount                  int            `json:"conversion_case_count"`
 }
 
 type RetrospectiveCalibrationCase struct {
@@ -76,6 +79,7 @@ type RetrospectiveCalibrationCase struct {
 	AccountRef          string                         `json:"account_ref"`
 	ProjectRef          string                         `json:"project_ref"`
 	PromotionRef        string                         `json:"promotion_ref"`
+	LineageStatus       string                         `json:"lineage_status"`
 	CookiesPlanBinding  CalibrationPlanBinding         `json:"cookies_plan_binding"`
 	PredictionCutoff    time.Time                      `json:"prediction_cutoff"`
 	HistoryStart        time.Time                      `json:"history_start"`
@@ -163,7 +167,7 @@ func (b RetrospectiveCalibrationBuilder) Build(ctx context.Context, request Retr
 		KnowledgeCutoff: request.KnowledgeCutoff.UTC(), ReplayStart: request.ReplayStart.UTC(), ReplayEnd: request.ReplayEnd.UTC(), ExportedAt: now,
 		Policy:  RetrospectiveCalibrationPolicy{LookbackDays: request.LookbackDays, HorizonDays: request.HorizonDays, StepDays: request.StepDays, MinimumHistoryWindows: request.MinimumHistoryWindows, ConfigurationUsage: "excluded_current_snapshot_not_historical", EligibleMetrics: []string{"spend_minor", "impressions", "clicks"}, ConversionUsage: "excluded_until_attribution_maturity_is_proven", SplitPolicy: "rolling_origin_with_final_20_percent_observed_cutoff_holdout"},
 		Summary: RetrospectiveCalibrationSummary{SkippedCaseCounts: map[string]int{}}, Cases: []RetrospectiveCalibrationCase{},
-		Limitations: []string{"not_a_production_point_in_time_replay", "finalized_historical_metrics_were_not_available_to_cookies_at_the_replay_cutoff", "current_configuration_is_excluded", "no_causal_budget_or_bid_effect", "conversion_feedback_maturity_not_proven", "cookies_project_and_plan_are_not_created"},
+		Limitations: []string{"not_a_production_point_in_time_replay", "finalized_historical_metrics_were_not_available_to_cookies_at_the_replay_cutoff", "current_configuration_is_excluded", "historical_project_lineage_can_be_unavailable", "no_causal_budget_or_bid_effect", "conversion_feedback_maturity_not_proven", "cookies_project_and_plan_are_not_created"},
 	}
 	promotions := latestObjects(snapshot.Objects, "promotion")
 	result.Summary.PromotionCount = len(promotions)
@@ -172,20 +176,19 @@ func (b RetrospectiveCalibrationBuilder) Build(ctx context.Context, request Retr
 		promotionByRef[promotion.ObjectRef] = promotion
 	}
 	metricsByPromotion := latestMetrics(snapshot.Metrics, request.ReplayStart.AddDate(0, 0, -request.LookbackDays), request.ReplayEnd)
-	for _, values := range metricsByPromotion {
+	result.Summary.MetricPromotionCount = len(metricsByPromotion)
+	for promotionRef, values := range metricsByPromotion {
 		result.Summary.MetricWindowCount += len(values)
+		if _, ok := promotionByRef[promotionRef]; ok {
+			result.Summary.InventoryMatchedMetricPromotionCount++
+		}
 	}
 	for cutoff := request.ReplayStart.UTC(); !cutoff.AddDate(0, 0, request.HorizonDays).After(request.ReplayEnd.UTC()); cutoff = cutoff.AddDate(0, 0, request.StepDays) {
 		for promotionRef, metrics := range metricsByPromotion {
 			result.Summary.CandidateFoldCount++
 			promotion, ok := promotionByRef[promotionRef]
 			if !ok {
-				result.Summary.SkippedCaseCounts["promotion_inventory_snapshot_missing"]++
-				continue
-			}
-			if promotion.ParentRef == "" {
-				result.Summary.SkippedCaseCounts["project_relationship_missing"]++
-				continue
+				promotion = ObjectSnapshot{ObjectKind: "promotion", ObjectRef: promotionRef}
 			}
 			value, reason, buildErr := b.buildRetrospectiveCase(request, accountRef, promotion, metrics, cutoff)
 			if buildErr != nil {
@@ -194,6 +197,9 @@ func (b RetrospectiveCalibrationBuilder) Build(ctx context.Context, request Retr
 			if reason != "" {
 				result.Summary.SkippedCaseCounts[reason]++
 				continue
+			}
+			if value.LineageStatus != "project_relationship_available" {
+				result.Summary.LineageLimitedCaseCount++
 			}
 			for _, metric := range value.EligibleMetrics {
 				if metric == "conversions" {
@@ -253,9 +259,15 @@ func (b RetrospectiveCalibrationBuilder) buildRetrospectiveCase(request Retrospe
 	if len(labels) == 0 {
 		return RetrospectiveCalibrationCase{}, "label_windows_missing", nil
 	}
-	projectRef, err := CalibrationExportRef(b.Key, "project", promotion.ParentRef)
-	if err != nil {
-		return RetrospectiveCalibrationCase{}, "", err
+	projectRef := ""
+	lineageStatus := "project_relationship_unavailable"
+	if promotion.ParentRef != "" {
+		var err error
+		projectRef, err = CalibrationExportRef(b.Key, "project", promotion.ParentRef)
+		if err != nil {
+			return RetrospectiveCalibrationCase{}, "", err
+		}
+		lineageStatus = "project_relationship_available"
 	}
 	promotionRef, err := CalibrationExportRef(b.Key, "promotion", promotion.ObjectRef)
 	if err != nil {
@@ -280,7 +292,11 @@ func (b RetrospectiveCalibrationBuilder) buildRetrospectiveCase(request Retrospe
 		delete(excluded, "conversions")
 	}
 	caseID := "retrocase_" + canonicalHash([]any{accountRef, projectRef, promotionRef, cutoff, request.LookbackDays, request.HorizonDays, featureRefs, labelRefs})
-	return RetrospectiveCalibrationCase{CaseID: caseID, AccountRef: accountRef, ProjectRef: projectRef, PromotionRef: promotionRef, CookiesPlanBinding: CalibrationPlanBinding{State: "unbound_historical", PlanID: nil, PlanVersion: nil}, PredictionCutoff: cutoff, HistoryStart: historyStart, HorizonEnd: horizonEnd, HistoryWindowCount: len(history), LabelWindowCount: len(labels), History: historyTotals, HistoryActivity: retrospectiveMetricActivity(history), Lifecycle: retrospectiveLifecycleFeatures(metrics, history, cutoff), BaselinePrediction: prediction, Observed: observed, EligibleMetrics: eligible, ExcludedMetrics: excluded, FeatureWindowRefs: featureRefs, LabelWindowRefs: labelRefs, QualityStatus: "retrospective_baseline_only"}, "", nil
+	qualityStatus := "retrospective_baseline_only"
+	if projectRef == "" {
+		qualityStatus = "retrospective_lineage_limited"
+	}
+	return RetrospectiveCalibrationCase{CaseID: caseID, AccountRef: accountRef, ProjectRef: projectRef, PromotionRef: promotionRef, LineageStatus: lineageStatus, CookiesPlanBinding: CalibrationPlanBinding{State: "unbound_historical", PlanID: nil, PlanVersion: nil}, PredictionCutoff: cutoff, HistoryStart: historyStart, HorizonEnd: horizonEnd, HistoryWindowCount: len(history), LabelWindowCount: len(labels), History: historyTotals, HistoryActivity: retrospectiveMetricActivity(history), Lifecycle: retrospectiveLifecycleFeatures(metrics, history, cutoff), BaselinePrediction: prediction, Observed: observed, EligibleMetrics: eligible, ExcludedMetrics: excluded, FeatureWindowRefs: featureRefs, LabelWindowRefs: labelRefs, QualityStatus: qualityStatus}, "", nil
 }
 
 func isRetrospectiveAtomicWindow(metric MetricWindow) bool {
