@@ -132,7 +132,7 @@ func walkRows(value any, leaves *[]map[string]any) {
 		if !ok {
 			continue
 		}
-		if nested, ok := row["Rows"]; ok {
+		if nested, ok := row["Rows"].([]any); ok && len(nested) > 0 {
 			walkRows(nested, leaves)
 			continue
 		}

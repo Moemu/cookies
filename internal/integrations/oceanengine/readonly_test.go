@@ -92,7 +92,7 @@ func TestReaderMethodsAndFlattenRows(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/ad/api/agw/statistics_sophonx/statQuery" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"code":0,"data":{"StatsData":{"Rows":[{"Rows":[{"Metrics":{"stat_cost":{"Value":1}}}]}]}}}`))
+			_, _ = w.Write([]byte(`{"code":0,"data":{"StatsData":{"Rows":[{"Rows":[{"Metrics":{"stat_cost":{"Value":1}},"Rows":null},{"Metrics":{"stat_cost":{"Value":2}},"Rows":[]}]}]}}}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -122,8 +122,8 @@ func TestReaderMethodsAndFlattenRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	stats := response["data"].(map[string]any)["StatsData"].(map[string]any)
-	if got := len(FlattenRows(stats["Rows"])); got != 1 {
-		t.Fatalf("flattened rows = %d, want 1", got)
+	if got := len(FlattenRows(stats["Rows"])); got != 2 {
+		t.Fatalf("flattened rows = %d, want 2", got)
 	}
 	if _, err := client.AccountInfo(ctx); err != nil {
 		t.Fatal(err)

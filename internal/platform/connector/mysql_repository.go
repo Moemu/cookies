@@ -203,7 +203,7 @@ func (r MySQLRepository) AppendMetric(ctx context.Context, value MetricWindow) (
 }
 
 func (r MySQLRepository) AppendMaterialMetric(ctx context.Context, value MaterialMetricWindow) (bool, error) {
-	if value.MaterialRef == "" || value.PromotionRef == "" {
+	if value.MaterialRef == "" || value.PromotionRef == "" && !hasQualityIssue(value.QualityIssues, "material_binding_unresolved") {
 		return false, ErrInvalidFact
 	}
 	return r.appendExtendedMetric(ctx, "connector_material_metric_windows", value.MetricWindow, []string{"material_ref", "promotion_ref"}, []any{value.MaterialRef, value.PromotionRef})

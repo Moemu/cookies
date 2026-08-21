@@ -617,7 +617,7 @@ func (l *Ledger) AppendMetric(value MetricWindow) (bool, error) {
 }
 
 func (l *Ledger) AppendMaterialMetric(value MaterialMetricWindow) (bool, error) {
-	if value.MaterialRef == "" || value.PromotionRef == "" {
+	if value.MaterialRef == "" || value.PromotionRef == "" && !hasQualityIssue(value.QualityIssues, "material_binding_unresolved") {
 		return false, ErrInvalidFact
 	}
 	if err := validateMetric(value.MetricWindow); err != nil {
@@ -626,6 +626,15 @@ func (l *Ledger) AppendMaterialMetric(value MaterialMetricWindow) (bool, error) 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return appendImmutable(l.materialMetrics, value.ID, value.PayloadHash, value, func(v MaterialMetricWindow) string { return v.PayloadHash })
+}
+
+func hasQualityIssue(values []QualityIssue, code string) bool {
+	for _, value := range values {
+		if value.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *Ledger) AppendConversionRevision(value ConversionRevision) (bool, error) {

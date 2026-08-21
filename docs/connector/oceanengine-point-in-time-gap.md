@@ -24,5 +24,7 @@ Unknown paths and write methods return `ErrForbiddenEndpoint`.
 - The shared ledger has memory and MySQL implementations.
 - The authenticated runtime exposes account registration, verification, sync, sync status, and point-in-time reads.
 - Synchronization uses only allow-listed read-only GET and query POST operations.
-- Live credentials are not available. Protocol and orchestration tests use synthetic, redacted facts.
+- An authorized local read-only audit completed on 2026-08-21. Credentials and raw account identity are not in this repository.
+- `statQuery` leaf rows can include `Rows: null`. The normalizer treats these objects as metric leaves when `Metrics` exists.
+- `ad_material_data.material_id` does not share one proven namespace with Promotion detail material IDs. The Connector keeps these metric rows as quarantined facts with `material_binding_unresolved`; it does not guess a binding.
 - Platform metric definitions and attribution maturity require formal confirmation. Until then, collected metric windows stay quarantined.

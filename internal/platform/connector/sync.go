@@ -347,6 +347,9 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 				return result, storeErr
 			}
 			rows := metricRows(metricsPayload)
+			if total := metricTotalCount(metricsPayload); total > metricRequest.Offset && len(rows) == 0 {
+				return result, fmt.Errorf("%w: promotion metric rows could not be normalized", ErrInvalidFact)
+			}
 			for _, row := range rows {
 				metric, ok := normalizeMetricRow(row, request, runID, metricRawID, metricObservedAt)
 				if !ok {
@@ -397,20 +400,29 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 			return result, storeErr
 		}
 		rows := metricRows(payload)
+		if total := metricTotalCount(payload); total > materialRequest.Offset && len(rows) == 0 {
+			return result, fmt.Errorf("%w: material metric rows could not be normalized", ErrInvalidFact)
+		}
 		for _, row := range rows {
 			dimensions, _ := row["Dimensions"].(map[string]any)
 			materialRef := firstString(dimensions, "material_id")
-			parents := materialParents[materialRef]
-			if materialRef == "" || len(parents) != 1 {
+			if materialRef == "" {
 				continue
 			}
+			parents := materialParents[materialRef]
 			promotionRef := ""
-			for value := range parents {
-				promotionRef = value
+			if len(parents) == 1 {
+				for value := range parents {
+					promotionRef = value
+				}
 			}
 			metric, ok := normalizeMetricRowForObject(row, request, runID, rawID, materialMetricObservedAt, materialRef)
 			if !ok {
 				continue
+			}
+			if promotionRef == "" {
+				metric.QualityIssues = append(metric.QualityIssues, QualityIssue{Disposition: QualityQuarantine, Code: "material_binding_unresolved"})
+				metric.QualityStatus = qualityDisposition(metric.QualityIssues)
 			}
 			metric.ID = "material_metric_" + canonicalHash([]string{rawID, materialRef, promotionRef, metric.WindowStart.String(), metric.PayloadHash})
 			metric.ObjectRef = opaqueRef(materialRef)
@@ -632,6 +644,11 @@ func metricRows(payload map[string]any) []map[string]any {
 	stats, _ := data["StatsData"].(map[string]any)
 	return oceanengine.FlattenRows(stats["Rows"])
 }
+func metricTotalCount(payload map[string]any) int {
+	data, _ := payload["data"].(map[string]any)
+	stats, _ := data["StatsData"].(map[string]any)
+	return int(numberValue(stats["TotalCount"]))
+}
 func normalizeMetricRow(row map[string]any, request SyncRequest, runID, evidenceRef string, collected time.Time) (MetricWindow, bool) {
 	dimensions, _ := row["Dimensions"].(map[string]any)
 	metrics, _ := row["Metrics"].(map[string]any)
@@ -650,16 +667,20 @@ func normalizeMetricRowValues(dimensions, metrics map[string]any, request SyncRe
 	if objectRef == "" {
 		return MetricWindow{}, false
 	}
-	start, end := request.WindowStart, request.WindowEnd
+	start, end := request.WindowStart.UTC(), request.WindowEnd.UTC()
 	if date := firstString(dimensions, "stat_time_day", "date"); date != "" {
-		if parsed, err := time.ParseInLocation("2006-01-02", date, time.UTC); err == nil {
-			start = parsed
-			end = parsed.AddDate(0, 0, 1)
+		location, locationErr := time.LoadLocation(request.TimeZone)
+		if locationErr != nil {
+			location = time.FixedZone("Asia/Shanghai", 8*60*60)
+		}
+		if parsed, err := time.ParseInLocation("2006-01-02", date, location); err == nil {
+			start = parsed.UTC()
+			end = parsed.AddDate(0, 0, 1).UTC()
 		}
 	}
 	counts := map[string]int64{"spend": int64(math.Round(numberValue(metrics["stat_cost"]) * 100)), "impressions": int64(numberValue(metrics["show_cnt"])), "clicks": int64(numberValue(metrics["click_cnt"])), "conversions": int64(numberValue(metrics["convert_cnt"]))}
 	payloadHash := canonicalHash(map[string]any{"object": objectRef, "start": start, "end": end, "metrics": counts})
-	header := FactHeader{OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, SourceSystem: SourceSystem, SourceRef: opaqueRef(request.AccountRef), IngestRunID: runID, SchemaVersion: DatasetVersion, PayloadHash: payloadHash, CollectedAt: collected, AvailableAt: collected, DataThrough: request.WindowEnd, ValidFrom: start, QualityStatus: QualityQuarantine, EvidenceRef: evidenceRef}
+	header := FactHeader{OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, SourceSystem: SourceSystem, SourceRef: opaqueRef(request.AccountRef), IngestRunID: runID, SchemaVersion: DatasetVersion, PayloadHash: payloadHash, CollectedAt: collected, AvailableAt: collected, DataThrough: end, ValidFrom: start, QualityStatus: QualityQuarantine, EvidenceRef: evidenceRef}
 	value := MetricWindow{FactHeader: header, ID: "metric_" + canonicalHash([]string{evidenceRef, objectRef, start.String(), end.String(), payloadHash}), ObjectRef: opaqueRef(objectRef), WindowStart: start, WindowEnd: end, Granularity: "day", TimeZone: request.TimeZone, AttributionWindow: "platform_default_unconfirmed", MetricDefinitionVersion: "oceanengine-atomic-v1", Currency: request.Currency, AmountUnit: "fen", Metrics: counts}
 	value.QualityIssues = AssessMetric(value, false, true, true)
 	derived := map[string]float64{}

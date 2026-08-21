@@ -62,22 +62,30 @@ func (r testReader) StatQueryPage(_ context.Context, request oceanengine.StatQue
 	}
 	dimensions := map[string]any{"cdp_promotion_id": map[string]any{"Value": "raw-promotion-1"}, "stat_time_day": map[string]any{"ValueStr": "2026-08-19"}}
 	if request.DatasetKey == "ad_material_data" {
-		dimensions = map[string]any{"material_id": map[string]any{"Value": "raw-material-1"}, "stat_time_day": map[string]any{"ValueStr": "2026-08-19"}, "image_mode": map[string]any{"Value": "video"}}
+		dimensions = map[string]any{"material_id": map[string]any{"Value": "report-material-1"}, "stat_time_day": map[string]any{"ValueStr": "2026-08-19"}, "image_mode": map[string]any{"Value": "video"}}
 	}
 	metrics := map[string]any{"stat_cost": map[string]any{"Value": 100.0}, "show_cnt": map[string]any{"Value": 1000.0}, "click_cnt": map[string]any{"Value": 10.0}, "convert_cnt": map[string]any{"Value": 2.0}}
-	return map[string]any{"data": map[string]any{"StatsData": map[string]any{"Rows": []any{map[string]any{"Dimensions": dimensions, "Metrics": metrics}}}}}, nil
+	return map[string]any{"data": map[string]any{"StatsData": map[string]any{"TotalCount": "1", "Rows": []any{map[string]any{"Dimensions": dimensions, "Metrics": metrics, "Rows": nil}}}}}, nil
+}
+
+func TestMetricTotalCountAcceptsPlatformStringValue(t *testing.T) {
+	payload := map[string]any{"data": map[string]any{"StatsData": map[string]any{"TotalCount": "12"}}}
+	if got := metricTotalCount(payload); got != 12 {
+		t.Fatalf("metric total count = %d, want 12", got)
+	}
 }
 
 type testWriter struct {
-	started   bool
-	completed string
-	raw       []RawSnapshot
-	objects   []ObjectSnapshot
-	configs   []ConfigurationSnapshot
-	metrics   []MetricWindow
-	bindings  []MaterialBinding
-	statuses  []PlatformStatusEvent
-	diagnoses []PlatformDiagnosisSnapshot
+	started         bool
+	completed       string
+	raw             []RawSnapshot
+	objects         []ObjectSnapshot
+	configs         []ConfigurationSnapshot
+	metrics         []MetricWindow
+	materialMetrics []MaterialMetricWindow
+	bindings        []MaterialBinding
+	statuses        []PlatformStatusEvent
+	diagnoses       []PlatformDiagnosisSnapshot
 }
 
 func (w *testWriter) StartSync(context.Context, SyncRun) (bool, error) {
@@ -114,7 +122,8 @@ func (w *testWriter) AppendMetric(_ context.Context, v MetricWindow) (bool, erro
 	w.metrics = append(w.metrics, v)
 	return true, nil
 }
-func (w *testWriter) AppendMaterialMetric(context.Context, MaterialMetricWindow) (bool, error) {
+func (w *testWriter) AppendMaterialMetric(_ context.Context, value MaterialMetricWindow) (bool, error) {
+	w.materialMetrics = append(w.materialMetrics, value)
 	return true, nil
 }
 func (w *testWriter) AppendConversionRevision(context.Context, ConversionRevision) (bool, error) {
@@ -174,6 +183,13 @@ func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	}
 	if writer.metrics[0].Metrics["spend"] != 10000 || writer.metrics[0].AmountUnit != "fen" {
 		t.Fatalf("spend was not normalized from yuan to fen: %#v", writer.metrics[0])
+	}
+	wantWindowStart := time.Date(2026, 8, 18, 16, 0, 0, 0, time.UTC)
+	if !writer.metrics[0].WindowStart.Equal(wantWindowStart) || !writer.metrics[0].DataThrough.Equal(writer.metrics[0].WindowEnd) {
+		t.Fatalf("platform day was not normalized to UTC: %#v", writer.metrics[0])
+	}
+	if len(writer.materialMetrics) != 1 || writer.materialMetrics[0].PromotionRef != "" || !hasQualityIssue(writer.materialMetrics[0].QualityIssues, "material_binding_unresolved") {
+		t.Fatalf("unbound material metric was not quarantined: %#v", writer.materialMetrics)
 	}
 	if writer.configs[0].Values["currency"] != "CNY" {
 		t.Fatalf("configuration currency was not retained: %#v", writer.configs[0].Values)
