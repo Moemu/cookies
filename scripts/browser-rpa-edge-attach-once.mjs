@@ -35,22 +35,27 @@ async function main() {
   }
 
   const browser = await chromium.connectOverCDP(playwrightEndpoint)
-  const contexts = browser.contexts()
-  if (contexts.length !== 1) throw new Error(`Expected one browser context; found ${contexts.length}`)
-  const pages = contexts[0].pages().filter(page => !page.isClosed() && isOceanEnginePage(page.url()))
-  const page = pages.at(-1)
+  const deadline = Date.now() + 15000
+  let page
+  do {
+    page = browser.contexts()
+      .flatMap(context => context.pages())
+      .filter(item => !item.isClosed() && isOceanEnginePage(item.url()))
+      .at(-1)
+    if (!page) await new Promise(resolveTimer => setTimeout(resolveTimer, 250))
+  } while (!page && Date.now() < deadline)
   if (!page) throw new Error('No current ad.oceanengine.com page is open')
 
-  const pageCDP = await contexts[0].newCDPSession(page)
+  const pageCDP = await page.context().newCDPSession(page)
   const target = await pageCDP.send('Target.getTargetInfo')
   const targetInfo = target.targetInfo
-  if (!targetInfo?.targetId || !targetInfo.browserContextId) {
+  if (!targetInfo?.targetId) {
     throw new Error('Playwright did not return stable page and context identifiers')
   }
   const capture = await pageCDP.send('Page.captureScreenshot', { format: 'png', fromSurface: true })
   await writeFile(screenshotPath, Buffer.from(capture.data, 'base64'), { mode: 0o600 })
   return {
-    browser_context_id: targetInfo.browserContextId,
+    browser_context_id: targetInfo.browserContextId ?? 'default',
     target_id: targetInfo.targetId,
     page: safePageURL(page.url()),
     screenshot_path: screenshotPath,

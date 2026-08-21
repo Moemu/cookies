@@ -360,7 +360,7 @@ async function attachOnce(endpoint: string, screenshotPath: string, currentProfi
   const argumentsList = [attachHelper, endpoint, screenshotPath]
   if (currentProfile) argumentsList.push(currentUserDataRoot())
   const { stdout } = await execFileAsync(process.execPath, argumentsList, {
-    timeout: 20000,
+    timeout: 120000,
     windowsHide: true,
     maxBuffer: 1 << 20,
   })
