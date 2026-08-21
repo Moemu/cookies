@@ -72,20 +72,44 @@ func TestRetrospectiveCalibrationRejectsReplayBeyondKnowledgeCutoff(t *testing.T
 	}
 }
 
-func TestHierarchicalHurdleCanPassStrictTimeHoldout(t *testing.T) {
+func TestLifecycleHurdleCanPassStrictTimeHoldout(t *testing.T) {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	cases := make([]RetrospectiveCalibrationCase, 0, 100)
 	for day := 0; day < 100; day++ {
 		cutoff := base.AddDate(0, 0, day)
-		cases = append(cases, RetrospectiveCalibrationCase{CaseID: cutoff.Format("20060102"), ProjectRef: "anon_project", PredictionCutoff: cutoff, HorizonEnd: cutoff.Add(24 * time.Hour), History: RetrospectiveMetricTotals{SpendMinor: 1000, Impressions: 10000, Clicks: 100}, HistoryActivity: RetrospectiveMetricActivity{ObservedWindows: 7, SpendPositiveWindows: 1, ImpressionPositiveWindows: 1, ClickPositiveWindows: 1}, BaselinePrediction: RetrospectiveMetricEstimate{SpendMinor: 500, Impressions: 5000, Clicks: 50}, Observed: RetrospectiveMetricTotals{SpendMinor: 200, Impressions: 2000, Clicks: 20}})
+		signal := RetrospectiveLifecycleSignal{AgeDays: day, AgeBucket: "established", RecencyBucket: "cooling", TrendBucket: "stable"}
+		projectRef := "anon_project"
+		if day >= 70 {
+			projectRef = "unseen_holdout_project"
+			signal = RetrospectiveLifecycleSignal{AgeDays: 2, AgeBucket: "launch", RecencyBucket: "recent", StreakBucket: "short", TrendBucket: "rising"}
+		}
+		cases = append(cases, RetrospectiveCalibrationCase{CaseID: cutoff.Format("20060102"), ProjectRef: projectRef, PredictionCutoff: cutoff, HorizonEnd: cutoff.Add(24 * time.Hour), History: RetrospectiveMetricTotals{SpendMinor: 1000, Impressions: 10000, Clicks: 100}, HistoryActivity: RetrospectiveMetricActivity{ObservedWindows: 7, SpendPositiveWindows: 1, ImpressionPositiveWindows: 1, ClickPositiveWindows: 1}, Lifecycle: RetrospectiveLifecycleFeatures{Spend: signal, Impressions: signal, Clicks: signal}, BaselinePrediction: RetrospectiveMetricEstimate{SpendMinor: 500, Impressions: 5000, Clicks: 50}, Observed: RetrospectiveMetricTotals{SpendMinor: 200, Impressions: 2000, Clicks: 20}})
 	}
-	calibration, evaluation, predictions := calibrateAndEvaluateRetrospectiveHurdle(cases, base.AddDate(0, 0, 70))
+	calibration, evaluation, predictions := calibrateAndEvaluateRetrospectiveLifecycle(cases, base.AddDate(0, 0, 70))
 	if calibration.Status != "evaluated" || calibration.TrainingCaseCount != 70 || calibration.HoldoutCaseCount != 30 || len(predictions) != 30 {
 		t.Fatalf("calibration=%#v predictions=%d", calibration, len(predictions))
 	}
 	baseline := evaluateRetrospectiveCases(cases[70:], "trailing_mean_baseline", "time_holdout", nil)
 	selection := selectRetrospectiveModel(append(baseline, evaluation...))
-	if !selection.HoldoutGatePassed || selection.SelectedModel != RetrospectiveHurdleModelVersion {
+	if !selection.HoldoutGatePassed || selection.SelectedModel != RetrospectiveLifecycleHurdleModelVersion {
 		t.Fatalf("selection=%#v evaluation=%#v", selection, evaluation)
+	}
+}
+
+func TestRetrospectiveLifecycleFeaturesExcludeMetricsAfterCutoff(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	metrics := make([]MetricWindow, 0, 4)
+	for day := 0; day < 4; day++ {
+		start := base.AddDate(0, 0, day)
+		spend := int64(100)
+		if day == 3 {
+			spend = 0
+		}
+		metrics = append(metrics, MetricWindow{WindowStart: start, WindowEnd: start.Add(24 * time.Hour), Granularity: "day", Currency: "CNY", AmountUnit: "fen", MetricDefinitionVersion: "v1", Metrics: map[string]int64{"spend": spend, "impressions": spend, "clicks": spend, "conversions": 0}})
+	}
+	cutoff := base.AddDate(0, 0, 3)
+	features := retrospectiveLifecycleFeatures(metrics, metrics[:3], cutoff)
+	if features.Spend.AgeDays != 3 || features.Spend.RecencyBucket != "recent" || features.Spend.ConsecutivePositiveWindows != 3 || features.Spend.StreakBucket != "short" {
+		t.Fatalf("future metric changed lifecycle features: %#v", features.Spend)
 	}
 }

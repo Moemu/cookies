@@ -36,3 +36,6 @@ configuration, platform diagnosis, and immature conversion labels. It uses a
 time holdout and never applies a candidate calibration to the simulator.
 The hierarchical hurdle challenger models activity and positive magnitude
 separately. Relative improvement alone cannot pass its absolute readiness gate.
+The lifecycle hurdle challenger adds cutoff-safe age, activity recency, streak,
+and recent-trend segments. Sparse segments fall back to anonymous Project and
+account priors. A passing report still requires a separate simulator change.
