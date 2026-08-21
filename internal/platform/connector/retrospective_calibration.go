@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const RetrospectiveCalibrationSchemaVersion = "delivery-retrospective-calibration/v3"
+const RetrospectiveCalibrationSchemaVersion = "delivery-retrospective-calibration/v4"
 
 type RetrospectiveCalibrationBuilder struct {
 	Reader SnapshotReader
@@ -42,6 +42,7 @@ type RetrospectiveCalibrationResult struct {
 	Calibration          []RetrospectiveCalibrationParameter `json:"calibration"`
 	HurdleCalibration    RetrospectiveHurdleCalibration      `json:"hurdle_calibration"`
 	LifecycleCalibration RetrospectiveLifecycleCalibration   `json:"lifecycle_calibration"`
+	Diagnostics          RetrospectiveCalibrationDiagnostics `json:"diagnostics"`
 	Evaluation           []RetrospectiveMetricEvaluation     `json:"evaluation"`
 	ModelSelection       RetrospectiveModelSelection         `json:"model_selection"`
 	Cases                []RetrospectiveCalibrationCase      `json:"cases"`
@@ -226,7 +227,8 @@ func (b RetrospectiveCalibrationBuilder) Build(ctx context.Context, request Retr
 			result.Cases[index].LifecyclePrediction = &prediction
 		}
 	}
-	result.ModelSelection = selectRetrospectiveModel(result.Evaluation)
+	result.Diagnostics = diagnoseRetrospectiveCalibration(result.Cases, holdoutStart)
+	result.ModelSelection = selectRetrospectiveModel(result.Evaluation, result.Diagnostics)
 	return result, nil
 }
 
@@ -445,7 +447,7 @@ func evaluateRetrospectiveCases(cases []RetrospectiveCalibrationCase, model, spl
 	return result
 }
 
-func selectRetrospectiveModel(evaluations []RetrospectiveMetricEvaluation) RetrospectiveModelSelection {
+func selectRetrospectiveModel(evaluations []RetrospectiveMetricEvaluation, diagnostics RetrospectiveCalibrationDiagnostics) RetrospectiveModelSelection {
 	result := RetrospectiveModelSelection{SelectedModel: "trailing_mean_baseline", CandidateModel: RetrospectiveLifecycleHurdleModelVersion, CandidateStatus: "rejected", AppliedToSimulator: false, Reasons: []string{}}
 	baseline, candidate := map[string]RetrospectiveMetricEvaluation{}, map[string]RetrospectiveMetricEvaluation{}
 	for _, value := range evaluations {
@@ -476,6 +478,11 @@ func selectRetrospectiveModel(evaluations []RetrospectiveMetricEvaluation) Retro
 		}
 		if math.Abs(challenger.MeanBias) > math.Abs(base.MeanBias)*1.05 {
 			result.Reasons = append(result.Reasons, metric+":absolute_bias_regressed")
+		}
+	}
+	if diagnostics.Status == "distribution_shift_detected" {
+		for _, signal := range diagnostics.Signals {
+			result.Reasons = append(result.Reasons, "diagnostics:"+signal)
 		}
 	}
 	if len(result.Reasons) == 0 {

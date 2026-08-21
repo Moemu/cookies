@@ -37,6 +37,9 @@ func TestRetrospectiveCalibrationBuildsLeakageMarkedRollingCases(t *testing.T) {
 	if !result.RetrospectiveOnly || len(result.Cases) != 7 || result.Policy.ConfigurationUsage != "excluded_current_snapshot_not_historical" {
 		t.Fatalf("result summary=%#v policy=%#v", result.Summary, result.Policy)
 	}
+	if result.SchemaVersion != RetrospectiveCalibrationSchemaVersion || result.Diagnostics.UsedForPrediction {
+		t.Fatalf("invalid diagnostics boundary: schema=%s diagnostics=%#v", result.SchemaVersion, result.Diagnostics)
+	}
 	first := result.Cases[0]
 	if first.CookiesPlanBinding.State != "unbound_historical" || first.CookiesPlanBinding.PlanID != nil || first.BaselinePrediction.Conversions != nil || first.History.Conversions != nil || first.Observed.Conversions != nil || first.HistoryWindowCount != 7 || first.LabelWindowCount != 2 {
 		t.Fatalf("case=%#v", first)
@@ -90,7 +93,7 @@ func TestLifecycleHurdleCanPassStrictTimeHoldout(t *testing.T) {
 		t.Fatalf("calibration=%#v predictions=%d", calibration, len(predictions))
 	}
 	baseline := evaluateRetrospectiveCases(cases[70:], "trailing_mean_baseline", "time_holdout", nil)
-	selection := selectRetrospectiveModel(append(baseline, evaluation...))
+	selection := selectRetrospectiveModel(append(baseline, evaluation...), diagnoseRetrospectiveCalibration(cases, base.AddDate(0, 0, 70)))
 	if !selection.HoldoutGatePassed || selection.SelectedModel != RetrospectiveLifecycleHurdleModelVersion {
 		t.Fatalf("selection=%#v evaluation=%#v", selection, evaluation)
 	}
@@ -111,5 +114,46 @@ func TestRetrospectiveLifecycleFeaturesExcludeMetricsAfterCutoff(t *testing.T) {
 	features := retrospectiveLifecycleFeatures(metrics, metrics[:3], cutoff)
 	if features.Spend.AgeDays != 3 || features.Spend.RecencyBucket != "recent" || features.Spend.ConsecutivePositiveWindows != 3 || features.Spend.StreakBucket != "short" {
 		t.Fatalf("future metric changed lifecycle features: %#v", features.Spend)
+	}
+}
+
+func TestRetrospectiveDiagnosticsDetectTemporalAndCohortShift(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	holdoutStart := base.AddDate(0, 0, 10)
+	cases := make([]RetrospectiveCalibrationCase, 0, 40)
+	for day := 0; day < 10; day++ {
+		cutoff := base.AddDate(0, 0, day)
+		cases = append(cases, RetrospectiveCalibrationCase{PromotionRef: "known", PredictionCutoff: cutoff, Observed: RetrospectiveMetricTotals{}})
+	}
+	for index := 0; index < 30; index++ {
+		cutoff := holdoutStart.AddDate(0, 0, index%3)
+		cases = append(cases, RetrospectiveCalibrationCase{PromotionRef: "new_" + cutoff.Format("20060102"), PredictionCutoff: cutoff, Observed: RetrospectiveMetricTotals{SpendMinor: 100, Impressions: 100, Clicks: 100}})
+	}
+	diagnostics := diagnoseRetrospectiveCalibration(cases, holdoutStart)
+	if diagnostics.Status != "distribution_shift_detected" || diagnostics.UsedForPrediction || diagnostics.Holdout.CutoffDateCount != 3 || diagnostics.Holdout.UnseenPromotionShare != 1 {
+		t.Fatalf("diagnostics=%#v", diagnostics)
+	}
+	wanted := map[string]bool{"holdout_cutoff_dates_below_minimum": false, "holdout_unseen_promotion_share_above_limit": false, "spend_minor:positive_rate_shift": false}
+	for _, signal := range diagnostics.Signals {
+		if _, ok := wanted[signal]; ok {
+			wanted[signal] = true
+		}
+	}
+	for signal, found := range wanted {
+		if !found {
+			t.Fatalf("missing signal %s in %#v", signal, diagnostics.Signals)
+		}
+	}
+	baselineWAPE, candidateWAPE := 0.8, 0.4
+	evaluations := make([]RetrospectiveMetricEvaluation, 0, 6)
+	for _, metric := range []string{"spend_minor", "impressions", "clicks"} {
+		evaluations = append(evaluations,
+			RetrospectiveMetricEvaluation{Model: "trailing_mean_baseline", Metric: metric, MeanBias: 10, WAPE: &baselineWAPE},
+			RetrospectiveMetricEvaluation{Model: RetrospectiveLifecycleHurdleModelVersion, Metric: metric, MeanBias: 5, WAPE: &candidateWAPE},
+		)
+	}
+	selection := selectRetrospectiveModel(evaluations, diagnostics)
+	if selection.HoldoutGatePassed || selection.CandidateStatus != "rejected" {
+		t.Fatalf("distribution shift did not block promotion: %#v", selection)
 	}
 }

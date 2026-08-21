@@ -39,3 +39,6 @@ separately. Relative improvement alone cannot pass its absolute readiness gate.
 The lifecycle hurdle challenger adds cutoff-safe age, activity recency, streak,
 and recent-trend segments. Sparse segments fall back to anonymous Project and
 account priors. A passing report still requires a separate simulator change.
+Backtest diagnostics compare training and holdout coverage, activity, positive
+magnitude, and unseen Promotion share. They use labels only after evaluation.
+The prediction path cannot consume these diagnostics.
