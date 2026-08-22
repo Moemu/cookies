@@ -127,16 +127,17 @@ function recommendationLabel(value: string) {
 }
 
 function scenarioCopyLabel(value: string) {
-  return ({ steady: '稳定投放', under_delivery: '跑量不足', cost_pressure: '成本压力', creative_fatigue: '素材疲劳', tracking_anomaly: '追踪异常', review_rejected: '审核拒绝', zero_conversion: '零转化', spend_spike: '消耗突增' } as Record<string, string>)[value] ?? value
+  return ({ typical_launch: '普通跑量情景', breakout_launch: '跑量号情景', steady: '稳定投放', under_delivery: '跑量不足', cost_pressure: '成本压力', creative_fatigue: '素材疲劳', tracking_anomaly: '追踪异常', review_rejected: '审核拒绝', zero_conversion: '零转化', spend_spike: '消耗突增' } as Record<string, string>)[value] ?? value
 }
 
 function candidateFocusLabel(value?: string) {
-  return ({ parallel_material_portfolio: '并行素材组合', material_rotation: '并行素材组合（旧结果）', tracking_integrity: '追踪完整性', delivery_constraints: '跑量约束', review_compliance: '审核合规', conversion_funnel: '转化漏斗', budget_pacing: '预算节奏', cost_control: '成本控制', maintain_and_observe: '保持并观察' } as Record<string, string>)[value ?? ''] ?? value ?? '预算控制'
+  return ({ parallel_launch_observation: '并行项目跑量观察', parallel_material_portfolio: '并行素材组合', material_rotation: '并行素材组合（旧结果）', tracking_integrity: '追踪完整性', delivery_constraints: '跑量约束', review_compliance: '审核合规', conversion_funnel: '转化漏斗', budget_pacing: '预算节奏', cost_control: '成本控制', maintain_and_observe: '保持并观察' } as Record<string, string>)[value ?? ''] ?? value ?? '预算控制'
 }
 
 function candidateActionLabel(value?: string) {
   return ({
     observe_existing_portfolio: '保护现有跑量对象并等待成熟窗口', launch_controlled_parallel_test: '新建并行项目或单元进行受控跑量', expand_parallel_test_and_prune_mature_losers: '扩大并行跑量，并在窗口成熟后淘汰低效对象',
+    observe_first_seven_days: '观察首个七日窗口', prepare_parallel_project_test: '准备并行项目测试', prepare_parallel_project_and_promotion_test: '准备并行项目与单元测试',
     prepare_material_rotation: '准备并行素材测试（旧结果）', controlled_material_rotation_test: '执行并行素材测试（旧结果）', expanded_material_rotation_test: '扩大并行素材测试（旧结果）',
     verify_primary_conversion_event: '核对主转化事件', audit_tracking_chain: '审计完整追踪链路', parallel_tracking_validation: '执行并行追踪验证',
     review_delivery_restrictions: '检查跑量限制', controlled_constraint_test: '执行受控约束测试', expanded_constraint_test: '扩大约束测试',
@@ -163,11 +164,11 @@ function decisionDiagnosticDetail(decision: DeliveryDecision) {
 }
 
 function mechanisticRecommendationLabel(value: string) {
-  return ({ review_compliance: '审核合规方案', tracking_review: '追踪链路检查方案', delivery_review: '跑量约束检查方案', cost_review: '成本控制方案', creative_test: '并行素材测试方案（旧结果）', portfolio_test: '并行跑量与淘汰方案', conversion_funnel_review: '转化漏斗检查方案', budget_pacing_review: '预算节奏检查方案' } as Record<string, string>)[value] ?? value
+  return ({ review_compliance: '审核合规方案', tracking_review: '追踪链路检查方案', delivery_review: '跑量约束检查方案', cost_review: '成本控制方案', creative_test: '并行素材测试方案（旧结果）', portfolio_test: '并行跑量与淘汰方案', portfolio_observation: '并行跑量观察方案', conversion_funnel_review: '转化漏斗检查方案', budget_pacing_review: '预算节奏检查方案' } as Record<string, string>)[value] ?? value
 }
 
 function mechanisticRationaleLabel(value: string) {
-  return ({ 'Review the rejection reason or replace non-compliant material.': '检查审核拒绝原因，并替换不合规素材。', 'Check tracking before budget or bid changes.': '在调整预算或出价前，先检查转化追踪链路。', 'Review delivery constraints and use a controlled test.': '检查定向、出价和库存约束，并使用受控测试验证。', 'Review cost assumptions before increasing budget or bid.': '提高预算或出价前，先复核成本先验和成本边界。', 'Consider a controlled creative rotation test.': '使用并行项目或单元测试不同素材，不修改现有跑量对象。', 'Launch parallel projects or promotions with distinct materials; protect stable delivery objects and prune only after a mature observation window.': '为同一商品新建并行项目或单元。使用不同素材跑量。保护稳定对象，只在观察窗口成熟后淘汰低效对象。', 'Check the conversion funnel before changing delivery settings.': '调整投放设置前，先检查转化漏斗。', 'Review budget pacing before changing the daily budget.': '调整日预算前，先检查预算消耗节奏。', 'Simulation assumptions can differ from platform outcomes.': '模拟假设可能与平台实际结果不同。', 'Do not execute automatically.': '禁止自动执行。', 'Use a controlled test after human approval.': '人工批准后使用受控测试。' } as Record<string, string>)[value] ?? value
+  return ({ 'Review the rejection reason or replace non-compliant material.': '检查审核拒绝原因，并替换不合规素材。', 'Check tracking before budget or bid changes.': '在调整预算或出价前，先检查转化追踪链路。', 'Review delivery constraints and use a controlled test.': '检查定向、出价和库存约束，并使用受控测试验证。', 'Review cost assumptions before increasing budget or bid.': '提高预算或出价前，先复核成本先验和成本边界。', 'Consider a controlled creative rotation test.': '使用并行项目或单元测试不同素材，不修改现有跑量对象。', 'Launch parallel projects or promotions with distinct materials; protect stable delivery objects and prune only after a mature observation window.': '为同一商品新建并行项目或单元。使用不同素材跑量。保护稳定对象，只在观察窗口成熟后淘汰低效对象。', 'Launch parallel projects or promotions, protect emerging winners, and prune only after the seven-day observation window matures.': '建立并行项目或单元。保护开始跑量的对象。只在七日观察窗口成熟后淘汰低效对象。', 'Check the conversion funnel before changing delivery settings.': '调整投放设置前，先检查转化漏斗。', 'Review budget pacing before changing the daily budget.': '调整日预算前，先检查预算消耗节奏。', 'Simulation assumptions can differ from platform outcomes.': '模拟假设可能与平台实际结果不同。', 'Winner identity is unknown before platform learning.': '平台学习前不能确定最终跑量单元。', 'Do not execute automatically.': '禁止自动执行。', 'Do not rotate material on an established winner.': '不要轮换已经稳定跑量对象的素材。', 'Do not change budget or bid from this shadow result.': '不要根据该影子结果调整预算或出价。', 'Use a controlled test after human approval.': '人工批准后使用受控测试。' } as Record<string, string>)[value] ?? value
 }
 
 function mechanisticTargetLabel(value: string) {
@@ -178,7 +179,7 @@ function MechanisticRecommendationCard({ item, index }: { item: MechanisticRecom
   return <article className="delivery-recommendation-card">
     <header><div><span>模拟优化方向 {index + 1}</span><h3>{mechanisticRecommendationLabel(item.recommendation_type)}</h3></div><strong className="delivery-recommendation-status proposed">需人工复核</strong></header>
     <dl className="delivery-recommendation-summary"><div><dt>建议目标</dt><dd>{mechanisticTargetLabel(item.target_field)}</dd></div><div><dt>置信度</dt><dd>{item.confidence === 'low' ? '低置信度' : item.confidence === 'medium' ? '中置信度' : '高置信度'}</dd></div><div className="wide"><dt>建议依据</dt><dd>{mechanisticRationaleLabel(item.rationale)}</dd></div><div className="wide"><dt>风险与约束</dt><dd>{[...(item.risks ?? []), ...(item.guardrails ?? [])].map(mechanisticRationaleLabel).join('；')}</dd></div></dl>
-    <footer><span>该方案来自假设驱动模拟。它尚未生成冻结配置或 ChangeSet。</span></footer>
+    <footer><span>该方案来自上线前概率模拟。它尚未生成冻结配置或 ChangeSet。</span></footer>
   </article>
 }
 

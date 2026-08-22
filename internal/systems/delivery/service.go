@@ -361,13 +361,14 @@ type Repository interface {
 }
 
 type Service struct {
-	Repository         Repository
-	Projects           ActiveProjectResolver
-	Adapter            PlatformAdapter
-	Insights           InsightsConsumer
-	ConnectorSnapshots ConnectorSnapshotReader
-	NewID              ids.Generator
-	Now                func() time.Time
+	Repository              Repository
+	Projects                ActiveProjectResolver
+	Adapter                 PlatformAdapter
+	Insights                InsightsConsumer
+	ConnectorSnapshots      ConnectorSnapshotReader
+	LaunchBatchCalibrations ConnectorLaunchBatchCalibrationReader
+	NewID                   ids.Generator
+	Now                     func() time.Time
 }
 
 func (s Service) CreatePlan(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreatePlanRequest) (DeliveryPlan, error) {

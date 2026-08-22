@@ -23,6 +23,9 @@ type Syncer interface {
 type SyncRunReader interface {
 	GetSync(context.Context, string, string, string, string) (connector.SyncRun, error)
 }
+type LaunchBatchCalibrationReader interface {
+	LatestLaunchBatchCalibration(context.Context, string, string) (connector.LaunchBatchCalibrationSnapshot, error)
+}
 type ProjectAuthorizer interface {
 	AuthorizeProject(context.Context, contract.ActorContext, contract.ProjectID) error
 }
@@ -59,6 +62,7 @@ func New(reader Reader, syncer Syncer, authorizer ProjectAuthorizer, accounts Ac
 	server.mux.HandleFunc("POST /api/connector/v1/accounts/{account_ref}/syncs", server.syncOrganizationAccount)
 	server.mux.HandleFunc("GET /api/connector/v1/accounts/{account_ref}/syncs/{sync_id}", server.organizationSyncStatus)
 	server.mux.HandleFunc("GET /api/connector/v1/accounts/{account_ref}/canonical-snapshots", server.organizationSnapshot)
+	server.mux.HandleFunc("GET /api/connector/v1/accounts/{account_ref}/launch-batch-calibration", server.organizationLaunchBatchCalibration)
 	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/canonical-snapshots", server.snapshot)
 	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/syncs", server.sync)
 	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/syncs/{sync_id}", server.syncStatus)
@@ -67,6 +71,25 @@ func New(reader Reader, syncer Syncer, authorizer ProjectAuthorizer, accounts Ac
 	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/verify", server.verifyAccount)
 	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/revoke", server.revokeAccount)
 	return server
+}
+
+func (s *Server) organizationLaunchBatchCalibration(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorForOrganization(r, connector.ScopeRead)
+	if !ok {
+		writeProblem(w, http.StatusForbidden, "SCOPE_REQUIRED")
+		return
+	}
+	reader, ok := s.reader.(LaunchBatchCalibrationReader)
+	if !ok {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	value, err := reader.LatestLaunchBatchCalibration(r.Context(), string(actor.OrganizationID), r.PathValue("account_ref"))
+	if err != nil {
+		writeProblem(w, http.StatusNotFound, "LAUNCH_BATCH_CALIBRATION_NOT_FOUND")
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
 }
 
 func (s *Server) listOrganizationAccounts(w http.ResponseWriter, r *http.Request) {

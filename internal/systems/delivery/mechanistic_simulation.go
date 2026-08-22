@@ -11,15 +11,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/connector"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/systems/delivery/calibrationmanifest"
 )
 
 const (
-	MechanisticSimulationSchemaVersion = "delivery-mechanistic-simulation/v0"
-	MechanisticSimulationModelVersion  = "delivery-mechanistic-monte-carlo/v0.2"
-	MechanisticThresholdVersion        = "delivery-mechanistic-scenarios/v0"
+	MechanisticSimulationSchemaVersion = "delivery-mechanistic-simulation/v1"
+	MechanisticSimulationModelVersion  = "delivery-mechanistic-monte-carlo/v0.3"
+	MechanisticThresholdVersion        = "delivery-mechanistic-scenarios/v1"
 	CalibrationStatusAssumptionDriven  = "assumption_driven"
+	CalibrationStatusAccountProduct    = "account_product_calibrated"
 )
 
 type SimulationReviewState string
@@ -100,11 +102,13 @@ func (p SimulationPriorSet) Validate(currency string) error {
 func finite(value float64) bool { return !math.IsNaN(value) && !math.IsInf(value, 0) }
 
 type MechanisticSimulationRequest struct {
-	StableSeed            string                `json:"stable_seed"`
-	SampleCount           int                   `json:"sample_count"`
-	PredictionHorizonDays int                   `json:"prediction_horizon_days"`
-	ReviewState           SimulationReviewState `json:"review_state"`
-	PriorSet              SimulationPriorSet    `json:"prior_set"`
+	StableSeed             string                                    `json:"stable_seed"`
+	SampleCount            int                                       `json:"sample_count"`
+	PredictionHorizonDays  int                                       `json:"prediction_horizon_days"`
+	ReviewState            SimulationReviewState                     `json:"review_state"`
+	PriorSet               SimulationPriorSet                        `json:"prior_set"`
+	CalibrationAccountRef  string                                    `json:"calibration_account_ref,omitempty"`
+	LaunchBatchCalibration *connector.LaunchBatchCalibrationSnapshot `json:"-"`
 }
 
 func (r MechanisticSimulationRequest) Validate(currency string) error {
@@ -113,6 +117,9 @@ func (r MechanisticSimulationRequest) Validate(currency string) error {
 	}
 	if r.ReviewState != SimulationReviewUnknown && r.ReviewState != SimulationReviewApproved && r.ReviewState != SimulationReviewRejected {
 		return ErrInvalidRequest
+	}
+	if r.CalibrationAccountRef != "" && (!strings.HasPrefix(r.CalibrationAccountRef, "oeacct_") || r.PredictionHorizonDays != 7) {
+		return fmt.Errorf("%w: calibrated launch simulation requires one local account and a seven-day horizon", ErrInvalidRequest)
 	}
 	return r.PriorSet.Validate(currency)
 }
@@ -217,6 +224,7 @@ type MechanisticSimulationResult struct {
 	Status                string                          `json:"status"`
 	IsSimulated           bool                            `json:"is_simulated"`
 	CalibrationStatus     string                          `json:"calibration_status"`
+	CalibrationPriorRef   string                          `json:"calibration_prior_ref,omitempty"`
 }
 
 type MechanisticSimulationEnvelope struct {
@@ -256,6 +264,17 @@ func (s Service) CreatePrelaunchMechanisticSimulation(ctx context.Context, actor
 	if err != nil {
 		return MechanisticSimulationEnvelope{}, err
 	}
+	request.CalibrationAccountRef = strings.TrimSpace(request.CalibrationAccountRef)
+	if request.CalibrationAccountRef != "" {
+		if s.LaunchBatchCalibrations == nil {
+			return MechanisticSimulationEnvelope{}, ErrUnsupportedConfigurationWorkflow
+		}
+		calibration, calibrationErr := s.LaunchBatchCalibrations.LatestLaunchBatchCalibration(ctx, string(actor.OrganizationID), request.CalibrationAccountRef)
+		if calibrationErr != nil {
+			return MechanisticSimulationEnvelope{}, fmt.Errorf("%w: calibrated launch prior is unavailable", ErrInvalidRequest)
+		}
+		request.LaunchBatchCalibration = &calibration
+	}
 	if err := request.Validate(input.Currency); err != nil {
 		return MechanisticSimulationEnvelope{}, err
 	}
@@ -271,13 +290,14 @@ func (s Service) CreatePrelaunchMechanisticSimulation(ctx context.Context, actor
 		return MechanisticSimulationEnvelope{}, err
 	}
 	fingerprint, err := contract.CanonicalJSONHash(struct {
-		InputHash       string `json:"input_hash"`
-		PriorSetVersion string `json:"prior_set_version"`
-		StableSeed      string `json:"stable_seed"`
-		Horizon         string `json:"horizon"`
-		SampleCount     int    `json:"sample_count"`
-		ModelVersion    string `json:"model_version"`
-	}{result.InputSnapshotHash, result.PriorSetVersion, result.StableSeed, result.PredictionHorizon, result.SampleCount, result.ModelVersion})
+		InputHash           string `json:"input_hash"`
+		PriorSetVersion     string `json:"prior_set_version"`
+		StableSeed          string `json:"stable_seed"`
+		Horizon             string `json:"horizon"`
+		SampleCount         int    `json:"sample_count"`
+		ModelVersion        string `json:"model_version"`
+		CalibrationPriorRef string `json:"calibration_prior_ref,omitempty"`
+	}{result.InputSnapshotHash, result.PriorSetVersion, result.StableSeed, result.PredictionHorizon, result.SampleCount, result.ModelVersion, result.CalibrationPriorRef})
 	if err != nil {
 		return MechanisticSimulationEnvelope{}, err
 	}
@@ -403,6 +423,9 @@ func RunMechanisticSimulation(input MechanisticSimulationInput, request Mechanis
 	base.EvidenceRefs = []string{"plan-version://" + input.PlanID + fmt.Sprintf("/%d", input.PlanVersion), "calibration-manifest://" + input.ManifestBinding.ManifestID, "simulation-prior://" + request.PriorSet.Version}
 	base.Assumptions = []string{"All distributions are supplied by an explicit prior set.", "The model is predictive association only.", "All metric summaries use one Monte Carlo sample batch."}
 	base.Limitations = []string{"No real Connector history is read.", "No model training or causal inference is done.", "Results require human review."}
+	if request.LaunchBatchCalibration != nil {
+		return runCalibratedLaunchBatchSimulation(base, input, request, inputHash)
+	}
 
 	seedMaterial := sha256.Sum256([]byte(inputHash + "\x00" + request.PriorSet.Version + "\x00" + request.StableSeed + "\x00" + MechanisticSimulationModelVersion))
 	rng := rand.New(rand.NewSource(int64(binary.BigEndian.Uint64(seedMaterial[:8])))) // #nosec G404 -- deterministic simulation, not security.
@@ -434,6 +457,116 @@ func RunMechanisticSimulation(input MechanisticSimulationInput, request Mechanis
 	base.Alerts = scenarioAlerts(base.ScenarioProbabilities)
 	base.RecommendationDrafts = draftMechanisticRecommendations(base.ScenarioProbabilities, input, base.EvidenceRefs)
 	return base, nil
+}
+
+func runCalibratedLaunchBatchSimulation(base MechanisticSimulationResult, input MechanisticSimulationInput, request MechanisticSimulationRequest, inputHash string) (MechanisticSimulationResult, error) {
+	calibration := request.LaunchBatchCalibration
+	if calibration == nil || calibration.Status != "ready_for_probabilistic_shadow" || calibration.SchemaVersion != connector.LaunchBatchCalibrationSchemaVersion || calibration.BreakoutProbability < 0 || calibration.BreakoutProbability > 1 {
+		return base, fmt.Errorf("%w: invalid calibrated launch prior", ErrInvalidRequest)
+	}
+	metric := func(values []connector.LaunchBatchScenarioMetricDistribution, name string) (connector.LaunchBatchScenarioMetricDistribution, bool) {
+		for _, value := range values {
+			if value.Metric == name && finite(value.P10) && finite(value.P50) && finite(value.P90) && value.P10 >= 0 && value.P10 <= value.P50 && value.P50 <= value.P90 {
+				return value, true
+			}
+		}
+		return connector.LaunchBatchScenarioMetricDistribution{}, false
+	}
+	typicalSpend, ok1 := metric(calibration.Typical, "spend_minor")
+	typicalImpressions, ok2 := metric(calibration.Typical, "impressions")
+	typicalClicks, ok3 := metric(calibration.Typical, "clicks")
+	breakoutSpend, ok4 := metric(calibration.Breakout, "spend_minor")
+	breakoutImpressions, ok5 := metric(calibration.Breakout, "impressions")
+	breakoutClicks, ok6 := metric(calibration.Breakout, "clicks")
+	if !(ok1 && ok2 && ok3 && ok4 && ok5 && ok6) {
+		return base, fmt.Errorf("%w: calibrated launch prior lacks required metrics", ErrInvalidRequest)
+	}
+	base.CalibrationStatus = CalibrationStatusAccountProduct
+	base.CalibrationPriorRef = calibration.ID
+	base.InputSnapshotHash = inputHash
+	base.PredictionHorizon = "P7D"
+	base.EvidenceRefs = []string{"plan-version://" + input.PlanID + fmt.Sprintf("/%d", input.PlanVersion), "calibration-manifest://" + input.ManifestBinding.ManifestID, "connector-launch-calibration://" + calibration.ID}
+	base.Assumptions = []string{"The account and product keep the observed fixed delivery behavior.", "Each sample selects one typical or breakout launch batch.", "Seven-day totals use the calibrated central 80 percent range.", "Daily allocation is uniform because the current calibration does not model a daily learning curve.", "Conversion metrics still use the explicit CVR and tracking priors."}
+	base.Limitations = []string{"The model cannot identify the winning unit before platform learning.", "The model does not estimate causal budget, bid, or material effects.", "The calibrated interval is truncated at historical P10 and P90.", "Point estimates are not reliable optimization targets.", "Results require human review."}
+
+	seedMaterial := sha256.Sum256([]byte(inputHash + "\x00" + calibration.PayloadHash + "\x00" + request.StableSeed + "\x00" + MechanisticSimulationModelVersion))
+	rng := rand.New(rand.NewSource(int64(binary.BigEndian.Uint64(seedMaterial[:8])))) // #nosec G404 -- deterministic simulation, not security.
+	windows := make([][]mechanisticSample, 7)
+	for day := range windows {
+		windows[day] = make([]mechanisticSample, request.SampleCount)
+	}
+	totalCap := input.BudgetMinor
+	if input.BudgetMode == OceanEngineBudgetModeDaily && input.DailyBudgetMinor > 0 && input.DailyBudgetMinor*7 < totalCap {
+		totalCap = input.DailyBudgetMinor * 7
+	}
+	for sampleIndex := 0; sampleIndex < request.SampleCount; sampleIndex++ {
+		rejected := request.ReviewState == SimulationReviewRejected || (request.ReviewState == SimulationReviewUnknown && rng.Float64() > request.PriorSet.ReviewPassProbability.Value)
+		if rejected {
+			for day := range windows {
+				windows[day][sampleIndex].reviewRejected = true
+			}
+			continue
+		}
+		spendPrior, impressionsPrior, clicksPrior := typicalSpend, typicalImpressions, typicalClicks
+		if rng.Float64() < calibration.BreakoutProbability {
+			spendPrior, impressionsPrior, clicksPrior = breakoutSpend, breakoutImpressions, breakoutClicks
+		}
+		spend := int64(math.Round(triangularValues(rng, spendPrior.P10, spendPrior.P50, spendPrior.P90)))
+		impressions := int64(math.Round(triangularValues(rng, impressionsPrior.P10, impressionsPrior.P50, impressionsPrior.P90)))
+		clicks := int64(math.Round(triangularValues(rng, clicksPrior.P10, clicksPrior.P50, clicksPrior.P90)))
+		if spend > totalCap {
+			ratio := float64(totalCap) / float64(spend)
+			spend = totalCap
+			impressions = int64(math.Round(float64(impressions) * ratio))
+			clicks = int64(math.Round(float64(clicks) * ratio))
+		}
+		if clicks > impressions {
+			clicks = impressions
+		}
+		for day := range windows {
+			dailySpend := splitIntegerTotal(spend, 7, day)
+			dailyImpressions := splitIntegerTotal(impressions, 7, day)
+			dailyClicks := splitIntegerTotal(clicks, 7, day)
+			value := mechanisticSample{spend: dailySpend, impressions: dailyImpressions, clicks: dailyClicks}
+			cvr := triangular(rng, request.PriorSet.CVR)
+			value.trueConversions = binomial(rng, dailyClicks, cvr)
+			value.observedConversions = binomial(rng, value.trueConversions, request.PriorSet.TrackingObservableRate.Value)
+			if dailyImpressions > 0 {
+				value.cpm = floatPtr(float64(dailySpend) * 1000 / float64(dailyImpressions))
+				value.ctr = floatPtr(float64(dailyClicks) / float64(dailyImpressions))
+			}
+			if dailyClicks > 0 {
+				value.cpc = floatPtr(float64(dailySpend) / float64(dailyClicks))
+				value.cvr = floatPtr(float64(value.trueConversions) / float64(dailyClicks))
+			}
+			if value.trueConversions > 0 {
+				value.cpa = floatPtr(float64(dailySpend) / float64(value.trueConversions))
+			}
+			windows[day][sampleIndex] = value
+		}
+	}
+	for day := range windows {
+		base.MetricWindows = append(base.MetricWindows, summarizeMechanisticWindow(input.Schedule.StartAt.Add(time.Duration(day)*24*time.Hour), input.Schedule.Timezone, day+1, windows[day], input.Currency))
+	}
+	base.ScenarioProbabilities = []SimulationScenarioProbability{
+		{Scenario: "typical_launch", ThresholdVersion: MechanisticThresholdVersion, Probability: 1 - calibration.BreakoutProbability, Status: "calibrated", EvidenceRefs: append([]string(nil), base.EvidenceRefs...), Limitations: []string{"The ordinary band uses historical P10, P50, and P90 totals."}},
+		{Scenario: "breakout_launch", ThresholdVersion: MechanisticThresholdVersion, Probability: calibration.BreakoutProbability, Status: "calibrated", EvidenceRefs: append([]string(nil), base.EvidenceRefs...), Limitations: []string{"The model cannot identify the winning unit before launch."}},
+	}
+	base.Alerts = []MechanisticSimulationAlert{}
+	base.RecommendationDrafts = []SimulationRecommendationDraft{{RecommendationType: "portfolio_observation", TargetField: "parallel_project_promotion_portfolio", CurrentValue: "frozen_configuration", SuggestedRange: [2]float64{0, 0}, ExpectedEffectRange: [2]float64{0, 0}, Confidence: "medium", EffectBasis: "predictive_association", Rationale: "Launch parallel projects or promotions, protect emerging winners, and prune only after the seven-day observation window matures.", EvidenceRefs: append([]string(nil), base.EvidenceRefs...), Risks: []string{"Winner identity is unknown before platform learning."}, Guardrails: []string{"Do not rotate material on an established winner.", "Do not change budget or bid from this shadow result."}, RequiresHumanReview: true}}
+	return base, nil
+}
+
+func triangularValues(rng *rand.Rand, minimum, mode, maximum float64) float64 {
+	return triangular(rng, SimulationRangePrior{Minimum: minimum, Mode: mode, Maximum: maximum})
+}
+
+func splitIntegerTotal(total int64, parts, index int) int64 {
+	base, remainder := total/int64(parts), total%int64(parts)
+	if int64(index) < remainder {
+		return base + 1
+	}
+	return base
 }
 
 func generateMechanisticSample(rng *rand.Rand, request MechanisticSimulationRequest, dailyCap, remaining int64, day int) mechanisticSample {

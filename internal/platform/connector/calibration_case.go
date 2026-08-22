@@ -39,19 +39,26 @@ type CalibrationExportResult struct {
 }
 
 type CalibrationAuditReport struct {
-	DatasetVersion               string         `json:"dataset_version"`
-	PredictionCutoff             time.Time      `json:"prediction_cutoff"`
-	ObjectCounts                 map[string]int `json:"object_counts"`
-	PromotionCount               int            `json:"promotion_count"`
-	ProductLinkedPromotionCount  int            `json:"product_linked_promotion_count"`
-	ConfigurationCoverageCount   int            `json:"configuration_coverage_count"`
-	MaterialBindingCoverageCount int            `json:"material_binding_coverage_count"`
-	MetricWindowCount            int            `json:"metric_window_count"`
-	MetricQualityCounts          map[string]int `json:"metric_quality_counts"`
-	EarliestMetricStart          *time.Time     `json:"earliest_metric_start"`
-	LatestMetricEnd              *time.Time     `json:"latest_metric_end"`
-	ExportedCaseCount            int            `json:"exported_case_count"`
-	SkippedPromotionCounts       map[string]int `json:"skipped_promotion_counts"`
+	DatasetVersion                        string         `json:"dataset_version"`
+	PredictionCutoff                      time.Time      `json:"prediction_cutoff"`
+	ObjectCounts                          map[string]int `json:"object_counts"`
+	PromotionCount                        int            `json:"promotion_count"`
+	PromotionCreateTimeCoverageCount      int            `json:"promotion_create_time_coverage_count"`
+	PromotionMetricCoverageCount          int            `json:"promotion_metric_coverage_count"`
+	PromotionLaunchMetricCoverageCount    int            `json:"promotion_launch_metric_coverage_count"`
+	PromotionMetricBeforeCreateCount      int            `json:"promotion_metric_before_create_count"`
+	PromotionMetricAfterLaunchWindowCount int            `json:"promotion_metric_after_launch_window_count"`
+	ProductLinkedPromotionCount           int            `json:"product_linked_promotion_count"`
+	ConfigurationCoverageCount            int            `json:"configuration_coverage_count"`
+	ConfigurationFeatureCoverage          map[string]int `json:"configuration_feature_coverage"`
+	ConfigurationFeatureDistinctCount     map[string]int `json:"configuration_feature_distinct_count"`
+	MaterialBindingCoverageCount          int            `json:"material_binding_coverage_count"`
+	MetricWindowCount                     int            `json:"metric_window_count"`
+	MetricQualityCounts                   map[string]int `json:"metric_quality_counts"`
+	EarliestMetricStart                   *time.Time     `json:"earliest_metric_start"`
+	LatestMetricEnd                       *time.Time     `json:"latest_metric_end"`
+	ExportedCaseCount                     int            `json:"exported_case_count"`
+	SkippedPromotionCounts                map[string]int `json:"skipped_promotion_counts"`
 }
 
 type CalibrationCase struct {
@@ -333,20 +340,49 @@ func (e CalibrationCaseExporter) buildCase(request CalibrationExportRequest, exp
 }
 
 func AuditCalibrationSnapshot(snapshot CanonicalSnapshot) CalibrationAuditReport {
-	report := CalibrationAuditReport{DatasetVersion: snapshot.DatasetVersion, PredictionCutoff: snapshot.PredictionCutoff, ObjectCounts: map[string]int{}, MetricQualityCounts: map[string]int{}, SkippedPromotionCounts: map[string]int{}}
+	report := CalibrationAuditReport{DatasetVersion: snapshot.DatasetVersion, PredictionCutoff: snapshot.PredictionCutoff, ObjectCounts: map[string]int{}, ConfigurationFeatureCoverage: map[string]int{}, ConfigurationFeatureDistinctCount: map[string]int{}, MetricQualityCounts: map[string]int{}, SkippedPromotionCounts: map[string]int{}}
 	promotions := latestObjects(snapshot.Objects, "promotion")
 	configs := latestConfigurations(snapshot.Configurations)
+	metricsByPromotion := latestMetrics(snapshot.Metrics, time.Time{}, snapshot.PredictionCutoff)
+	featureValues := map[string]map[string]struct{}{}
 	bindings := activeBindings(snapshot.Bindings, snapshot.PredictionCutoff)
 	for _, object := range snapshot.Objects {
 		report.ObjectCounts[object.ObjectKind]++
 	}
 	for _, promotion := range promotions {
 		report.PromotionCount++
+		createTime, hasCreateTime := calibrationObjectCreateTime(promotion.State)
+		if hasCreateTime {
+			report.PromotionCreateTimeCoverageCount++
+		}
+		promotionMetrics := metricsByPromotion[promotion.ObjectRef]
+		if len(promotionMetrics) > 0 {
+			report.PromotionMetricCoverageCount++
+			if hasCreateTime {
+				firstMetric := promotionMetrics[0].WindowStart
+				metricDay := calibrationPlatformDay(firstMetric)
+				createDay := calibrationPlatformDay(createTime)
+				if metricDay.Before(createDay) {
+					report.PromotionMetricBeforeCreateCount++
+				} else if metricDay.Sub(createDay) <= 7*24*time.Hour {
+					report.PromotionLaunchMetricCoverageCount++
+				} else {
+					report.PromotionMetricAfterLaunchWindowCount++
+				}
+			}
+		}
 		if value, ok := promotion.State["product_ref"].(string); ok && strings.HasPrefix(value, "ref_") {
 			report.ProductLinkedPromotionCount++
 		}
 		if _, ok := configs[promotion.ObjectRef]; ok {
 			report.ConfigurationCoverageCount++
+			features, _ := calibrationFeatures(configs[promotion.ObjectRef].Values, 0)
+			appendCalibrationAuditFeature(featureValues, report.ConfigurationFeatureCoverage, "budget_minor", features.BudgetMinor)
+			appendCalibrationAuditFeature(featureValues, report.ConfigurationFeatureCoverage, "bid_minor", features.BidMinor)
+			appendCalibrationAuditFeature(featureValues, report.ConfigurationFeatureCoverage, "currency", features.Currency)
+			appendCalibrationAuditFeature(featureValues, report.ConfigurationFeatureCoverage, "charging_mode", features.ChargingMode)
+			appendCalibrationAuditFeature(featureValues, report.ConfigurationFeatureCoverage, "optimization_target", features.OptimizationTarget)
+			appendCalibrationAuditFeature(featureValues, report.ConfigurationFeatureCoverage, "delivery_mode", features.DeliveryMode)
 		}
 		if len(bindings[promotion.ObjectRef]) > 0 {
 			report.MaterialBindingCoverageCount++
@@ -364,7 +400,61 @@ func AuditCalibrationSnapshot(snapshot CanonicalSnapshot) CalibrationAuditReport
 			report.LatestMetricEnd = &value
 		}
 	}
+	for name, values := range featureValues {
+		report.ConfigurationFeatureDistinctCount[name] = len(values)
+	}
 	return report
+}
+
+func calibrationPlatformDay(value time.Time) time.Time {
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	local := value.In(location)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location)
+}
+
+func calibrationObjectCreateTime(values map[string]any) (time.Time, bool) {
+	for _, key := range []string{"promotion_create_time", "create_time"} {
+		raw, ok := values[key].(string)
+		if !ok {
+			continue
+		}
+		if value, ok := parseCalibrationPlatformTime(raw); ok {
+			return value, true
+		}
+	}
+	for _, value := range values {
+		nested, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if result, found := calibrationObjectCreateTime(nested); found {
+			return result, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func parseCalibrationPlatformTime(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if value, err := time.Parse(time.RFC3339, raw); err == nil {
+		return value.UTC(), true
+	}
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	if value, err := time.ParseInLocation("2006-01-02 15:04:05", raw, location); err == nil {
+		return value.UTC(), true
+	}
+	return time.Time{}, false
+}
+
+func appendCalibrationAuditFeature[T comparable](values map[string]map[string]struct{}, coverage map[string]int, name string, value *T) {
+	if value == nil {
+		return
+	}
+	coverage[name]++
+	if values[name] == nil {
+		values[name] = map[string]struct{}{}
+	}
+	values[name][fmt.Sprint(*value)] = struct{}{}
 }
 
 func latestObjects(values []ObjectSnapshot, kind string) []ObjectSnapshot {

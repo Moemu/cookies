@@ -50,6 +50,10 @@ type AccountService struct {
 	Now      func() time.Time
 }
 
+func PlatformAccountID(organizationID, projectID, externalID string) string {
+	return "oeacct_" + canonicalHash([]string{strings.TrimSpace(organizationID), strings.TrimSpace(projectID), strings.TrimSpace(externalID)})
+}
+
 func (s AccountService) Register(ctx context.Context, request RegisterAccountRequest) (PlatformAccount, error) {
 	externalID, credentialRef := strings.TrimSpace(request.ExternalID), strings.TrimSpace(request.CredentialRef)
 	if s.Store == nil || request.OrganizationID == "" || externalID == "" || len(externalID) > 191 || credentialRef == "" || len(credentialRef) > 191 || strings.ContainsAny(externalID, "\r\n\t") || containsSensitiveText(credentialRef) {
@@ -110,7 +114,7 @@ func (r MySQLRepository) RegisterAccount(ctx context.Context, request RegisterAc
 		return PlatformAccount{}, err
 	}
 	now := time.Now().UTC()
-	id := "oeacct_" + canonicalHash([]string{request.OrganizationID, request.ProjectID, request.ExternalID})
+	id := PlatformAccountID(request.OrganizationID, request.ProjectID, request.ExternalID)
 	connectionID := "oeconn_" + canonicalHash([]string{request.OrganizationID, request.ProjectID, id})
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

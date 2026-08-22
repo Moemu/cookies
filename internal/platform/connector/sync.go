@@ -54,8 +54,9 @@ type SyncRequest struct {
 type SyncMode string
 
 const (
-	SyncModeFull        SyncMode = "full"
-	SyncModeMetricsOnly SyncMode = "metrics_only"
+	SyncModeFull          SyncMode = "full"
+	SyncModeMetricsOnly   SyncMode = "metrics_only"
+	SyncModeInventoryOnly SyncMode = "inventory_only"
 )
 
 func (m SyncMode) normalized() SyncMode {
@@ -67,7 +68,7 @@ func (m SyncMode) normalized() SyncMode {
 
 func (m SyncMode) Valid() bool {
 	value := m.normalized()
-	return value == SyncModeFull || value == SyncModeMetricsOnly
+	return value == SyncModeFull || value == SyncModeMetricsOnly || value == SyncModeInventoryOnly
 }
 
 type SyncResult struct {
@@ -165,7 +166,7 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 		maxPages = 1000
 	}
 	materialParents := map[string]map[string]struct{}{}
-	if request.Mode == SyncModeFull {
+	if request.Mode == SyncModeFull || request.Mode == SyncModeInventoryOnly {
 		cursor = "account_info"
 		if err = s.Writer.UpdateSyncCursor(ctx, runID, cursor); err != nil {
 			return result, err
@@ -274,6 +275,9 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 					}
 				}
 			}
+			if request.Mode == SyncModeInventoryOnly {
+				continue
+			}
 			configuration, readErr := reader.PromotionConfiguration(ctx, promotionRef)
 			if readErr != nil {
 				return result, readErr
@@ -349,6 +353,10 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 				}
 			}
 		}
+	}
+	if request.Mode == SyncModeInventoryOnly {
+		cursor, status = "complete", "completed"
+		return result, nil
 	}
 	metricWindowDays := 7
 	if request.Mode == SyncModeMetricsOnly {

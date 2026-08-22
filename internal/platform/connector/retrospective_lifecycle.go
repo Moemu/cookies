@@ -15,13 +15,16 @@ type RetrospectiveLifecycleFeatures struct {
 }
 
 type RetrospectiveLifecycleSignal struct {
-	AgeDays                    int    `json:"age_days"`
-	AgeBucket                  string `json:"age_bucket"`
-	DaysSinceLastPositive      *int   `json:"days_since_last_positive,omitempty"`
-	RecencyBucket              string `json:"recency_bucket"`
-	ConsecutivePositiveWindows int    `json:"consecutive_positive_windows"`
-	StreakBucket               string `json:"streak_bucket"`
-	TrendBucket                string `json:"trend_bucket"`
+	AgeDays                    int     `json:"age_days"`
+	AgeBucket                  string  `json:"age_bucket"`
+	DaysSinceLastPositive      *int    `json:"days_since_last_positive,omitempty"`
+	RecencyBucket              string  `json:"recency_bucket"`
+	ConsecutivePositiveWindows int     `json:"consecutive_positive_windows"`
+	StreakBucket               string  `json:"streak_bucket"`
+	TrendBucket                string  `json:"trend_bucket"`
+	LatestValue                int64   `json:"latest_value"`
+	RecentWindowCount          int     `json:"recent_window_count"`
+	RecentMean                 float64 `json:"recent_mean"`
 }
 
 type RetrospectiveLifecycleCalibration struct {
@@ -102,6 +105,20 @@ func retrospectiveLifecycleSignal(allMetrics, history []MetricWindow, cutoff tim
 		result.ConsecutivePositiveWindows++
 	}
 	result.StreakBucket = lifecycleStreakBucket(result.ConsecutivePositiveWindows)
+	recent := append([]MetricWindow(nil), history...)
+	sort.Slice(recent, func(i, j int) bool { return recent[i].WindowStart.Before(recent[j].WindowStart) })
+	if len(recent) > 0 {
+		result.LatestValue = recent[len(recent)-1].Metrics[metric]
+		start := len(recent) - 3
+		if start < 0 {
+			start = 0
+		}
+		for _, value := range recent[start:] {
+			result.RecentMean += float64(value.Metrics[metric])
+			result.RecentWindowCount++
+		}
+		result.RecentMean /= float64(result.RecentWindowCount)
+	}
 	return result
 }
 

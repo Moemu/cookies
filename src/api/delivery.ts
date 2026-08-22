@@ -1323,7 +1323,8 @@ export type MechanisticSimulation = {
   sampleCount: number
   status: string
   isSimulated: true
-  calibrationStatus: 'assumption_driven'
+  calibrationStatus: 'assumption_driven' | 'account_product_calibrated'
+  calibrationPriorRef?: string
   metricWindows: Array<{ sequence: number; start: string; end: string; timezone: string; metrics: Record<string, { available: boolean; unit: string; p10?: number; p50?: number; p90?: number; mean?: number }> }>
   scenarioProbabilities: Array<{ scenario: string; probability: number; status: string; limitations: string[] }>
   alerts: Array<{ type: string; severity: string; probability: number; limitations: string[] }>
@@ -1350,7 +1351,7 @@ export type MechanisticRecommendationDraft = {
 
 type WireMechanisticSimulation = {
   id: string; plan_id: string; plan_version: number; model_version: string; prior_set_version: string; stable_seed: string
-  prediction_horizon: string; sample_count: number; status: string; is_simulated: true; calibration_status: 'assumption_driven'
+  prediction_horizon: string; sample_count: number; status: string; is_simulated: true; calibration_status: MechanisticSimulation['calibrationStatus']; calibration_prior_ref?: string
   metric_windows: Array<{ sequence: number; start: string; end: string; timezone: string; metrics: MechanisticSimulation['metricWindows'][number]['metrics'] }>
   scenario_probabilities: Array<{ scenario: string; probability: number; status: string; limitations: string[] }>
   alerts: MechanisticSimulation['alerts']; recommendation_drafts: MechanisticSimulation['recommendationDrafts']
@@ -1358,9 +1359,9 @@ type WireMechanisticSimulation = {
 }
 
 export const deliveryMechanisticSimulationApi = {
-  async run(projectId: string, planId: string, version: number, request: { stableSeed: string; sampleCount: number; predictionHorizonDays: number; reviewState: 'unknown' | 'approved' | 'rejected'; priorSet: MechanisticPriorSet }): Promise<MechanisticSimulation> {
+  async run(projectId: string, planId: string, version: number, request: { stableSeed: string; sampleCount: number; predictionHorizonDays: number; reviewState: 'unknown' | 'approved' | 'rejected'; priorSet: MechanisticPriorSet; calibrationAccountRef: string }): Promise<MechanisticSimulation> {
     const response = await deliveryPlanRequest<{ result: WireMechanisticSimulation }>(projectId, `/plans/${encodeURIComponent(planId)}/versions/${version}/mechanistic-simulation-runs`, {
-      method: 'POST', body: JSON.stringify({ stable_seed: request.stableSeed, sample_count: request.sampleCount, prediction_horizon_days: request.predictionHorizonDays, review_state: request.reviewState, prior_set: request.priorSet }),
+      method: 'POST', body: JSON.stringify({ stable_seed: request.stableSeed, sample_count: request.sampleCount, prediction_horizon_days: request.predictionHorizonDays, review_state: request.reviewState, prior_set: request.priorSet, calibration_account_ref: request.calibrationAccountRef }),
     })
     return toMechanisticSimulation(response.result)
   },
@@ -1373,7 +1374,7 @@ function toMechanisticSimulation(value: WireMechanisticSimulation): MechanisticS
   return {
     id: value.id, planId: value.plan_id, planVersion: value.plan_version, modelVersion: value.model_version,
     priorSetVersion: value.prior_set_version, stableSeed: value.stable_seed, predictionHorizon: value.prediction_horizon,
-    sampleCount: value.sample_count, status: value.status, isSimulated: value.is_simulated, calibrationStatus: value.calibration_status,
+    sampleCount: value.sample_count, status: value.status, isSimulated: value.is_simulated, calibrationStatus: value.calibration_status, calibrationPriorRef: value.calibration_prior_ref,
     metricWindows: value.metric_windows.map(window => ({ sequence: window.sequence, start: window.start, end: window.end, timezone: window.timezone, metrics: window.metrics })),
     scenarioProbabilities: value.scenario_probabilities, alerts: value.alerts, recommendationDrafts: value.recommendation_drafts,
     assumptions: value.assumptions, limitations: value.limitations, evidenceRefs: value.evidence_refs,

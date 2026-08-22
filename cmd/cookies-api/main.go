@@ -465,9 +465,10 @@ func main() {
 		httpserver.DomainMount{Pattern: "/api/media/v1/", Handler: mediaunderstandinghttp.New(*mediaUnderstandingService)})
 	connectorRepository := connector.MySQLRepository{DB: db}
 	deliveryService := &delivery.Service{
-		Repository:         delivery.MySQLRepository{DB: db},
-		Projects:           projectService,
-		ConnectorSnapshots: connectorRepository,
+		Repository:              delivery.MySQLRepository{DB: db},
+		Projects:                projectService,
+		ConnectorSnapshots:      connectorRepository,
+		LaunchBatchCalibrations: connectorRepository,
 		// The Connector is not configured in this environment. Normalize the
 		// deterministic OutcomeSimulation records through the Delivery consumer
 		// port until its future adapter publishes a stable contract.

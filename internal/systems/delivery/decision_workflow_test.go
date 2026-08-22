@@ -80,6 +80,21 @@ func TestBuildDeliveryDecisionUsesCreativeFatigueForParallelPortfolio(t *testing
 	}
 }
 
+func TestBuildDeliveryDecisionKeepsCalibratedLaunchPriorInObservationMode(t *testing.T) {
+	input := validDecisionEngineInput(t)
+	input.Scenarios = []SimulationScenarioProbability{{Scenario: "typical_launch", Probability: .78}, {Scenario: "breakout_launch", Probability: .22}}
+	input.Recommendations = []SimulationRecommendationDraft{{RecommendationType: "portfolio_observation", TargetField: "parallel_project_promotion_portfolio", RequiresHumanReview: true}}
+	decision, err := BuildDeliveryDecision(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range decision.Candidates {
+		if candidate.OptimizationFocus != "parallel_launch_observation" || candidate.Scenario != "breakout_launch" || candidate.ScenarioProbability != .22 || candidate.BudgetChangePercent != 0 {
+			t.Fatalf("calibrated launch prior produced an unsafe candidate: %#v", candidate)
+		}
+	}
+}
+
 func TestBuildDeliveryDecisionUsesCostPressureForDistinctBudgetPlans(t *testing.T) {
 	input := validDecisionEngineInput(t)
 	input.Scenarios = []SimulationScenarioProbability{{Scenario: "cost_pressure", Probability: .8}}

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const RetrospectiveCalibrationSchemaVersion = "delivery-retrospective-calibration/v6"
+const RetrospectiveCalibrationSchemaVersion = "delivery-retrospective-calibration/v7"
 
 type RetrospectiveCalibrationBuilder struct {
 	Reader SnapshotReader
@@ -42,6 +42,7 @@ type RetrospectiveCalibrationResult struct {
 	Calibration          []RetrospectiveCalibrationParameter `json:"calibration"`
 	HurdleCalibration    RetrospectiveHurdleCalibration      `json:"hurdle_calibration"`
 	LifecycleCalibration RetrospectiveLifecycleCalibration   `json:"lifecycle_calibration"`
+	CohortCalibration    RetrospectiveCohortCalibration      `json:"cohort_calibration"`
 	Diagnostics          RetrospectiveCalibrationDiagnostics `json:"diagnostics"`
 	Evaluation           []RetrospectiveMetricEvaluation     `json:"evaluation"`
 	ModelSelection       RetrospectiveModelSelection         `json:"model_selection"`
@@ -92,6 +93,7 @@ type RetrospectiveCalibrationCase struct {
 	BaselinePrediction  RetrospectiveMetricEstimate    `json:"baseline_prediction"`
 	HurdlePrediction    *RetrospectiveHurdlePrediction `json:"hurdle_prediction,omitempty"`
 	LifecyclePrediction *RetrospectiveHurdlePrediction `json:"lifecycle_prediction,omitempty"`
+	CohortPrediction    *RetrospectiveHurdlePrediction `json:"cohort_prediction,omitempty"`
 	Observed            RetrospectiveMetricTotals      `json:"observed"`
 	EligibleMetrics     []string                       `json:"eligible_metrics"`
 	ExcludedMetrics     map[string]string              `json:"excluded_metrics"`
@@ -167,7 +169,7 @@ func (b RetrospectiveCalibrationBuilder) Build(ctx context.Context, request Retr
 		KnowledgeCutoff: request.KnowledgeCutoff.UTC(), ReplayStart: request.ReplayStart.UTC(), ReplayEnd: request.ReplayEnd.UTC(), ExportedAt: now,
 		Policy:  RetrospectiveCalibrationPolicy{LookbackDays: request.LookbackDays, HorizonDays: request.HorizonDays, StepDays: request.StepDays, MinimumHistoryWindows: request.MinimumHistoryWindows, ConfigurationUsage: "excluded_current_snapshot_not_historical", EligibleMetrics: []string{"spend_minor", "impressions", "clicks"}, ConversionUsage: "excluded_until_attribution_maturity_is_proven", SplitPolicy: "rolling_origin_with_final_20_percent_observed_cutoff_holdout"},
 		Summary: RetrospectiveCalibrationSummary{SkippedCaseCounts: map[string]int{}}, Cases: []RetrospectiveCalibrationCase{},
-		Limitations: []string{"not_a_production_point_in_time_replay", "finalized_historical_metrics_were_not_available_to_cookies_at_the_replay_cutoff", "current_configuration_is_excluded", "historical_project_lineage_can_be_unavailable", "no_causal_budget_or_bid_effect", "conversion_feedback_maturity_not_proven", "cookies_project_and_plan_are_not_created"},
+		Limitations: []string{"not_a_production_point_in_time_replay", "finalized_historical_metrics_were_not_available_to_cookies_at_the_replay_cutoff", "current_configuration_is_excluded", "historical_project_lineage_can_be_unavailable", "missing_daily_rows_require_coverage_evidence_before_zero_imputation", "no_causal_budget_or_bid_effect", "conversion_feedback_maturity_not_proven", "cookies_project_and_plan_are_not_created"},
 	}
 	promotions := latestObjects(snapshot.Objects, "promotion")
 	result.Summary.PromotionCount = len(promotions)
@@ -233,7 +235,20 @@ func (b RetrospectiveCalibrationBuilder) Build(ctx context.Context, request Retr
 			result.Cases[index].LifecyclePrediction = &prediction
 		}
 	}
-	result.Diagnostics = diagnoseRetrospectiveCalibration(result.Cases, holdoutStart)
+	var cohortEvaluation []RetrospectiveMetricEvaluation
+	var cohortPredictions map[string]RetrospectiveHurdlePrediction
+	result.CohortCalibration, cohortEvaluation, cohortPredictions = calibrateAndEvaluateRetrospectiveCohort(result.Cases, holdoutStart)
+	result.Evaluation = append(result.Evaluation, cohortEvaluation...)
+	for index := range result.Cases {
+		if prediction, ok := cohortPredictions[result.Cases[index].CaseID]; ok {
+			result.Cases[index].CohortPrediction = &prediction
+		}
+	}
+	result.Diagnostics = diagnoseRetrospectiveCalibration(result.Cases, holdoutStart, result.Summary)
+	training, holdout := splitRetrospectiveCases(result.Cases, holdoutStart)
+	coldStart, warmStart := retrospectiveHoldoutCohorts(holdout, retrospectivePromotionSet(training))
+	result.Evaluation = append(result.Evaluation, evaluateRetrospectiveCases(coldStart, "trailing_mean_baseline", "time_holdout_cold_start", nil)...)
+	result.Evaluation = append(result.Evaluation, evaluateRetrospectiveCases(warmStart, "trailing_mean_baseline", "time_holdout_warm_start", nil)...)
 	result.ModelSelection = selectRetrospectiveModel(result.Evaluation, result.Diagnostics)
 	return result, nil
 }
@@ -464,14 +479,15 @@ func evaluateRetrospectiveCases(cases []RetrospectiveCalibrationCase, model, spl
 }
 
 func selectRetrospectiveModel(evaluations []RetrospectiveMetricEvaluation, diagnostics RetrospectiveCalibrationDiagnostics) RetrospectiveModelSelection {
-	result := RetrospectiveModelSelection{SelectedModel: "trailing_mean_baseline", CandidateModel: RetrospectiveLifecycleHurdleModelVersion, CandidateStatus: "rejected", AppliedToSimulator: false, Reasons: []string{}}
+	result := RetrospectiveModelSelection{SelectedModel: "trailing_mean_baseline", CandidateModel: RetrospectiveCohortModelVersion, CandidateStatus: "rejected", AppliedToSimulator: false, Reasons: []string{}}
 	baseline, candidate := map[string]RetrospectiveMetricEvaluation{}, map[string]RetrospectiveMetricEvaluation{}
 	for _, value := range evaluations {
+		key := value.DatasetSplit + "|" + value.Metric
 		switch value.Model {
 		case "trailing_mean_baseline":
-			baseline[value.Metric] = value
-		case RetrospectiveLifecycleHurdleModelVersion:
-			candidate[value.Metric] = value
+			baseline[key] = value
+		case RetrospectiveCohortModelVersion:
+			candidate[key] = value
 		}
 	}
 	if len(candidate) == 0 {
@@ -479,24 +495,27 @@ func selectRetrospectiveModel(evaluations []RetrospectiveMetricEvaluation, diagn
 		result.Reasons = []string{"training_or_holdout_cases_insufficient"}
 		return result
 	}
-	for _, metric := range []string{"spend_minor", "impressions", "clicks"} {
-		base, baseOK := baseline[metric]
-		challenger, challengerOK := candidate[metric]
-		if !baseOK || !challengerOK || base.WAPE == nil || challenger.WAPE == nil {
-			result.Reasons = append(result.Reasons, metric+":wape_unavailable")
-			continue
-		}
-		if *challenger.WAPE >= *base.WAPE {
-			result.Reasons = append(result.Reasons, metric+":holdout_wape_not_improved")
-		}
-		if *challenger.WAPE > 1 {
-			result.Reasons = append(result.Reasons, metric+":holdout_wape_above_readiness_limit")
-		}
-		if math.Abs(challenger.MeanBias) > math.Abs(base.MeanBias)*1.05 {
-			result.Reasons = append(result.Reasons, metric+":absolute_bias_regressed")
+	for _, split := range []string{"time_holdout", "time_holdout_cold_start", "time_holdout_warm_start"} {
+		for _, metric := range []string{"spend_minor", "impressions", "clicks"} {
+			key := split + "|" + metric
+			base, baseOK := baseline[key]
+			challenger, challengerOK := candidate[key]
+			if !baseOK || !challengerOK || base.WAPE == nil || challenger.WAPE == nil {
+				result.Reasons = append(result.Reasons, split+":"+metric+":wape_unavailable")
+				continue
+			}
+			if *challenger.WAPE >= *base.WAPE {
+				result.Reasons = append(result.Reasons, split+":"+metric+":wape_not_improved")
+			}
+			if *challenger.WAPE > 1 {
+				result.Reasons = append(result.Reasons, split+":"+metric+":wape_above_readiness_limit")
+			}
+			if math.Abs(challenger.MeanBias) > math.Abs(base.MeanBias)*1.05 {
+				result.Reasons = append(result.Reasons, split+":"+metric+":absolute_bias_regressed")
+			}
 		}
 	}
-	if diagnostics.Status == "distribution_shift_detected" {
+	if diagnostics.Status != "stable" {
 		for _, signal := range diagnostics.Signals {
 			result.Reasons = append(result.Reasons, "diagnostics:"+signal)
 		}

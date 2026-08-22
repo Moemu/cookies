@@ -7,22 +7,35 @@ import (
 )
 
 type RetrospectiveCalibrationDiagnostics struct {
-	Status            string                            `json:"status"`
-	UsedForPrediction bool                              `json:"used_for_prediction"`
-	Thresholds        RetrospectiveDiagnosticThresholds `json:"thresholds"`
-	Training          RetrospectiveSplitDiagnostics     `json:"training"`
-	Holdout           RetrospectiveSplitDiagnostics     `json:"holdout"`
-	MetricDrift       []RetrospectiveMetricDrift        `json:"metric_drift"`
-	Signals           []string                          `json:"signals"`
+	Status             string                            `json:"status"`
+	UsedForPrediction  bool                              `json:"used_for_prediction"`
+	Thresholds         RetrospectiveDiagnosticThresholds `json:"thresholds"`
+	Training           RetrospectiveSplitDiagnostics     `json:"training"`
+	Holdout            RetrospectiveSplitDiagnostics     `json:"holdout"`
+	HoldoutColdStart   RetrospectiveSplitDiagnostics     `json:"holdout_cold_start"`
+	HoldoutWarmStart   RetrospectiveSplitDiagnostics     `json:"holdout_warm_start"`
+	LabelObservability RetrospectiveLabelObservability   `json:"label_observability"`
+	MetricDrift        []RetrospectiveMetricDrift        `json:"metric_drift"`
+	Signals            []string                          `json:"signals"`
+	ContextSignals     []string                          `json:"context_signals"`
 }
 
 type RetrospectiveDiagnosticThresholds struct {
 	MinimumHoldoutCutoffDates   int     `json:"minimum_holdout_cutoff_dates"`
 	MaximumDateCaseShare        float64 `json:"maximum_date_case_share"`
-	MaximumUnseenPromotionShare float64 `json:"maximum_unseen_promotion_share"`
+	MinimumColdStartCases       int     `json:"minimum_cold_start_cases"`
+	MinimumWarmStartCases       int     `json:"minimum_warm_start_cases"`
 	MaximumPositiveRateDelta    float64 `json:"maximum_positive_rate_delta"`
 	MinimumPositiveMeanRatio    float64 `json:"minimum_positive_mean_ratio"`
 	MaximumPositiveMeanRatio    float64 `json:"maximum_positive_mean_ratio"`
+	MinimumLabelOutcomeCoverage float64 `json:"minimum_label_outcome_coverage"`
+}
+
+type RetrospectiveLabelObservability struct {
+	HistoryEligibleFoldCount int     `json:"history_eligible_fold_count"`
+	ObservedLabelFoldCount   int     `json:"observed_label_fold_count"`
+	MissingLabelFoldCount    int     `json:"missing_label_fold_count"`
+	ObservedLabelShare       float64 `json:"observed_label_share"`
 }
 
 type RetrospectiveSplitDiagnostics struct {
@@ -53,10 +66,10 @@ type RetrospectiveMetricDrift struct {
 	PositiveMeanRatio *float64 `json:"positive_mean_ratio,omitempty"`
 }
 
-func diagnoseRetrospectiveCalibration(cases []RetrospectiveCalibrationCase, holdoutStart time.Time) RetrospectiveCalibrationDiagnostics {
+func diagnoseRetrospectiveCalibration(cases []RetrospectiveCalibrationCase, holdoutStart time.Time, summaries ...RetrospectiveCalibrationSummary) RetrospectiveCalibrationDiagnostics {
 	thresholds := RetrospectiveDiagnosticThresholds{
-		MinimumHoldoutCutoffDates: 7, MaximumDateCaseShare: 0.4, MaximumUnseenPromotionShare: 0.2,
-		MaximumPositiveRateDelta: 0.2, MinimumPositiveMeanRatio: 0.67, MaximumPositiveMeanRatio: 1.5,
+		MinimumHoldoutCutoffDates: 7, MaximumDateCaseShare: 0.4, MinimumColdStartCases: 30, MinimumWarmStartCases: 30,
+		MaximumPositiveRateDelta: 0.2, MinimumPositiveMeanRatio: 0.67, MaximumPositiveMeanRatio: 1.5, MinimumLabelOutcomeCoverage: 1,
 	}
 	training, holdout := make([]RetrospectiveCalibrationCase, 0), make([]RetrospectiveCalibrationCase, 0)
 	for _, value := range cases {
@@ -70,10 +83,23 @@ func diagnoseRetrospectiveCalibration(cases []RetrospectiveCalibrationCase, hold
 	for _, value := range training {
 		trainingPromotions[value.PromotionRef] = struct{}{}
 	}
+	coldStart, warmStart := retrospectiveHoldoutCohorts(holdout, trainingPromotions)
 	result := RetrospectiveCalibrationDiagnostics{
 		Status: "stable", UsedForPrediction: false, Thresholds: thresholds,
 		Training: retrospectiveSplitDiagnostics(training, nil), Holdout: retrospectiveSplitDiagnostics(holdout, trainingPromotions),
-		MetricDrift: []RetrospectiveMetricDrift{}, Signals: []string{},
+		HoldoutColdStart: retrospectiveSplitDiagnostics(coldStart, trainingPromotions), HoldoutWarmStart: retrospectiveSplitDiagnostics(warmStart, trainingPromotions),
+		MetricDrift: []RetrospectiveMetricDrift{}, Signals: []string{}, ContextSignals: []string{},
+	}
+	if len(summaries) > 0 {
+		missing := summaries[0].SkippedCaseCounts["label_windows_missing"]
+		eligible := summaries[0].ExportedCaseCount + missing
+		result.LabelObservability = RetrospectiveLabelObservability{HistoryEligibleFoldCount: eligible, ObservedLabelFoldCount: summaries[0].ExportedCaseCount, MissingLabelFoldCount: missing}
+		if eligible > 0 {
+			result.LabelObservability.ObservedLabelShare = float64(summaries[0].ExportedCaseCount) / float64(eligible)
+		}
+		if result.LabelObservability.ObservedLabelShare < thresholds.MinimumLabelOutcomeCoverage {
+			result.Signals = append(result.Signals, "missing_daily_rows_lack_coverage_evidence")
+		}
 	}
 	if result.Holdout.CutoffDateCount < thresholds.MinimumHoldoutCutoffDates {
 		result.Signals = append(result.Signals, "holdout_cutoff_dates_below_minimum")
@@ -81,8 +107,14 @@ func diagnoseRetrospectiveCalibration(cases []RetrospectiveCalibrationCase, hold
 	if result.Holdout.MaximumDateCaseShare > thresholds.MaximumDateCaseShare {
 		result.Signals = append(result.Signals, "holdout_case_concentration_above_limit")
 	}
-	if result.Holdout.UnseenPromotionShare > thresholds.MaximumUnseenPromotionShare {
-		result.Signals = append(result.Signals, "holdout_unseen_promotion_share_above_limit")
+	if result.Holdout.UnseenPromotionCases > 0 {
+		result.ContextSignals = append(result.ContextSignals, "holdout_contains_cold_start_workload")
+	}
+	if result.HoldoutColdStart.CaseCount < thresholds.MinimumColdStartCases {
+		result.Signals = append(result.Signals, "cold_start_holdout_cases_below_minimum")
+	}
+	if result.HoldoutWarmStart.CaseCount < thresholds.MinimumWarmStartCases {
+		result.Signals = append(result.Signals, "warm_start_holdout_cases_below_minimum")
 	}
 	trainingMetrics := retrospectiveMetricDistributionByName(result.Training.Metrics)
 	holdoutMetrics := retrospectiveMetricDistributionByName(result.Holdout.Metrics)
@@ -94,18 +126,32 @@ func diagnoseRetrospectiveCalibration(cases []RetrospectiveCalibrationCase, hold
 			ratio := holdoutMetric.PositiveMean / trainingMetric.PositiveMean
 			drift.PositiveMeanRatio = &ratio
 			if ratio < thresholds.MinimumPositiveMeanRatio || ratio > thresholds.MaximumPositiveMeanRatio {
-				result.Signals = append(result.Signals, metric+":positive_magnitude_shift")
+				result.ContextSignals = append(result.ContextSignals, metric+":aggregate_positive_magnitude_shift")
 			}
 		}
 		if math.Abs(drift.PositiveRateDelta) > thresholds.MaximumPositiveRateDelta {
-			result.Signals = append(result.Signals, metric+":positive_rate_shift")
+			result.ContextSignals = append(result.ContextSignals, metric+":aggregate_positive_rate_shift")
 		}
 		result.MetricDrift = append(result.MetricDrift, drift)
 	}
-	if len(result.Signals) > 0 {
-		result.Status = "distribution_shift_detected"
+	if result.LabelObservability.MissingLabelFoldCount > 0 {
+		result.Status = "insufficient_label_observability"
+	} else if len(result.Signals) > 0 {
+		result.Status = "insufficient_segment_coverage"
 	}
 	return result
+}
+
+func retrospectiveHoldoutCohorts(holdout []RetrospectiveCalibrationCase, trainingPromotions map[string]struct{}) ([]RetrospectiveCalibrationCase, []RetrospectiveCalibrationCase) {
+	coldStart, warmStart := make([]RetrospectiveCalibrationCase, 0), make([]RetrospectiveCalibrationCase, 0)
+	for _, value := range holdout {
+		if _, seen := trainingPromotions[value.PromotionRef]; seen {
+			warmStart = append(warmStart, value)
+		} else {
+			coldStart = append(coldStart, value)
+		}
+	}
+	return coldStart, warmStart
 }
 
 func retrospectiveSplitDiagnostics(cases []RetrospectiveCalibrationCase, trainingPromotions map[string]struct{}) RetrospectiveSplitDiagnostics {

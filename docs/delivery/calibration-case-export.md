@@ -214,7 +214,7 @@ go run ./cmd/cookies-delivery-calibration export `
 2. 记录响应中的本地 `oeacct_` ID。
 3. 通过 `PUT /api/connector/v1/accounts/{account_ref}/session` 提交只读会话。
 4. 通过 `POST /api/connector/v1/accounts/{account_ref}/verify` 验证只读会话。
-5. 通过 `POST /api/connector/v1/accounts/{account_ref}/syncs` 同步 90 至 180 天。
+5. 通过 `POST /api/connector/v1/accounts/{account_ref}/syncs` 同步账号可用历史。
 6. 同步请求必须使用稳定幂等键。
 7. 运行 `audit`。
 8. 检查商品、配置、素材和指标覆盖率。
@@ -282,33 +282,194 @@ go run ./cmd/cookies-delivery-calibration backtest `
 
 每个特征只读取 `prediction_cutoff` 之前的指标。模型按生命周期分组建立先验。样本少时，模型回退到匿名 Project 和账号先验。
 
-程序只在训练集拟合生命周期先验和输出倍率。最终 20% 时间窗口只用于留出评估。报告可以同时保存 v2 和 v3 结果，但选择门只评估 v3。
+`cohort_continuation_v4` 用于短生命周期和冷启动任务。它使用截点前的最近值。它再拟合稳健的次日延续倍率。
 
-Hurdle challenger 必须满足全部门禁：
+程序只在训练集选择倍率分位数、先验强度和分组深度。内部时间验证也只读取训练集。最终 20% 时间窗口只用于留出评估。
+
+报告可以保存 v2、v3 和 v4 结果。选择门只评估 v4。程序分别评估全部、冷启动和暖启动留出集。
+
+单个单元不需要提供 90 至 180 天历史。账号历史应覆盖多个生命周期批次。单元可以只有 60 天或更短历史。
+
+候选模型必须满足全部门禁：
 
 - 训练集必须为每个合格指标提供至少 10 个正值案例。
-- 所有合格指标的留出 WAPE 都必须改善。
-- 所有合格指标的留出 WAPE 都必须不高于 100%。
-- 所有合格指标的绝对偏差不能恶化 5% 以上。
+- 全部、冷启动和暖启动留出集都必须有至少 30 个案例。
+- 所有分层和合格指标的留出 WAPE 都必须改善。
+- 所有分层和合格指标的留出 WAPE 都必须不高于 100%。
+- 所有分层和合格指标的绝对偏差不能恶化 5% 以上。
 
 相对改善但未通过绝对门槛时，程序仍拒绝候选模型。
 
-生命周期模型通过门禁后，程序也不会修改模拟器。Owner 必须单独批准模型接入。
+候选模型通过门禁后，程序也不会修改模拟器。Owner 必须单独批准模型接入。
 
 ### 回测分布诊断
 
 回测报告包含独立的 `diagnostics`。诊断可以读取训练集和留出集标签。模型不能把诊断结果作为预测特征。
 
-诊断检查以下风险：
+诊断使用以下硬边界：
 
 - 留出集少于 7 个预测日期。
 - 单个日期包含超过 40% 的留出案例。
-- 未见推广单元包含超过 20% 的留出案例。
-- 指标正值率变化超过 20 个百分点。
-- 指标正值均值低于训练集的 0.67 倍或高于 1.5 倍。
+- 冷启动留出集少于 30 个案例。
+- 暖启动留出集少于 30 个案例。
+- 历史合格截点存在未分类的缺失标签行。
 
-任一风险出现时，报告设置 `diagnostics.status=distribution_shift_detected`。该状态阻止候选模型通过就绪门禁。它不能放宽其他门禁。
+未见推广单元占比只描述冷启动任务构成。它不是漂移判据。
 
-设置页提供“补齐近 180 天日级指标”。该操作使用 `metrics_only`。它不重复读取对象详情，也不调用平台写接口。
+正值率和正值均值变化属于上下文信号。它们不能单独拒绝候选模型。
+
+任一硬边界出现时，报告设置非稳定状态。该状态阻止候选模型通过就绪门禁。它不能放宽其他门禁。
+
+日级行缺失不能无证据地表示零投放。
+
+默认账号、项目和单元报表完成逐日对账后，账号日期可作为覆盖证据。导入器从单元首次出现日开始补零。报表结束边界仍按右删失处理。该方法不要求状态字段。
+
+设置页提供账号历史日级指标同步。该操作使用 `metrics_only`。它不重复读取对象详情，也不调用平台写接口。
+
+设置页也提供对象索引同步。该操作使用 `inventory_only`。它只读取账号和单元清单。它保存真实创建时间，但不读取配置详情、素材、诊断或指标。
 
 所有对象和指标窗口引用使用 HMAC 匿名化。输出不包含平台原始 ID、自由文本、Cookie 或当前配置值。
+
+## 离线 XLSX 回测
+
+没有托管 API 时，可以使用平台导出的四个 XLSX 文件运行回测。
+
+该路径不要求 Docker 或 Connector 数据库。它也不会写平台。
+
+命令按表头识别以下四种数据：
+
+1. 账号日级汇总。
+2. 项目日级汇总。
+3. 单元日级明细。
+4. 素材聚合明细。
+
+命令必须确认以下条件：
+
+- 四个文件属于同一平台账号。
+- 账号、项目和单元的日级原子指标完全对账。
+- 每个日级对象键唯一。
+- 文件不包含公式、隐藏行、隐藏列或外部关系。
+
+回测只使用单元日级消耗、曝光、点击和转化。
+
+素材聚合数据没有日期和单元绑定。系统只将它用于输入完整性检查。系统不能把它作为模型指标。
+
+素材聚合可能把同一次投放同时归因给视频和标题。直接求和会重复计数。
+
+```powershell
+go run ./cmd/cookies-delivery-calibration backtest-xlsx `
+  -organization <cookies-organization-id> `
+  -account-daily <account-daily.xlsx> `
+  -project-daily <project-daily.xlsx> `
+  -promotion-daily <promotion-daily.xlsx> `
+  -material-aggregate <material-aggregate.xlsx> `
+  -lookback-days 7 `
+  -horizon-days 1 `
+  -step-days 1 `
+  -minimum-history-windows 2 `
+  -key-version <non-secret-key-version> `
+  -output retrospective-offline.json
+```
+
+命令从文件名绑定平台账号。输出不包含该平台账号 ID。
+
+原始文件仍可能包含素材 URL 和临时访问参数。不要提交这些文件。
+
+### 导入 Connector 账本
+
+Docker 和数据库可用后，可以把同一数据写入 Connector 的不可变账本。
+
+该操作要求已登记的本地 `oeacct_` 账号。命令会把登记账号与文件账号进行精确比较。
+
+```powershell
+go run ./cmd/cookies-delivery-calibration import-xlsx `
+  -organization <cookies-organization-id> `
+  -account <connector-local-account-id> `
+  -account-daily <account-daily.xlsx> `
+  -project-daily <project-daily.xlsx> `
+  -promotion-daily <promotion-daily.xlsx> `
+  -material-aggregate <material-aggregate.xlsx> `
+  -idempotency-key <stable-import-key> `
+  -output offline-import-report.json
+```
+
+系统加密保存四个原始工作簿。
+
+规范快照只写匿名项目、匿名单元和单元日级原子指标。
+
+系统不写名称、素材文本、素材 URL 或临时访问参数。
+
+离线文件没有单元到项目的可靠关系。系统保留空 `parent_ref`。系统不能根据名称猜测关系。
+
+## 自定义配置报表
+
+默认报表用于指标对账。自定义报表用于增加投放前已知特征。
+
+同一推广产品通常使用固定的优化目标、计费类型、深度转化目标和投放模式。系统把这些固定值作为账号/产品先验。系统不要求这些值在同一账号内变化。
+
+模型使用以下层级：
+
+- 账号/产品先验。
+- 项目启动批次。
+- 批次内单元。
+
+系统先预测启动批次的总量、有效单元数和集中度。系统不承诺在平台学习前识别最终跑量单元。单元在启动时使用可交换的概率分配。
+
+报表中的首个指标日期不能代替真实创建时间。Connector 对象清单提供 `create_time` 或 `promotion_create_time`。系统必须先用真实创建时间建立启动批次，再关联离线日级指标。
+
+主报表使用“时间-天 × 项目 ID × 单元 ID”粒度。不要在主报表加入素材维度。素材维度可能拆分一条单元日记录。
+
+维度超过平台单个报表的十项限制时，导出两个互补报表。两个报表都必须包含“时间-天 × 项目 ID × 单元 ID”。系统先在每个报表内聚合重复键，再按该键关联。系统不能直接按行号关联。
+
+完成对象索引同步后，运行启动批次回测：
+
+```powershell
+go run ./cmd/cookies-delivery-calibration backtest-launch-batches `
+  -organization <cookies-organization-id> `
+  -account <connector-local-account-id> `
+  -core <custom-core.xlsx> `
+  -supplement <custom-supplement.xlsx> `
+  -cutoff <connector-knowledge-cutoff-rfc3339> `
+  -persist `
+  -output launch-batch-backtest.json
+```
+
+`-persist` 只保存紧凑先验。它保存文件哈希、样本计数、情景概率和分位数。它不保存原始平台 ID、名称或报表行。
+
+程序执行以下检查：
+
+- 两份文件必须属于同一登记账号。
+- 两份文件必须包含相同的日期、项目和单元键。
+- 程序先聚合重复键，再核对消耗、展示、点击和转化原子指标。
+- 单元必须匹配 Connector 对象索引和真实创建时间。
+- 完整七日窗口才可以进入启动批次样本。
+
+模型把批次分为普通情景和跑量情景。它使用训练期第 80 百分位消耗作为情景边界。Beta 平滑用于估计跑量概率。
+
+`ready_for_probabilistic_shadow` 只允许影子模拟。它不允许模型直接生成预算或出价变更。点预测不能识别哪个单元会在平台学习后跑量。
+
+上线前模拟请求必须显式提供本地 `oeacct_` 账号引用。Delivery 服务从 Connector 读取该账号的最新先验。服务不接受客户端提供的校准分布。首版校准窗口固定为七日。
+
+首版选择以下维度：
+
+- 时间-天。
+- 项目 ID、项目类型、营销目的、优化目标和计费类型。
+- 深度转化目标、投放模式和营销场景。
+- 是否搜索蓝海流量项目、关键行为名称和线索多载体优选。
+- 单元 ID、单元出价、深度转化出价和 ROI 系数。
+- 是否原生营销、首选位置、包名和平台。
+- 性别、年龄细分、网络、省份和城市。
+
+首版选择以下原子指标：
+
+- 消耗（元）。
+- 展示数。
+- 点击数。
+- 转化数（计费时间）。
+- 深度转化数（计费时间）。
+
+不要选择点击率、转化率、平均成本或 ROI 派生指标。程序从原子指标计算它们。
+
+不要选择项目名称、单元名称、抖音昵称或下载链接。模型不需要自由文本和外部标识。
+
+如果需要素材模型，单独导出“时间-天 × 单元 ID × 素材类型”报表。该报表不能直接与主报表指标求和。

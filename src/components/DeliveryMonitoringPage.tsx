@@ -5,6 +5,7 @@ import {
   type ConnectorInspection, type DeliveryAlert, type DeliveryPlan, type MechanisticPriorSet, type MechanisticSimulation,
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
+import { api, type ApiConnectorAccount, type ApiLaunchBatchCalibration } from '../data/api'
 import { StateBoundary } from './StateBoundary'
 
 const typeLabel: Record<DeliveryAlert['type'], string> = {
@@ -19,6 +20,8 @@ const metricLabel: Record<string, string> = {
   cpm: '千次展示成本（CPM）', ctr: '点击率（CTR）', cpc: '单次点击成本（CPC）', cvr: '转化率（CVR）', cpa: '单次转化成本（CPA）',
 }
 const scenarioCopy: Record<string, { label: string; detail: string }> = {
+  typical_launch: { label: '普通跑量情景', detail: '账号历史中普通项目首个七日窗口的情景概率。' },
+  breakout_launch: { label: '跑量号情景', detail: '账号历史中进入高消耗尾部的项目首个七日窗口概率。模型不能提前识别具体跑量单元。' },
   steady: { label: '稳定投放', detail: '审核通过、正常起量且产生转化的模拟样本占比。' },
   under_delivery: { label: '跑量不足', detail: '未起量或没有消耗的模拟样本占比。' },
   cost_pressure: { label: '成本承压', detail: '千次展示成本高于显式先验众数的模拟样本占比。' },
@@ -28,7 +31,9 @@ const scenarioCopy: Record<string, { label: string; detail: string }> = {
   zero_conversion: { label: '零转化风险', detail: '产生点击但没有真实转化的模拟样本占比。' },
   spend_spike: { label: '高预算消耗风险', detail: '单日消耗超过日预算九成的模拟样本占比。' },
 }
-const scenarioStatusLabel: Record<string, string> = { simulated: '概率模拟结果', suspected: '疑似风险', known_state: '已知状态' }
+const scenarioStatusLabel: Record<string, string> = { calibrated: '账号校准结果', simulated: '概率模拟结果', suspected: '疑似风险', known_state: '已知状态' }
+
+type CalibratedAccount = { account: ApiConnectorAccount; calibration?: ApiLaunchBatchCalibration }
 
 type PriorForm = {
   review: number; delivery: number; budgetMin: number; budgetMode: number; budgetMax: number
@@ -49,9 +54,10 @@ export function DeliveryMonitoringPage({ tourCase: _tourCase }: { tourCase?: str
   const [alerts, setAlerts] = useState<DeliveryAlert[] | null>(null)
   const [simulation, setSimulation] = useState<MechanisticSimulation>()
   const [inspection, setInspection] = useState<ConnectorInspection>()
+  const [calibratedAccounts, setCalibratedAccounts] = useState<CalibratedAccount[]>([])
+  const [calibrationAccountRef, setCalibrationAccountRef] = useState('')
   const [prior, setPrior] = useState<PriorForm>(initialPrior)
   const [stableSeed, setStableSeed] = useState('prelaunch-assumption-v1')
-  const [horizonDays, setHorizonDays] = useState(7)
   const [sampleCount, setSampleCount] = useState(5000)
   const [busy, setBusy] = useState<string>()
   const [error, setError] = useState<string>()
@@ -64,10 +70,15 @@ export function DeliveryMonitoringPage({ tourCase: _tourCase }: { tourCase?: str
     setError(undefined)
     setForbidden(false)
     try {
-      const [loadedPlans, loadedAlerts] = await Promise.all([
+      const [loadedPlans, loadedAlerts, connectorAccounts] = await Promise.all([
         deliveryPlanApi.list(currentProject.id),
         deliveryAlertApi.list(currentProject.id, queryPlanID ? { planId: queryPlanID } : {}),
+        api.listConnectorAccounts(),
       ])
+      const accountCalibrations = await Promise.all(connectorAccounts.items.filter(account => account.status === 'verified').map(async account => {
+        try { return { account, calibration: await api.getConnectorLaunchBatchCalibration(account.id) } }
+        catch { return { account } }
+      }))
       const nextPlanID = queryPlanID || loadedPlans[0]?.id || ''
       const nextPlan = loadedPlans.find(plan => plan.id === nextPlanID)
       const latestSimulation = nextPlan ? await readLatestSimulation(currentProject.id, nextPlan) : undefined
@@ -76,6 +87,8 @@ export function DeliveryMonitoringPage({ tourCase: _tourCase }: { tourCase?: str
       setPlanID(current => current || nextPlanID)
       setAlerts(nextPlanID ? loadedAlerts.filter(alert => alert.planId === nextPlanID && alert.source === 'connector') : [])
       setSimulation(latestSimulation)
+      setCalibratedAccounts(accountCalibrations)
+      setCalibrationAccountRef(current => current || accountCalibrations.find(value => value.calibration)?.account.id || '')
     } catch (reason) {
       if (generation !== loadGeneration.current) return
       setForbidden(reason instanceof DeliveryApiError && (reason.status === 403 || reason.code === 'PROJECT_ACCESS_DENIED'))
@@ -117,7 +130,7 @@ export function DeliveryMonitoringPage({ tourCase: _tourCase }: { tourCase?: str
     setError(undefined)
     try {
       setSimulation(await deliveryMechanisticSimulationApi.run(currentProject.id, selectedPlan.id, selectedPlan.currentVersionNumber, {
-        stableSeed: stableSeed.trim(), sampleCount, predictionHorizonDays: horizonDays, reviewState: 'unknown', priorSet: buildPriorSet(prior),
+        stableSeed: stableSeed.trim(), sampleCount, predictionHorizonDays: 7, reviewState: 'unknown', priorSet: buildPriorSet(prior), calibrationAccountRef,
       }))
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '无法运行上线前概率模拟。')
@@ -156,30 +169,21 @@ export function DeliveryMonitoringPage({ tourCase: _tourCase }: { tourCase?: str
     </header>
     {error ? <div className="delivery-monitoring__error" role="alert"><CircleAlert size={15}/>{error}</div> : null}
     <section className="delivery-simulation-workspace" aria-label="上线前概率模拟">
-      <header><div><span className="section-label">上线前</span><h3>Mechanistic 概率模拟</h3><p>该结果使用显式先验。结果是情景分布，不是已校准效果承诺。</p></div><span className={`delivery-simulation-status ${simulation ? 'is-complete' : ''}`}>{simulation ? '模拟已完成' : '等待运行'}</span></header>
+      <header><div><span className="section-label">上线前</span><h3>账号校准概率模拟</h3><p>模型读取所选账号的历史项目首个七日窗口。结果区分普通情景和跑量号情景。</p></div><span className={`delivery-simulation-status ${simulation ? 'is-complete' : ''}`}>{simulation ? '模拟已完成' : '等待运行'}</span></header>
       <div className="delivery-simulation-controls">
+        <label>校准账号<select value={calibrationAccountRef} onChange={event => setCalibrationAccountRef(event.target.value)}><option value="">请选择已校准账号</option>{calibratedAccounts.map(({ account, calibration }) => <option key={account.id} value={account.id} disabled={!calibration}>{account.display_label || '未命名账号'} · {calibration ? '校准可用' : '缺少校准'}</option>)}</select></label>
         <label>稳定 seed<input value={stableSeed} onChange={event => setStableSeed(event.target.value)} /></label>
-        <label>预测天数<input type="number" min={1} max={31} value={horizonDays} onChange={event => setHorizonDays(Number(event.target.value))} /></label>
+        <label>预测窗口<input value="首个 7 日" disabled /></label>
         <label>样本数<input type="number" min={100} max={100000} value={sampleCount} onChange={event => setSampleCount(Number(event.target.value))} /></label>
-        <button className="primary-button" disabled={!selectedPlan || busy !== undefined || !stableSeed.trim()} onClick={() => void runSimulation()}><Play size={14} fill="currentColor"/>{busy === 'simulation' ? '模拟中…' : '运行概率模拟'}</button>
+        <button className="primary-button" disabled={!selectedPlan || !calibrationAccountRef || busy !== undefined || !stableSeed.trim()} onClick={() => void runSimulation()}><Play size={14} fill="currentColor"/>{busy === 'simulation' ? '模拟中…' : '运行概率模拟'}</button>
       </div>
-      <details className="delivery-alert-card__technical"><summary>编辑显式先验</summary><p>初始值是未校准的产品演练假设。它不是行业基准。运行记录会保存全部值和来源。</p><div className="delivery-simulation-controls">
+      {calibrationAccountRef ? <CalibrationSummary value={calibratedAccounts.find(value => value.account.id === calibrationAccountRef)?.calibration}/> : <div className="delivery-monitoring__caution"><ShieldAlert size={15}/>请选择包含可用校准结果的 Connector 账号。</div>}
+      <details className="delivery-alert-card__technical"><summary>补充假设：审核与转化</summary><p>账号报表未校准审核通过率、转化率和追踪可观测率。模型仅把这些值用于转化诊断。</p><div className="delivery-simulation-controls">
         <PriorInput label="审核通过概率" value={prior.review} onChange={review => setPrior(value => ({ ...value, review }))}/>
-        <PriorInput label="起量概率" value={prior.delivery} onChange={delivery => setPrior(value => ({ ...value, delivery }))}/>
-        <PriorInput label="预算利用率低值" value={prior.budgetMin} onChange={budgetMin => setPrior(value => ({ ...value, budgetMin }))}/>
-        <PriorInput label="预算利用率众数" value={prior.budgetMode} onChange={budgetMode => setPrior(value => ({ ...value, budgetMode }))}/>
-        <PriorInput label="预算利用率高值" value={prior.budgetMax} onChange={budgetMax => setPrior(value => ({ ...value, budgetMax }))}/>
-        <PriorInput label="千次展示成本（CPM）低值（分）" value={prior.cpmMin} onChange={cpmMin => setPrior(value => ({ ...value, cpmMin }))}/>
-        <PriorInput label="千次展示成本（CPM）众数（分）" value={prior.cpmMode} onChange={cpmMode => setPrior(value => ({ ...value, cpmMode }))}/>
-        <PriorInput label="千次展示成本（CPM）高值（分）" value={prior.cpmMax} onChange={cpmMax => setPrior(value => ({ ...value, cpmMax }))}/>
-        <PriorInput label="点击率（CTR）低值" value={prior.ctrMin} onChange={ctrMin => setPrior(value => ({ ...value, ctrMin }))}/>
-        <PriorInput label="点击率（CTR）众数" value={prior.ctrMode} onChange={ctrMode => setPrior(value => ({ ...value, ctrMode }))}/>
-        <PriorInput label="点击率（CTR）高值" value={prior.ctrMax} onChange={ctrMax => setPrior(value => ({ ...value, ctrMax }))}/>
         <PriorInput label="转化率（CVR）低值" value={prior.cvrMin} onChange={cvrMin => setPrior(value => ({ ...value, cvrMin }))}/>
         <PriorInput label="转化率（CVR）众数" value={prior.cvrMode} onChange={cvrMode => setPrior(value => ({ ...value, cvrMode }))}/>
         <PriorInput label="转化率（CVR）高值" value={prior.cvrMax} onChange={cvrMax => setPrior(value => ({ ...value, cvrMax }))}/>
         <PriorInput label="追踪可观测率" value={prior.tracking} onChange={tracking => setPrior(value => ({ ...value, tracking }))}/>
-        <PriorInput label="每日素材衰减率" value={prior.fatigue} onChange={fatigue => setPrior(value => ({ ...value, fatigue }))}/>
       </div></details>
       {simulation ? <MechanisticResult value={simulation}/> : <div className="delivery-simulation-empty"><Database size={17}/><span>选择计划并运行模拟。系统不会要求计划先上线。</span></div>}
     </section>
@@ -195,6 +199,13 @@ export function DeliveryMonitoringPage({ tourCase: _tourCase }: { tourCase?: str
 
 function PriorInput({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
   return <label>{label}<input type="number" step="any" value={value} onChange={event => onChange(Number(event.target.value))}/></label>
+}
+function CalibrationSummary({ value }: { value?: ApiLaunchBatchCalibration }) {
+  if (!value) return <div className="delivery-monitoring__caution"><ShieldAlert size={15}/>该账号没有可用的项目首七日校准结果。</div>
+  const spend = (items: ApiLaunchBatchCalibration['typical']) => items.find(item => item.metric === 'spend_minor')
+  const typicalSpend = spend(value.typical)
+  const breakoutSpend = spend(value.breakout)
+  return <div className="delivery-monitoring__notice"><Database size={15}/><span>已加载 {value.training_batches} 个训练项目批次。跑量号概率为 {(value.breakout_probability * 100).toFixed(1)}%。普通情景七日消耗 P50 为 {formatQuantile(typicalSpend?.p50, 'CNY_minor')}。跑量号情景七日消耗 P50 为 {formatQuantile(breakoutSpend?.p50, 'CNY_minor')}。</span></div>
 }
 function buildPriorSet(value: PriorForm): MechanisticPriorSet {
   const source = 'operator://delivery-monitoring-page'
@@ -214,7 +225,7 @@ function buildPriorSet(value: PriorForm): MechanisticPriorSet {
 function MechanisticResult({ value }: { value: MechanisticSimulation }) {
   const finalWindow = value.metricWindows.at(-1)
   return <div className="delivery-simulation-result">
-    <div className="delivery-simulation-summary"><dl><div><dt>计划版本</dt><dd>V{value.planVersion}</dd></div><div><dt>模型</dt><dd>{value.modelVersion}</dd></div><div><dt>先验版本</dt><dd>{value.priorSetVersion}</dd></div><div><dt>样本数</dt><dd>{value.sampleCount.toLocaleString('zh-CN')}</dd></div><div><dt>校准状态</dt><dd>假设驱动</dd></div><div><dt>Run ID</dt><dd>{value.id || '平台引用待解析'}</dd></div></dl></div>
+    <div className="delivery-simulation-summary"><dl><div><dt>计划版本</dt><dd>V{value.planVersion}</dd></div><div><dt>模型</dt><dd>{value.modelVersion}</dd></div><div><dt>先验版本</dt><dd>{value.priorSetVersion}</dd></div><div><dt>样本数</dt><dd>{value.sampleCount.toLocaleString('zh-CN')}</dd></div><div><dt>校准状态</dt><dd>{value.calibrationStatus === 'account_product_calibrated' ? '账号与商品已校准' : '假设驱动'}</dd></div><div><dt>Run ID</dt><dd>{value.id || '平台引用待解析'}</dd></div></dl></div>
     {finalWindow ? <div className="delivery-simulation-metrics">{Object.entries(finalWindow.metrics).map(([name, quantiles]) => <article key={name}><header><span>{metricLabel[name] ?? name}</span><time>窗口 {finalWindow.sequence}</time></header><dl><div><dt>P10</dt><dd>{formatQuantile(quantiles.p10, quantiles.unit)}</dd></div><div><dt>P50</dt><dd>{formatQuantile(quantiles.p50, quantiles.unit)}</dd></div><div><dt>P90</dt><dd>{formatQuantile(quantiles.p90, quantiles.unit)}</dd></div></dl></article>)}</div> : <div className="delivery-monitoring__caution"><ShieldAlert size={15}/>计划存在未解析的平台引用。模拟器已 fail closed。</div>}
     <div className="delivery-simulation-explanation"><div><h4>情景概率</h4>{value.scenarioProbabilities.map(item => { const copy = scenarioCopy[item.scenario] ?? { label: item.scenario, detail: '该情景暂无中文说明。' }; return <p key={item.scenario}><strong>{copy.label} · {(item.probability * 100).toFixed(1)}%</strong><span>{copy.detail} {scenarioStatusLabel[item.status] ?? item.status}。</span></p> })}</div><div><h4>反馈建议草案</h4>{value.recommendationDrafts.length ? value.recommendationDrafts.map(item => <p key={`${item.recommendation_type}-${item.target_field}`}><strong>{recommendationTypeLabel(item.recommendation_type)} · {confidenceLabel(item.confidence)}</strong><span>{recommendationRationale(item.rationale)} 需要人工复核。</span></p>) : <p><span>当前分布未触发建议草案。</span></p>}</div></div>
   </div>
@@ -232,9 +243,9 @@ function describeAlert(alert: DeliveryAlert) {
   return `当前值 ${formatQuantile(metric.observedValue, metric.unit)}。上一窗口 ${formatQuantile(metric.baselineValue, metric.unit)}。规则阈值 ${formatQuantile(metric.threshold, metric.unit)}。`
 }
 function inspectionStatus(value: ConnectorInspection['status']) { return ({ ready: '可评估', insufficient_data: '数据不足', quarantined: '数据隔离', stale: '数据过期', unavailable: 'Connector 不可用' })[value] }
-function recommendationTypeLabel(value: string) { return ({ review_compliance: '审核合规检查', tracking_review: '追踪链路检查', delivery_review: '跑量约束检查', cost_review: '成本控制检查', creative_test: '并行素材测试（旧结果）', portfolio_test: '并行跑量与淘汰', conversion_funnel_review: '转化漏斗检查', budget_pacing_review: '预算节奏检查' } as Record<string, string>)[value] ?? value }
+function recommendationTypeLabel(value: string) { return ({ review_compliance: '审核合规检查', tracking_review: '追踪链路检查', delivery_review: '跑量约束检查', cost_review: '成本控制检查', creative_test: '并行素材测试（旧结果）', portfolio_test: '并行跑量与淘汰', portfolio_observation: '并行跑量观察', conversion_funnel_review: '转化漏斗检查', budget_pacing_review: '预算节奏检查' } as Record<string, string>)[value] ?? value }
 function confidenceLabel(value: string) { return ({ low: '低置信度', medium: '中置信度', high: '高置信度' } as Record<string, string>)[value] ?? value }
-function recommendationRationale(value: string) { return ({ 'Review the rejection reason or replace non-compliant material.': '检查审核拒绝原因，并替换不合规素材。', 'Check tracking before budget or bid changes.': '在调整预算或出价前，先检查转化追踪链路。', 'Review delivery constraints and use a controlled test.': '检查定向、出价和库存约束，并使用受控测试验证。', 'Review cost assumptions before increasing budget or bid.': '提高预算或出价前，先复核成本先验和成本边界。', 'Consider a controlled creative rotation test.': '使用并行项目或单元测试不同素材，不修改现有跑量对象。', 'Launch parallel projects or promotions with distinct materials; protect stable delivery objects and prune only after a mature observation window.': '为同一商品新建并行项目或单元。使用不同素材跑量。保护稳定对象，只在观察窗口成熟后淘汰低效对象。', 'Check the conversion funnel before changing delivery settings.': '调整投放设置前，先检查转化漏斗。', 'Review budget pacing before changing the daily budget.': '调整日预算前，先检查预算消耗节奏。' } as Record<string, string>)[value] ?? value }
+function recommendationRationale(value: string) { return ({ 'Review the rejection reason or replace non-compliant material.': '检查审核拒绝原因，并替换不合规素材。', 'Check tracking before budget or bid changes.': '在调整预算或出价前，先检查转化追踪链路。', 'Review delivery constraints and use a controlled test.': '检查定向、出价和库存约束，并使用受控测试验证。', 'Review cost assumptions before increasing budget or bid.': '提高预算或出价前，先复核成本先验和成本边界。', 'Consider a controlled creative rotation test.': '使用并行项目或单元测试不同素材，不修改现有跑量对象。', 'Launch parallel projects or promotions with distinct materials; protect stable delivery objects and prune only after a mature observation window.': '为同一商品新建并行项目或单元。使用不同素材跑量。保护稳定对象，只在观察窗口成熟后淘汰低效对象。', 'Launch parallel projects or promotions, protect emerging winners, and prune only after the seven-day observation window matures.': '建立并行项目或单元。保护开始跑量的对象。只在七日观察窗口成熟后淘汰低效对象。', 'Check the conversion funnel before changing delivery settings.': '调整投放设置前，先检查转化漏斗。', 'Review budget pacing before changing the daily budget.': '调整日预算前，先检查预算消耗节奏。' } as Record<string, string>)[value] ?? value }
 async function readLatestSimulation(projectID: string, plan: DeliveryPlan) {
   try {
     return await deliveryMechanisticSimulationApi.getLatest(projectID, plan.id, plan.currentVersionNumber)

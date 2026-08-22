@@ -38,12 +38,46 @@ The hierarchical hurdle challenger models activity and positive magnitude
 separately. Relative improvement alone cannot pass its absolute readiness gate.
 The lifecycle hurdle challenger adds cutoff-safe age, activity recency, streak,
 and recent-trend segments. Sparse segments fall back to anonymous Project and
-account priors. A passing report still requires a separate simulator change.
+account priors. The cohort continuation challenger uses the latest cutoff-safe
+value and a robust next-day ratio. It selects its settings with training-only
+nested time validation. It evaluates overall, cold-start, and warm-start
+holdouts separately. A Promotion does not need 90 to 180 days of history.
+A passing report still requires a separate simulator change.
 Backtest diagnostics compare training and holdout coverage, activity, positive
-magnitude, and unseen Promotion share. They use labels only after evaluation.
-The prediction path cannot consume these diagnostics.
+magnitude, and unseen Promotion share. Unseen share describes the cold-start
+workload. It is not a drift failure. The prediction path cannot consume these
+diagnostics.
+
+`cookies-delivery-calibration backtest-xlsx` validates four offline platform
+exports without a running API or database. Account, Project, and Promotion
+daily atomic totals must reconcile exactly. Only Promotion daily metrics enter
+the retrospective model. Material aggregate metrics stay excluded because they
+lack a daily Promotion binding and can count one delivery more than once.
+After reconciliation, an absent Promotion row becomes zero only on a date that
+exists in the account export and after the Promotion first appears. This rule
+does not require a platform status field.
+
+`cookies-delivery-calibration import-xlsx` writes the validated bundle to the
+immutable ledger when MySQL is available. It verifies the source account
+against the registered local account and encrypts the original workbooks.
+Canonical facts never contain names, material text, URLs, or access parameters.
 Retrospective backtests retain metric-only Promotions after they leave the
 current inventory. Missing Project lineage stays empty. The backtest does not
 create or infer a Project, and these cases use only account-level priors.
 Each hurdle model requires at least ten positive training cases per eligible
 metric. A larger all-zero training set cannot satisfy this readiness boundary.
+
+`cookies-delivery-calibration backtest-launch-batches` joins two complementary
+custom reports to the read-only object index. It aggregates each report at
+day, Project, and Promotion grain before the join. It uses the platform create
+time. It does not use the first metric day as a launch date.
+
+The launch-batch model treats fixed optimization and charging settings as an
+account/product prior. It groups Promotions by the platform Project and the
+Project launch day. It predicts a typical scenario and a heavy-tail breakout
+scenario. It does not claim that it can identify the winning Promotion before
+platform learning. `ready_for_probabilistic_shadow` permits shadow simulation
+only. Point estimates remain diagnostic and cannot drive an optimization.
+Use `--persist` only after the result reaches that status. Persistence stores a
+compact prior and source hashes. It never stores raw report rows or external
+platform IDs. Delivery reads the latest prior through a narrow read-only port.

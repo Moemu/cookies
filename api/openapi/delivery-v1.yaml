@@ -3090,6 +3090,10 @@ components:
         prediction_horizon_days: { type: integer, minimum: 1, maximum: 31 }
         review_state: { type: string, enum: [unknown, approved, rejected] }
         prior_set: { $ref: '#/components/schemas/SimulationPriorSet' }
+        calibration_account_ref:
+          type: string
+          pattern: '^oeacct_[0-9a-f]+$'
+          description: Local Connector account reference. A calibrated request requires a seven-day horizon.
     SimulationQuantiles:
       type: object
       additionalProperties: false
@@ -3118,10 +3122,10 @@ components:
       additionalProperties: false
       required: [scenario, threshold_version, probability, status, evidence_refs, limitations]
       properties:
-        scenario: { type: string, enum: [steady, under_delivery, cost_pressure, creative_fatigue, tracking_anomaly, review_rejected, zero_conversion, spend_spike] }
+        scenario: { type: string, enum: [typical_launch, breakout_launch, steady, under_delivery, cost_pressure, creative_fatigue, tracking_anomaly, review_rejected, zero_conversion, spend_spike] }
         threshold_version: { type: string }
         probability: { type: number, minimum: 0, maximum: 1 }
-        status: { type: string, enum: [simulated, suspected, known_state] }
+        status: { type: string, enum: [calibrated, simulated, suspected, known_state] }
         evidence_refs: { type: array, items: { type: string } }
         limitations: { type: array, items: { type: string } }
     SimulationRecommendationDraft:
@@ -3161,8 +3165,8 @@ components:
         project_id: { type: string }
         plan_id: { type: string }
         plan_version: { type: integer, minimum: 1 }
-        schema_version: { type: string, const: delivery-mechanistic-simulation/v0 }
-        model_version: { type: string, const: delivery-mechanistic-monte-carlo/v0.2 }
+        schema_version: { type: string, const: delivery-mechanistic-simulation/v1 }
+        model_version: { type: string, const: delivery-mechanistic-monte-carlo/v0.3 }
         prior_set_version: { type: string }
         prior_set: { $ref: '#/components/schemas/SimulationPriorSet' }
         manifest_binding: { $ref: '#/components/schemas/CalibrationManifestBinding' }
@@ -3179,7 +3183,8 @@ components:
         evidence_refs: { type: array, items: { type: string } }
         status: { type: string, enum: [completed, platform_pending, blocked] }
         is_simulated: { type: boolean, const: true }
-        calibration_status: { type: string, const: assumption_driven }
+        calibration_status: { type: string, enum: [assumption_driven, account_product_calibrated] }
+        calibration_prior_ref: { type: string }
     MechanisticSimulationEnvelope:
       type: object
       additionalProperties: false

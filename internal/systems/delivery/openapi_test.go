@@ -180,9 +180,9 @@ func TestOpenAPIContractCoversMechanisticSimulationV0(t *testing.T) {
 		"/api/delivery/v1/projects/{project_id}/mechanistic-simulation-runs/{run_id}:",
 		"MechanisticSimulationRequest:",
 		"MechanisticSimulationResult:",
-		"delivery-mechanistic-simulation/v0",
-		"delivery-mechanistic-monte-carlo/v0.2",
-		"calibration_status: { type: string, const: assumption_driven }",
+		"delivery-mechanistic-simulation/v1",
+		"delivery-mechanistic-monte-carlo/v0.3",
+		"calibration_status: { type: string, enum: [assumption_driven, account_product_calibrated] }",
 		"requires_human_review: { type: boolean, const: true }",
 		"effect_basis: { type: string, enum: [predictive_association, rule_constraint] }",
 	} {

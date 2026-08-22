@@ -5721,6 +5721,15 @@ export type ApiConnectorSyncStatus = {
   status: 'queued' | 'running' | 'completed' | 'failed'; cursor?: string
   attempt: number; started_at: string; completed_at?: string
 }
+export type ApiLaunchBatchMetricDistribution = { metric: string; p10: number; p50: number; p90: number }
+export type ApiLaunchBatchCalibration = {
+  id: string; account_id: string; schema_version: string; model_version: string; status: 'ready_for_probabilistic_shadow'
+  training_batches: number; training_dates: number; evaluation_batches: number; evaluation_dates: number
+  breakout_threshold_minor: number; breakout_probability: number
+  typical: ApiLaunchBatchMetricDistribution[]; breakout: ApiLaunchBatchMetricDistribution[]
+  brier_score: number; calibration_error: number; final_brier_score: number; final_calibration_error: number
+  created_at: string
+}
 
 export type ApiMiyunAssetVersionRef = { asset_id: string; version: number }
 export type ApiMediaUnderstandingArtifact = {
@@ -6591,8 +6600,9 @@ export const api = {
   getConnectorAccountSession: (accountId: string) => request<ApiConnectorAccountSession>(`/connector/v1/accounts/${encodeURIComponent(accountId)}/session`),
   updateConnectorAccountSession: (accountId: string, body: { session: string; expected_version: number }) => request<ApiConnectorAccountSession>(`/connector/v1/accounts/${encodeURIComponent(accountId)}/session`, 'PUT', body),
   verifyConnectorAccount: (accountId: string) => request<ApiConnectorAccount>(`/connector/v1/accounts/${encodeURIComponent(accountId)}/verify`, 'POST'),
-  syncConnectorAccount: (accountId: string, body: { start: string; end: string; time_zone: string; currency: string; sync_mode?: 'full' | 'metrics_only' }, idempotencyKey: string) => request<ApiConnectorSyncResult>(`/connector/v1/accounts/${encodeURIComponent(accountId)}/syncs`, 'POST', body, { 'Idempotency-Key': idempotencyKey }),
+  syncConnectorAccount: (accountId: string, body: { start: string; end: string; time_zone: string; currency: string; sync_mode?: 'full' | 'metrics_only' | 'inventory_only' }, idempotencyKey: string) => request<ApiConnectorSyncResult>(`/connector/v1/accounts/${encodeURIComponent(accountId)}/syncs`, 'POST', body, { 'Idempotency-Key': idempotencyKey }),
   getConnectorSync: (accountId: string, syncId: string) => request<ApiConnectorSyncStatus>(`/connector/v1/accounts/${encodeURIComponent(accountId)}/syncs/${encodeURIComponent(syncId)}`),
+  getConnectorLaunchBatchCalibration: (accountId: string) => request<ApiLaunchBatchCalibration>(`/connector/v1/accounts/${encodeURIComponent(accountId)}/launch-batch-calibration`),
   getMiyunConnection: (projectId: string) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`),
   updateMiyunConnection: (projectId: string, body: { session: string; session_expires_at?: string; expected_version?: number }) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`, 'PUT', body),
   verifyMiyunConnection: (projectId: string, expectedVersion: number) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection:verify`, 'POST', { expected_version: expectedVersion }),

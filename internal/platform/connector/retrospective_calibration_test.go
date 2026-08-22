@@ -62,11 +62,11 @@ func TestRetrospectiveCalibrationBuildsLeakageMarkedRollingCases(t *testing.T) {
 	if first.CookiesPlanBinding.State != "unbound_historical" || first.CookiesPlanBinding.PlanID != nil || first.BaselinePrediction.Conversions != nil || first.History.Conversions != nil || first.Observed.Conversions != nil || first.HistoryWindowCount != 7 || first.LabelWindowCount != 2 {
 		t.Fatalf("case=%#v", first)
 	}
-	if len(result.Calibration) != 3 || len(result.Evaluation) != 6 {
+	if len(result.Calibration) != 3 || len(result.Evaluation) < 6 {
 		t.Fatalf("conversion entered evaluation: %#v", result.Evaluation)
 	}
 	for _, evaluation := range result.Evaluation {
-		if evaluation.DatasetSplit != "time_holdout" || evaluation.Metric == "conversions" {
+		if !strings.HasPrefix(evaluation.DatasetSplit, "time_holdout") || evaluation.Metric == "conversions" {
 			t.Fatalf("invalid evaluation boundary: %#v", evaluation)
 		}
 	}
@@ -93,26 +93,32 @@ func TestRetrospectiveCalibrationRejectsReplayBeyondKnowledgeCutoff(t *testing.T
 	}
 }
 
-func TestLifecycleHurdleCanPassStrictTimeHoldout(t *testing.T) {
+func TestCohortContinuationCanPassStratifiedTimeHoldout(t *testing.T) {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	cases := make([]RetrospectiveCalibrationCase, 0, 100)
-	for day := 0; day < 100; day++ {
+	cases := make([]RetrospectiveCalibrationCase, 0, 180)
+	for day := 0; day < 180; day++ {
 		cutoff := base.AddDate(0, 0, day)
-		signal := RetrospectiveLifecycleSignal{AgeDays: day, AgeBucket: "established", RecencyBucket: "cooling", TrendBucket: "stable"}
-		projectRef := "anon_project"
-		if day >= 70 {
-			projectRef = "unseen_holdout_project"
-			signal = RetrospectiveLifecycleSignal{AgeDays: 2, AgeBucket: "launch", RecencyBucket: "recent", StreakBucket: "short", TrendBucket: "rising"}
+		promotionRef := "known_promotion"
+		if day >= 150 {
+			promotionRef = "cold_" + cutoff.Format("20060102")
 		}
-		cases = append(cases, RetrospectiveCalibrationCase{CaseID: cutoff.Format("20060102"), ProjectRef: projectRef, PredictionCutoff: cutoff, HorizonEnd: cutoff.Add(24 * time.Hour), History: RetrospectiveMetricTotals{SpendMinor: 1000, Impressions: 10000, Clicks: 100}, HistoryActivity: RetrospectiveMetricActivity{ObservedWindows: 7, SpendPositiveWindows: 1, ImpressionPositiveWindows: 1, ClickPositiveWindows: 1}, Lifecycle: RetrospectiveLifecycleFeatures{Spend: signal, Impressions: signal, Clicks: signal}, BaselinePrediction: RetrospectiveMetricEstimate{SpendMinor: 500, Impressions: 5000, Clicks: 50}, Observed: RetrospectiveMetricTotals{SpendMinor: 200, Impressions: 2000, Clicks: 20}})
+		signal := RetrospectiveLifecycleSignal{AgeDays: 2, AgeBucket: "launch", RecencyBucket: "recent", StreakBucket: "short", TrendBucket: "stable"}
+		spendSignal, impressionSignal, clickSignal := signal, signal, signal
+		spendSignal.LatestValue, impressionSignal.LatestValue, clickSignal.LatestValue = 200, 2000, 20
+		cases = append(cases, RetrospectiveCalibrationCase{CaseID: cutoff.Format("20060102"), PromotionRef: promotionRef, PredictionCutoff: cutoff, HorizonEnd: cutoff.Add(24 * time.Hour), History: RetrospectiveMetricTotals{SpendMinor: 1000, Impressions: 10000, Clicks: 100}, HistoryActivity: RetrospectiveMetricActivity{ObservedWindows: 7, SpendPositiveWindows: 7, ImpressionPositiveWindows: 7, ClickPositiveWindows: 7}, Lifecycle: RetrospectiveLifecycleFeatures{Spend: spendSignal, Impressions: impressionSignal, Clicks: clickSignal}, BaselinePrediction: RetrospectiveMetricEstimate{SpendMinor: 500, Impressions: 5000, Clicks: 50}, Observed: RetrospectiveMetricTotals{SpendMinor: 200, Impressions: 2000, Clicks: 20}})
 	}
-	calibration, evaluation, predictions := calibrateAndEvaluateRetrospectiveLifecycle(cases, base.AddDate(0, 0, 70))
-	if calibration.Status != "evaluated" || calibration.TrainingCaseCount != 70 || calibration.HoldoutCaseCount != 30 || len(predictions) != 30 {
+	holdoutStart := base.AddDate(0, 0, 120)
+	calibration, evaluation, predictions := calibrateAndEvaluateRetrospectiveCohort(cases, holdoutStart)
+	if calibration.Status != "evaluated" || calibration.TrainingCaseCount != 120 || calibration.HoldoutCaseCount != 60 || len(predictions) != 60 {
 		t.Fatalf("calibration=%#v predictions=%d", calibration, len(predictions))
 	}
-	baseline := evaluateRetrospectiveCases(cases[70:], "trailing_mean_baseline", "time_holdout", nil)
-	selection := selectRetrospectiveModel(append(baseline, evaluation...), diagnoseRetrospectiveCalibration(cases, base.AddDate(0, 0, 70)))
-	if !selection.HoldoutGatePassed || selection.SelectedModel != RetrospectiveLifecycleHurdleModelVersion {
+	training, holdout := splitRetrospectiveCases(cases, holdoutStart)
+	cold, warm := retrospectiveHoldoutCohorts(holdout, retrospectivePromotionSet(training))
+	baseline := evaluateRetrospectiveCases(holdout, "trailing_mean_baseline", "time_holdout", nil)
+	baseline = append(baseline, evaluateRetrospectiveCases(cold, "trailing_mean_baseline", "time_holdout_cold_start", nil)...)
+	baseline = append(baseline, evaluateRetrospectiveCases(warm, "trailing_mean_baseline", "time_holdout_warm_start", nil)...)
+	selection := selectRetrospectiveModel(append(baseline, evaluation...), diagnoseRetrospectiveCalibration(cases, holdoutStart))
+	if !selection.HoldoutGatePassed || selection.SelectedModel != RetrospectiveCohortModelVersion {
 		t.Fatalf("selection=%#v evaluation=%#v", selection, evaluation)
 	}
 }
@@ -148,10 +154,10 @@ func TestRetrospectiveDiagnosticsDetectTemporalAndCohortShift(t *testing.T) {
 		cases = append(cases, RetrospectiveCalibrationCase{PromotionRef: "new_" + cutoff.Format("20060102"), PredictionCutoff: cutoff, Observed: RetrospectiveMetricTotals{SpendMinor: 100, Impressions: 100, Clicks: 100}})
 	}
 	diagnostics := diagnoseRetrospectiveCalibration(cases, holdoutStart)
-	if diagnostics.Status != "distribution_shift_detected" || diagnostics.UsedForPrediction || diagnostics.Holdout.CutoffDateCount != 3 || diagnostics.Holdout.UnseenPromotionShare != 1 {
+	if diagnostics.Status != "insufficient_segment_coverage" || diagnostics.UsedForPrediction || diagnostics.Holdout.CutoffDateCount != 3 || diagnostics.Holdout.UnseenPromotionShare != 1 || diagnostics.HoldoutColdStart.CaseCount != 30 || diagnostics.HoldoutWarmStart.CaseCount != 0 {
 		t.Fatalf("diagnostics=%#v", diagnostics)
 	}
-	wanted := map[string]bool{"holdout_cutoff_dates_below_minimum": false, "holdout_unseen_promotion_share_above_limit": false, "spend_minor:positive_rate_shift": false}
+	wanted := map[string]bool{"holdout_cutoff_dates_below_minimum": false, "warm_start_holdout_cases_below_minimum": false}
 	for _, signal := range diagnostics.Signals {
 		if _, ok := wanted[signal]; ok {
 			wanted[signal] = true
@@ -162,17 +168,45 @@ func TestRetrospectiveDiagnosticsDetectTemporalAndCohortShift(t *testing.T) {
 			t.Fatalf("missing signal %s in %#v", signal, diagnostics.Signals)
 		}
 	}
+	for _, signal := range diagnostics.Signals {
+		if signal == "holdout_unseen_promotion_share_above_limit" {
+			t.Fatalf("cold-start workload became a hard signal: %#v", diagnostics.Signals)
+		}
+	}
 	baselineWAPE, candidateWAPE := 0.8, 0.4
 	evaluations := make([]RetrospectiveMetricEvaluation, 0, 6)
 	for _, metric := range []string{"spend_minor", "impressions", "clicks"} {
-		evaluations = append(evaluations,
-			RetrospectiveMetricEvaluation{Model: "trailing_mean_baseline", Metric: metric, MeanBias: 10, WAPE: &baselineWAPE},
-			RetrospectiveMetricEvaluation{Model: RetrospectiveLifecycleHurdleModelVersion, Metric: metric, MeanBias: 5, WAPE: &candidateWAPE},
-		)
+		for _, split := range []string{"time_holdout", "time_holdout_cold_start", "time_holdout_warm_start"} {
+			evaluations = append(evaluations,
+				RetrospectiveMetricEvaluation{Model: "trailing_mean_baseline", DatasetSplit: split, Metric: metric, MeanBias: 10, WAPE: &baselineWAPE},
+				RetrospectiveMetricEvaluation{Model: RetrospectiveCohortModelVersion, DatasetSplit: split, Metric: metric, MeanBias: 5, WAPE: &candidateWAPE},
+			)
+		}
 	}
 	selection := selectRetrospectiveModel(evaluations, diagnostics)
 	if selection.HoldoutGatePassed || selection.CandidateStatus != "rejected" {
 		t.Fatalf("distribution shift did not block promotion: %#v", selection)
+	}
+}
+
+func TestRetrospectiveDiagnosticsRejectMissingUnclassifiedLabels(t *testing.T) {
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cases := make([]RetrospectiveCalibrationCase, 0, 80)
+	for day := 0; day < 80; day++ {
+		cases = append(cases, RetrospectiveCalibrationCase{PromotionRef: "promotion", PredictionCutoff: base.AddDate(0, 0, day), Observed: RetrospectiveMetricTotals{SpendMinor: 1, Impressions: 1, Clicks: 1}})
+	}
+	diagnostics := diagnoseRetrospectiveCalibration(cases, base.AddDate(0, 0, 40), RetrospectiveCalibrationSummary{ExportedCaseCount: 80, SkippedCaseCounts: map[string]int{"label_windows_missing": 20}})
+	if diagnostics.Status != "insufficient_label_observability" || diagnostics.LabelObservability.HistoryEligibleFoldCount != 100 || diagnostics.LabelObservability.ObservedLabelShare != 0.8 {
+		t.Fatalf("diagnostics=%#v", diagnostics)
+	}
+	found := false
+	for _, signal := range diagnostics.Signals {
+		if signal == "missing_daily_rows_lack_coverage_evidence" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing label observability signal: %#v", diagnostics.Signals)
 	}
 }
 

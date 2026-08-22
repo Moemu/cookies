@@ -40,6 +40,21 @@ type testReader struct {
 
 type metricsOnlyReader struct{ testReader }
 
+type inventoryOnlyReader struct{ testReader }
+
+func (inventoryOnlyReader) PromotionConfiguration(context.Context, string) (map[string]any, error) {
+	return nil, fmt.Errorf("configuration read is not permitted")
+}
+func (inventoryOnlyReader) PromotionMaterials(context.Context, string, bool) (map[string]any, error) {
+	return nil, fmt.Errorf("material read is not permitted")
+}
+func (inventoryOnlyReader) Attributes(context.Context, []string, string) (map[string]any, error) {
+	return nil, fmt.Errorf("attribute read is not permitted")
+}
+func (inventoryOnlyReader) StatQueryPage(context.Context, oceanengine.StatQueryRequest) (map[string]any, error) {
+	return nil, fmt.Errorf("metric read is not permitted")
+}
+
 func (metricsOnlyReader) AccountInfo(context.Context) (map[string]any, error) {
 	return nil, fmt.Errorf("inventory read is not permitted")
 }
@@ -63,7 +78,7 @@ func (testReader) ListPage(_ context.Context, r oceanengine.ListRequest) (map[st
 	if r.Page > 1 {
 		return map[string]any{"data": map[string]any{"ads": []any{}, "pagination": map[string]any{"total_page": 1.0}}}, nil
 	}
-	return map[string]any{"data": map[string]any{"ads": []any{map[string]any{"promotion_id": "raw-promotion-1", "project_id": "raw-project-1", "promotion_object": map[string]any{"product_id": "raw-product-1"}, "status": "active"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+	return map[string]any{"data": map[string]any{"ads": []any{map[string]any{"promotion_id": "raw-promotion-1", "project_id": "raw-project-1", "promotion_create_time": "2026-08-01 10:30:00", "promotion_object": map[string]any{"product_id": "raw-product-1"}, "status": "active"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
 }
 func (testReader) PromotionConfiguration(context.Context, string) (map[string]any, error) {
 	return map[string]any{"budget": 100.0, "landing_url": "https://secret.test/?token=x"}, nil
@@ -249,6 +264,25 @@ func TestSynchronizerMetricsOnlySkipsInventory(t *testing.T) {
 	}
 	if len(statRequests) != 15 || statRequests[0].StartTime != statRequests[0].EndTime[:10]+" 00:00:00" || statRequests[0].EndTime[11:] != "23:59:59" {
 		t.Fatalf("metrics-only requests do not use 14 stable daily windows: %#v", statRequests)
+	}
+}
+
+func TestSynchronizerInventoryOnlyStopsAfterObjectIndex(t *testing.T) {
+	writer := &testWriter{}
+	now := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
+	syncer := Synchronizer{Writer: writer, Readers: testFactory{reader: inventoryOnlyReader{testReader{}}}, Cipher: testCipher{}, Now: func() time.Time { return now }}
+	result, err := syncer.Sync(context.Background(), SyncRequest{OrganizationID: "org_1", AccountRef: "account", IdempotencyKey: "inventory", WindowStart: now.AddDate(0, 0, -180), WindowEnd: now, Mode: SyncModeInventoryOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ObjectCount != 4 || result.MetricCount != 0 || writer.completed != "completed" {
+		t.Fatalf("inventory-only result=%#v completed=%s", result, writer.completed)
+	}
+	if len(writer.raw) != 2 || len(writer.configs) != 0 || len(writer.metrics) != 0 || len(writer.materialMetrics) != 0 || len(writer.bindings) != 0 || len(writer.diagnoses) != 0 {
+		t.Fatalf("raw=%d config=%d metrics=%d material_metrics=%d bindings=%d diagnoses=%d", len(writer.raw), len(writer.configs), len(writer.metrics), len(writer.materialMetrics), len(writer.bindings), len(writer.diagnoses))
+	}
+	if got := writer.objects[1].State["promotion_create_time"]; got != "2026-08-01 10:30:00" {
+		t.Fatalf("promotion create time=%v", got)
 	}
 }
 

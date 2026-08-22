@@ -154,7 +154,7 @@ export function OceanEngineSessionSettings() {
     }
   }
 
-  const runSync = async (days: number, mode: 'full' | 'metrics_only') => {
+  const runSync = async (days: number, mode: 'full' | 'metrics_only' | 'inventory_only') => {
     if (!selectedAccountID || session?.status !== 'ready') return
     setBusy(true); setNotice('')
     try {
@@ -225,7 +225,7 @@ export function OceanEngineSessionSettings() {
         </section>
 
         <section className={`oe-sync-card ${session?.status === 'ready' ? 'ready' : ''}`} aria-labelledby="oe-sync-section-title">
-          <div className="oe-sync-icon"><Database size={20} aria-hidden="true" /></div><div className="oe-sync-copy"><span>03 · 数据读取</span><h3 id="oe-sync-section-title">历史同步与每日巡检</h3><p>{session?.status === 'ready' ? '首次同步读取完整对象。日级补数只读取指标，不重复读取对象详情。' : '完成只读验证后，系统才允许读取数据。'}</p><div className="oe-sync-facts"><span>只读请求</span><span>单日窗口</span><span>转换修订</span></div></div><div className="oe-sync-actions"><button className="secondary-button" type="button" onClick={() => void runSync(14, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><RefreshCw size={15} aria-hidden="true" />巡检最近 14 天</button><button className="secondary-button" type="button" onClick={() => void runSync(180, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />补齐近 180 天日级指标</button><button className="primary-button" type="button" onClick={() => void runSync(180, 'full')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步最近 180 天</button></div>
+          <div className="oe-sync-icon"><Database size={20} aria-hidden="true" /></div><div className="oe-sync-copy"><span>03 · 数据读取</span><h3 id="oe-sync-section-title">历史同步与每日巡检</h3><p>{session?.status === 'ready' ? '对象索引读取真实创建时间。日级补数只读取指标，不重复读取对象详情。' : '完成只读验证后，系统才允许读取数据。'}</p><div className="oe-sync-facts"><span>只读请求</span><span>单日窗口</span><span>转换修订</span></div></div><div className="oe-sync-actions"><button className="secondary-button" type="button" onClick={() => void runSync(180, 'inventory_only')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步对象索引</button><button className="secondary-button" type="button" onClick={() => void runSync(14, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><RefreshCw size={15} aria-hidden="true" />巡检最近 14 天</button><button className="secondary-button" type="button" onClick={() => void runSync(180, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />补齐近 180 天日级指标</button><button className="primary-button" type="button" onClick={() => void runSync(180, 'full')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步最近 180 天</button></div>
         </section>
       </div>
       {notice ? <p className="miyun-settings-notice" role="status" aria-live="polite">{notice}</p> : null}
