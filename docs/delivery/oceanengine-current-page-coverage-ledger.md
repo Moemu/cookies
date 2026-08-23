@@ -6,9 +6,10 @@ This ledger calibrates the current visible OceanEngine page only.
 
 It does not claim full platform coverage. It does not navigate to another page.
 
-The checked-in ledger is:
+The checked-in ledgers are:
 
-`api/fixtures/oceanengine-readonly-coverage-ledger-v1.json`
+- `api/fixtures/oceanengine-readonly-coverage-ledger-v1.json` — frozen historical contract.
+- `api/fixtures/oceanengine-readonly-coverage-ledger-v2.json` — current contract with separate create/edit targets.
 
 ## Coverage inventory
 
@@ -24,13 +25,15 @@ The ledger attempts these targets:
 
 | Target | Current status | Drift state |
 | --- | --- | --- |
-| Account context | `confirmed` | `stable` |
-| Project list | `confirmed` | `stable` |
-| Promotion list | `confirmed` | `stable` |
-| Project detail or edit | `confirmed` | `stable` |
-| Promotion detail or edit | `confirmed` | `stable` |
-| Material overview | `confirmed` | `stable` |
-| Report overview | `confirmed` | `stable` |
+| Account context | `confirmed_shell` | `stable` |
+| Project list | `confirmed_shell` | `stable` |
+| Project create | `not_accessible` | `verification_pending` |
+| Project edit | `confirmed_shell` | `stable` |
+| Promotion list | `confirmed_shell` | `stable` |
+| Promotion create | `not_accessible` | `verification_pending` |
+| Promotion edit | `confirmed_shell` | `stable` |
+| Material overview | `confirmed_shell` | `stable` |
+| Report overview | `confirmed_shell` | `stable` |
 
 `not_accessible` means the target was not the current page. It does not mean the platform lacks the page.
 
@@ -69,7 +72,7 @@ The ledger does not store their visible text.
 
 Two separate Playwright attachments observed each confirmed page target.
 
-Each before and after summary contained 10 observable object rows.
+The two list-page summaries contained 10 observable object rows each; the four form, material, and report pages contained 0 rows.
 
 The evidence recorded:
 
@@ -108,6 +111,24 @@ The proof covers current-page observable counts and controlled status markers on
 The commands write local observations and diagnostics below:
 
 `%LOCALAPPDATA%\cookies\browser-rpa\calibration\`
+
+Current runs retain their before/after preimages under `runs/<run_id>/coverage-{before,after}.json`, with `active-run.json` pointing to the in-progress run. Finalization removes the pointer. Finalization still reads the legacy root-level `coverage-before.json` and `coverage-after.json` layout for historical runs.
+
+The v2 ledger separates project/unit create and edit targets and distinguishes `confirmed_shell` from the future field-level `confirmed_fields` status. v1 and its fixture remain frozen history.
+
+## Field-level capture
+
+`browser-rpa:fields` runs read-only per-case field observations against the current Edge page. It consumes the 51-field calibration manifest and records, per coverage case, one observation envelope under:
+
+`%LOCALAPPDATA%\cookies\browser-rpa\calibration\field-observations\<case-id>-<timestamp>.json`
+
+Each envelope stores hashes and states only — no raw field values, account identifiers, or URL queries. Field-level evidence that covers every declared field of a page family is what upgrades a v2 target from `confirmed_shell` to `confirmed_fields`.
+
+```powershell
+npm run browser-rpa:fields -- init
+npm run browser-rpa:fields -- run CASE_ID [PLAN_PATH]
+npm run test:browser-rpa:fields
+```
 
 Do not copy raw DOM, screenshots, URL queries, or browser data into Git.
 
