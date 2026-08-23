@@ -64,6 +64,7 @@ export function DeliveryMonitoringPage({ tourCase: _tourCase }: { tourCase?: str
   const [forbidden, setForbidden] = useState(false)
   const loadGeneration = useRef(0)
   const selectedPlan = useMemo(() => plans?.find(plan => plan.id === planID), [plans, planID])
+  const selectedCalibration = useMemo(() => calibratedAccounts.find(value => value.account.id === calibrationAccountRef)?.calibration, [calibratedAccounts, calibrationAccountRef])
 
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current
@@ -73,22 +74,23 @@ export function DeliveryMonitoringPage({ tourCase: _tourCase }: { tourCase?: str
       const [loadedPlans, loadedAlerts, connectorAccounts] = await Promise.all([
         deliveryPlanApi.list(currentProject.id),
         deliveryAlertApi.list(currentProject.id, queryPlanID ? { planId: queryPlanID } : {}),
-        api.listConnectorAccounts(),
+        api.listProjectConnectorAccounts(currentProject.id),
       ])
       const accountCalibrations = await Promise.all(connectorAccounts.items.filter(account => account.status === 'verified').map(async account => {
-        try { return { account, calibration: await api.getConnectorLaunchBatchCalibration(account.id) } }
+        try { return { account, calibration: await api.getProjectConnectorLaunchBatchCalibration(currentProject.id, account.id) } }
         catch { return { account } }
       }))
       const nextPlanID = queryPlanID || loadedPlans[0]?.id || ''
       const nextPlan = loadedPlans.find(plan => plan.id === nextPlanID)
-      const latestSimulation = nextPlan ? await readLatestSimulation(currentProject.id, nextPlan) : undefined
+      const accountAvailable = accountCalibrations.some(value => value.account.id === nextPlan?.currentVersion.advertiser.id)
+      const latestSimulation = nextPlan && accountAvailable ? await readLatestSimulation(currentProject.id, nextPlan) : undefined
       if (generation !== loadGeneration.current) return
       setPlans(loadedPlans)
       setPlanID(current => current || nextPlanID)
       setAlerts(nextPlanID ? loadedAlerts.filter(alert => alert.planId === nextPlanID && alert.source === 'connector') : [])
       setSimulation(latestSimulation)
       setCalibratedAccounts(accountCalibrations)
-      setCalibrationAccountRef(current => current || accountCalibrations.find(value => value.calibration)?.account.id || '')
+      setCalibrationAccountRef(nextPlan?.currentVersion.advertiser.id ?? '')
     } catch (reason) {
       if (generation !== loadGeneration.current) return
       setForbidden(reason instanceof DeliveryApiError && (reason.status === 403 || reason.code === 'PROJECT_ACCESS_DENIED'))
@@ -105,6 +107,7 @@ export function DeliveryMonitoringPage({ tourCase: _tourCase }: { tourCase?: str
 
   const selectPlan = async (nextPlanID: string) => {
     setPlanID(nextPlanID)
+    setCalibrationAccountRef(plans?.find(plan => plan.id === nextPlanID)?.currentVersion.advertiser.id ?? '')
     setSimulation(undefined)
     setInspection(undefined)
     setError(undefined)
@@ -114,8 +117,9 @@ export function DeliveryMonitoringPage({ tourCase: _tourCase }: { tourCase?: str
         setAlerts([])
         return
       }
+      const accountAvailable = calibratedAccounts.some(value => value.account.id === nextPlan.currentVersion.advertiser.id)
       const [loadedAlerts, latestSimulation] = await Promise.all([
-        deliveryAlertApi.list(currentProject.id, { planId: nextPlanID }), readLatestSimulation(currentProject.id, nextPlan),
+        deliveryAlertApi.list(currentProject.id, { planId: nextPlanID }), accountAvailable ? readLatestSimulation(currentProject.id, nextPlan) : Promise.resolve(undefined),
       ])
       setAlerts(loadedAlerts.filter(alert => alert.source === 'connector'))
       setSimulation(latestSimulation)
@@ -171,13 +175,13 @@ export function DeliveryMonitoringPage({ tourCase: _tourCase }: { tourCase?: str
     <section className="delivery-simulation-workspace" aria-label="上线前概率模拟">
       <header><div><span className="section-label">上线前</span><h3>账号校准概率模拟</h3><p>模型读取所选账号的历史项目首个七日窗口。结果区分普通情景和跑量号情景。</p></div><span className={`delivery-simulation-status ${simulation ? 'is-complete' : ''}`}>{simulation ? '模拟已完成' : '等待运行'}</span></header>
       <div className="delivery-simulation-controls">
-        <label>校准账号<select value={calibrationAccountRef} onChange={event => setCalibrationAccountRef(event.target.value)}><option value="">请选择已校准账号</option>{calibratedAccounts.map(({ account, calibration }) => <option key={account.id} value={account.id} disabled={!calibration}>{account.display_label || '未命名账号'} · {calibration ? '校准可用' : '缺少校准'}</option>)}</select></label>
+        <label>Plan 绑定账号<input value={calibratedAccounts.find(value => value.account.id === calibrationAccountRef)?.account.display_label || (calibrationAccountRef ? '账号不属于当前 Project' : '当前 Plan 未绑定账号')} disabled /></label>
         <label>稳定 seed<input value={stableSeed} onChange={event => setStableSeed(event.target.value)} /></label>
         <label>预测窗口<input value="首个 7 日" disabled /></label>
         <label>样本数<input type="number" min={100} max={100000} value={sampleCount} onChange={event => setSampleCount(Number(event.target.value))} /></label>
-        <button className="primary-button" disabled={!selectedPlan || !calibrationAccountRef || busy !== undefined || !stableSeed.trim()} onClick={() => void runSimulation()}><Play size={14} fill="currentColor"/>{busy === 'simulation' ? '模拟中…' : '运行概率模拟'}</button>
+        <button className="primary-button" disabled={!selectedPlan || !selectedCalibration || busy !== undefined || !stableSeed.trim()} onClick={() => void runSimulation()}><Play size={14} fill="currentColor"/>{busy === 'simulation' ? '模拟中…' : '运行概率模拟'}</button>
       </div>
-      {calibrationAccountRef ? <CalibrationSummary value={calibratedAccounts.find(value => value.account.id === calibrationAccountRef)?.calibration}/> : <div className="delivery-monitoring__caution"><ShieldAlert size={15}/>请选择包含可用校准结果的 Connector 账号。</div>}
+      {calibrationAccountRef ? <CalibrationSummary value={selectedCalibration}/> : <div className="delivery-monitoring__caution"><ShieldAlert size={15}/>请先为 Plan 绑定包含可用校准结果的 Project 账号。</div>}
       <details className="delivery-alert-card__technical"><summary>补充假设：审核与转化</summary><p>账号报表未校准审核通过率、转化率和追踪可观测率。模型仅把这些值用于转化诊断。</p><div className="delivery-simulation-controls">
         <PriorInput label="审核通过概率" value={prior.review} onChange={review => setPrior(value => ({ ...value, review }))}/>
         <PriorInput label="转化率（CVR）低值" value={prior.cvrMin} onChange={cvrMin => setPrior(value => ({ ...value, cvrMin }))}/>

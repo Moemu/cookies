@@ -20,6 +20,7 @@ const (
 type OceanEngineAccountSession struct {
 	ID                   string               `json:"id"`
 	OrganizationID       string               `json:"organization_id"`
+	ProjectID            string               `json:"-"`
 	AccountID            string               `json:"account_id"`
 	Status               AccountSessionStatus `json:"status"`
 	CredentialRefPresent bool                 `json:"credential_ref_present"`
@@ -101,7 +102,7 @@ func (r MySQLRepository) ListReadyAccountSessions(ctx context.Context, limit int
 	if limit < 1 || limit > 1000 {
 		limit = 100
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id,organization_id,account_id,status,last_verified_at,version,created_at,updated_at FROM connector_ocean_engine_account_sessions WHERE status='ready' ORDER BY organization_id,account_id LIMIT ?`, limit)
+	rows, err := db.QueryContext(ctx, `SELECT s.id,s.organization_id,s.account_id,c.project_id,s.status,s.last_verified_at,s.version,s.created_at,s.updated_at FROM connector_ocean_engine_account_sessions s JOIN platform_account_connections c ON c.organization_id=s.organization_id AND c.account_id=s.account_id WHERE s.status='ready' AND c.status<>'revoked' ORDER BY s.organization_id,c.project_id,s.account_id LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +111,7 @@ func (r MySQLRepository) ListReadyAccountSessions(ctx context.Context, limit int
 	for rows.Next() {
 		var value OceanEngineAccountSession
 		var verified sql.NullTime
-		if err = rows.Scan(&value.ID, &value.OrganizationID, &value.AccountID, &value.Status, &verified, &value.Version, &value.CreatedAt, &value.UpdatedAt); err != nil {
+		if err = rows.Scan(&value.ID, &value.OrganizationID, &value.AccountID, &value.ProjectID, &value.Status, &verified, &value.Version, &value.CreatedAt, &value.UpdatedAt); err != nil {
 			return nil, err
 		}
 		value.CredentialRefPresent = true

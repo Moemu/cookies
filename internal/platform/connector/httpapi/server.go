@@ -32,6 +32,7 @@ type ProjectAuthorizer interface {
 type AccountManager interface {
 	Register(context.Context, connector.RegisterAccountRequest) (connector.PlatformAccount, error)
 	List(context.Context, string, string) ([]connector.PlatformAccount, error)
+	Claim(context.Context, string, string, string) (connector.PlatformAccount, error)
 	Verify(context.Context, string, string, string) (connector.PlatformAccount, error)
 	Revoke(context.Context, string, string, string) (connector.PlatformAccount, error)
 }
@@ -68,9 +69,124 @@ func New(reader Reader, syncer Syncer, authorizer ProjectAuthorizer, accounts Ac
 	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/syncs/{sync_id}", server.syncStatus)
 	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts", server.listAccounts)
 	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts", server.registerAccount)
+	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts:claim", server.claimOrganizationAccount)
+	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/session", server.getProjectAccountSession)
+	server.mux.HandleFunc("PUT /api/connector/v1/projects/{project_id}/accounts/{account_ref}/session", server.updateProjectAccountSession)
 	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/verify", server.verifyAccount)
 	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/revoke", server.revokeAccount)
+	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/launch-batch-calibration", server.projectLaunchBatchCalibration)
 	return server
+}
+
+func (s *Server) getProjectAccountSession(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeRead)
+	if !ok || !s.authorize(r, actor) || !s.projectAccountExists(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref")) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	if s.sessions == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	value, err := s.sessions.Get(r.Context(), string(actor.OrganizationID), r.PathValue("account_ref"))
+	if err != nil {
+		writeProblem(w, http.StatusNotFound, "CONNECTOR_SESSION_NOT_FOUND")
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) updateProjectAccountSession(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeSync)
+	if !ok || !s.authorize(r, actor) || !s.projectAccountExists(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref")) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	if s.sessions == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	var body struct {
+		Session         string `json:"session"`
+		ExpectedVersion int64  `json:"expected_version"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 20<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || strings.TrimSpace(body.Session) == "" || body.ExpectedVersion < 0 {
+		writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
+		return
+	}
+	plaintext := []byte(body.Session)
+	body.Session = ""
+	value, err := s.sessions.Update(r.Context(), string(actor.OrganizationID), r.PathValue("account_ref"), plaintext, body.ExpectedVersion)
+	clear(plaintext)
+	if err != nil {
+		status, code := http.StatusInternalServerError, "CONNECTOR_SESSION_FAILED"
+		if errors.Is(err, connector.ErrImmutableConflict) {
+			status, code = http.StatusConflict, "VERSION_CONFLICT"
+		}
+		writeProblem(w, status, code)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) claimOrganizationAccount(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeSync)
+	if !ok || !s.authorize(r, actor) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	var body struct {
+		AccountRef string `json:"account_ref"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || !strings.HasPrefix(strings.TrimSpace(body.AccountRef), "oeacct_") {
+		writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
+		return
+	}
+	value, err := s.accounts.Claim(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"), strings.TrimSpace(body.AccountRef))
+	if err != nil {
+		writeProblem(w, http.StatusConflict, "CONNECTOR_ACCOUNT_SCOPE_CONFLICT")
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) projectLaunchBatchCalibration(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeRead)
+	if !ok || !s.authorize(r, actor) || !s.projectAccountExists(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref")) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	reader, ok := s.reader.(LaunchBatchCalibrationReader)
+	if !ok {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	value, err := reader.LatestLaunchBatchCalibration(r.Context(), string(actor.OrganizationID), r.PathValue("account_ref"))
+	if err != nil {
+		writeProblem(w, http.StatusNotFound, "LAUNCH_BATCH_CALIBRATION_NOT_FOUND")
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func (s *Server) projectAccountExists(ctx context.Context, organizationID, projectID, accountID string) bool {
+	if s.accounts == nil {
+		return false
+	}
+	values, err := s.accounts.List(ctx, organizationID, projectID)
+	if err != nil {
+		return false
+	}
+	for _, value := range values {
+		if value.ID == accountID && value.Status != "revoked" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) organizationLaunchBatchCalibration(w http.ResponseWriter, r *http.Request) {
@@ -519,10 +635,11 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Start    time.Time `json:"start"`
-		End      time.Time `json:"end"`
-		TimeZone string    `json:"time_zone"`
-		Currency string    `json:"currency"`
+		Start    time.Time          `json:"start"`
+		End      time.Time          `json:"end"`
+		TimeZone string             `json:"time_zone"`
+		Currency string             `json:"currency"`
+		SyncMode connector.SyncMode `json:"sync_mode"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
 	decoder.DisallowUnknownFields()
@@ -535,7 +652,7 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusBadRequest, "IDEMPOTENCY_KEY_REQUIRED")
 		return
 	}
-	value, err := s.syncer.Sync(r.Context(), connector.SyncRequest{OrganizationID: string(actor.OrganizationID), ProjectID: r.PathValue("project_id"), AccountRef: r.PathValue("account_ref"), IdempotencyKey: key, WindowStart: body.Start, WindowEnd: body.End, TimeZone: body.TimeZone, Currency: body.Currency})
+	value, err := s.syncer.Sync(r.Context(), connector.SyncRequest{OrganizationID: string(actor.OrganizationID), ProjectID: r.PathValue("project_id"), AccountRef: r.PathValue("account_ref"), IdempotencyKey: key, WindowStart: body.Start, WindowEnd: body.End, TimeZone: body.TimeZone, Currency: body.Currency, Mode: body.SyncMode})
 	if err != nil {
 		status := http.StatusInternalServerError
 		code := "CONNECTOR_SYNC_FAILED"

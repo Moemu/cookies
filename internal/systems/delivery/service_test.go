@@ -8,8 +8,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/connector"
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
+
+type connectorAccountReaderStub struct{ accounts []connector.PlatformAccount }
+
+func (s connectorAccountReaderStub) ListAccounts(context.Context, string, string) ([]connector.PlatformAccount, error) {
+	return s.accounts, nil
+}
+
+func TestPlanAccountMustBeVerifiedInCurrentProject(t *testing.T) {
+	service, actor := newTestService()
+	request := testPlatformCreateRequest()
+	request.PlatformConfiguration.Payload.OceanEngine.Project.AccountReference.ID = "oeacct_verified"
+	service.ConnectorAccounts = connectorAccountReaderStub{accounts: []connector.PlatformAccount{{ID: "oeacct_verified", ProjectID: "project_a", Status: "verified"}}}
+	if err := service.validateProjectAccount(context.Background(), actor, "project_a", request.PlatformConfiguration); err != nil {
+		t.Fatalf("verified project account rejected: %v", err)
+	}
+	service.ConnectorAccounts = connectorAccountReaderStub{accounts: []connector.PlatformAccount{{ID: "oeacct_verified", ProjectID: "project_b", Status: "verified"}}}
+	if err := service.validateProjectAccount(context.Background(), actor, "project_a", request.PlatformConfiguration); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("cross-project account accepted: %v", err)
+	}
+}
 
 func TestPlanIsolation(t *testing.T) {
 	service, actor := newTestService()

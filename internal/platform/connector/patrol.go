@@ -53,6 +53,7 @@ func (r PatrolRunner) RunOnce(ctx context.Context) (PatrolResult, error) {
 		accountCtx, cancel := context.WithTimeout(ctx, timeout)
 		_, syncErr := r.Syncer.Sync(accountCtx, SyncRequest{
 			OrganizationID: session.OrganizationID,
+			ProjectID:      session.ProjectID,
 			AccountRef:     session.AccountID,
 			IdempotencyKey: fmt.Sprintf("daily-metric-patrol-v1:%s", now.Format("2006-01-02")),
 			WindowStart:    now.AddDate(0, 0, -lookbackDays),

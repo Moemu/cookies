@@ -34,6 +34,9 @@ func (s accountManagerStub) Register(context.Context, connector.RegisterAccountR
 func (s accountManagerStub) List(context.Context, string, string) ([]connector.PlatformAccount, error) {
 	return nil, nil
 }
+func (s accountManagerStub) Claim(context.Context, string, string, string) (connector.PlatformAccount, error) {
+	return connector.PlatformAccount{}, nil
+}
 func (s accountManagerStub) Verify(context.Context, string, string, string) (connector.PlatformAccount, error) {
 	return connector.PlatformAccount{}, s.verifyErr
 }

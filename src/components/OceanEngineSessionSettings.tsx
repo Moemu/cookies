@@ -24,7 +24,7 @@ function errorMessage(error: unknown) {
   if (error instanceof ApiRequestError && error.status === 409) return '数据版本已变化。请刷新后重试。'
   if (error instanceof ApiRequestError && error.status === 422) return 'Cookie 已失效，或缺少该投放账号上下文。请从该账号成功的广告列表请求中重新复制完整 Cookie。'
   if (error instanceof ApiRequestError && error.status === 502) return '巨量引擎验证接口当前不可用。会话未改变，请稍后重试。'
-  if (error instanceof ApiRequestError && error.status === 403) return '你没有管理 Organization 级 Connector 的权限。'
+  if (error instanceof ApiRequestError && error.status === 403) return '你没有管理当前 Project Connector 的权限。'
   return error instanceof Error ? error.message : '连接操作失败。请稍后重试。'
 }
 
@@ -37,12 +37,13 @@ function syncWindow(days: number) {
 
 const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds))
 
-export function OceanEngineSessionSettings() {
+export function OceanEngineSessionSettings({ projectId }: { projectId: string }) {
   const externalIDRef = useRef<HTMLInputElement>(null)
   const labelRef = useRef<HTMLInputElement>(null)
   const sessionInputRef = useRef<HTMLInputElement>(null)
   const requestRef = useRef(0)
   const [accounts, setAccounts] = useState<ApiConnectorAccount[]>([])
+  const [legacyAccounts, setLegacyAccounts] = useState<ApiConnectorAccount[]>([])
   const [selectedAccountID, setSelectedAccountID] = useState('')
   const [session, setSession] = useState<ApiConnectorAccountSession | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('loading')
@@ -54,9 +55,13 @@ export function OceanEngineSessionSettings() {
     const requestID = ++requestRef.current
     setLoadState('loading')
     try {
-      const response = await api.listConnectorAccounts()
+      const [response, legacyResponse] = await Promise.all([
+        api.listProjectConnectorAccounts(projectId),
+        api.listConnectorAccounts(),
+      ])
       if (requestID !== requestRef.current) return
       setAccounts(response.items)
+      setLegacyAccounts(legacyResponse.items)
       const accountID = response.items.some(item => item.id === preferredAccountID)
         ? preferredAccountID
         : response.items[0]?.id ?? ''
@@ -67,7 +72,7 @@ export function OceanEngineSessionSettings() {
         return
       }
       try {
-        const nextSession = await api.getConnectorAccountSession(accountID)
+        const nextSession = await api.getProjectConnectorAccountSession(projectId, accountID)
         if (requestID !== requestRef.current) return
         setSession(nextSession)
       } catch (error) {
@@ -81,7 +86,7 @@ export function OceanEngineSessionSettings() {
       setLoadState('error')
       setNotice(errorMessage(error))
     }
-  }, [])
+  }, [projectId])
 
   useEffect(() => { void load() }, [load])
 
@@ -91,7 +96,7 @@ export function OceanEngineSessionSettings() {
     if (!accountID) return setSession(null)
     setLoadState('loading')
     try {
-      setSession(await api.getConnectorAccountSession(accountID))
+      setSession(await api.getProjectConnectorAccountSession(projectId, accountID))
     } catch (error) {
       if (error instanceof ApiRequestError && error.status === 404) setSession(null)
       else setNotice(errorMessage(error))
@@ -107,7 +112,7 @@ export function OceanEngineSessionSettings() {
     if (!externalID) return setNotice('请输入投放账号 ID。')
     setBusy(true); setNotice('')
     try {
-      const account = await api.registerConnectorAccount({ external_id: externalID, display_label: displayLabel })
+      const account = await api.registerProjectConnectorAccount(projectId, { external_id: externalID, display_label: displayLabel })
       if (externalIDRef.current) externalIDRef.current.value = ''
       if (labelRef.current) labelRef.current.value = ''
       await load(account.id)
@@ -127,7 +132,7 @@ export function OceanEngineSessionSettings() {
     if (value.length > 16384) return setNotice('Cookie 超过 16 KiB。请确认只复制 Cookie 值。')
     setBusy(true); setNotice('')
     try {
-      const next = await api.updateConnectorAccountSession(selectedAccountID, { session: value, expected_version: session?.version ?? 0 })
+      const next = await api.updateProjectConnectorAccountSession(projectId, selectedAccountID, { session: value, expected_version: session?.version ?? 0 })
       if (sessionInputRef.current) sessionInputRef.current.value = ''
       setSession(next)
       setNotice('会话已加密保存，输入框已清空。请执行只读验证。')
@@ -142,8 +147,8 @@ export function OceanEngineSessionSettings() {
     if (!selectedAccountID || !session) return
     setBusy(true); setNotice('')
     try {
-      await api.verifyConnectorAccount(selectedAccountID)
-      const next = await api.getConnectorAccountSession(selectedAccountID)
+      await api.verifyProjectConnectorAccount(projectId, selectedAccountID)
+      const next = await api.getProjectConnectorAccountSession(projectId, selectedAccountID)
       setSession(next)
       setAccounts(current => current.map(account => account.id === selectedAccountID ? { ...account, status: 'verified', verified_at: next.last_verified_at } : account))
       setNotice('只读验证通过。现在可以同步历史数据。')
@@ -160,13 +165,13 @@ export function OceanEngineSessionSettings() {
     try {
       const window = syncWindow(days)
       const operation = mode === 'full' ? '历史同步' : days > 30 ? '历史日级补数' : '指标巡检'
-      const idempotencyKey = `organization-${mode}-${selectedAccountID}-${crypto.randomUUID()}`
-      const result = await api.syncConnectorAccount(selectedAccountID, { ...window, time_zone: 'Asia/Shanghai', currency: 'CNY', sync_mode: mode }, idempotencyKey)
+      const idempotencyKey = `${projectId}-${mode}-${selectedAccountID}-${crypto.randomUUID()}`
+      const result = await api.syncProjectConnectorAccount(projectId, selectedAccountID, { ...window, time_zone: 'Asia/Shanghai', currency: 'CNY', sync_mode: mode }, idempotencyKey)
       setNotice(`${operation}已进入后台。页面将持续读取同步状态。`)
       for (let attempt = 0; attempt < 1_350; attempt += 1) {
         await wait(2_000)
         try {
-          const status = await api.getConnectorSync(selectedAccountID, result.run_id)
+          const status = await api.getProjectConnectorSync(projectId, selectedAccountID, result.run_id)
           if (status.status === 'completed') {
             setNotice(mode === 'full' ? '历史同步已完成。对象快照和指标窗口已经写入 Connector。' : `${operation}已完成。指标窗口和转换修订已经写入 Connector。`)
             return
@@ -188,12 +193,25 @@ export function OceanEngineSessionSettings() {
     }
   }
 
+  const claimAccount = async (accountID: string) => {
+    setBusy(true); setNotice('')
+    try {
+      const account = await api.claimProjectConnectorAccount(projectId, accountID)
+      await load(account.id)
+      setNotice('账号已迁入当前 Project。原会话、同步记录和校准结果保持不变。')
+    } catch (error) {
+      setNotice(errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const selectedAccount = accounts.find(account => account.id === selectedAccountID)
-  const copy = session ? statusCopy[session.status] : { title: '尚未保存会话', detail: '账号和会话归属 Organization，不需要业务 Project 或 Plan。' }
+  const copy = session ? statusCopy[session.status] : { title: '尚未保存会话', detail: '账号和会话只归属当前 Project。' }
 
   return <section className="miyun-connection-settings" aria-labelledby="ocean-engine-session-title">
     <div className="miyun-settings-main">
-      <header><div><span>Organization 级只读 Connector</span><h2 id="ocean-engine-session-title">巨量投放账号</h2><p>历史校准不创建占位 Project，也不建立虚假 Plan。</p></div><div className="miyun-settings-status-group" aria-live="polite"><span className={`miyun-connection-status ${session?.status === 'ready' ? 'ready' : ''}`}>{session?.status === 'ready' ? <Check size={14} aria-hidden="true" /> : <CircleAlert size={14} aria-hidden="true" />}{loadState === 'loading' ? '正在读取…' : copy.title}</span><small>页面同步于 {formatTime(lastSyncedAt)}</small></div></header>
+      <header><div><span>Project 级只读 Connector</span><h2 id="ocean-engine-session-title">巨量投放账号</h2><p>当前 Project 的 Plan 只能选择本页已验证的账号。</p></div><div className="miyun-settings-status-group" aria-live="polite"><span className={`miyun-connection-status ${session?.status === 'ready' ? 'ready' : ''}`}>{session?.status === 'ready' ? <Check size={14} aria-hidden="true" /> : <CircleAlert size={14} aria-hidden="true" />}{loadState === 'loading' ? '正在读取…' : copy.title}</span><small>页面同步于 {formatTime(lastSyncedAt)}</small></div></header>
       <div className="miyun-settings-secret-policy"><LockKeyhole size={18} aria-hidden="true" /><p><b>账号和凭据分开保存</b>{copy.detail} 原始账号 ID 和 Cookie 都不会进入校准导出。</p></div>
 
       <div className="oe-connector-flow">
@@ -211,6 +229,7 @@ export function OceanEngineSessionSettings() {
             <div className="oe-register-fields"><label htmlFor="ocean-engine-account-id">投放账号 ID<input id="ocean-engine-account-id" name="ocean_engine_account_id" ref={externalIDRef} type="password" autoComplete="off" spellCheck={false} placeholder="仅用于登记，保存后不回显…" /></label><label htmlFor="ocean-engine-account-label">本地显示名称<input id="ocean-engine-account-label" name="ocean_engine_account_label" ref={labelRef} autoComplete="off" maxLength={255} placeholder="例如：历史校准账号…" /></label></div>
             <button className="secondary-button" type="submit" disabled={busy}><Save size={15} aria-hidden="true" />登记账号</button>
           </form>
+          {legacyAccounts.length ? <div className="oe-account-empty"><CircleAlert size={18} aria-hidden="true" /><p><b>待迁入的历史账号</b><span>迁入会保留会话、同步记录和校准结果。一个账号只能归属一个 Project。</span></p>{legacyAccounts.map(account => <button key={account.id} className="secondary-button" type="button" disabled={busy} onClick={() => void claimAccount(account.id)}>迁入 {account.display_label || '未命名账号'}</button>)}</div> : null}
         </section>
 
         <section className={`oe-settings-card ${selectedAccountID ? '' : 'disabled'}`} aria-labelledby="oe-session-section-title">
@@ -230,6 +249,6 @@ export function OceanEngineSessionSettings() {
       </div>
       {notice ? <p className="miyun-settings-notice" role="status" aria-live="polite">{notice}</p> : null}
     </div>
-    <aside className="miyun-cookie-guide"><h3>安全边界</h3><ol><li><span>01</span><p>账号归属 Organization，不归属业务 Project。</p></li><li><span>02</span><p>Cookie 只提交到服务端加密存储。</p></li><li><span>03</span><p>验证和同步只使用读取请求。</p></li><li><span>04</span><p>校准导出使用独立匿名密钥。</p></li></ol></aside>
+    <aside className="miyun-cookie-guide"><h3>安全边界</h3><ol><li><span>01</span><p>账号只归属当前 Project。</p></li><li><span>02</span><p>其他 Project 不能选择或读取此账号。</p></li><li><span>03</span><p>Cookie 只提交到服务端加密存储。</p></li><li><span>04</span><p>验证和同步只使用读取请求。</p></li></ol></aside>
   </section>
 }

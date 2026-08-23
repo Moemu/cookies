@@ -237,6 +237,77 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PlatformAccount'}
+  /api/connector/v1/projects/{project_id}/accounts:claim:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      operationId: claimOrganizationConnectorAccountForProject
+      summary: Move one legacy Organization account into the current Project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_ref]
+              properties:
+                account_ref: {type: string, pattern: '^oeacct_'}
+              additionalProperties: false
+      responses:
+        '200':
+          description: Project-owned account with its existing session and calibration data.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlatformAccount'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/session:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AccountRef'
+    get:
+      operationId: getProjectConnectorAccountSession
+      summary: Read safe session status for a Project account
+      responses:
+        '200':
+          description: Session status without credential material.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountSession'}
+    put:
+      operationId: updateProjectConnectorAccountSession
+      summary: Encrypt and replace a Project account session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session, expected_version]
+              properties:
+                session: {type: string, minLength: 1, maxLength: 16384, writeOnly: true}
+                expected_version: {type: integer, minimum: 0}
+              additionalProperties: false
+      responses:
+        '200':
+          description: Safe session status.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountSession'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/launch-batch-calibration:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AccountRef'
+    get:
+      operationId: getProjectConnectorLaunchBatchCalibration
+      summary: Read the latest launch-batch calibration for a Project account
+      responses:
+        '200':
+          description: Versioned calibration snapshot.
+          content:
+            application/json:
+              schema: {type: object}
+        '404': {$ref: '#/components/responses/NotFound'}
   /api/connector/v1/projects/{project_id}/accounts/{account_ref}/verify:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -357,7 +428,7 @@ components:
       required: [organization_id, source_ref]
       properties:
         organization_id: {type: string, minLength: 1}
-        project_id: {type: string, minLength: 1, description: Optional legacy consumer Project scope.}
+        project_id: {type: string, minLength: 1, description: Project scope for Project-owned accounts.}
         source_ref: {type: string, minLength: 1, description: Local or anonymized Connector reference.}
       additionalProperties: false
     PlatformAccount:
@@ -367,7 +438,7 @@ components:
         id: {type: string, minLength: 1}
         organization_id: {type: string, minLength: 1}
         platform: {type: string, const: ocean_engine}
-        project_id: {type: string, minLength: 1, description: Present only on legacy Project-scoped connections.}
+        project_id: {type: string, minLength: 1, description: Present for Project-owned connections.}
         display_label: {type: string}
         status: {type: string, enum: [pending, verified, revoked, blocked]}
         verified_at: {type: string, format: date-time}

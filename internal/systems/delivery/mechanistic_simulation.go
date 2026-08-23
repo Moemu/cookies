@@ -135,6 +135,7 @@ type MechanisticSimulationInput struct {
 	ConfigurationVersion       int                        `json:"configuration_version"`
 	ConfigurationCanonicalHash string                     `json:"configuration_canonical_hash"`
 	ManifestBinding            CalibrationManifestBinding `json:"manifest_binding"`
+	AccountReference           StableReference            `json:"account_reference"`
 	BudgetMinor                int64                      `json:"budget_minor"`
 	BudgetMode                 string                     `json:"budget_mode"`
 	DailyBudgetMinor           int64                      `json:"daily_budget_minor"`
@@ -264,7 +265,17 @@ func (s Service) CreatePrelaunchMechanisticSimulation(ctx context.Context, actor
 	if err != nil {
 		return MechanisticSimulationEnvelope{}, err
 	}
+	boundAccountID := strings.TrimSpace(input.AccountReference.ID)
 	request.CalibrationAccountRef = strings.TrimSpace(request.CalibrationAccountRef)
+	if request.CalibrationAccountRef != "" && request.CalibrationAccountRef != boundAccountID {
+		return MechanisticSimulationEnvelope{}, fmt.Errorf("%w: calibration account does not match the plan account", ErrInvalidRequest)
+	}
+	if strings.HasPrefix(boundAccountID, "oeacct_") {
+		if err := s.validateProjectAccount(ctx, actor, projectID, version.PlatformConfiguration); err != nil {
+			return MechanisticSimulationEnvelope{}, err
+		}
+		request.CalibrationAccountRef = boundAccountID
+	}
 	if request.CalibrationAccountRef != "" {
 		if s.LaunchBatchCalibrations == nil {
 			return MechanisticSimulationEnvelope{}, ErrUnsupportedConfigurationWorkflow
@@ -390,7 +401,7 @@ func BuildMechanisticSimulationInput(version DeliveryPlanVersion) (MechanisticSi
 		PlanID: version.PlanID, PlanVersion: version.VersionNumber, PlanCanonicalHash: version.CanonicalHash,
 		IntentID: intent.IntentID, IntentVersion: intent.VersionNumber, IntentCanonicalHash: intent.CanonicalHash,
 		ConfigurationID: configuration.ConfigurationID, ConfigurationVersion: configuration.VersionNumber, ConfigurationCanonicalHash: configuration.CanonicalHash,
-		ManifestBinding: intent.Payload.CalibrationManifest, BudgetMinor: intent.Payload.BudgetBoundary.MaximumTotalMinor,
+		ManifestBinding: intent.Payload.CalibrationManifest, AccountReference: project.AccountReference, BudgetMinor: intent.Payload.BudgetBoundary.MaximumTotalMinor,
 		BudgetMode: project.BudgetAndBidding.BudgetMode, DailyBudgetMinor: project.BudgetAndBidding.DailyBudgetMinor,
 		Currency: intent.Payload.BudgetBoundary.Currency, Schedule: project.Schedule, MarketingObjective: intent.Payload.MarketingObjective,
 		OptimizationGoalState: goalState, BiddingStrategy: project.BudgetAndBidding.BiddingStrategy, ChargingMode: project.BudgetAndBidding.ChargingMode,

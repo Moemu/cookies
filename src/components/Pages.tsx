@@ -25,6 +25,7 @@ import { KanonReviewCenter } from '../features/strategy/KanonReviewCenter'
 import { strategyStageLabel } from '../features/strategy/workspace/StageRail'
 import type { StrategyPanel, StrategyStage, StrategyWorkspaceLocation } from '../features/strategy/workspace/workspaceRoute'
 import { industryProfile } from '../data/industry-profiles'
+import { OceanEngineSessionSettings } from './OceanEngineSessionSettings'
 
 const ApprovalCenterPage = lazy(() => import('./SpecializedPages').then(module => ({ default: module.ApprovalCenterPage })))
 const ArtifactFlow = lazy(() => import('./SpecializedPages').then(module => ({ default: module.ArtifactFlow })))
@@ -1141,8 +1142,13 @@ function EditorSurface({ item, activeView }: { item: NavItem; activeView: string
 }
 
 function TableSurface(props: { item: NavItem; activeView: string; onOpenRecord: (id: string) => void }) {
-  if (props.activeView === '广告账户') return <AdAccountBindingSurface item={props.item} activeView={props.activeView}/>
+  if (props.activeView === '广告账户') return <ProjectAdAccountSurface/>
   return <GenericTableSurface {...props}/>
+}
+
+function ProjectAdAccountSurface() {
+  const { currentProject } = useProject()
+  return <OceanEngineSessionSettings projectId={currentProject.id}/>
 }
 
 function AdAccountBindingSurface({ item, activeView }: { item: NavItem; activeView: string }) {
@@ -1667,7 +1673,7 @@ export function ModulePage({
     setActiveView(view)
     onOpenProject(currentProject.id, system.key, item.id, isStrategyWorkspace ? objectId : undefined, view, undefined, tourRunId, tourCase)
   }
-  const deliveryEnvironment = system.key === 'delivery' ? <DeliveryMockEnvironmentBanner/> : null
+  const deliveryEnvironment = system.key === 'delivery' && (tourRunId || tourCase) ? <DeliveryMockEnvironmentBanner/> : null
   const pageSurface = <>{deliveryEnvironment}<div className={showObjectDetail ? 'page-surface with-object-detail' : 'page-surface'}>{surface}{showObjectDetail ? <ObjectDetail system={system} item={item} objectId={objectId!} onOpenProject={onOpenProject}/> : null}</div></>
 
   const strategyStatusLabel = isStrategyWorkspace ? strategyStageLabel(strategyStage ?? 'intake') : activeView

@@ -22,7 +22,7 @@ func (s *patrolSyncRecorder) Sync(_ context.Context, request SyncRequest) (SyncR
 func TestPatrolRunnerUsesMetricsOnlyLookback(t *testing.T) {
 	now := time.Date(2026, 8, 21, 6, 0, 0, 0, time.UTC)
 	syncer := &patrolSyncRecorder{}
-	runner := PatrolRunner{Sessions: patrolSessionSource{values: []OceanEngineAccountSession{{OrganizationID: "org_1", AccountID: "oeacct_local"}}}, Syncer: syncer, Now: func() time.Time { return now }, LookbackDays: 14}
+	runner := PatrolRunner{Sessions: patrolSessionSource{values: []OceanEngineAccountSession{{OrganizationID: "org_1", ProjectID: "project_1", AccountID: "oeacct_local"}}}, Syncer: syncer, Now: func() time.Time { return now }, LookbackDays: 14}
 	result, err := runner.RunOnce(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestPatrolRunnerUsesMetricsOnlyLookback(t *testing.T) {
 		t.Fatalf("result=%#v requests=%d", result, len(syncer.requests))
 	}
 	request := syncer.requests[0]
-	if request.Mode != SyncModeMetricsOnly || request.ProjectID != "" || !request.WindowEnd.Equal(now) || !request.WindowStart.Equal(now.AddDate(0, 0, -14)) {
+	if request.Mode != SyncModeMetricsOnly || request.ProjectID != "project_1" || !request.WindowEnd.Equal(now) || !request.WindowStart.Equal(now.AddDate(0, 0, -14)) {
 		t.Fatalf("request=%#v", request)
 	}
 }

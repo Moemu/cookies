@@ -39,6 +39,7 @@ type AccountSessionState interface {
 type AccountStore interface {
 	RegisterAccount(context.Context, RegisterAccountRequest) (PlatformAccount, error)
 	ListAccounts(context.Context, string, string) ([]PlatformAccount, error)
+	ClaimOrganizationAccount(context.Context, string, string, string, time.Time) (PlatformAccount, error)
 	MarkAccountVerified(context.Context, string, string, string, time.Time) (PlatformAccount, error)
 	ResolveAnyExternalAccountID(context.Context, string, string, string) (string, error)
 	RevokeAccount(context.Context, string, string, string, time.Time) (PlatformAccount, error)
@@ -68,6 +69,16 @@ func (s AccountService) List(ctx context.Context, organizationID, projectID stri
 	}
 	return s.Store.ListAccounts(ctx, organizationID, projectID)
 }
+func (s AccountService) Claim(ctx context.Context, organizationID, projectID, accountID string) (PlatformAccount, error) {
+	if s.Store == nil || strings.TrimSpace(projectID) == "" || !strings.HasPrefix(strings.TrimSpace(accountID), "oeacct_") {
+		return PlatformAccount{}, ErrInvalidFact
+	}
+	now := time.Now().UTC()
+	if s.Now != nil {
+		now = s.Now().UTC()
+	}
+	return s.Store.ClaimOrganizationAccount(ctx, organizationID, projectID, accountID, now)
+}
 func (s AccountService) Verify(ctx context.Context, organizationID, projectID, accountID string) (PlatformAccount, error) {
 	if s.Store == nil || s.Probe == nil {
 		return PlatformAccount{}, ErrInvalidFact
@@ -87,13 +98,11 @@ func (s AccountService) Verify(ctx context.Context, organizationID, projectID, a
 	if s.Now != nil {
 		now = s.Now().UTC()
 	}
-	if projectID == "" {
-		if s.Sessions == nil {
-			return PlatformAccount{}, ErrInvalidFact
-		}
-		if _, err = s.Sessions.MarkAccountSessionVerified(ctx, organizationID, accountID, sessionVersion, now); err != nil {
-			return PlatformAccount{}, err
-		}
+	if s.Sessions == nil {
+		return PlatformAccount{}, ErrInvalidFact
+	}
+	if _, err = s.Sessions.MarkAccountSessionVerified(ctx, organizationID, accountID, sessionVersion, now); err != nil {
+		return PlatformAccount{}, err
 	}
 	return s.Store.MarkAccountVerified(ctx, organizationID, projectID, accountID, now)
 }
@@ -170,6 +179,33 @@ func (r MySQLRepository) ListAccounts(ctx context.Context, organizationID, proje
 		result = append(result, value)
 	}
 	return result, rows.Err()
+}
+func (r MySQLRepository) ClaimOrganizationAccount(ctx context.Context, organizationID, projectID, accountID string, now time.Time) (PlatformAccount, error) {
+	db, err := r.db()
+	if err != nil {
+		return PlatformAccount{}, err
+	}
+	result, err := db.ExecContext(ctx, `UPDATE platform_account_connections SET project_id=?,updated_at=? WHERE organization_id=? AND account_id=? AND project_id='' AND status<>'revoked'`, projectID, now, organizationID, accountID)
+	if err != nil {
+		return PlatformAccount{}, fmt.Errorf("claim organization Connector account: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return PlatformAccount{}, err
+	}
+	if count != 1 {
+		return PlatformAccount{}, sql.ErrNoRows
+	}
+	values, err := r.ListAccounts(ctx, organizationID, projectID)
+	if err != nil {
+		return PlatformAccount{}, err
+	}
+	for _, value := range values {
+		if value.ID == accountID {
+			return value, nil
+		}
+	}
+	return PlatformAccount{}, sql.ErrNoRows
 }
 func (r MySQLRepository) ResolveAnyExternalAccountID(ctx context.Context, organizationID, projectID, accountID string) (string, error) {
 	db, err := r.db()

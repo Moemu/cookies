@@ -10,7 +10,7 @@ import {
   type OceanEngineMarketingPurpose,
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
-import type { ApiAssetVersionPointer } from '../data/api'
+import { api, type ApiAssetVersionPointer, type ApiConnectorAccount } from '../data/api'
 import { projectPath } from '../lib/router'
 import type { DataState, ProjectRecord } from '../types'
 import { StateBoundary } from './StateBoundary'
@@ -58,6 +58,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   const { currentProject, agencyWorkbench } = useProject()
   const projectId = currentProject.id
   const [plans, setPlans] = useState<DeliveryPlan[]>([])
+  const [connectorAccounts, setConnectorAccounts] = useState<ApiConnectorAccount[]>([])
   const requestedPlanId = useRef(new URLSearchParams(window.location.search).get('plan_id') ?? '')
   const [selectedId, setSelectedId] = useState(requestedPlanId.current)
   const [draft, setDraft] = useState<DeliveryPlanDraft>(() => newMockDraft(currentProject, agencyWorkbench))
@@ -105,9 +106,11 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
     if (!projectId) return () => { active = false }
     preserveEditorState.current = false
     setBusy(true)
-    void deliveryPlanApi.list(projectId).then(records => {
+    void Promise.all([deliveryPlanApi.list(projectId), api.listProjectConnectorAccounts(projectId)]).then(([records, accountResponse]) => {
       if (!active) return
+      const verifiedAccounts = accountResponse.items.filter(account => account.status === 'verified')
       setPlans(records)
+      setConnectorAccounts(verifiedAccounts)
       if (preserveEditorState.current) return
       const preferred = records.find(plan => plan.id === requestedPlanId.current) ?? records[0]
       if (preferred) {
@@ -118,7 +121,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
         setNotice(`已从服务端恢复 ${records.length} 份计划草稿。`)
       } else {
         setSelectedId('')
-        setDraft(newMockDraft(currentProject, agencyWorkbench))
+        setDraft(newMockDraft(currentProject, agencyWorkbench, verifiedAccounts))
         setIsNew(true)
         setInspectedVersionNumber(undefined)
         setNotice('当前 Project 尚无投放计划，可创建第一份计划草稿。')
@@ -148,7 +151,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   const beginNew = () => {
     preserveEditorState.current = true
     setSelectedId('')
-    setDraft(newMockDraft(currentProject, agencyWorkbench))
+    setDraft(newMockDraft(currentProject, agencyWorkbench, connectorAccounts))
     setSection('目标与账户')
     setIsNew(true)
     setDirty(true)
@@ -226,7 +229,7 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
         </nav>
 
         <section className="delivery-plan-form" aria-label={`${section}编辑区`}>
-          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft} strategyTasks={strategyTasks} products={projectProducts} marketingPurposeSuggestion={marketingPurposeSuggestion} productsCatalogURL={productsCatalogURL}/> : null}
+          {section === '目标与账户' ? <TargetAccountFields draft={draft} changeDraft={changeDraft} strategyTasks={strategyTasks} products={projectProducts} marketingPurposeSuggestion={marketingPurposeSuggestion} productsCatalogURL={productsCatalogURL} connectorAccounts={connectorAccounts} projectId={projectId}/> : null}
           {section === '预算与排期' ? <BudgetScheduleFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '投放载体和监测' ? <TrackingFields draft={draft} changeDraft={changeDraft}/> : null}
           {section === '素材引用' ? <CreativeFields draft={draft} changeDraft={changeDraft} confirmedAssets={confirmedAssets}/> : null}
@@ -261,8 +264,8 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
   </StateBoundary>
 }
 
-function TargetAccountFields({ draft, changeDraft, strategyTasks = [], products = [], marketingPurposeSuggestion, productsCatalogURL }: FieldProps) {
-  const hasPlanAdvertiserOption = Boolean(draft.advertiser.id && draft.advertiser.id !== 'mock-advertiser-001')
+function TargetAccountFields({ draft, changeDraft, strategyTasks = [], products = [], marketingPurposeSuggestion, productsCatalogURL, connectorAccounts = [], projectId = '' }: FieldProps) {
+  const hasPlanAdvertiserOption = Boolean(draft.advertiser.id && !connectorAccounts.some(account => account.id === draft.advertiser.id))
   return <div className="delivery-field-grid">
     <label>计划名称<input id="plan_name" aria-label="计划名称" value={draft.name} onChange={event => changeDraft(current => ({ ...current, name: event.target.value }))}/></label>
     <label>业务目标<textarea id="plan_objective" aria-label="业务目标" value={draft.objective} onChange={event => changeDraft(current => ({ ...current, objective: event.target.value }))}/></label>
@@ -270,9 +273,9 @@ function TargetAccountFields({ draft, changeDraft, strategyTasks = [], products 
     <label><span className="delivery-field-label">账户边界{!draft.advertiser.id ? <em>必填</em> : null}</span><select id="advertiser_id" aria-label="账户边界" aria-required="true" required className={!draft.advertiser.id ? 'field-missing' : undefined} value={draft.advertiser.id} onChange={event => changeDraft(current => ({
       ...current,
       advertiser: event.target.value
-        ? { id: event.target.value, name: '当前演示账户边界', platform: 'ocean_engine' }
+        ? { id: event.target.value, name: connectorAccounts.find(account => account.id === event.target.value)?.display_label || '巨量投放账号', platform: 'ocean_engine' }
         : { id: '', name: '', platform: 'ocean_engine' },
-    }))}><option value="">请选择账户边界</option>{hasPlanAdvertiserOption ? <option value={draft.advertiser.id}>{draft.advertiser.name || '当前计划账户边界'}</option> : null}<option value="mock-advertiser-001">当前演示账户边界</option></select></label>
+    }))}><option value="">请选择已验证的 Project 账号</option>{hasPlanAdvertiserOption ? <option value={draft.advertiser.id} disabled>{draft.advertiser.name || '历史账号'}（不属于当前 Project）</option> : null}{connectorAccounts.map(account => <option key={account.id} value={account.id}>{account.display_label || '未命名账号'}</option>)}</select>{!connectorAccounts.length && projectId ? <a href={projectPath(projectId, 'delivery', 'accounts', undefined, '广告账户')}>先登记并验证巨量账号</a> : null}</label>
     <label><span className="delivery-field-label">策略来源{!draft.strategyReference.taskId ? <em>必填</em> : null}</span><select id="strategy_reference" aria-label="策略来源" aria-required="true" required className={!draft.strategyReference.taskId ? 'field-missing' : undefined} value={draft.strategyReference.taskId} onChange={event => {
       const task = strategyTasks.find(candidate => candidate.id === event.target.value)
       changeDraft(current => ({ ...current, marketingPurpose: '', strategyReference: { taskId: task?.id ?? '', version: task?.version ?? 0 }, sourceStrategyVersion: task ? `${task.id}@v${task.version}` : '' }))
@@ -385,6 +388,8 @@ type FieldProps = {
   confirmedAssets?: ApiAssetVersionPointer[]
   marketingPurposeSuggestion?: MarketingPurposeSuggestion
   productsCatalogURL?: string
+  connectorAccounts?: ApiConnectorAccount[]
+  projectId?: string
 }
 
 type MarketingPurposeSuggestion = { value: OceanEngineMarketingPurpose; reason: string }
@@ -402,7 +407,7 @@ function marketingPurposeLabel(value: OceanEngineMarketingPurpose) {
   return ({ ecommerce: '电商', lead_generation: '销售线索', application: '应用', product_catalog: '商品', content_marketing: '内容营销' } as const)[value]
 }
 
-function newMockDraft(project: ProjectRecord, workbench: ReturnType<typeof useProject>['agencyWorkbench']): DeliveryPlanDraft {
+function newMockDraft(project: ProjectRecord, workbench: ReturnType<typeof useProject>['agencyWorkbench'], accounts: ApiConnectorAccount[] = []): DeliveryPlanDraft {
   const code = project.code && project.code !== '—' ? project.code : 'LOCAL'
   const strategy = project.tasks.find(task => task.type === 'strategy' && (task.status === 'ready' || task.status === 'completed'))
   const creative = workbench?.assetVersionPointers.find(pointer => pointer.projectId === project.id && pointer.humanConfirmedVersion)
@@ -411,7 +416,7 @@ function newMockDraft(project: ProjectRecord, workbench: ReturnType<typeof usePr
     objective: project.goal && !project.goal.startsWith('请启动') ? project.goal : '获取高质量销售线索',
     marketingPurpose: '',
     marketingProduct: { id: '', name: '', activityType: '', activityName: '', brandName: '' },
-    advertiser: { id: 'mock-advertiser-001', name: '当前演示账户边界', platform: 'ocean_engine' },
+    advertiser: { id: accounts[0]?.id ?? '', name: accounts[0]?.display_label ?? '', platform: 'ocean_engine' },
     budget: { totalMinor: Math.max(project.budget || 3000, 0) * 100, currency: 'CNY' },
     schedule: {
       mode: 'long_term',

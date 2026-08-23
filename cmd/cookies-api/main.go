@@ -468,6 +468,7 @@ func main() {
 		Repository:              delivery.MySQLRepository{DB: db},
 		Projects:                projectService,
 		ConnectorSnapshots:      connectorRepository,
+		ConnectorAccounts:       connectorRepository,
 		LaunchBatchCalibrations: connectorRepository,
 		// The Connector is not configured in this environment. Normalize the
 		// deterministic OutcomeSimulation records through the Delivery consumer
