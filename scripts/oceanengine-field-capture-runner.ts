@@ -194,8 +194,16 @@ export function validateFieldCapturePlan(input: unknown, manifest: CalibrationMa
   const declared = value.declared_conditions as Record<string, unknown>
   if (!declared || typeof declared !== 'object' || Array.isArray(declared)) throw new CaptureError('invalid_plan')
   const declaredConditions: Record<string, string> = {}
+  // Declared form state may cover path dimensions (closed value sets) or any
+  // dimension a field condition rule references — operators record upstream
+  // picks such as carrier so absence evidence can name the unmet link.
+  const ruleDimensions = new Set(manifest.fields.flatMap(field => {
+    const rule = field.condition_rule?.all
+    return Array.isArray(rule) ? rule.map(clause => typeof clause.dimension === 'string' ? clause.dimension : '').filter(item => item !== '') : []
+  }))
   for (const [key, item] of Object.entries(declared)) {
-    if (!dimensionKeyPattern.test(key) || typeof item !== 'string' || !dimensions.get(key)?.has(item)) throw new CaptureError('invalid_plan')
+    const allowedValues = dimensions.get(key)
+    if (!dimensionKeyPattern.test(key) || typeof item !== 'string' || !(allowedValues ? allowedValues.has(item) : ruleDimensions.has(key))) throw new CaptureError('invalid_plan')
     declaredConditions[key] = item
   }
   return {
@@ -211,22 +219,38 @@ export function validateFieldCapturePlan(input: unknown, manifest: CalibrationMa
   }
 }
 
-// A field whose evaluable condition rule is contradicted by the operator's
-// declared dimension state cannot appear on the current page variant.
-// Undeclared dimensions stay unknown and never contradict.
-export function conditionContradicted(field: ManifestField, declared: Record<string, string>): boolean {
+type ClauseState = 'satisfied' | 'contradicted' | 'undeclared'
+
+function conditionClauseStates(field: ManifestField, declared: Record<string, string>): Array<{ dimension: string; state: ClauseState }> {
   const rule = field.condition_rule?.all
-  if (field.condition_state !== 'evaluable' || !Array.isArray(rule)) return false
-  return rule.some(clause => {
+  if (field.condition_state !== 'evaluable' || !Array.isArray(rule)) return []
+  return rule.map(clause => {
     const dimension = typeof clause.dimension === 'string' ? clause.dimension : ''
     const operator = typeof clause.operator === 'string' ? clause.operator : ''
     const values = Array.isArray(clause.values) ? clause.values.filter((item): item is string => typeof item === 'string') : []
     const current = declared[dimension]
-    if (current === undefined || dimension === '') return false
-    if (operator === 'in') return !values.includes(current)
-    if (operator === 'not_in') return values.includes(current)
-    return false
-  })
+    if (dimension === '' || current === undefined) return { dimension, state: 'undeclared' as ClauseState }
+    let state: ClauseState
+    if (operator === 'in') state = values.includes(current) ? 'satisfied' : 'contradicted'
+    else if (operator === 'not_in') state = values.includes(current) ? 'contradicted' : 'satisfied'
+    else if (operator === 'equals') state = values.includes(current) ? 'satisfied' : 'contradicted'
+    else state = 'undeclared'
+    return { dimension, state }
+  }).filter(clause => clause.dimension !== '')
+}
+
+// A field whose evaluable condition rule is contradicted by the operator's
+// declared dimension state cannot appear on the current page variant.
+// Undeclared dimensions stay unknown and never contradict.
+export function conditionContradicted(field: ManifestField, declared: Record<string, string>): boolean {
+  return conditionClauseStates(field, declared).some(clause => clause.state === 'contradicted')
+}
+
+// Dimensions the operator explicitly declared that fail the field's rule —
+// recorded on observations so absence evidence names which link of the
+// condition chain was missing instead of a bare scope_missing.
+export function unmetConditionDimensions(field: ManifestField, declared: Record<string, string>): string[] {
+  return conditionClauseStates(field, declared).filter(clause => clause.state === 'contradicted').map(clause => clause.dimension)
 }
 
 export interface FieldCaptureLocator {
@@ -315,6 +339,7 @@ type FieldObservation = {
   target: { kind: 'resolved' | 'unresolvable'; element_count: number; visible: boolean; accessible_name_state: NameState; accessible_name_sha256?: string }
   readback: { kind: 'resolved' | 'unresolvable'; resolved: boolean; value_kind?: 'text' | 'boolean' | 'number'; value_state: ValueState; value_sha256?: string }
   status: FieldObservationStatus
+  unmet_condition_dimensions?: string[]
 }
 
 export type FieldObservationEnvelope = {
@@ -471,15 +496,17 @@ export async function executeCaseObservation(input: CaseObservationInput): Promi
         observations.push(emptyObservation())
         continue
       }
+      const unmetDimensions = unmetConditionDimensions(field, plan.declared_conditions)
+      const withCondition = (observation: FieldObservation): FieldObservation => unmetDimensions.length > 0 ? { ...observation, unmet_condition_dimensions: unmetDimensions } : observation
       if (conditionContradicted(field, plan.declared_conditions)) {
         const skipped = emptyObservation()
         skipped.status = 'blocked_by_condition'
-        observations.push(skipped)
+        observations.push(withCondition(skipped))
         continue
       }
       const scopeSpec = normalizeLocator(field.playwright_rpa.scope ?? field.locator)
       if (!scopeSpec) {
-        observations.push(emptyObservation())
+        observations.push(withCondition(emptyObservation()))
         continue
       }
       const targetSpec = normalizeLocator(field.playwright_rpa.target ?? { kind: undefined, value: undefined })
@@ -495,13 +522,13 @@ export async function executeCaseObservation(input: CaseObservationInput): Promi
         status: scopeFacts.count === 0 ? 'scope_missing' : scopeFacts.count > 1 ? 'scope_ambiguous' : 'target_missing',
       })
       if (scopeFacts.count !== 1 || !scopeFacts.visible) {
-        observations.push(partial())
+        observations.push(withCondition(partial()))
         continue
       }
       if (!targetSpec) {
         const missingTarget = partial()
         missingTarget.status = 'blocked_spec'
-        observations.push(missingTarget)
+        observations.push(withCondition(missingTarget))
         continue
       }
       const targetFacts = await locatorFacts(page.locate(targetSpec))
@@ -510,7 +537,7 @@ export async function executeCaseObservation(input: CaseObservationInput): Promi
         failed.target.element_count = targetFacts.count
         failed.target.visible = targetFacts.visible
         failed.status = targetFacts.count === 0 ? 'target_missing' : 'target_ambiguous'
-        observations.push(failed)
+        observations.push(withCondition(failed))
         continue
       }
       const targetName = await accessibleNameFacts(page.locate(targetSpec))
@@ -519,7 +546,7 @@ export async function executeCaseObservation(input: CaseObservationInput): Promi
         const facts = await readbackFacts(page.locate(readbackSpec))
         readback = { kind: 'resolved', resolved: facts.value_state === 'present' || facts.value_state === 'empty', value_kind: facts.value_kind, value_state: facts.value_state, ...(facts.value_sha256 ? { value_sha256: facts.value_sha256 } : {}) }
       }
-      observations.push({
+      observations.push(withCondition({
         key,
         semantic_label_state: labelPresent ? 'present' : 'absent',
         operation,
@@ -527,7 +554,7 @@ export async function executeCaseObservation(input: CaseObservationInput): Promi
         target: { kind: 'resolved', element_count: 1, visible: true, accessible_name_state: targetName.state, ...(targetName.sha256 ? { accessible_name_sha256: targetName.sha256 } : {}) },
         readback,
         status: 'observed',
-      })
+      }))
     }
     const attempted = observations.filter(item => item.status !== 'blocked_spec' && item.status !== 'blocked_by_condition')
     const confirmed = attempted.every(item => item.status === 'observed')
@@ -637,14 +664,26 @@ async function initCommand(localAppData: string) {
   return { outcome: 'initialized' as const, case_count: plan.case_ids.length, plan_sha256: sha256(canonicalJSON(plan)) }
 }
 
-async function runCommand(localAppData: string, caseId: string, planPath?: string) {
+async function runCommand(localAppData: string, caseId: string, planPath?: string, declarations: string[] = []) {
   if (!caseIDPattern.test(caseId ?? '')) throw new CaptureError('invalid_plan')
   const paths = fieldCapturePaths(localAppData)
   await mkdir(paths.observations, { recursive: true })
   const manifest = await loadCalibrationManifest()
-  const storedPlan = JSON.parse(await readFile(planPath ? resolve(planPath) : paths.plan, 'utf8'))
+  const planFile = planPath ? resolve(planPath) : paths.plan
+  const storedPlan = JSON.parse(await readFile(planFile, 'utf8')) as { declared_conditions?: Record<string, string> }
+  // Operator-declared form state (e.g. carrier=orange_landing_page) is merged
+  // into the stored plan so observations record which branch was on screen
+  // and condition evidence can name the unmet dimensions.
+  const dimensionPattern = /^[a-z][a-z0-9_-]{0,47}$/
+  const valuePattern = /^[a-z][a-z0-9_|-]{0,47}$/
+  for (const declaration of declarations) {
+    const [key, value] = declaration.split('=', 2)
+    if (!key || !value || !dimensionPattern.test(key) || !valuePattern.test(value)) throw new CaptureError('invalid_plan')
+    storedPlan.declared_conditions = { ...storedPlan.declared_conditions, [key]: value }
+  }
   const plan = validateFieldCapturePlan(storedPlan, manifest)
   if (!plan.case_ids.includes(caseId)) throw new CaptureError('invalid_plan')
+  if (declarations.length > 0) await atomicJSON(planFile, plan)
   const live = await openLivePage(localAppData)
   const observation = await executeCaseObservation({ plan, manifest, caseId, page: new PlaywrightFieldCapturePage(live.page), sessionContextSha256: live.sessionContextSha256 })
   const stamp = observation.observed_at.replaceAll(':', '-').replaceAll('.', '-')
@@ -656,10 +695,29 @@ async function runCommand(localAppData: string, caseId: string, planPath?: strin
 async function main() {
   const localAppData = process.env.LOCALAPPDATA
   if (!localAppData) throw new Error('LOCALAPPDATA is not set')
-  const [command, firstArgument, secondArgument] = process.argv.slice(2)
+  const [command, firstArgument] = process.argv.slice(2)
   if (command === 'init') return await initCommand(localAppData)
-  if (command === 'run') return await runCommand(localAppData, firstArgument ?? '', secondArgument)
-  throw new Error('Usage: npm run browser-rpa:fields -- <init|run CASE_ID [PLAN_PATH]>')
+  if (command === 'run') {
+    const remaining = process.argv.slice(4)
+    const declarations: string[] = []
+    let planPath: string | undefined
+    let index = 0
+    while (index < remaining.length) {
+      const item = remaining[index]
+      if (item === '--declare') {
+        declarations.push(remaining[index + 1] ?? '')
+        index += 2
+      } else if (item === '--plan') {
+        planPath = remaining[index + 1]
+        index += 2
+      } else {
+        if (planPath === undefined && !item.startsWith('--')) planPath = item
+        index += 1
+      }
+    }
+    return await runCommand(localAppData, firstArgument ?? '', planPath, declarations)
+  }
+  throw new Error('Usage: npm run browser-rpa:fields -- <init|run CASE_ID [--plan PLAN_PATH] [--declare key=value ...]>')
 }
 
 if (basename(process.argv[1] ?? '') === 'oceanengine-field-capture-runner.ts') {

@@ -81,6 +81,11 @@
         "key": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,79}$" },
         "semantic_label_state": { "enum": ["present", "absent"] },
         "operation": { "$ref": "#/$defs/operation" },
+        "unmet_condition_dimensions": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,47}$" }
+        },
         "scope": {
           "type": "object",
           "additionalProperties": false,

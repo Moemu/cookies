@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import test from 'node:test'
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
-import { buildDefaultPlan, conditionContradicted, detectPageKind, executeCaseObservation, loadCalibrationManifest, normalizeLocator, observationEvidenceHash, validateFieldCapturePlan, type CalibrationManifest, type FieldCaptureLocator, type FieldCapturePage, type ManifestCase, type ManifestField, type NormalizedLocator } from '../scripts/oceanengine-field-capture-runner.js'
+import { buildDefaultPlan, conditionContradicted, detectPageKind, executeCaseObservation, loadCalibrationManifest, normalizeLocator, observationEvidenceHash, unmetConditionDimensions, validateFieldCapturePlan, type CalibrationManifest, type FieldCaptureLocator, type FieldCapturePage, type ManifestCase, type ManifestField, type NormalizedLocator } from '../scripts/oceanengine-field-capture-runner.js'
 
 type Validator = { compile(schema: Record<string, unknown>): ((value: unknown) => boolean) & { errors?: unknown } }
 const AjvConstructor = Ajv2020 as unknown as new (options: { allErrors: boolean; strict: boolean }) => Validator
@@ -152,6 +152,35 @@ test('contradiction only fires on declared conflicting dimensions', () => {
   assert.equal(conditionContradicted(demoField, { marketing_purpose: 'product_catalog' }), true)
 })
 
+test('unmet condition dimensions name declared failing clauses including equals rules', () => {
+  const deepOptimizationLike = {
+    ...demoField,
+    condition_rule: { all: [
+      { dimension: 'marketing_purpose', operator: 'equals' as const, values: ['ecommerce'] },
+      { dimension: 'carrier', operator: 'in' as const, values: ['orange_landing_page', 'owned_landing_page'] },
+      { dimension: 'optimization_target_semantic_key', operator: 'equals' as const, values: ['in_app_order'] },
+    ] },
+  }
+  assert.deepEqual(unmetConditionDimensions(deepOptimizationLike, {}), [])
+  assert.deepEqual(unmetConditionDimensions(deepOptimizationLike, { marketing_purpose: 'ecommerce' }), [])
+  // Declared but failing clauses are named; undeclared ones stay unknown.
+  assert.deepEqual(unmetConditionDimensions(deepOptimizationLike, { marketing_purpose: 'application', carrier: 'orange_landing_page' }), ['marketing_purpose'])
+  assert.deepEqual(unmetConditionDimensions(deepOptimizationLike, { marketing_purpose: 'ecommerce', carrier: 'independent_private_page', optimization_target_semantic_key: 'in_app_order' }), ['carrier'])
+  assert.deepEqual(unmetConditionDimensions(deepOptimizationLike, { marketing_purpose: 'lead_generation', carrier: 'independent_private_page', optimization_target_semantic_key: 'form_submit' }), ['marketing_purpose', 'carrier', 'optimization_target_semantic_key'])
+})
+
+test('observations record unmet condition dimensions from declared plan state', async () => {
+  const manifest = baseManifest()
+  const plan = livePlan(manifest, { marketing_purpose: 'product_catalog' })
+  const envelope = await executeCaseObservation({ plan, manifest, caseId: 'OE-DEMO-CREATE', page: new FakePage(createUrl('&is_create=1'), fullElements()), sessionContextSha256: hash })
+  const choice = envelope.fields[0]
+  assert.equal(choice.status, 'blocked_by_condition')
+  assert.deepEqual(choice.unmet_condition_dimensions, ['marketing_purpose'])
+  const lazy = envelope.fields[3]
+  assert.equal(lazy.status, 'observed')
+  assert.equal(lazy.unmet_condition_dimensions, undefined)
+})
+
 test('detects page families through fingerprints and URL markers', async () => {
   const manifest = baseManifest()
   const detectWith = async (url: string, elements: Map<string, FakeElement>) => {
@@ -254,12 +283,17 @@ test('observation envelopes satisfy the frozen schema and redaction boundary', (
   assert.equal(validate(poisoned), false)
 })
 
-test('validates plans against the manifest and closes unknown dimensions', () => {
+test('validates plans against the manifest and closes unknown dimensions', async () => {
   const manifest = baseManifest()
   const plan = buildDefaultPlan(manifest, accountHash)
   assert.equal(validateFieldCapturePlan(plan, manifest).case_ids.length, 3)
   assert.throws(() => validateFieldCapturePlan({ ...plan, case_ids: ['OE-MISSING'] }, manifest), /invalid_plan/)
   assert.throws(() => validateFieldCapturePlan({ ...plan, declared_conditions: { marketing_purpose: 'unknown_value' } }, manifest), /invalid_plan/)
+  assert.throws(() => validateFieldCapturePlan({ ...plan, declared_conditions: { nonexistent_dimension: 'x' } }, manifest), /invalid_plan/)
+  // Condition-rule dimensions accept declarations even though they are not
+  // path dimensions with closed value sets.
+  const liveManifest = await loadCalibrationManifest(root)
+  validateFieldCapturePlan({ ...buildDefaultPlan(liveManifest, accountHash), declared_conditions: { carrier: 'orange_landing_page', optimization_target_semantic_key: 'in_app_order' } }, liveManifest)
   assert.throws(() => validateFieldCapturePlan({ ...plan, allowed_hosts: ['evil.example.com'] }, manifest), /invalid_plan/)
   assert.equal(validateFieldCapturePlan(buildDefaultPlan(manifest, accountHash), manifest).manifest_ref.fixture, 'oceanengine-calibration-manifest-v1.json')
 })
