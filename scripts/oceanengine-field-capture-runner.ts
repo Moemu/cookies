@@ -246,7 +246,9 @@ export interface FieldCapturePage {
 
 async function locatorFacts(locator: FieldCaptureLocator) {
   const count = await locator.count()
-  const visible = count > 0 ? await locator.isVisible() : false
+  // Strict-mode resolvers throw on multi-matches; visibility is only consumed
+  // for a unique element, and an ambiguous match stays ambiguous regardless.
+  const visible = count === 1 ? await locator.isVisible().catch(() => false) : false
   return { count, visible }
 }
 
