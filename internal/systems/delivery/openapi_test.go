@@ -125,6 +125,7 @@ func TestOpenAPIContractCoversProjectScopedMonitoringAlerts(t *testing.T) {
 	contract := string(contents)
 	required := []string{
 		"/api/delivery/v1/projects/{project_id}/alerts:evaluate:",
+		"/api/delivery/v1/projects/{project_id}/alerts:inspect:",
 		"/api/delivery/v1/projects/{project_id}/alerts:",
 		"/api/delivery/v1/projects/{project_id}/alerts/{alert_id}:",
 		"AlertEvaluationRequest:",
@@ -175,12 +176,13 @@ func TestOpenAPIContractCoversMechanisticSimulationV0(t *testing.T) {
 	contract := string(contents)
 	for _, expected := range []string{
 		"/api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}/mechanistic-simulation-runs:",
+		"/api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}/mechanistic-simulation-run:",
 		"/api/delivery/v1/projects/{project_id}/mechanistic-simulation-runs/{run_id}:",
 		"MechanisticSimulationRequest:",
 		"MechanisticSimulationResult:",
-		"delivery-mechanistic-simulation/v0",
-		"delivery-mechanistic-monte-carlo/v0",
-		"calibration_status: { type: string, const: assumption_driven }",
+		"delivery-mechanistic-simulation/v1",
+		"delivery-mechanistic-monte-carlo/v0.3",
+		"calibration_status: { type: string, enum: [assumption_driven, account_product_calibrated] }",
 		"requires_human_review: { type: boolean, const: true }",
 		"effect_basis: { type: string, enum: [predictive_association, rule_constraint] }",
 	} {

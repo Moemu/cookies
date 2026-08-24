@@ -40,6 +40,14 @@ func (r MySQLRepository) GetMechanisticSimulation(ctx context.Context, organizat
 	return value, err
 }
 
+func (r MySQLRepository) GetLatestMechanisticSimulation(ctx context.Context, organizationID contract.OrganizationID, projectID contract.ProjectID, planID string, version int) (MechanisticSimulationResult, error) {
+	value, err := scanMechanisticSimulation(r.DB.QueryRowContext(ctx, `SELECT result_json FROM delivery_mechanistic_simulation_runs WHERE organization_id=? AND project_id=? AND plan_id=? AND plan_version=? ORDER BY created_at DESC,id DESC LIMIT 1`, organizationID, projectID, planID, version))
+	if errors.Is(err, sql.ErrNoRows) {
+		return MechanisticSimulationResult{}, ErrNotFound
+	}
+	return value, err
+}
+
 func scanMechanisticSimulation(row rowScanner) (MechanisticSimulationResult, error) {
 	var payload []byte
 	if err := row.Scan(&payload); err != nil {

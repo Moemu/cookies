@@ -56,6 +56,31 @@ func TestMechanisticSimulationHTTPUsesPlanVersionWithoutExecution(t *testing.T) 
 	if response.Code != http.StatusOK || app.runID != "run_1" || !strings.Contains(response.Body.String(), `"is_simulated":true`) {
 		t.Fatalf("get status=%d run=%q body=%s", response.Code, app.runID, response.Body.String())
 	}
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet, "/api/delivery/v1/projects/project_1/plans/plan_1/versions/2/mechanistic-simulation-run", ""))
+	if response.Code != http.StatusOK || app.planID != "plan_1" || app.version != 2 || !strings.Contains(response.Body.String(), `"id":"latest_run"`) {
+		t.Fatalf("latest status=%d plan=%q version=%d body=%s", response.Code, app.planID, app.version, response.Body.String())
+	}
+}
+
+func TestConnectorInspectionHTTPDoesNotUseFixtureOrExecution(t *testing.T) {
+	app := &connectorInspectionApplicationStub{applicationStub: applicationStub{}}
+	server := New(app)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/alerts:inspect", `{"plan_id":"plan_1","window_days":14}`))
+	if response.Code != http.StatusOK || app.request.PlanID != "plan_1" || app.request.WindowDays != 14 || !strings.Contains(response.Body.String(), `"is_simulated":false`) {
+		t.Fatalf("status=%d request=%+v body=%s", response.Code, app.request, response.Body.String())
+	}
+}
+
+type connectorInspectionApplicationStub struct {
+	applicationStub
+	request delivery.ConnectorInspectionRequest
+}
+
+func (s *connectorInspectionApplicationStub) InspectConnectorAlerts(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, request delivery.ConnectorInspectionRequest) (delivery.ConnectorInspectionResponse, error) {
+	s.request = request
+	return delivery.ConnectorInspectionResponse{Items: []delivery.DeliveryAlert{}, Source: "connector", IsSimulated: false, Status: "quarantined", DatasetVersion: "connector/v1"}, nil
 }
 
 type mechanisticApplicationStub struct {
@@ -74,6 +99,11 @@ func (s *mechanisticApplicationStub) CreatePrelaunchMechanisticSimulation(_ cont
 func (s *mechanisticApplicationStub) GetPrelaunchMechanisticSimulation(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, runID string) (delivery.MechanisticSimulationResult, error) {
 	s.runID = runID
 	return delivery.MechanisticSimulationResult{ID: runID, SchemaVersion: delivery.MechanisticSimulationSchemaVersion, ModelVersion: delivery.MechanisticSimulationModelVersion, CalibrationStatus: delivery.CalibrationStatusAssumptionDriven, IsSimulated: true, Status: "completed"}, nil
+}
+
+func (s *mechanisticApplicationStub) GetLatestPrelaunchMechanisticSimulation(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, planID string, version int) (delivery.MechanisticSimulationResult, error) {
+	s.planID, s.version = planID, version
+	return delivery.MechanisticSimulationResult{ID: "latest_run", PlanID: planID, PlanVersion: version, IsSimulated: true}, nil
 }
 
 func TestPlatformEntityMappingHTTPKeepsPlatformValuesServerOwnedAndRequiresTwoReadbacks(t *testing.T) {
@@ -562,6 +592,9 @@ func (s *applicationStub) ListMetricSnapshots(context.Context, contract.ActorCon
 }
 func (s *applicationStub) EvaluateAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.EvaluateAlertsRequest) (delivery.EvaluateAlertsResponse, error) {
 	return delivery.EvaluateAlertsResponse{Items: []delivery.DeliveryAlert{}}, nil
+}
+func (s *applicationStub) InspectConnectorAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.ConnectorInspectionRequest) (delivery.ConnectorInspectionResponse, error) {
+	return delivery.ConnectorInspectionResponse{Items: []delivery.DeliveryAlert{}, Source: "connector"}, nil
 }
 func (s *applicationStub) ListAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.AlertFilter) ([]delivery.DeliveryAlert, error) {
 	return []delivery.DeliveryAlert{}, nil

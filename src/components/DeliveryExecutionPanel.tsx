@@ -130,7 +130,7 @@ export function DeliveryExecutionPanel({ projectId, changeSet, canExecute, golde
       setSelectedId(value.execution.id)
       setSelectedRecord(value)
       onExecutionCreated(value.changeSet)
-      setNotice('平台操作演练已完成；操作步骤与证据已保存。请另行运行投放效果情景模拟，演练成功本身不会生成指标。')
+      setNotice('平台操作演练已完成；操作步骤与证据已保存。效果模拟使用上线前 PlanVersion，不依赖本次演练。')
     } catch (error) {
       if (request !== executionRequest.current || activeProjectId.current !== requestedProjectId || activeChangeSetId.current !== requestedChangeSetId) return
       setNotice(error instanceof Error ? error.message : '启动平台操作演练失败。')

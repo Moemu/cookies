@@ -41,6 +41,7 @@ type Application interface {
 	CreateDemoMetricSnapshot(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.CreateMetricSnapshotRequest) (delivery.DeliveryMetricSnapshot, error)
 	ListMetricSnapshots(context.Context, contract.ActorContext, contract.ProjectID, string, int) ([]delivery.DeliveryMetricSnapshot, error)
 	EvaluateAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.EvaluateAlertsRequest) (delivery.EvaluateAlertsResponse, error)
+	InspectConnectorAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.ConnectorInspectionRequest) (delivery.ConnectorInspectionResponse, error)
 	ListAlerts(context.Context, contract.ActorContext, contract.ProjectID, delivery.AlertFilter) ([]delivery.DeliveryAlert, error)
 	UpdateAlert(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.UpdateAlertRequest) (delivery.DeliveryAlert, error)
 	GenerateRecommendation(context.Context, contract.ActorContext, contract.ProjectID, string, int) (delivery.DeliveryRecommendation, error)
@@ -73,6 +74,7 @@ type observatoryApplication interface {
 type mechanisticSimulationApplication interface {
 	CreatePrelaunchMechanisticSimulation(context.Context, contract.ActorContext, contract.ProjectID, string, int, delivery.MechanisticSimulationRequest) (delivery.MechanisticSimulationEnvelope, error)
 	GetPrelaunchMechanisticSimulation(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.MechanisticSimulationResult, error)
+	GetLatestPrelaunchMechanisticSimulation(context.Context, contract.ActorContext, contract.ProjectID, string, int) (delivery.MechanisticSimulationResult, error)
 }
 
 type controlledAuthorityApplication interface {
@@ -109,6 +111,7 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions", server.listPlanVersions)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}", server.getPlanVersion)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}/mechanistic-simulation-runs", server.createMechanisticSimulation)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/plans/{plan_id}/versions/{version}/mechanistic-simulation-run", server.getLatestMechanisticSimulation)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/mechanistic-simulation-runs/{run_id}", server.getMechanisticSimulation)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/plans/{plan_id}/preflight", server.planPreflight)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/plans/{plan_id}/detail", server.getPlanDetail)
@@ -152,6 +155,7 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots", server.createMetricSnapshot)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions/{execution_id}/metric-snapshots", server.listMetricSnapshots)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/alerts:evaluate", server.evaluateAlerts)
+	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/alerts:inspect", server.inspectConnectorAlerts)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/alerts", server.listAlerts)
 	server.mux.HandleFunc("PATCH /api/delivery/v1/projects/{project_id}/alerts/{alert_id}", server.updateAlert)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/tour-runs/{tour_action}", server.tourRunAction)
@@ -201,6 +205,25 @@ func (s *Server) getMechanisticSimulation(writer http.ResponseWriter, request *h
 		return
 	}
 	value, err := app.GetPrelaunchMechanisticSimulation(request.Context(), mustActor(request), projectID(request), request.PathValue("run_id"))
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
+}
+
+func (s *Server) getLatestMechanisticSimulation(writer http.ResponseWriter, request *http.Request) {
+	version, err := strconv.Atoi(request.PathValue("version"))
+	if err != nil || version < 1 {
+		writeError(writer, request, delivery.ErrInvalidRequest)
+		return
+	}
+	app, err := s.mechanisticSimulationApp()
+	if err != nil {
+		writeError(writer, request, err)
+		return
+	}
+	value, err := app.GetLatestPrelaunchMechanisticSimulation(request.Context(), mustActor(request), projectID(request), request.PathValue("plan_id"), version)
 	if err != nil {
 		writeError(writer, request, err)
 		return
@@ -542,6 +565,18 @@ func (s *Server) evaluateAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, v)
 }
+func (s *Server) inspectConnectorAlerts(w http.ResponseWriter, r *http.Request) {
+	var body delivery.ConnectorInspectionRequest
+	if !decode(w, r, &body) {
+		return
+	}
+	v, err := s.app.InspectConnectorAlerts(r.Context(), mustActor(r), projectID(r), body)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	v, err := s.app.ListAlerts(r.Context(), mustActor(r), projectID(r), delivery.AlertFilter{PlanID: q.Get("plan_id"), ExecutionID: q.Get("execution_id"), Status: delivery.AlertStatus(q.Get("status")), Type: delivery.AlertType(q.Get("type")), Severity: q.Get("severity"), Fixture: delivery.AlertEvaluationScenario(q.Get("fixture")), Cursor: q.Get("cursor"), Limit: queryLimit(r)})
@@ -553,7 +588,7 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	if len(v) == queryLimit(r) {
 		next = v[len(v)-1].ID
 	}
-	writeJSON(w, http.StatusOK, delivery.AlertList{Items: v, NextCursor: next, Source: delivery.MetricSourceDemoFixture, IsSimulated: true})
+	writeJSON(w, http.StatusOK, delivery.AlertList{Items: v, NextCursor: next, Source: "connector", IsSimulated: false})
 }
 func (s *Server) updateAlert(w http.ResponseWriter, r *http.Request) {
 	var body delivery.UpdateAlertRequest

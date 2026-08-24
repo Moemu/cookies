@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/connector"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/ids"
 )
@@ -331,6 +332,10 @@ type ActiveProjectResolver interface {
 	RequireActiveContext(context.Context, contract.ActorContext, contract.ProjectID) (contract.ProjectContext, error)
 }
 
+type ConnectorAccountReader interface {
+	ListAccounts(context.Context, string, string) ([]connector.PlatformAccount, error)
+}
+
 type Repository interface {
 	CreatePlan(context.Context, DeliveryPlan, DeliveryPlanVersion) (DeliveryPlan, error)
 	UpdatePlan(context.Context, contract.OrganizationID, contract.ProjectID, string, int, DeliveryPlanVersion) (DeliveryPlan, error)
@@ -361,12 +366,15 @@ type Repository interface {
 }
 
 type Service struct {
-	Repository Repository
-	Projects   ActiveProjectResolver
-	Adapter    PlatformAdapter
-	Insights   InsightsConsumer
-	NewID      ids.Generator
-	Now        func() time.Time
+	Repository              Repository
+	Projects                ActiveProjectResolver
+	Adapter                 PlatformAdapter
+	Insights                InsightsConsumer
+	ConnectorSnapshots      ConnectorSnapshotReader
+	ConnectorAccounts       ConnectorAccountReader
+	LaunchBatchCalibrations ConnectorLaunchBatchCalibrationReader
+	NewID                   ids.Generator
+	Now                     func() time.Time
 }
 
 func (s Service) CreatePlan(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, request CreatePlanRequest) (DeliveryPlan, error) {
@@ -382,6 +390,11 @@ func (s Service) createPlan(ctx context.Context, actor contract.ActorContext, pr
 	}
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return DeliveryPlan{}, err
+	}
+	if tourRunID == "" {
+		if err := s.validateProjectAccount(ctx, actor, projectID, request.PlatformConfiguration); err != nil {
+			return DeliveryPlan{}, err
+		}
 	}
 	tourOwnerID := ""
 	if tourRunID == "" && tourCase != "" || tourRunID != "" && tourCase == "" {
@@ -427,11 +440,39 @@ func (s Service) UpdatePlan(ctx context.Context, actor contract.ActorContext, pr
 	if err := request.Validate(); err != nil {
 		return DeliveryPlan{}, ErrInvalidRequest
 	}
+	if plan.TourRunID == "" {
+		if err := s.validateProjectAccount(ctx, actor, projectID, request.PlatformConfiguration); err != nil {
+			return DeliveryPlan{}, err
+		}
+	}
 	version, err := newPlatformPlanVersion(plan.ID, actor, projectID, request.ExpectedVersion+1, *request.Intent, *request.PlatformConfiguration, s.now())
 	if err != nil {
 		return DeliveryPlan{}, err
 	}
 	return s.Repository.UpdatePlan(ctx, actor.OrganizationID, projectID, planID, request.ExpectedVersion, version)
+}
+
+func (s Service) validateProjectAccount(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, configuration *PlatformConfiguration) error {
+	if s.ConnectorAccounts == nil {
+		return nil
+	}
+	if configuration == nil || configuration.Payload.OceanEngine == nil || configuration.Payload.OceanEngine.Project == nil {
+		return ErrInvalidRequest
+	}
+	accountID := strings.TrimSpace(configuration.Payload.OceanEngine.Project.AccountReference.ID)
+	if !strings.HasPrefix(accountID, "oeacct_") {
+		return fmt.Errorf("%w: select a verified Connector account from the current project", ErrInvalidRequest)
+	}
+	accounts, err := s.ConnectorAccounts.ListAccounts(ctx, string(actor.OrganizationID), string(projectID))
+	if err != nil {
+		return err
+	}
+	for _, account := range accounts {
+		if account.ID == accountID && account.Status == "verified" && account.ProjectID == string(projectID) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: the Connector account is not verified in the current project", ErrInvalidRequest)
 }
 
 // validateVersionBlocking runs the authoritative preflight rules against a

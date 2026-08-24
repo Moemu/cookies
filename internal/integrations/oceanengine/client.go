@@ -16,6 +16,39 @@ import (
 var ErrForbiddenEndpoint = errors.New("oceanengine endpoint is not read-only")
 var ErrSessionInvalid = errors.New("oceanengine session is invalid")
 
+type HTTPStatusError struct {
+	StatusCode int
+}
+
+func (e HTTPStatusError) Error() string {
+	return fmt.Sprintf("oceanengine HTTP status %d", e.StatusCode)
+}
+
+type BusinessCodeError struct {
+	Code int
+}
+
+func (e BusinessCodeError) Error() string {
+	return fmt.Sprintf("%s: business code %d", ErrSessionInvalid.Error(), e.Code)
+}
+
+func (e BusinessCodeError) Unwrap() error {
+	return ErrSessionInvalid
+}
+
+type RedirectBlockedError struct {
+	Reason    string
+	PathShape string
+}
+
+func (e RedirectBlockedError) Error() string {
+	return "oceanengine redirect blocked: " + e.Reason
+}
+
+func (e RedirectBlockedError) Unwrap() error {
+	return ErrForbiddenEndpoint
+}
+
 type Endpoint struct {
 	Method string
 	Path   string
@@ -81,10 +114,31 @@ func newClient(rawBaseURL, advertiserID string, session Session, httpClient *htt
 	previousRedirect := clientCopy.CheckRedirect
 	clientCopy.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if !strings.EqualFold(req.URL.Host, base.Host) {
-			return ErrForbiddenEndpoint
+			host := strings.ToLower(req.URL.Hostname())
+			if strings.Contains(host, "sso.") || strings.Contains(host, "login.") {
+				return RedirectBlockedError{Reason: "authentication_required", PathShape: safeRedirectPathShape(req.URL.Path)}
+			}
+			return RedirectBlockedError{Reason: "cross_host", PathShape: safeRedirectPathShape(req.URL.Path)}
 		}
-		if _, ok := readOnlyEndpoints[Endpoint{req.Method, req.URL.Path}]; !ok {
-			return ErrForbiddenEndpoint
+		redirectPath := req.URL.Path
+		if redirectPath != "/" {
+			redirectPath = strings.TrimSuffix(redirectPath, "/")
+		}
+		if _, ok := readOnlyEndpoints[Endpoint{req.Method, redirectPath}]; !ok {
+			path := strings.ToLower(req.URL.Path)
+			if strings.Contains(path, "login") || strings.Contains(path, "sso") || strings.Contains(path, "auth") {
+				return RedirectBlockedError{Reason: "authentication_required", PathShape: safeRedirectPathShape(req.URL.Path)}
+			}
+			if path == "/brand" {
+				return RedirectBlockedError{Reason: "account_context_required", PathShape: safeRedirectPathShape(req.URL.Path)}
+			}
+			if path == "/" || strings.HasSuffix(path, ".html") {
+				return RedirectBlockedError{Reason: "application_page", PathShape: safeRedirectPathShape(req.URL.Path)}
+			}
+			if strings.Contains(path, "account") || strings.Contains(path, "advertiser") {
+				return RedirectBlockedError{Reason: "unknown_account_path", PathShape: safeRedirectPathShape(req.URL.Path)}
+			}
+			return RedirectBlockedError{Reason: "unknown_path", PathShape: safeRedirectPathShape(req.URL.Path)}
 		}
 		if previousRedirect != nil {
 			return previousRedirect(req, via)
@@ -99,6 +153,29 @@ func newClient(rawBaseURL, advertiserID string, session Session, httpClient *htt
 		session.CSRFToken = cookieValue(session.Cookies, "csrftoken")
 	}
 	return &Client{BaseURL: base, HTTPClient: httpClient, Session: session, AdvertiserID: advertiserID, UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0", Delay: 500 * time.Millisecond, MaxAttempts: 3}, nil
+}
+
+func safeRedirectPathShape(path string) string {
+	segments := strings.Split(path, "/")
+	for index, segment := range segments {
+		if len(segment) > 48 {
+			segments[index] = "*"
+			continue
+		}
+		var shaped strings.Builder
+		for _, char := range strings.ToLower(segment) {
+			switch {
+			case char >= 'a' && char <= 'z', char == '-', char == '_', char == '.':
+				shaped.WriteRune(char)
+			case char >= '0' && char <= '9':
+				shaped.WriteByte('#')
+			default:
+				shaped.WriteByte('*')
+			}
+		}
+		segments[index] = shaped.String()
+	}
+	return strings.Join(segments, "/")
 }
 
 func cookieValue(header, name string) string {
@@ -181,6 +258,10 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 		}
 		resp, requestErr := c.HTTPClient.Do(req)
 		if requestErr != nil {
+			var redirectErr RedirectBlockedError
+			if errors.As(requestErr, &redirectErr) {
+				return nil, redirectErr
+			}
 			if attempt < attempts {
 				if err := waitRetry(ctx, attempt); err != nil {
 					return nil, err
@@ -200,7 +281,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			_ = resp.Body.Close()
-			return nil, fmt.Errorf("oceanengine HTTP status %d", resp.StatusCode)
+			return nil, HTTPStatusError{StatusCode: resp.StatusCode}
 		}
 		var payload map[string]any
 		decodeErr := json.NewDecoder(resp.Body).Decode(&payload)
@@ -209,7 +290,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader, co
 			return nil, fmt.Errorf("decode Ocean Engine response: %w", decodeErr)
 		}
 		if code, ok := payload["code"].(float64); ok && code != 0 {
-			return nil, fmt.Errorf("%w: business code %.0f", ErrSessionInvalid, code)
+			return nil, BusinessCodeError{Code: int(code)}
 		}
 		return payload, nil
 	}

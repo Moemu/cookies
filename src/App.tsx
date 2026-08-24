@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect } from 'react'
 import { Shell } from './components/Shell'
 import { ProjectFlowDashboard } from './components/ProjectWorkflow'
 import { ProjectManagementPage } from './components/ProjectManagementPage'
-import { ModelSettingsPage } from './components/ModelSettingsPage'
 import { LoginPage } from './components/LoginPage'
 import { RenderErrorBoundary } from './components/RenderErrorBoundary'
 import { StateBoundary } from './components/StateBoundary'
@@ -19,6 +18,7 @@ import type { SystemKey } from './types'
 const loadPages = () => import('./components/Pages')
 const HomePage = lazy(() => loadPages().then(module => ({ default: module.HomePage })))
 const ModulePage = lazy(() => loadPages().then(module => ({ default: module.ModulePage })))
+const ModelSettingsPage = lazy(() => import('./components/ModelSettingsPage').then(module => ({ default: module.ModelSettingsPage })))
 
 export default function App() {
   const { route, navigate } = useAppRoute()

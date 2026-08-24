@@ -283,6 +283,11 @@ export type DeliveryDecisionCandidate = {
   risks: string[]
   uncertainty: 'low' | 'medium' | 'high'
   calibrationManifest: OceanEngineCalibrationManifestBinding
+  optimizationFocus?: string
+  proposedAction?: string
+  actionMagnitudePercent?: number
+  scenario?: string
+  scenarioProbability?: number
 }
 
 export type DeliveryDecision = {
@@ -290,7 +295,7 @@ export type DeliveryDecision = {
   id: string
   organizationId: string
   projectId: string
-  policyVersion: 'delivery-decision-policy/v1'
+  policyVersion: 'delivery-decision-policy/v1' | 'delivery-decision-policy/v2'
   diagnostic: { code: 'ready' | 'insufficient_data' | 'stale_data' | 'blocked_by_asset' | 'platform_pending'; explanation: string; nextAction: string }
   inputs: { planId: string; planVersion: number; planCanonicalHash: string; intentCanonicalHash: string; configurationCanonicalHash: string; factSnapshotRef: string; simulationRunId?: string; simulationInputHash?: string }
   candidates: DeliveryDecisionCandidate[]
@@ -689,10 +694,10 @@ type WireDeliveryDecision = {
   id: string
   organization_id: string
   project_id: string
-  policy_version: 'delivery-decision-policy/v1'
+  policy_version: DeliveryDecision['policyVersion']
   diagnostic: { code: DeliveryDecision['diagnostic']['code']; explanation: string; next_action: string }
   inputs: { plan_id: string; plan_version: number; plan_canonical_hash: string; intent_canonical_hash: string; configuration_canonical_hash: string; fact_snapshot_ref: string; simulation_run_id?: string; simulation_input_hash?: string }
-  candidates: Array<{ id: string; kind: DeliveryDecisionCandidate['kind']; target_configuration: PlatformConfiguration; budget_change_percent: number; rationale: string[]; constraints: DeliveryDecisionCandidate['constraints']; risks: string[]; uncertainty: DeliveryDecisionCandidate['uncertainty']; calibration_manifest: OceanEngineCalibrationManifestBinding }>
+  candidates: Array<{ id: string; kind: DeliveryDecisionCandidate['kind']; target_configuration: PlatformConfiguration; budget_change_percent: number; rationale: string[]; constraints: DeliveryDecisionCandidate['constraints']; risks: string[]; uncertainty: DeliveryDecisionCandidate['uncertainty']; calibration_manifest: OceanEngineCalibrationManifestBinding; optimization_focus?: string; proposed_action?: string; action_magnitude_percent?: number; scenario?: string; scenario_probability?: number }>
   recommended_candidate_id: string
   evidence: string[]
   canonical_hash: string
@@ -1143,7 +1148,7 @@ export type DeliveryAlert = {
   planId: string
   executionId: string
   simulationRunId?: string
-  monitoredEntity: { type: 'delivery_plan'; id: string; advertiserId: string }
+  monitoredEntity: { type: 'delivery_plan' | 'platform_promotion'; id: string; advertiserId: string }
   type: 'review_rejected' | 'spend_spike' | 'zero_conversion' | 'cost_worsening' | 'under_delivery' | 'creative_fatigue' | 'tracking_anomaly'
   ruleId: string
   ruleVersion: string
@@ -1155,9 +1160,9 @@ export type DeliveryAlert = {
   metricDefinition: { name: string; unit: string; numerator?: number; denominator?: number; observedValue?: number; baselineValue?: number; threshold?: number }
   owner: { id: string; displayName: string; source: string }
   evidenceRefs: string[]
-  source: 'demo_fixture'
-  isSimulated: true
-  scenario: DeliveryAlertFixture
+  source: 'demo_fixture' | 'connector'
+  isSimulated: boolean
+  scenario: DeliveryAlertFixture | 'connector_inspection'
   datasetVersion: string
   fixtureVersion: string
   freshness: { status: 'fresh' | 'stale' | 'unknown' | 'insufficient_data'; asOf: string; evaluatedAt: string; ageSeconds: number; maxAgeSeconds: number; missingMetrics?: string[] }
@@ -1188,7 +1193,7 @@ type WireDeliveryAlert = {
   plan_id: string
   execution_id: string
   simulation_run_id?: string
-  monitored_entity: { type: 'delivery_plan'; id: string; advertiser_id: string }
+  monitored_entity: { type: 'delivery_plan' | 'platform_promotion'; id: string; advertiser_id: string }
   type: DeliveryAlert['type']
   rule_id: string
   rule_version: string
@@ -1200,9 +1205,9 @@ type WireDeliveryAlert = {
   metric_definition: { name: string; unit: string; numerator?: number; denominator?: number; observed_value?: number; baseline_value?: number; threshold?: number }
   owner: { id: string; display_name: string; source: string }
   evidence_refs: string[]
-  source: 'demo_fixture'
-  is_simulated: true
-  scenario: DeliveryAlertFixture
+  source: 'demo_fixture' | 'connector'
+  is_simulated: boolean
+  scenario: DeliveryAlertFixture | 'connector_inspection'
   dataset_version: string
   fixture_version: string
   freshness: { status: DeliveryAlert['freshness']['status']; as_of: string; evaluated_at: string; age_seconds: number; max_age_seconds: number; missing_metrics?: string[] | null }
@@ -1234,6 +1239,17 @@ export const deliveryAlertApi = {
     })
     return toDeliveryAlertEvaluation(response)
   },
+  async inspect(projectId: string, planId: string, windowDays = 14): Promise<ConnectorInspection> {
+    const response = await deliveryPlanRequest<WireConnectorInspection>(projectId, '/alerts:inspect', {
+      method: 'POST', body: JSON.stringify({ plan_id: planId, window_days: windowDays }),
+    })
+    return {
+      items: response.items.map(toDeliveryAlert), createdCount: response.created_count, reusedCount: response.reused_count,
+      source: response.source, isSimulated: response.is_simulated, status: response.status, statusReason: response.status_reason,
+      datasetVersion: response.dataset_version, evaluatedAt: response.evaluated_at, dataThrough: response.data_through,
+      evidenceRefs: response.evidence_refs ?? [],
+    }
+  },
   async list(projectId: string, filter: { planId?: string; executionId?: string } = {}): Promise<DeliveryAlert[]> {
     const items: DeliveryAlert[] = []
     let cursor: string | null = null
@@ -1254,6 +1270,115 @@ export const deliveryAlertApi = {
       body: JSON.stringify({ action, expected_version: expectedVersion }),
     }))
   },
+}
+
+export type ConnectorInspection = {
+  items: DeliveryAlert[]
+  createdCount: number
+  reusedCount: number
+  source: 'connector'
+  isSimulated: false
+  status: 'ready' | 'insufficient_data' | 'quarantined' | 'stale' | 'unavailable'
+  statusReason?: string
+  datasetVersion: string
+  evaluatedAt: string
+  dataThrough?: string
+  evidenceRefs: string[]
+}
+
+type WireConnectorInspection = {
+  items: WireDeliveryAlert[]
+  created_count: number
+  reused_count: number
+  source: 'connector'
+  is_simulated: false
+  status: ConnectorInspection['status']
+  status_reason?: string
+  dataset_version: string
+  evaluated_at: string
+  data_through?: string
+  evidence_refs?: string[]
+}
+
+export type MechanisticPriorSet = {
+  version: string
+  review_pass_probability: { value: number; source: string; unit: 'probability'; scope: string[]; uncertainty: string }
+  delivery_probability: { value: number; source: string; unit: 'probability'; scope: string[]; uncertainty: string }
+  budget_utilization: { minimum: number; mode: number; maximum: number; source: string; unit: 'ratio'; scope: string[]; uncertainty: string }
+  cpm: { minimum: number; mode: number; maximum: number; source: string; unit: string; scope: string[]; uncertainty: string }
+  ctr: { minimum: number; mode: number; maximum: number; source: string; unit: 'ratio'; scope: string[]; uncertainty: string }
+  cvr: { minimum: number; mode: number; maximum: number; source: string; unit: 'ratio'; scope: string[]; uncertainty: string }
+  tracking_observable_rate: { value: number; source: string; unit: 'probability'; scope: string[]; uncertainty: string }
+  creative_fatigue?: { enabled: boolean; daily_rate: number; source: string; unit: 'ratio_per_day'; scope: string[]; uncertainty: string }
+}
+
+export type MechanisticSimulation = {
+  id: string
+  planId: string
+  planVersion: number
+  modelVersion: string
+  priorSetVersion: string
+  stableSeed: string
+  predictionHorizon: string
+  sampleCount: number
+  status: string
+  isSimulated: true
+  calibrationStatus: 'assumption_driven' | 'account_product_calibrated'
+  calibrationPriorRef?: string
+  metricWindows: Array<{ sequence: number; start: string; end: string; timezone: string; metrics: Record<string, { available: boolean; unit: string; p10?: number; p50?: number; p90?: number; mean?: number }> }>
+  scenarioProbabilities: Array<{ scenario: string; probability: number; status: string; limitations: string[] }>
+  alerts: Array<{ type: string; severity: string; probability: number; limitations: string[] }>
+  recommendationDrafts: MechanisticRecommendationDraft[]
+  assumptions: string[]
+  limitations: string[]
+  evidenceRefs: string[]
+}
+
+export type MechanisticRecommendationDraft = {
+  recommendation_type: string
+  target_field: string
+  current_value?: unknown
+  suggested_range?: [number, number]
+  expected_effect_range?: [number, number]
+  confidence: string
+  effect_basis?: string
+  rationale: string
+  evidence_refs?: string[]
+  risks?: string[]
+  guardrails?: string[]
+  requires_human_review: boolean
+}
+
+type WireMechanisticSimulation = {
+  id: string; plan_id: string; plan_version: number; model_version: string; prior_set_version: string; stable_seed: string
+  prediction_horizon: string; sample_count: number; status: string; is_simulated: true; calibration_status: MechanisticSimulation['calibrationStatus']; calibration_prior_ref?: string
+  metric_windows: Array<{ sequence: number; start: string; end: string; timezone: string; metrics: MechanisticSimulation['metricWindows'][number]['metrics'] }>
+  scenario_probabilities: Array<{ scenario: string; probability: number; status: string; limitations: string[] }>
+  alerts: MechanisticSimulation['alerts']; recommendation_drafts: MechanisticSimulation['recommendationDrafts']
+  assumptions: string[]; limitations: string[]; evidence_refs: string[]
+}
+
+export const deliveryMechanisticSimulationApi = {
+  async run(projectId: string, planId: string, version: number, request: { stableSeed: string; sampleCount: number; predictionHorizonDays: number; reviewState: 'unknown' | 'approved' | 'rejected'; priorSet: MechanisticPriorSet; calibrationAccountRef: string }): Promise<MechanisticSimulation> {
+    const response = await deliveryPlanRequest<{ result: WireMechanisticSimulation }>(projectId, `/plans/${encodeURIComponent(planId)}/versions/${version}/mechanistic-simulation-runs`, {
+      method: 'POST', body: JSON.stringify({ stable_seed: request.stableSeed, sample_count: request.sampleCount, prediction_horizon_days: request.predictionHorizonDays, review_state: request.reviewState, prior_set: request.priorSet, calibration_account_ref: request.calibrationAccountRef }),
+    })
+    return toMechanisticSimulation(response.result)
+  },
+  async getLatest(projectId: string, planId: string, version: number): Promise<MechanisticSimulation> {
+    return toMechanisticSimulation(await deliveryPlanRequest<WireMechanisticSimulation>(projectId, `/plans/${encodeURIComponent(planId)}/versions/${version}/mechanistic-simulation-run`))
+  },
+}
+
+function toMechanisticSimulation(value: WireMechanisticSimulation): MechanisticSimulation {
+  return {
+    id: value.id, planId: value.plan_id, planVersion: value.plan_version, modelVersion: value.model_version,
+    priorSetVersion: value.prior_set_version, stableSeed: value.stable_seed, predictionHorizon: value.prediction_horizon,
+    sampleCount: value.sample_count, status: value.status, isSimulated: value.is_simulated, calibrationStatus: value.calibration_status, calibrationPriorRef: value.calibration_prior_ref,
+    metricWindows: value.metric_windows.map(window => ({ sequence: window.sequence, start: window.start, end: window.end, timezone: window.timezone, metrics: window.metrics })),
+    scenarioProbabilities: value.scenario_probabilities, alerts: value.alerts, recommendationDrafts: value.recommendation_drafts,
+    assumptions: value.assumptions, limitations: value.limitations, evidenceRefs: value.evidence_refs,
+  }
 }
 
 async function deliveryChangeSetAction(
@@ -1636,6 +1761,8 @@ function toDeliveryDecision(value: WireDeliveryDecision): DeliveryDecision {
     candidates: value.candidates.map(candidate => ({
       id: candidate.id, kind: candidate.kind, targetConfiguration: candidate.target_configuration, budgetChangePercent: candidate.budget_change_percent,
       rationale: candidate.rationale ?? [], constraints: candidate.constraints ?? [], risks: candidate.risks ?? [], uncertainty: candidate.uncertainty, calibrationManifest: candidate.calibration_manifest,
+      optimizationFocus: candidate.optimization_focus, proposedAction: candidate.proposed_action, actionMagnitudePercent: candidate.action_magnitude_percent,
+      scenario: candidate.scenario, scenarioProbability: candidate.scenario_probability,
     })),
     recommendedCandidateId: value.recommended_candidate_id, evidence: value.evidence ?? [], canonicalHash: value.canonical_hash, createdBy: value.created_by, createdAt: value.created_at,
   }

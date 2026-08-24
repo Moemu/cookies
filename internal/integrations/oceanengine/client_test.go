@@ -2,6 +2,7 @@ package oceanengine
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -84,6 +85,10 @@ func TestClientMapsBusinessFailureToSessionInvalid(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), ErrSessionInvalid.Error()) {
 		t.Fatalf("expected session invalid, got %v", err)
 	}
+	var businessErr BusinessCodeError
+	if !errors.As(err, &businessErr) || businessErr.Code != 401 {
+		t.Fatalf("expected business code 401, got %v", err)
+	}
 }
 
 func TestClientRetriesTransientReadOnlyResponse(t *testing.T) {
@@ -125,8 +130,90 @@ func TestClientRejectsRedirectToUnknownPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.Delay = 0
-	_, err = client.AccountInfo(context.Background())
-	if err == nil || !strings.Contains(err.Error(), ErrForbiddenEndpoint.Error()) {
+	_, err = client.getJSON(context.Background(), "/ad/api/account/info")
+	var redirectErr RedirectBlockedError
+	if err == nil || !errors.Is(err, ErrForbiddenEndpoint) || !errors.As(err, &redirectErr) || redirectErr.Reason != "unknown_path" {
 		t.Fatalf("redirect error=%v", err)
+	}
+}
+
+func TestClientClassifiesAuthenticationRedirectWithoutExposingLocation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://sso.oceanengine.com/login?account=raw-account-id", http.StatusFound)
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "raw-account-id", Session{Cookies: "session=x"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	_, err = client.AccountInfo(context.Background())
+	var redirectErr RedirectBlockedError
+	if !errors.As(err, &redirectErr) || redirectErr.Reason != "authentication_required" || strings.Contains(err.Error(), "raw-account-id") || strings.Contains(err.Error(), "sso.oceanengine.com") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestClientAllowsTrailingSlashForApprovedReadOnlyEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ad/api/account/info" {
+			http.Redirect(w, r, "/ad/api/account/info/", http.StatusPermanentRedirect)
+			return
+		}
+		if r.URL.Path != "/ad/api/account/info/" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "123", Session{Cookies: "session=x"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	if _, err = client.AccountInfo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRedirectPathShapeRemovesIdentifiersAndQueryIsNeverIncluded(t *testing.T) {
+	shape := safeRedirectPathShape("/route/1234567890/verylongsegmentverylongsegmentverylongsegmentverylongsegment")
+	if shape != "/route/##########/*" || strings.Contains(shape, "1234567890") {
+		t.Fatalf("shape=%q", shape)
+	}
+}
+
+func TestClientClassifiesBrandRedirectAsMissingAccountContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/brand", http.StatusFound)
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "123", Session{Cookies: "session=x"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	_, err = client.getJSON(context.Background(), "/ad/api/account/info")
+	var redirectErr RedirectBlockedError
+	if !errors.As(err, &redirectErr) || redirectErr.Reason != "account_context_required" || redirectErr.PathShape != "/brand" {
+		t.Fatalf("error=%v redirect=%#v", err, redirectErr)
+	}
+}
+
+func TestClientReturnsTypedHTTPStatusWithoutRequestIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "raw-account-id", Session{Cookies: "session=x"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	_, err = client.AccountInfo(context.Background())
+	var statusErr HTTPStatusError
+	if !errors.As(err, &statusErr) || statusErr.StatusCode != http.StatusBadGateway || strings.Contains(err.Error(), "raw-account-id") {
+		t.Fatalf("error=%v", err)
 	}
 }

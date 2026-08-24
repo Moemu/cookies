@@ -870,6 +870,51 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 .miyun-connection-metadata { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 9px 0 0; border: 1px solid var(--line); }.miyun-connection-metadata > div { display: grid; gap: 4px; padding: 10px 12px; }.miyun-connection-metadata > div + div { border-left: 1px solid var(--line); }.miyun-connection-metadata dt { color: var(--muted); font-size: 9px; }.miyun-connection-metadata dd { font-size: 11px; font-weight: 650; margin: 0; }
 .miyun-settings-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 10px; }.miyun-settings-actions button { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 0 11px; font-size: 11px; }.miyun-settings-actions button:first-child { margin-right: auto; }.miyun-settings-notice { margin-top: 14px; padding: 10px 12px; color: var(--cobalt-dark); background: var(--cobalt-soft); border: 1px solid color-mix(in srgb, var(--cobalt) 28%, var(--line)); border-radius: 5px; font-size: 11px; }
 .miyun-cookie-guide { padding: 28px 24px; background: var(--subtle); }.miyun-cookie-guide h3 { font-size: 16px; }.miyun-cookie-guide ol { display: grid; gap: 0; margin: 16px 0 0; padding: 0; list-style: none; }.miyun-cookie-guide li { display: grid; grid-template-columns: 30px 1fr; gap: 9px; padding: 14px 0; border-bottom: 1px solid var(--line); }.miyun-cookie-guide li > span { color: var(--cobalt); font-size: 10px; font-weight: 700; }.miyun-cookie-guide li p { color: var(--muted); font-size: 11px; line-height: 1.65; }.miyun-cookie-guide li b { color: var(--text); }.miyun-cookie-guide a { display: inline-flex; align-items: center; gap: 3px; color: var(--cobalt-dark); font-weight: 700; }
+.oe-connector-flow { display: grid; gap: 14px; }
+.oe-settings-card { overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 1px 2px oklch(.25 .02 255 / .035); }
+.oe-settings-card.disabled { background: color-mix(in srgb, var(--subtle) 45%, var(--surface)); }
+.oe-settings-card-header { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 62px; padding: 12px 16px; background: var(--subtle); border-bottom: 1px solid var(--line); }
+.oe-settings-card-header > span { display: grid; place-items: center; width: 28px; height: 28px; color: var(--cobalt-dark); background: var(--cobalt-soft); border-radius: 50%; font-size: 9px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.oe-settings-card-header h3 { font-size: 13px; line-height: 1.4; text-wrap: balance; }
+.oe-settings-card-header p { margin-top: 2px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.oe-settings-card-header > svg { color: var(--muted); }
+.oe-account-state { padding: 5px 8px; color: var(--warning); background: oklch(.965 .04 82); border-radius: 999px; font-size: 9px; white-space: nowrap; }
+.oe-account-state.verified { color: var(--success); background: oklch(.955 .035 155); }
+.oe-account-state.revoked, .oe-account-state.blocked { color: var(--danger); background: oklch(.97 .025 25); }
+.oe-account-picker { display: grid; grid-template-columns: minmax(190px, .9fr) minmax(0, 1.25fr); gap: 7px 18px; align-items: end; padding: 16px; }
+.oe-account-picker > label { grid-column: 1; color: var(--text); font-size: 10px; font-weight: 700; }
+.oe-account-picker select { grid-column: 1; width: 100%; height: 40px; padding: 0 34px 0 11px; color: var(--text); background-color: var(--surface); border: 1px solid var(--line-strong); border-radius: 5px; font: inherit; font-size: 11px; }
+.oe-account-picker select:focus-visible { border-color: var(--cobalt); outline: 2px solid var(--cobalt-soft); outline-offset: 1px; }
+.oe-account-reference { grid-column: 2; grid-row: 1 / span 2; display: grid; align-content: center; gap: 5px; min-width: 0; min-height: 62px; padding: 10px 12px; background: var(--subtle); border-radius: 5px; }
+.oe-account-reference span { color: var(--muted); font-size: 9px; }
+.oe-account-reference code { display: block; min-width: 0; overflow: hidden; color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.oe-account-empty { display: flex; gap: 10px; align-items: center; margin: 16px 16px 0; padding: 13px; color: var(--muted); background: var(--subtle); border: 1px dashed var(--line-strong); border-radius: 6px; }
+.oe-account-empty p { display: grid; gap: 3px; }
+.oe-account-empty b { color: var(--text); font-size: 10px; }
+.oe-account-empty span { font-size: 9px; }
+.oe-register-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 11px 14px; align-items: end; padding: 15px 16px 16px; border-top: 1px solid var(--line); }
+.oe-form-heading { grid-column: 1 / -1; display: flex; align-items: center; gap: 7px; color: var(--muted); }
+.oe-form-heading b { color: var(--text); font-size: 10px; }
+.oe-register-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.oe-register-fields label { display: grid; gap: 6px; color: var(--text); font-size: 9px; font-weight: 700; }
+.oe-register-fields input, .oe-settings-card .miyun-session-form input { width: 100%; min-width: 0; height: 38px; padding: 0 11px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 5px; font: inherit; font-size: 11px; }
+.oe-register-fields input:focus-visible, .oe-settings-card .miyun-session-form input:focus-visible { border-color: var(--cobalt); outline: 2px solid var(--cobalt-soft); outline-offset: 1px; }
+.oe-register-form > button { display: inline-flex; align-items: center; gap: 5px; min-height: 38px; padding: 0 12px; font-size: 10px; }
+.oe-settings-card > .miyun-session-form { padding: 16px; }
+.oe-settings-card .miyun-settings-actions { margin-top: 4px; }
+.oe-settings-card .miyun-settings-actions button:first-child { margin-right: 0; }
+.oe-settings-card .miyun-settings-actions button:last-child { margin-left: auto; }
+.oe-sync-card { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 17px 18px; background: var(--subtle); border: 1px solid var(--line); border-radius: 8px; }
+.oe-sync-card.ready { background: linear-gradient(120deg, oklch(.975 .018 155), var(--surface) 66%); border-color: oklch(.88 .06 155); }
+.oe-sync-icon { display: grid; place-items: center; width: 42px; height: 42px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.oe-sync-card.ready .oe-sync-icon { color: var(--success); background: oklch(.955 .035 155); border-color: oklch(.88 .06 155); }
+.oe-sync-copy > span { color: var(--cobalt); font-size: 8px; font-weight: 750; letter-spacing: .05em; }
+.oe-sync-copy h3 { margin-top: 3px; font-size: 13px; text-wrap: balance; }
+.oe-sync-copy p { margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.oe-sync-facts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.oe-sync-facts span { padding: 3px 6px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; font-size: 8px; }
+.oe-sync-actions { display: flex; gap: 7px; align-items: center; }
+.oe-sync-actions button { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; padding: 0 12px; font-size: 10px; white-space: nowrap; }
 
 /* Ecommerce pre-roll and hook strategy workspace */
 .performance-mode-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }.performance-mode-tabs button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 58px; padding: 12px 16px; background: var(--surface); border-right: 1px solid var(--line); text-align: left; }.performance-mode-tabs button:last-child { border-right: 0; }.performance-mode-tabs button.active { color: var(--cobalt-dark); background: var(--cobalt-soft); box-shadow: inset 0 -2px var(--cobalt); }.performance-mode-tabs b { font-size: 11px; }.performance-mode-tabs small { color: var(--muted); font-size: 9px; }
@@ -2449,6 +2494,12 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
 .delivery-optimization-stale > span { display: grid; gap: 3px; }
 .delivery-optimization-stale b { font-size: 11px; }
 .delivery-optimization-stale small { color: #806b42; font-size: 9px; line-height: 1.5; }
+.delivery-optimization-history { border: 1px solid var(--line); background: var(--surface); }
+.delivery-optimization-history summary { cursor: pointer; padding: 12px 16px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.delivery-optimization-history > div { display: grid; border-top: 1px solid var(--line); }
+.delivery-optimization-history p { display: flex; justify-content: space-between; gap: 16px; margin: 0; padding: 10px 16px; font-size: 10px; }
+.delivery-optimization-history p + p { border-top: 1px solid var(--line); }
+.delivery-optimization-history p span { color: var(--muted); text-align: right; }
 .delivery-proposal-review { overflow: hidden; margin: 0 20px 20px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(20, 55, 92, .08); }
 .delivery-proposal-review-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 18px 20px; background: linear-gradient(135deg, #f4f9ff, #fff); border-bottom: 1px solid var(--line); }
 .delivery-proposal-review-heading > div { display: grid; gap: 5px; }
@@ -8562,6 +8613,38 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
     border-bottom: 1px solid var(--line);
     border-right: 0;
     padding: 20px;
+  }
+
+  .oe-account-picker,
+  .oe-register-fields,
+  .oe-register-form,
+  .oe-sync-card {
+    grid-template-columns: 1fr;
+  }
+
+  .oe-account-reference {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .oe-register-form > button {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .oe-sync-actions { width: 100%; }
+  .oe-sync-actions button { flex: 1; justify-content: center; }
+
+  .oe-sync-icon {
+    display: none;
+  }
+
+  .oe-settings-card .miyun-settings-actions {
+    display: grid;
+  }
+
+  .oe-settings-card .miyun-settings-actions button:last-child {
+    margin-left: 0;
   }
 
   .miyun-cookie-guide {

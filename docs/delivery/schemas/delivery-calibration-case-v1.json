@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/docs/delivery/schemas/delivery-calibration-case-v1.json",
+  "title": "Delivery CalibrationCase v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "case_id", "dataset_version", "export_policy_version", "source_system", "source_binding", "prediction", "materials", "labels", "quality", "anonymization", "lineage"],
+  "properties": {
+    "schema_version": { "const": "delivery-calibration-case/v1" },
+    "case_id": { "type": "string", "pattern": "^calcase_[0-9a-f]{64}$" },
+    "dataset_version": { "const": "connector-oceanengine-point-in-time-v1" },
+    "export_policy_version": { "const": "connector-calibration-export/v1" },
+    "source_system": { "const": "ocean_engine" },
+    "source_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account_ref", "product_ref", "project_ref", "promotion_ref", "cookies_plan_binding"],
+      "properties": {
+        "account_ref": { "$ref": "#/$defs/anonymous_ref" },
+        "product_ref": { "oneOf": [{ "$ref": "#/$defs/anonymous_ref" }, { "type": "null" }] },
+        "project_ref": { "$ref": "#/$defs/anonymous_ref" },
+        "promotion_ref": { "$ref": "#/$defs/anonymous_ref" },
+        "cookies_plan_binding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "plan_id", "plan_version"],
+          "properties": {
+            "state": { "const": "unbound_historical" },
+            "plan_id": { "type": "null" },
+            "plan_version": { "type": "null" }
+          }
+        }
+      }
+    },
+    "prediction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prediction_cutoff", "horizon", "configuration"],
+      "properties": {
+        "prediction_cutoff": { "type": "string", "format": "date-time" },
+        "horizon": { "type": "string", "pattern": "^P[1-9][0-9]*D$" },
+        "configuration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["snapshot_ref", "payload_hash", "available_at", "valid_from", "features", "missing_features"],
+          "properties": {
+            "snapshot_ref": { "$ref": "#/$defs/anonymous_ref" },
+            "payload_hash": { "$ref": "#/$defs/hash" },
+            "available_at": { "type": "string", "format": "date-time" },
+            "valid_from": { "type": "string", "format": "date-time" },
+            "features": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["budget_minor", "bid_minor", "currency", "charging_mode", "optimization_target", "delivery_mode", "material_count"],
+              "properties": {
+                "budget_minor": { "type": ["integer", "null"], "minimum": 0 },
+                "bid_minor": { "type": ["integer", "null"], "minimum": 0 },
+                "currency": { "type": ["string", "null"] },
+                "charging_mode": { "type": ["string", "null"] },
+                "optimization_target": { "type": ["string", "null"] },
+                "delivery_mode": { "type": ["string", "null"] },
+                "material_count": { "type": "integer", "minimum": 0 }
+              }
+            },
+            "missing_features": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "materials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["material_ref", "binding_ref", "first_available_at"],
+        "properties": {
+          "material_ref": { "$ref": "#/$defs/anonymous_ref" },
+          "binding_ref": { "$ref": "#/$defs/anonymous_ref" },
+          "first_available_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label_cutoff", "attribution_status", "metric_windows", "operational_outcome"],
+      "properties": {
+        "label_cutoff": { "type": "string", "format": "date-time" },
+        "attribution_status": { "enum": ["mature", "immature", "unknown"] },
+        "metric_windows": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/metric_window" }
+        },
+        "operational_outcome": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["disposition", "observed_at", "is_material_quality_label", "interpretation"],
+          "properties": {
+            "disposition": { "enum": ["retained", "paused", "deleted", "unknown"] },
+            "observed_at": { "type": ["string", "null"], "format": "date-time" },
+            "is_material_quality_label": { "const": false },
+            "interpretation": { "const": "operator_and_platform_outcome_only" }
+          }
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "blockers", "warnings"],
+      "properties": {
+        "status": { "enum": ["accepted", "quarantined", "rejected"] },
+        "blockers": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "warnings": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+      }
+    },
+    "anonymization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "key_version", "scope", "raw_identifiers_removed", "free_text_removed", "diagnosis_removed"],
+      "properties": {
+        "algorithm": { "const": "HMAC-SHA256" },
+        "key_version": { "type": "string", "minLength": 1 },
+        "scope": { "const": "stable_within_key_version" },
+        "raw_identifiers_removed": { "const": true },
+        "free_text_removed": { "const": true },
+        "diagnosis_removed": { "const": true }
+      }
+    },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feature_snapshot_refs", "label_snapshot_refs", "evidence_hashes", "exported_at"],
+      "properties": {
+        "feature_snapshot_refs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/anonymous_ref" } },
+        "label_snapshot_refs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/anonymous_ref" } },
+        "evidence_hashes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/hash" } },
+        "exported_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "anonymous_ref": { "type": "string", "pattern": "^anon_v1_[0-9a-f]{64}$" },
+    "metric_window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["window_ref", "window_start", "window_end", "collected_at", "available_at", "data_through", "granularity", "time_zone", "attribution_window", "metric_definition_version", "currency", "amount_unit", "metrics", "quality_status"],
+      "properties": {
+        "window_ref": { "$ref": "#/$defs/anonymous_ref" },
+        "window_start": { "type": "string", "format": "date-time" },
+        "window_end": { "type": "string", "format": "date-time" },
+        "collected_at": { "type": "string", "format": "date-time" },
+        "available_at": { "type": "string", "format": "date-time" },
+        "data_through": { "type": "string", "format": "date-time" },
+        "granularity": { "enum": ["hour", "day"] },
+        "time_zone": { "type": "string", "minLength": 1 },
+        "attribution_window": { "type": "string", "minLength": 1 },
+        "metric_definition_version": { "type": "string", "minLength": 1 },
+        "currency": { "type": "string", "minLength": 1 },
+        "amount_unit": { "type": "string", "minLength": 1 },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["spend", "impressions", "clicks", "conversions"],
+          "properties": {
+            "spend": { "type": "integer", "minimum": 0 },
+            "impressions": { "type": "integer", "minimum": 0 },
+            "clicks": { "type": "integer", "minimum": 0 },
+            "conversions": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "quality_status": { "enum": ["accept", "warning", "quarantine"] }
+      }
+    }
+  }
+}

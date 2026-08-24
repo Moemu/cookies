@@ -8,6 +8,152 @@ servers:
 security:
   - cookiesAuth: []
 paths:
+  /api/connector/v1/accounts:
+    get:
+      operationId: listOrganizationConnectorAccounts
+      summary: List Organization-owned Connector accounts
+      responses:
+        '200':
+          description: Account metadata without raw platform IDs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/PlatformAccount'}}
+    post:
+      operationId: registerOrganizationConnectorAccount
+      summary: Register an Organization-owned Ocean Engine account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RegisterAccountRequest'}
+      responses:
+        '201':
+          description: Safe local account metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlatformAccount'}
+  /api/connector/v1/accounts/{account_ref}/session:
+    parameters:
+      - $ref: '#/components/parameters/AccountRef'
+    get:
+      operationId: getOrganizationConnectorAccountSession
+      summary: Read safe encrypted-session status
+      responses:
+        '200':
+          description: Session status without credential material.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountSession'}
+    put:
+      operationId: updateOrganizationConnectorAccountSession
+      summary: Encrypt and replace a read-only account session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session, expected_version]
+              properties:
+                session: {type: string, minLength: 1, maxLength: 16384, writeOnly: true}
+                expected_version: {type: integer, minimum: 0}
+              additionalProperties: false
+      responses:
+        '200':
+          description: Safe session status.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountSession'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/connector/v1/accounts/{account_ref}/verify:
+    parameters:
+      - $ref: '#/components/parameters/AccountRef'
+    post:
+      operationId: verifyOrganizationConnectorAccount
+      summary: Verify an Organization-owned account with a read-only request
+      responses:
+        '200':
+          description: Verified safe local account metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlatformAccount'}
+  /api/connector/v1/accounts/{account_ref}/revoke:
+    parameters:
+      - $ref: '#/components/parameters/AccountRef'
+    post:
+      operationId: revokeOrganizationConnectorAccount
+      summary: Revoke an Organization-owned local connection
+      responses:
+        '200':
+          description: Revoked safe local account metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlatformAccount'}
+  /api/connector/v1/accounts/{account_ref}/syncs:
+    parameters:
+      - $ref: '#/components/parameters/AccountRef'
+    post:
+      operationId: startOrganizationConnectorSync
+      summary: Start an Organization-scoped read-only synchronization
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 191}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StartSyncRequest'}
+      responses:
+        '202':
+          description: Read-only synchronization accepted for background execution.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SyncResult'}
+  /api/connector/v1/accounts/{account_ref}/syncs/{sync_id}:
+    parameters:
+      - $ref: '#/components/parameters/AccountRef'
+      - $ref: '#/components/parameters/SyncID'
+    get:
+      operationId: getOrganizationConnectorSync
+      summary: Get Organization-scoped synchronization status
+      responses:
+        '200':
+          description: Synchronization status.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SyncStatus'}
+  /api/connector/v1/accounts/{account_ref}/canonical-snapshots:
+    parameters:
+      - $ref: '#/components/parameters/AccountRef'
+    get:
+      operationId: getOrganizationConnectorPointInTimeSnapshot
+      summary: Read an Organization-scoped Canonical Snapshot
+      parameters:
+        - name: prediction_cutoff
+          in: query
+          required: true
+          schema: {type: string, format: date-time}
+        - name: object_ref
+          in: query
+          schema: {type: string, minLength: 1}
+        - name: window_start
+          in: query
+          schema: {type: string, format: date-time}
+        - name: window_end
+          in: query
+          schema: {type: string, format: date-time}
+      responses:
+        '200':
+          description: Versioned Canonical Snapshot.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PointInTimeSnapshot'}
   /api/connector/v1/projects/{project_id}/accounts/{account_ref}/syncs:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -91,6 +237,77 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PlatformAccount'}
+  /api/connector/v1/projects/{project_id}/accounts:claim:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    post:
+      operationId: claimOrganizationConnectorAccountForProject
+      summary: Move one legacy Organization account into the current Project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [account_ref]
+              properties:
+                account_ref: {type: string, pattern: '^oeacct_'}
+              additionalProperties: false
+      responses:
+        '200':
+          description: Project-owned account with its existing session and calibration data.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PlatformAccount'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/session:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AccountRef'
+    get:
+      operationId: getProjectConnectorAccountSession
+      summary: Read safe session status for a Project account
+      responses:
+        '200':
+          description: Session status without credential material.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountSession'}
+    put:
+      operationId: updateProjectConnectorAccountSession
+      summary: Encrypt and replace a Project account session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session, expected_version]
+              properties:
+                session: {type: string, minLength: 1, maxLength: 16384, writeOnly: true}
+                expected_version: {type: integer, minimum: 0}
+              additionalProperties: false
+      responses:
+        '200':
+          description: Safe session status.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountSession'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/launch-batch-calibration:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AccountRef'
+    get:
+      operationId: getProjectConnectorLaunchBatchCalibration
+      summary: Read the latest launch-batch calibration for a Project account
+      responses:
+        '200':
+          description: Versioned calibration snapshot.
+          content:
+            application/json:
+              schema: {type: object}
+        '404': {$ref: '#/components/responses/NotFound'}
   /api/connector/v1/projects/{project_id}/accounts/{account_ref}/verify:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -187,7 +404,7 @@ components:
   schemas:
     ObjectKind:
       type: string
-      enum: [account, campaign, project, promotion, material]
+      enum: [account, campaign, project, product, promotion, material]
     Quality:
       type: string
       enum: [healthy, partial, delayed, blocked, mapping_incomplete]
@@ -208,26 +425,47 @@ components:
       additionalProperties: false
     AccountRef:
       type: object
-      required: [organization_id, project_id, source_ref]
+      required: [organization_id, source_ref]
       properties:
         organization_id: {type: string, minLength: 1}
-        project_id: {type: string, minLength: 1}
+        project_id: {type: string, minLength: 1, description: Project scope for Project-owned accounts.}
         source_ref: {type: string, minLength: 1, description: Local or anonymized Connector reference.}
       additionalProperties: false
     PlatformAccount:
       type: object
-      required: [id, organization_id, project_id, platform, status]
+      required: [id, organization_id, platform, status, credential_ref_present]
       properties:
         id: {type: string, minLength: 1}
         organization_id: {type: string, minLength: 1}
         platform: {type: string, const: ocean_engine}
-        project_id: {type: string, minLength: 1}
+        project_id: {type: string, minLength: 1, description: Present for Project-owned connections.}
         display_label: {type: string}
         status: {type: string, enum: [pending, verified, revoked, blocked]}
         verified_at: {type: string, format: date-time}
         last_checked_at: {type: string, format: date-time}
         connection_type: {type: string, const: web_api}
         credential_ref_present: {type: boolean}
+      additionalProperties: false
+    RegisterAccountRequest:
+      type: object
+      required: [external_id]
+      properties:
+        external_id: {type: string, minLength: 1, maxLength: 191, writeOnly: true}
+        display_label: {type: string, maxLength: 255}
+      additionalProperties: false
+    AccountSession:
+      type: object
+      required: [id, organization_id, account_id, status, credential_ref_present, version, created_at, updated_at]
+      properties:
+        id: {type: string, minLength: 1}
+        organization_id: {type: string, minLength: 1}
+        account_id: {type: string, minLength: 1}
+        status: {type: string, enum: [unverified, ready, auth_required, disabled]}
+        credential_ref_present: {type: boolean}
+        last_verified_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
       additionalProperties: false
     EvidenceRef:
       type: object
@@ -298,6 +536,11 @@ components:
         end: {type: string, format: date-time}
         time_zone: {type: string, minLength: 1}
         currency: {type: string, pattern: '^[A-Z]{3}$'}
+        sync_mode:
+          type: string
+          enum: [full, metrics_only]
+          default: full
+          description: Full reads objects and metrics. Metrics-only reads recent metric windows and conversion revisions.
         object_kinds:
           type: array
           minItems: 1
@@ -307,11 +550,11 @@ components:
       additionalProperties: false
     SyncStatus:
       type: object
-      required: [id, organization_id, project_id, account_ref, status, started_at, attempt]
+      required: [id, organization_id, account_ref, status, started_at, attempt]
       properties:
         id: {type: string, minLength: 1}
         organization_id: {type: string, minLength: 1}
-        project_id: {type: string, minLength: 1}
+        project_id: {type: string, description: Empty for Organization-scoped synchronization.}
         account_ref: {type: string, minLength: 1, description: Local or anonymized Connector account reference.}
         status: {type: string, enum: [queued, running, completed, failed]}
         cursor: {type: string}
@@ -330,10 +573,10 @@ components:
       additionalProperties: false
     FactHeader:
       type: object
-      required: [organization_id, project_id, source_system, source_ref, ingest_run_id, schema_version, payload_hash, collected_at, available_at, data_through, valid_from, quality_status, evidence_ref]
+      required: [organization_id, source_system, source_ref, ingest_run_id, schema_version, payload_hash, collected_at, available_at, data_through, valid_from, quality_status, evidence_ref]
       properties:
         organization_id: {type: string, minLength: 1}
-        project_id: {type: string, minLength: 1}
+        project_id: {type: string, description: Empty for Organization-scoped facts.}
         source_system: {type: string, const: ocean_engine}
         source_ref: {type: string, minLength: 1}
         ingest_run_id: {type: string, minLength: 1}

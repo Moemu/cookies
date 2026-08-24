@@ -55,7 +55,7 @@ type FactHeader struct {
 }
 
 func (h FactHeader) validate() error {
-	if h.OrganizationID == "" || h.ProjectID == "" || h.SourceSystem == "" || h.SourceRef == "" ||
+	if h.OrganizationID == "" || h.SourceSystem == "" || h.SourceRef == "" ||
 		h.IngestRunID == "" || h.SchemaVersion == "" || h.PayloadHash == "" || h.CollectedAt.IsZero() ||
 		h.AvailableAt.IsZero() || h.DataThrough.IsZero() || h.ValidFrom.IsZero() || h.QualityStatus == "" || h.EvidenceRef == "" {
 		return fmt.Errorf("%w: required lineage or time field is missing", ErrInvalidFact)
@@ -375,7 +375,7 @@ func NewLedger() *Ledger {
 }
 
 func (l *Ledger) StartSync(value SyncRun) (bool, error) {
-	if value.ID == "" || value.OrganizationID == "" || value.ProjectID == "" || value.AccountRef == "" || value.StartedAt.IsZero() || value.Attempt < 1 {
+	if value.ID == "" || value.OrganizationID == "" || value.AccountRef == "" || value.StartedAt.IsZero() || value.Attempt < 1 {
 		return false, ErrInvalidFact
 	}
 	if value.Status == "" {
@@ -617,7 +617,7 @@ func (l *Ledger) AppendMetric(value MetricWindow) (bool, error) {
 }
 
 func (l *Ledger) AppendMaterialMetric(value MaterialMetricWindow) (bool, error) {
-	if value.MaterialRef == "" || value.PromotionRef == "" {
+	if value.MaterialRef == "" || value.PromotionRef == "" && !hasQualityIssue(value.QualityIssues, "material_binding_unresolved") {
 		return false, ErrInvalidFact
 	}
 	if err := validateMetric(value.MetricWindow); err != nil {
@@ -626,6 +626,15 @@ func (l *Ledger) AppendMaterialMetric(value MaterialMetricWindow) (bool, error) 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return appendImmutable(l.materialMetrics, value.ID, value.PayloadHash, value, func(v MaterialMetricWindow) string { return v.PayloadHash })
+}
+
+func hasQualityIssue(values []QualityIssue, code string) bool {
+	for _, value := range values {
+		if value.Code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *Ledger) AppendConversionRevision(value ConversionRevision) (bool, error) {
@@ -685,7 +694,7 @@ func visible(h FactHeader, q Query) bool {
 func AnonymizeRef(value string) string { return opaqueRef(value) }
 
 func (l *Ledger) Snapshot(_ context.Context, q Query) (CanonicalSnapshot, error) {
-	if q.OrganizationID == "" || q.ProjectID == "" || q.PredictionCutoff.IsZero() {
+	if q.OrganizationID == "" || q.PredictionCutoff.IsZero() {
 		return CanonicalSnapshot{}, ErrInvalidFact
 	}
 	l.mu.RLock()

@@ -6,7 +6,31 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shikanon/cookies/internal/platform/connector"
 )
+
+func TestRunMechanisticSimulationConsumesAccountLaunchCalibration(t *testing.T) {
+	input := mechanisticTestInput(100000)
+	input.Schedule.EndAt = input.Schedule.StartAt.Add(8 * 24 * time.Hour)
+	request := MechanisticSimulationRequest{StableSeed: "calibrated", SampleCount: 1000, PredictionHorizonDays: 7, ReviewState: SimulationReviewApproved, PriorSet: mechanisticTestPrior(), CalibrationAccountRef: "oeacct_abc"}
+	request.LaunchBatchCalibration = &connector.LaunchBatchCalibrationSnapshot{
+		ID: "oecal_test", SchemaVersion: connector.LaunchBatchCalibrationSchemaVersion, ModelVersion: connector.LaunchBatchModelVersion,
+		Status: "ready_for_probabilistic_shadow", PayloadHash: "payload", BreakoutProbability: .2,
+		Typical:  []connector.LaunchBatchScenarioMetricDistribution{{Metric: "spend_minor", P10: 100, P50: 200, P90: 300}, {Metric: "impressions", P10: 1000, P50: 2000, P90: 3000}, {Metric: "clicks", P10: 10, P50: 20, P90: 30}},
+		Breakout: []connector.LaunchBatchScenarioMetricDistribution{{Metric: "spend_minor", P10: 10000, P50: 20000, P90: 30000}, {Metric: "impressions", P10: 100000, P50: 200000, P90: 300000}, {Metric: "clicks", P10: 1000, P50: 2000, P90: 3000}},
+	}
+	result, err := RunMechanisticSimulation(input, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CalibrationStatus != CalibrationStatusAccountProduct || result.CalibrationPriorRef != "oecal_test" || len(result.ScenarioProbabilities) != 2 || result.ScenarioProbabilities[1].Scenario != "breakout_launch" || result.ScenarioProbabilities[1].Probability != .2 {
+		t.Fatalf("unexpected calibrated result: %#v", result)
+	}
+	if len(result.Alerts) != 0 || len(result.RecommendationDrafts) != 1 || result.RecommendationDrafts[0].RecommendationType != "portfolio_observation" {
+		t.Fatalf("unsafe calibrated actions: alerts=%#v recommendations=%#v", result.Alerts, result.RecommendationDrafts)
+	}
+}
 
 func mechanisticTestInput(budget int64) MechanisticSimulationInput {
 	return MechanisticSimulationInput{
@@ -145,5 +169,15 @@ func TestMechanisticZeroTrackingRateSuppressesBudgetDrafts(t *testing.T) {
 		if strings.Contains(draft.TargetField, "budget") || strings.Contains(draft.TargetField, "bid") {
 			t.Fatalf("tracking anomaly produced a budget or bid draft: %+v", draft)
 		}
+	}
+}
+
+func TestMechanisticCreativeRiskUsesParallelPortfolioNotRotation(t *testing.T) {
+	drafts := draftMechanisticRecommendations([]SimulationScenarioProbability{{Scenario: "creative_fatigue", Probability: .8}}, mechanisticTestInput(30000), []string{"simulation://test"})
+	if len(drafts) != 1 || drafts[0].RecommendationType != "portfolio_test" || drafts[0].TargetField != "parallel_project_promotion_portfolio" {
+		t.Fatalf("unexpected creative recommendation: %#v", drafts)
+	}
+	if strings.Contains(strings.ToLower(drafts[0].Rationale), "rotation") {
+		t.Fatalf("creative recommendation still instructs rotation: %#v", drafts[0])
 	}
 }

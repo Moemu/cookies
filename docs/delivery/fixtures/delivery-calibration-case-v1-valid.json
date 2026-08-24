@@ -1,0 +1,84 @@
+{
+  "schema_version": "delivery-calibration-case/v1",
+  "case_id": "calcase_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "dataset_version": "connector-oceanengine-point-in-time-v1",
+  "export_policy_version": "connector-calibration-export/v1",
+  "source_system": "ocean_engine",
+  "source_binding": {
+    "account_ref": "anon_v1_1111111111111111111111111111111111111111111111111111111111111111",
+    "product_ref": "anon_v1_2222222222222222222222222222222222222222222222222222222222222222",
+    "project_ref": "anon_v1_3333333333333333333333333333333333333333333333333333333333333333",
+    "promotion_ref": "anon_v1_4444444444444444444444444444444444444444444444444444444444444444",
+    "cookies_plan_binding": { "state": "unbound_historical", "plan_id": null, "plan_version": null }
+  },
+  "prediction": {
+    "prediction_cutoff": "2026-08-01T00:00:00Z",
+    "horizon": "P7D",
+    "configuration": {
+      "snapshot_ref": "anon_v1_5555555555555555555555555555555555555555555555555555555555555555",
+      "payload_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "available_at": "2026-08-01T00:00:00Z",
+      "valid_from": "2026-08-01T00:00:00Z",
+      "features": {
+        "budget_minor": 100000,
+        "bid_minor": 9000,
+        "currency": "CNY",
+        "charging_mode": "OCPM",
+        "optimization_target": "in_app_order",
+        "delivery_mode": "standard",
+        "material_count": 3
+      },
+      "missing_features": []
+    }
+  },
+  "materials": [
+    {
+      "material_ref": "anon_v1_6666666666666666666666666666666666666666666666666666666666666666",
+      "binding_ref": "anon_v1_7777777777777777777777777777777777777777777777777777777777777777",
+      "first_available_at": "2026-08-01T00:00:00Z"
+    }
+  ],
+  "labels": {
+    "label_cutoff": "2026-08-10T00:00:00Z",
+    "attribution_status": "mature",
+    "metric_windows": [
+      {
+        "window_ref": "anon_v1_8888888888888888888888888888888888888888888888888888888888888888",
+        "window_start": "2026-08-01T00:00:00Z",
+        "window_end": "2026-08-02T00:00:00Z",
+        "collected_at": "2026-08-10T00:00:00Z",
+        "available_at": "2026-08-10T00:00:00Z",
+        "data_through": "2026-08-09T23:59:59Z",
+        "granularity": "day",
+        "time_zone": "Asia/Shanghai",
+        "attribution_window": "7d_click",
+        "metric_definition_version": "oceanengine-atomic-v1",
+        "currency": "CNY",
+        "amount_unit": "fen",
+        "metrics": { "spend": 40050, "impressions": 16460, "clicks": 290, "conversions": 2 },
+        "quality_status": "accept"
+      }
+    ],
+    "operational_outcome": {
+      "disposition": "retained",
+      "observed_at": "2026-08-10T00:00:00Z",
+      "is_material_quality_label": false,
+      "interpretation": "operator_and_platform_outcome_only"
+    }
+  },
+  "quality": { "status": "accepted", "blockers": [], "warnings": [] },
+  "anonymization": {
+    "algorithm": "HMAC-SHA256",
+    "key_version": "calibration-export-local-v1",
+    "scope": "stable_within_key_version",
+    "raw_identifiers_removed": true,
+    "free_text_removed": true,
+    "diagnosis_removed": true
+  },
+  "lineage": {
+    "feature_snapshot_refs": ["anon_v1_9999999999999999999999999999999999999999999999999999999999999999"],
+    "label_snapshot_refs": ["anon_v1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    "evidence_hashes": ["cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],
+    "exported_at": "2026-08-10T01:00:00Z"
+  }
+}
