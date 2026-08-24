@@ -18,3 +18,34 @@ ee5650e8ea7096c1d53fac097dba4d9d89538b13:server/provider.test.ts:generic-api-key
 # Controlled execution presentation uses a deterministic local idempotency
 # label; this exact historical fixture is not a credential.
 09a5fa2bd2dbc4fd316014132abae212738df434:test/controlled-execution-presentation.test.ts:generic-api-key:36
+
+# OceanEngine coverage fixtures contain SHA-256 evidence hashes. These exact
+# historical fingerprints are evidence values, not credentials.
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:52
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:61
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:81
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:90
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:110
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:119
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:128
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:148
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:157
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:177
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:197
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:206
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:215
+6f848a1b6cac5ae1ada22a43ae9a369bab9caaf3:api/fixtures/oceanengine-readonly-coverage-ledger-v1.json:generic-api-key:224
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:52
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:61
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:102
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:111
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:120
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:146
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:155
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:196
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:205
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:231
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:257
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:266
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:275
+40b0e2e7a100ac117114b627dbbe15ced5775f16:api/fixtures/oceanengine-readonly-coverage-ledger-v2.json:generic-api-key:284
