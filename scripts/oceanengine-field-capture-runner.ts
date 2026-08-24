@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
-import { chromium, type Locator, type Page } from '@playwright/test'
+import { createInterface } from 'node:readline'
+import { chromium, type Browser, type Locator, type Page } from '@playwright/test'
 
 // Read-only field-level capture: walks the frozen calibration manifest's
 // coverage cases and records per-field presence/readback evidence for the
@@ -18,12 +19,35 @@ const safeID = /^[a-z][a-z0-9._-]{0,63}$/
 const caseIDPattern = /^OE-[A-Z0-9-]{1,64}$/
 const hashPattern = /^[0-9a-f]{64}$/
 const dimensionKeyPattern = /^[a-z][a-z0-9_-]{0,47}$/
+const declarationValuePattern = /^[a-z][a-z0-9_|-]{0,47}$/
 
 export type PageFamilyId = 'project_list' | 'project_create' | 'project_edit' | 'promotion_list' | 'promotion_create' | 'promotion_edit'
 type CandidateFamily = PageFamilyId
 const candidateOrder: CandidateFamily[] = ['project_list', 'promotion_list', 'project_create', 'project_edit', 'promotion_create', 'promotion_edit']
 
 type ErrorCode = 'ok' | 'invalid_plan' | 'invalid_manifest' | 'cdp_unavailable' | 'host_not_allowed' | 'account_context_missing' | 'account_mismatch' | 'page_type_mismatch' | 'case_not_found' | 'case_blocked' | 'internal'
+
+export type PersistentSessionRequest = { case_id: string; declarations: string[] }
+
+export function parsePersistentSessionRequest(line: string): PersistentSessionRequest | 'exit' | null {
+  const input = line.trim()
+  if (input === '') return null
+  if (input === 'exit' || input === 'quit') return 'exit'
+  if (caseIDPattern.test(input)) return { case_id: input, declarations: [] }
+  let value: unknown
+  try {
+    value = JSON.parse(input)
+  } catch {
+    throw new CaptureError('invalid_plan')
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CaptureError('invalid_plan')
+  const record = value as Record<string, unknown>
+  if (Object.keys(record).some(key => key !== 'case_id' && key !== 'declare')) throw new CaptureError('invalid_plan')
+  if (typeof record.case_id !== 'string' || !caseIDPattern.test(record.case_id)) throw new CaptureError('invalid_plan')
+  const declarations = record.declare ?? []
+  if (!Array.isArray(declarations) || declarations.some(item => typeof item !== 'string')) throw new CaptureError('invalid_plan')
+  return { case_id: record.case_id, declarations: declarations as string[] }
+}
 
 export class CaptureError extends Error {
   constructor(readonly code: ErrorCode) {
@@ -110,9 +134,12 @@ export type ManifestField = {
   playwright_rpa: {
     operation: string
     scope?: ManifestLocatorSpec
+    scope_alternates?: ManifestLocatorSpec[]
     target?: ManifestLocatorSpec
+    target_alternates?: ManifestLocatorSpec[]
     expected_target_count?: number
     readback?: ManifestLocatorSpec
+    readback_alternates?: ManifestLocatorSpec[]
     blocked_state?: string
   }
   evidence_state: string
@@ -274,6 +301,21 @@ async function locatorFacts(locator: FieldCaptureLocator) {
   // for a unique element, and an ambiguous match stays ambiguous regardless.
   const visible = count === 1 ? await locator.isVisible().catch(() => false) : false
   return { count, visible }
+}
+
+async function firstVisibleLocatorSpec(
+  page: FieldCapturePage,
+  primary: ManifestLocatorSpec | undefined,
+  alternates: ManifestLocatorSpec[] | undefined,
+) {
+  const candidates = [primary, ...(alternates ?? [])]
+    .map(spec => normalizeLocator(spec ?? { kind: undefined, value: undefined }))
+    .filter((spec): spec is NormalizedLocator => spec !== null)
+  for (const candidate of candidates) {
+    const facts = await locatorFacts(page.locate(candidate))
+    if (facts.count === 1 && facts.visible) return candidate
+  }
+  return candidates[0] ?? null
 }
 
 type NameState = 'present' | 'empty' | 'unreadable' | 'not_attempted'
@@ -504,13 +546,25 @@ export async function executeCaseObservation(input: CaseObservationInput): Promi
         observations.push(withCondition(skipped))
         continue
       }
-      const scopeSpec = normalizeLocator(field.playwright_rpa.scope ?? field.locator)
+      const scopeSpec = await firstVisibleLocatorSpec(
+        page,
+        field.playwright_rpa.scope ?? field.locator,
+        field.playwright_rpa.scope_alternates,
+      )
       if (!scopeSpec) {
         observations.push(withCondition(emptyObservation()))
         continue
       }
-      const targetSpec = normalizeLocator(field.playwright_rpa.target ?? { kind: undefined, value: undefined })
-      const readbackSpec = normalizeLocator(field.playwright_rpa.readback ?? { kind: undefined, value: undefined })
+      const targetSpec = await firstVisibleLocatorSpec(
+        page,
+        field.playwright_rpa.target,
+        field.playwright_rpa.target_alternates,
+      )
+      const readbackSpec = await firstVisibleLocatorSpec(
+        page,
+        field.playwright_rpa.readback,
+        field.playwright_rpa.readback_alternates,
+      )
       const scopeFacts = await locatorFacts(page.locate(scopeSpec))
       const partial = (): FieldObservation => ({
         key,
@@ -617,27 +671,54 @@ async function sessionConnection(localAppData: string) {
   return `ws://127.0.0.1:${port}${browserPath}`
 }
 
-async function openLivePage(localAppData: string) {
+async function connectLiveBrowser(localAppData: string) {
   let endpoint: string
   try {
     endpoint = await sessionConnection(localAppData)
   } catch {
     throw new CaptureError('cdp_unavailable')
   }
-  const browser = await chromium.connectOverCDP(endpoint, { timeout: 120000 })
+  try {
+    return await chromium.connectOverCDP(endpoint, { timeout: 120000 })
+  } catch {
+    throw new CaptureError('cdp_unavailable')
+  }
+}
+
+async function findLivePage(browser: Browser, manifest: CalibrationManifest, sessionContextCache = new WeakMap<Page, string>(), requiredFamily?: PageFamilyId) {
   const deadline = Date.now() + 30000
   let page: Page | undefined
   do {
-    page = browser.contexts().flatMap(context => context.pages()).filter(item => {
+    const candidates = browser.contexts().flatMap(context => context.pages()).filter(item => {
       try { return new URL(item.url()).hostname === allowedHost } catch { return false }
-    }).at(-1)
+    })
+    if (!requiredFamily) page = candidates.at(-1)
+    else {
+      for (const candidate of [...candidates].reverse()) {
+        const candidatePage = new PlaywrightFieldCapturePage(candidate)
+        const pageKind = await detectPageKind(new URL(candidate.url()), manifest, locator => candidatePage.locate(locator).count())
+        if (pageKind === requiredFamily) {
+          page = candidate
+          break
+        }
+      }
+    }
     if (!page) await new Promise(resolveTimer => setTimeout(resolveTimer, 250))
   } while (!page && Date.now() < deadline)
   if (!page) throw new CaptureError('host_not_allowed')
-  const pageCDP = await page.context().newCDPSession(page)
-  const target = await pageCDP.send('Target.getTargetInfo') as { targetInfo?: { targetId?: string; browserContextId?: string } }
-  if (!target.targetInfo?.targetId) throw new CaptureError('cdp_unavailable')
-  return { page, sessionContextSha256: sha256(`${target.targetInfo.browserContextId ?? 'default'}:${target.targetInfo.targetId}`) }
+  let sessionContextSha256 = sessionContextCache.get(page)
+  if (!sessionContextSha256) {
+    const pageCDP = await page.context().newCDPSession(page)
+    const target = await pageCDP.send('Target.getTargetInfo') as { targetInfo?: { targetId?: string; browserContextId?: string } }
+    if (!target.targetInfo?.targetId) throw new CaptureError('cdp_unavailable')
+    sessionContextSha256 = sha256(`${target.targetInfo.browserContextId ?? 'default'}:${target.targetInfo.targetId}`)
+    sessionContextCache.set(page, sessionContextSha256)
+  }
+  return { page, sessionContextSha256 }
+}
+
+async function openLivePage(localAppData: string, manifest: CalibrationManifest, requiredFamily?: PageFamilyId) {
+  return await findLivePage(await connectLiveBrowser(localAppData), manifest, new WeakMap<Page, string>(), requiredFamily)
 }
 
 async function atomicJSON(path: string, value: unknown) {
@@ -650,46 +731,102 @@ async function appendDiagnostic(path: string, command: string, outcome: string, 
   await appendFile(path, `${JSON.stringify({ schema_version: 'oceanengine-field-capture-diagnostic/v1', observed_at: new Date().toISOString(), command, outcome, error_code: errorCode })}\n`, { encoding: 'utf8', mode: 0o600 })
 }
 
-async function initCommand(localAppData: string) {
-  const paths = fieldCapturePaths(localAppData)
-  await mkdir(paths.root, { recursive: true })
-  const manifest = await loadCalibrationManifest()
-  const { page } = await openLivePage(localAppData)
+async function initializePlanFromPage(manifest: CalibrationManifest, planFile: string, page: Page) {
   const url = new URL(page.url())
   if (url.hostname !== allowedHost) throw new CaptureError('host_not_allowed')
   const accountValue = url.searchParams.get(accountQueryKey)
   if (!accountValue) throw new CaptureError('account_context_missing')
   const plan = buildDefaultPlan(manifest, sha256(accountValue))
-  await atomicJSON(paths.plan, plan)
+  await atomicJSON(planFile, plan)
+  return plan
+}
+
+async function initCommand(localAppData: string) {
+  const paths = fieldCapturePaths(localAppData)
+  await mkdir(paths.root, { recursive: true })
+  const manifest = await loadCalibrationManifest()
+  const { page } = await openLivePage(localAppData, manifest)
+  const plan = await initializePlanFromPage(manifest, paths.plan, page)
   return { outcome: 'initialized' as const, case_count: plan.case_ids.length, plan_sha256: sha256(canonicalJSON(plan)) }
 }
 
-async function runCommand(localAppData: string, caseId: string, planPath?: string, declarations: string[] = []) {
-  if (!caseIDPattern.test(caseId ?? '')) throw new CaptureError('invalid_plan')
-  const paths = fieldCapturePaths(localAppData)
-  await mkdir(paths.observations, { recursive: true })
-  const manifest = await loadCalibrationManifest()
-  const planFile = planPath ? resolve(planPath) : paths.plan
+async function loadPlanForCase(manifest: CalibrationManifest, planFile: string, declarations: string[]) {
   const storedPlan = JSON.parse(await readFile(planFile, 'utf8')) as { declared_conditions?: Record<string, string> }
   // Operator-declared form state (e.g. carrier=orange_landing_page) is merged
   // into the stored plan so observations record which branch was on screen
   // and condition evidence can name the unmet dimensions.
-  const dimensionPattern = /^[a-z][a-z0-9_-]{0,47}$/
-  const valuePattern = /^[a-z][a-z0-9_|-]{0,47}$/
   for (const declaration of declarations) {
     const [key, value] = declaration.split('=', 2)
-    if (!key || !value || !dimensionPattern.test(key) || !valuePattern.test(value)) throw new CaptureError('invalid_plan')
+    if (!key || !value || !dimensionKeyPattern.test(key) || !declarationValuePattern.test(value)) throw new CaptureError('invalid_plan')
     storedPlan.declared_conditions = { ...storedPlan.declared_conditions, [key]: value }
   }
   const plan = validateFieldCapturePlan(storedPlan, manifest)
-  if (!plan.case_ids.includes(caseId)) throw new CaptureError('invalid_plan')
   if (declarations.length > 0) await atomicJSON(planFile, plan)
-  const live = await openLivePage(localAppData)
+  return plan
+}
+
+async function captureCase(paths: ReturnType<typeof fieldCapturePaths>, manifest: CalibrationManifest, plan: FieldCapturePlan, caseId: string, live: Awaited<ReturnType<typeof findLivePage>>) {
+  if (!caseIDPattern.test(caseId ?? '') || !plan.case_ids.includes(caseId)) throw new CaptureError('invalid_plan')
   const observation = await executeCaseObservation({ plan, manifest, caseId, page: new PlaywrightFieldCapturePage(live.page), sessionContextSha256: live.sessionContextSha256 })
   const stamp = observation.observed_at.replaceAll(':', '-').replaceAll('.', '-')
   await atomicJSON(join(paths.observations, `${caseId}-${stamp}.json`), observation)
   await appendDiagnostic(paths.diagnostics, `run:${caseId}`, observation.outcome, observation.error_code)
   return observation
+}
+
+async function runCommand(localAppData: string, caseId: string, planPath?: string, declarations: string[] = []) {
+  const paths = fieldCapturePaths(localAppData)
+  await mkdir(paths.observations, { recursive: true })
+  const manifest = await loadCalibrationManifest()
+  const planFile = planPath ? resolve(planPath) : paths.plan
+  const plan = await loadPlanForCase(manifest, planFile, declarations)
+  const requiredFamily = manifest.coverage_cases.find(item => item.id === caseId)?.path[0] as PageFamilyId | undefined
+  if (!requiredFamily) throw new CaptureError('case_not_found')
+  return await captureCase(paths, manifest, plan, caseId, await openLivePage(localAppData, manifest, requiredFamily))
+}
+
+async function persistentSessionCommand(localAppData: string, planPath?: string) {
+  const paths = fieldCapturePaths(localAppData)
+  await mkdir(paths.observations, { recursive: true })
+  const manifest = await loadCalibrationManifest()
+  const planFile = planPath ? resolve(planPath) : paths.plan
+  // Keep this Browser and its WebSocket alive for the complete stdin session.
+  // New requests reuse the connection. A new page gets one target probe only.
+  const browser = await connectLiveBrowser(localAppData)
+  const sessionContextCache = new WeakMap<Page, string>()
+  const initialPlan = planPath
+    ? await loadPlanForCase(manifest, planFile, [])
+    : await initializePlanFromPage(manifest, planFile, (await findLivePage(browser, manifest, sessionContextCache)).page)
+  const input = createInterface({ input: process.stdin, crlfDelay: Infinity, terminal: false })
+  let processed = 0
+  process.stdout.write(`${JSON.stringify({ outcome: 'ready', mode: 'persistent', connection_count: 1, case_count: initialPlan.case_ids.length, plan_sha256: sha256(canonicalJSON(initialPlan)) })}\n`)
+  for await (const line of input) {
+    let request: PersistentSessionRequest | 'exit' | null
+    try {
+      request = parsePersistentSessionRequest(line)
+    } catch (error) {
+      const code: ErrorCode = error instanceof CaptureError ? error.code : 'internal'
+      await appendDiagnostic(paths.diagnostics, 'session:request', 'failed', code)
+      process.stdout.write(`${JSON.stringify({ outcome: 'failed', error_code: code })}\n`)
+      continue
+    }
+    if (request === null) continue
+    if (request === 'exit') break
+    try {
+      const plan = await loadPlanForCase(manifest, planFile, request.declarations)
+      const requiredFamily = manifest.coverage_cases.find(item => item.id === request.case_id)?.path[0] as PageFamilyId | undefined
+      if (!requiredFamily) throw new CaptureError('case_not_found')
+      const live = await findLivePage(browser, manifest, sessionContextCache, requiredFamily)
+      const observation = await captureCase(paths, manifest, plan, request.case_id, live)
+      processed += 1
+      process.stdout.write(`${JSON.stringify(observation)}\n`)
+    } catch (error) {
+      const code: ErrorCode = error instanceof CaptureError ? error.code : 'internal'
+      await appendDiagnostic(paths.diagnostics, `session:${request.case_id}`, 'failed', code)
+      process.stdout.write(`${JSON.stringify({ case_id: request.case_id, outcome: 'failed', error_code: code })}\n`)
+    }
+  }
+  return { outcome: 'session_closed' as const, processed, connection_count: 1 }
 }
 
 async function main() {
@@ -717,7 +854,15 @@ async function main() {
     }
     return await runCommand(localAppData, firstArgument ?? '', planPath, declarations)
   }
-  throw new Error('Usage: npm run browser-rpa:fields -- <init|run CASE_ID [--plan PLAN_PATH] [--declare key=value ...]>')
+  if (command === 'session') {
+    const argumentsList = process.argv.slice(3)
+    let planPath: string | undefined
+    if (argumentsList.length === 1 && !argumentsList[0]?.startsWith('--')) planPath = argumentsList[0]
+    else if (argumentsList.length === 2 && argumentsList[0] === '--plan' && argumentsList[1]) planPath = argumentsList[1]
+    else if (argumentsList.length !== 0) throw new CaptureError('invalid_plan')
+    return await persistentSessionCommand(localAppData, planPath)
+  }
+  throw new Error('Usage: npm run browser-rpa:fields -- <init|run CASE_ID [--plan PLAN_PATH] [--declare key=value ...]|session [--plan PLAN_PATH]>')
 }
 
 if (basename(process.argv[1] ?? '') === 'oceanengine-field-capture-runner.ts') {

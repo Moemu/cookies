@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import test from 'node:test'
 import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
-import { buildDefaultPlan, conditionContradicted, detectPageKind, executeCaseObservation, loadCalibrationManifest, normalizeLocator, observationEvidenceHash, unmetConditionDimensions, validateFieldCapturePlan, type CalibrationManifest, type FieldCaptureLocator, type FieldCapturePage, type ManifestCase, type ManifestField, type NormalizedLocator } from '../scripts/oceanengine-field-capture-runner.js'
+import { buildDefaultPlan, conditionContradicted, detectPageKind, executeCaseObservation, loadCalibrationManifest, normalizeLocator, observationEvidenceHash, parsePersistentSessionRequest, unmetConditionDimensions, validateFieldCapturePlan, type CalibrationManifest, type FieldCaptureLocator, type FieldCapturePage, type ManifestCase, type ManifestField, type NormalizedLocator } from '../scripts/oceanengine-field-capture-runner.js'
 
 type Validator = { compile(schema: Record<string, unknown>): ((value: unknown) => boolean) & { errors?: unknown } }
 const AjvConstructor = Ajv2020 as unknown as new (options: { allErrors: boolean; strict: boolean }) => Validator
@@ -146,6 +146,16 @@ test('normalizes manifest locator kinds and rejects domain keys', () => {
   assert.equal(normalizeLocator({ kind: 'attribute', value: 'style=red' }), null)
 })
 
+test('persistent session accepts safe line requests and explicit exit', () => {
+  assert.deepEqual(parsePersistentSessionRequest('OE-DEMO-CREATE'), { case_id: 'OE-DEMO-CREATE', declarations: [] })
+  assert.deepEqual(parsePersistentSessionRequest('{"case_id":"OE-DEMO-CREATE","declare":["carrier=orange_landing_page"]}'), { case_id: 'OE-DEMO-CREATE', declarations: ['carrier=orange_landing_page'] })
+  assert.equal(parsePersistentSessionRequest('  '), null)
+  assert.equal(parsePersistentSessionRequest('exit'), 'exit')
+  assert.equal(parsePersistentSessionRequest('quit'), 'exit')
+  assert.throws(() => parsePersistentSessionRequest('{"case_id":"OE-DEMO-CREATE","unknown":true}'), /invalid_plan/)
+  assert.throws(() => parsePersistentSessionRequest('not-a-case'), /invalid_plan/)
+})
+
 test('contradiction only fires on declared conflicting dimensions', () => {
   assert.equal(conditionContradicted(demoField, {}), false)
   assert.equal(conditionContradicted(demoField, { marketing_purpose: 'ecommerce' }), false)
@@ -223,6 +233,42 @@ test('executes a covered case into hashed per-field observations', async () => {
   assert.ok(!serialized.includes('account-1'))
   const { evidence_sha256, ...rest } = envelope
   assert.equal(evidence_sha256, observationEvidenceHash(rest))
+})
+
+test('uses the first unique visible alternate locator for branch-specific controls', async () => {
+  const alternateField: ManifestField = {
+    ...demoField,
+    locator: { kind: 'attribute', value: 'data-auto-id=primary-scope' },
+    playwright_rpa: {
+      operation: 'choose_exact_visible_option',
+      scope: { kind: 'attribute', value: 'data-auto-id=primary-scope' },
+      scope_alternates: [{ kind: 'attribute', value: 'data-e2e=alternate-scope' }],
+      target: { kind: 'attribute', value: 'data-auto-id=primary-target' },
+      target_alternates: [{ kind: 'attribute', value: 'data-e2e=alternate-target' }],
+      expected_target_count: 1,
+      readback: { kind: 'attribute', value: 'data-auto-id=primary-readback' },
+      readback_alternates: [{ kind: 'attribute', value: 'data-e2e=alternate-readback' }],
+    },
+  }
+  const manifest = manifestFixture([alternateField], [
+    { id: 'OE-DEMO-ALTERNATE', path: ['project_create', 'ecommerce'], field_keys: [alternateField.key], status: 'covered' },
+  ])
+  const elements = fullElements()
+  elements.set('attribute:data-auto-id=primary-scope', { count: 1, visible: false })
+  elements.set('attribute:data-e2e=alternate-scope', { count: 1, visible: true })
+  elements.set('attribute:data-auto-id=primary-target', { count: 1, visible: false })
+  elements.set('attribute:data-e2e=alternate-target', { count: 1, visible: true, snapshot: 'alternate-target' })
+  elements.set('attribute:data-auto-id=primary-readback', { count: 1, visible: false })
+  elements.set('attribute:data-e2e=alternate-readback', { count: 1, visible: true, input: 'alternate-value' })
+  const envelope = await executeCaseObservation({
+    plan: livePlan(manifest, { marketing_purpose: 'ecommerce' }),
+    manifest,
+    caseId: 'OE-DEMO-ALTERNATE',
+    page: new FakePage(createUrl('&is_create=1'), elements),
+    sessionContextSha256: hash,
+  })
+  assert.equal(envelope.outcome, 'success')
+  assert.equal(envelope.fields[0]?.status, 'observed')
 })
 
 test('short-circuits blocked cases without touching the page', async () => {
@@ -308,6 +354,127 @@ test('real calibration manifest integrity holds for capture consumption', async 
     assert.ok(coverageCase.field_keys.every(key => fieldKeys.has(key)))
     assert.ok(validateFieldCapturePlan({ ...buildDefaultPlan(manifest, accountHash), case_ids: [coverageCase.id] }, manifest))
   }
+  const promotionCreate = manifest.coverage_cases.find(item => item.id === 'OE-PROMOTION-CREATE')
+  const promotionEdit = manifest.coverage_cases.find(item => item.id === 'OE-PROMOTION-EDIT')
+  const projectDefault = manifest.coverage_cases.find(item => item.id === 'OE-PROJECT-E-COMMERCE-DEFAULT')
+  const projectManual = manifest.coverage_cases.find(item => item.id === 'OE-PROJECT-E-COMMERCE-MANUAL')
+  const projectLeadsSmart = manifest.coverage_cases.find(item => item.id === 'OE-PROJECT-LEADS-SMART')
+  const projectLeadsCustom = manifest.coverage_cases.find(item => item.id === 'OE-PROJECT-LEADS-CUSTOM')
+  const projectCatalog = manifest.coverage_cases.find(item => item.id === 'OE-PROJECT-CATALOG-DEFAULT')
+  const projectContent = manifest.coverage_cases.find(item => item.id === 'OE-PROJECT-CONTENT-MARKETING')
+  const projectAppDownload = manifest.coverage_cases.find(item => item.id === 'OE-PROJECT-APP-DOWNLOAD-IOS-HARMONY-PACKAGE')
+  const projectAppLaunch = manifest.coverage_cases.find(item => item.id === 'OE-PROJECT-APP-LAUNCH')
+  const projectAppAppointment = manifest.coverage_cases.find(item => item.id === 'OE-PROJECT-APP-APPOINTMENT-ANDROID-IOS')
+  const projectEdit = manifest.coverage_cases.find(item => item.id === 'OE-PROJECT-EDIT')
+  assert.ok(promotionCreate)
+  assert.ok(promotionEdit)
+  assert.ok(projectDefault)
+  assert.ok(projectManual)
+  assert.ok(projectLeadsSmart)
+  assert.ok(projectLeadsCustom)
+  assert.ok(projectCatalog)
+  assert.ok(projectContent)
+  assert.ok(projectAppDownload)
+  assert.ok(projectAppLaunch)
+  assert.ok(projectAppAppointment)
+  assert.ok(projectEdit)
+  assert.equal(promotionCreate.field_keys.length, 19)
+  assert.equal(promotionEdit.field_keys.length, 20)
+  assert.ok(promotionCreate.field_keys.every(key => promotionEdit.field_keys.includes(key)))
+  assert.ok(promotionEdit.field_keys.includes('promotion.editable_surface'))
+  assert.equal(projectDefault.field_keys.length, 12)
+  assert.ok(projectDefault.field_keys.includes('project.aigc_dynamic_creative'))
+  assert.ok(!projectDefault.field_keys.includes('project.placement_strategy'))
+  assert.equal(projectManual.field_keys.length, 6)
+  assert.ok(projectManual.field_keys.includes('project.placement_strategy'))
+  assert.ok(!projectManual.field_keys.includes('project.aigc_dynamic_creative'))
+  assert.ok(!projectManual.field_keys.includes('project.bid_minor'))
+  assert.equal(projectLeadsSmart.field_keys.length, 13)
+  assert.ok(projectLeadsSmart.field_keys.includes('project.lead_capture_mode'))
+  assert.ok(projectLeadsSmart.field_keys.includes('project.bid_minor'))
+  assert.equal(projectLeadsCustom.field_keys.length, 3)
+  assert.deepEqual(projectLeadsCustom.field_keys, [
+    'project.lead_capture_mode',
+    'project.carrier',
+    'project.optimization_target_reference',
+  ])
+  const fieldsByKey = new Map(manifest.fields.map(item => [item.key, item]))
+  assert.deepEqual(fieldsByKey.get('project.lead_capture_mode')?.locator, {
+    kind: 'attribute',
+    value: 'data-e2e=createproject_assetType_multioption',
+  })
+  assert.deepEqual(fieldsByKey.get('project.carrier')?.locator, {
+    kind: 'attribute',
+    value: 'data-auto-id=assetType',
+  })
+  assert.deepEqual(fieldsByKey.get('project.bid_minor')?.locator, {
+    kind: 'attribute',
+    value: 'data-e2e=createproject_adBid',
+  })
+  assert.equal(projectCatalog.field_keys.length, 11)
+  assert.ok(projectCatalog.field_keys.includes('project.product_catalog_reference'))
+  assert.ok(projectCatalog.field_keys.includes('project.product_targeting'))
+  assert.deepEqual(fieldsByKey.get('project.product_catalog_reference')?.locator, {
+    kind: 'attribute',
+    value: 'data-auto-id=productCatalogue',
+  })
+  assert.deepEqual(fieldsByKey.get('project.product_targeting')?.locator, {
+    kind: 'attribute',
+    value: 'data-auto-id=dpaAudienceModule',
+  })
+  assert.equal(projectContent.field_keys.length, 11)
+  assert.ok(projectContent.field_keys.includes('project.carrier'))
+  assert.ok(projectContent.field_keys.includes('project.optimization_target_reference'))
+  assert.deepEqual(fieldsByKey.get('project.carrier')?.playwright_rpa.scope_alternates, [
+    { kind: 'attribute', value: 'data-e2e=createproject_promotionType' },
+  ])
+  assert.deepEqual(fieldsByKey.get('project.optimization_target_reference')?.playwright_rpa.scope_alternates, [
+    { kind: 'attribute', value: 'data-auto-id=optimizeTargetCrowdGrass' },
+  ])
+  assert.equal(projectAppDownload.field_keys.length, 12)
+  assert.equal(projectAppLaunch.field_keys.length, 5)
+  assert.equal(projectAppAppointment.field_keys.length, 4)
+  assert.deepEqual(fieldsByKey.get('project.operating_system')?.locator, {
+    kind: 'attribute',
+    value: 'data-e2e=createproject_appTypeShift',
+  })
+  assert.deepEqual(fieldsByKey.get('project.operating_system')?.playwright_rpa.scope_alternates, [
+    { kind: 'attribute', value: 'data-auto-id=subscribeAppTypeSelect' },
+  ])
+  assert.deepEqual(fieldsByKey.get('project.application_reference')?.locator, {
+    kind: 'attribute',
+    value: 'data-e2e=createproject_appselect_input__ocInput',
+  })
+  assert.deepEqual(fieldsByKey.get('project.application_reference')?.playwright_rpa.scope_alternates, [
+    { kind: 'attribute', value: 'data-e2e=createproject_subscribeUrlInput_input__ocInput' },
+  ])
+  assert.deepEqual(fieldsByKey.get('project.bidding_strategy')?.playwright_rpa.scope_alternates, [
+    { kind: 'attribute', value: 'data-e2e=createproject_flowcontrolmode' },
+  ])
+  assert.deepEqual(fieldsByKey.get('project.operational_state')?.playwright_rpa.scope, {
+    kind: 'attribute',
+    value: 'data-e2e=promotion_project_on-off',
+  })
+  assert.deepEqual(fieldsByKey.get('promotion.operational_state')?.playwright_rpa.scope, {
+    kind: 'attribute',
+    value: 'data-e2e=promotion_promotion_on-off',
+  })
+  assert.deepEqual(fieldsByKey.get('promotion.material_replacement_edit')?.playwright_rpa.readback, {
+    kind: 'visible_text',
+    value: '共22个视频',
+  })
+  assert.equal(projectEdit.field_keys.length, 17)
+  for (const key of [
+    'project.marketing_product_reference',
+    'project.optimization_target_reference',
+    'project.placement_strategy',
+    'project.targeting',
+    'project.schedule',
+    'project.daily_budget_minor',
+    'project.monitoring_references',
+    'project.project_name',
+    'project.editable_surface',
+  ]) assert.ok(projectEdit.field_keys.includes(key))
 })
 
 test('capture implementation has no mutation, navigation, screenshot, or browser close call', () => {
@@ -316,5 +483,7 @@ test('capture implementation has no mutation, navigation, screenshot, or browser
   assert.doesNotMatch(source, /nth-child|\.nth\s*\(/)
   assert.doesNotMatch(source, /class\s*[~*^$|]?=/)
   assert.match(source, /chromium\.connectOverCDP\s*\(/)
+  assert.equal(source.match(/chromium\.connectOverCDP\s*\(/g)?.length, 1)
+  assert.match(source, /mode: 'persistent', connection_count: 1/)
   assert.match(source, /process\.exit\s*\(/)
 })

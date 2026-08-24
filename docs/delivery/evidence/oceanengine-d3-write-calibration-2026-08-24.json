@@ -1,0 +1,77 @@
+{
+  "evidence_version": "oceanengine-d3-write-calibration/v1",
+  "recorded_at": "2026-08-24",
+  "scope": {
+    "account": "redacted_current_test_account",
+    "project": "authorized_self_created_project",
+    "promotion": "authorized_self_created_promotion",
+    "authority_kind": "session_scoped_field_calibration",
+    "production_authority_objects_created": false
+  },
+  "operations": [
+    {
+      "case_id": "OE-D3-PROMOTION-BUDGET-EDIT",
+      "outcome": "blocked_by_input_constraint",
+      "baseline_minor": 30000,
+      "attempted_minor": 29900,
+      "platform_minimum_minor": 30000,
+      "authority_maximum_minor": 30000,
+      "save_available": false,
+      "final_minor": 30000
+    },
+    {
+      "case_id": "OE-D3-PROMOTION-MATERIAL-REPLACEMENT",
+      "outcome": "covered",
+      "temporary_existing_video_saved": true,
+      "temporary_value_read_back": true,
+      "original_video_required_audit_rejected_filter": false,
+      "original_video_restored": true,
+      "original_value_read_back": true
+    },
+    {
+      "case_id": "OE-D3-PROJECT-ENABLE",
+      "outcome": "covered",
+      "write_read_back": true
+    },
+    {
+      "case_id": "OE-D3-PROJECT-PAUSE",
+      "outcome": "covered",
+      "write_read_back": true,
+      "restored_original_state": true
+    },
+    {
+      "case_id": "OE-D3-PROMOTION-PAUSE",
+      "outcome": "covered",
+      "write_read_back": true
+    },
+    {
+      "case_id": "OE-D3-PROMOTION-ENABLE",
+      "outcome": "covered",
+      "write_read_back": true,
+      "restored_original_state": true
+    }
+  ],
+  "final_state": {
+    "project_switch": false,
+    "promotion_switch": true,
+    "schedule": "2026-08-25",
+    "project_budget_minor": 30000,
+    "promotion_budget_minor": 30000,
+    "promotion_bid_minor": 1,
+    "original_material_restored": true,
+    "account_spend_observed": "unchanged_zero"
+  },
+  "field_observation_inventory": {
+    "success": 20,
+    "blocked_case": 6,
+    "partial": 0,
+    "missing": 0
+  },
+  "redaction": {
+    "raw_account_id_persisted": false,
+    "raw_project_id_persisted": false,
+    "raw_promotion_id_persisted": false,
+    "raw_material_id_or_name_persisted": false,
+    "url_or_credentials_persisted": false
+  }
+}
