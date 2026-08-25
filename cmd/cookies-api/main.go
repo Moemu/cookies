@@ -633,7 +633,7 @@ func main() {
 			Cipher: sessionCipher,
 		}
 		connectorAccountSessions := connector.AccountSessionService{Store: connectorRepository, Cipher: sessionCipher}
-		connectorAccounts := connector.AccountService{Store: connectorRepository, Sessions: connectorRepository, Probe: oceanEngineAccountProbe{sessions: insightsService.OceanEngineSessions, accountSessions: connectorRepository, cipher: sessionCipher, baseURL: cfg.OceanEngine.BaseURL, client: &http.Client{Timeout: 30 * time.Second}}}
+		connectorAccounts := connector.AccountService{Store: connectorRepository, Sessions: connectorRepository, Probe: oceanEngineAccountProbe{accountSessions: connectorRepository, cipher: sessionCipher, baseURL: cfg.OceanEngine.BaseURL, client: &http.Client{Timeout: 30 * time.Second}}}
 		if cfg.OceanEngine.PatrolEnabled {
 			connectorPatrol = &connector.PatrolRunner{Sessions: connectorRepository, Syncer: connectorSync, LookbackDays: cfg.OceanEngine.PatrolLookbackDays, Timeout: 15 * time.Minute}
 		}

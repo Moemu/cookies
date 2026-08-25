@@ -541,7 +541,16 @@ func (s *Server) verifyAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := s.accounts.Verify(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref"))
 	if err != nil {
-		writeProblem(w, http.StatusConflict, "CONNECTOR_ACCOUNT_VERIFY_FAILED")
+		status, code := http.StatusInternalServerError, "CONNECTOR_ACCOUNT_VERIFY_FAILED"
+		switch {
+		case errors.Is(err, connector.ErrImmutableConflict):
+			status, code = http.StatusConflict, "VERSION_CONFLICT"
+		case errors.Is(err, connector.ErrAccountSessionInvalid):
+			status, code = http.StatusUnprocessableEntity, "CONNECTOR_ACCOUNT_SESSION_INVALID"
+		case errors.Is(err, connector.ErrAccountVerificationUnavailable):
+			status, code = http.StatusBadGateway, "CONNECTOR_ACCOUNT_VERIFY_UNAVAILABLE"
+		}
+		writeProblem(w, status, code)
 		return
 	}
 	writeJSON(w, http.StatusOK, value)
