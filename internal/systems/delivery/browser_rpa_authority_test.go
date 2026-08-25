@@ -80,6 +80,12 @@ func TestBrowserRpaAuthorityCreatesAndConfirmsAllStagedMappings(t *testing.T) {
 	if len(repo.mappings) != 3 {
 		t.Fatalf("staged mappings=%d want=3", len(repo.mappings))
 	}
+	if _, err := provider.RecordCreatedObject(context.Background(), resolved.Binding, "run_staged", browserautomation.PreparedPage{
+		InternalObjectKind: "project", InternalObjectID: "project-draft-1",
+		Readback: map[string]string{"platform_object_id": "7677595885572784182", "reconciliation": "matched", "field_reconciliation_status": "not_checked"},
+	}, "unchecked_result", "unchecked_list", now); err != browserautomation.ErrInvalidContract {
+		t.Fatalf("unchecked fields writeback err=%v", err)
+	}
 
 	targets := []struct{ kind, internalID, platformID string }{
 		{"project", "project-draft-1", "7677595885572784182"},

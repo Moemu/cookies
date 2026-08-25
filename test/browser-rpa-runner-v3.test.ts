@@ -239,6 +239,46 @@ test("runner v3 reports a successful create with persisted field drift", async (
   }
 });
 
+test("runner v3 stops when required persisted fields cannot be checked", async () => {
+  const preparePlan = compilePromotionPlan();
+  preparePlan.account_reference = "1855554434276391";
+  preparePlan.parent_project_reference = "7677595885572784182";
+  const now = new Date("2026-08-25T01:00:00.000Z");
+  const bundle = authorizeSubmitPlan(preparePlan, {
+    account_reference: preparePlan.account_reference,
+    maximum_money_cny: 300,
+    schedule_date: "2026-08-26",
+  }, now);
+  const stateDirectory = await mkdtemp(join(tmpdir(), "cookies-runner-not-checked-"));
+  try {
+    const page = new FakePage();
+    page.reconciliation = {
+      status: "matched",
+      created_object_id: "7677604041052405801",
+      field_reconciliation: {
+        status: "not_checked",
+        fields: [
+          { field_key: "promotion.landing_page_reference", expected: "7545332540006350875", status: "not_checked" },
+          { field_key: "promotion.call_to_action", expected: ["立即预订"], status: "not_checked" },
+        ],
+      },
+    };
+    const result = await executePlan(bundle.plan, page, {
+      confirmToken: bundle.confirm_token,
+      authorityStateDirectory: stateDirectory,
+      now,
+    });
+    assert.equal(validateResult(result), true, JSON.stringify(validateResult.errors));
+    assert.equal(result.outcome, "result_unknown");
+    assert.equal(result.error_code, "field_reconciliation_not_checked");
+    assert.equal(result.created_object_id, "7677604041052405801");
+    assert.equal(result.field_reconciliation?.status, "not_checked");
+    assert.equal(page.finalClicks, 1);
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
 test("runner v3 does not click when the confirmation token is wrong", async () => {
   const preparePlan = compilePromotionPlan();
   preparePlan.account_reference = "1855554434276391";

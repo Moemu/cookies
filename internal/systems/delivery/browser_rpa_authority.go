@@ -131,7 +131,7 @@ func stagedMappingID(executionID, kind, internalID string) string {
 
 func (p BrowserRpaAuthorityProvider) RecordCreatedObject(ctx context.Context, authority browserautomation.AuthorityBinding, runID string, page browserautomation.PreparedPage, resultEvidenceID, listEvidenceID string, _ time.Time) (bool, error) {
 	repo, ok := p.Repository.(browserRpaStagedCreateRepository)
-	if !ok || page.InternalObjectID == "" || (page.InternalObjectKind != "project" && page.InternalObjectKind != "promotion") || !numericPlatformID(page.Readback["platform_object_id"]) || page.Readback["reconciliation"] != "matched" {
+	if !ok || page.InternalObjectID == "" || (page.InternalObjectKind != "project" && page.InternalObjectKind != "promotion") || !numericPlatformID(page.Readback["platform_object_id"]) || page.Readback["reconciliation"] != "matched" || page.Readback["field_reconciliation_status"] == "not_checked" {
 		return false, browserautomation.ErrInvalidContract
 	}
 	mapping, err := repo.GetPlatformEntityMappingByInternalObject(ctx, authority.OrganizationID, authority.ProjectID, authority.AccountReferenceID, page.InternalObjectKind, page.InternalObjectID)

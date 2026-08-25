@@ -215,6 +215,17 @@ func TestAdapterRunsV3AndProjectsObjectAndFieldReconciliation(t *testing.T) {
 	}
 }
 
+func TestAdapterRejectsSuccessfulV3ResultWithUncheckedRequiredFields(t *testing.T) {
+	run, env, policy := adapterFixture()
+	adapter := testAdapter(t, "v3-not-checked", env, policy)
+	adapter.Protocol = ProtocolV3
+	adapter.V3Compiler = stubV3Compiler{}
+	outcome, page, err := adapter.Submit(context.Background(), run, browserautomation.ControlledActionAttempt{}, "token")
+	if err != nil || outcome != browserautomation.WorkerResultUnknown || page.Readback["field_reconciliation_status"] != "not_checked" {
+		t.Fatalf("outcome=%s page=%#v err=%v", outcome, page, err)
+	}
+}
+
 func TestV3DriftReadbackKeepsObjectAndStructuredFields(t *testing.T) {
 	page := preparedPageFromResult(RpaResult{
 		SchemaVersion: ResultSchemaV2, Outcome: OutcomeSuccessWithDrift, CreatedObjectID: "promotion_1", Reconciliation: "matched",

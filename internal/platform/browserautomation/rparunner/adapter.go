@@ -278,6 +278,9 @@ func (a PlaywrightRPAAdapter) Submit(ctx context.Context, run browserautomation.
 	case OutcomeSuccess:
 		page := preparedPageFromResult(result)
 		attachPlannedObject(compiledV3Plan, &page)
+		if page.Readback["field_reconciliation_status"] == "not_checked" {
+			return browserautomation.WorkerResultUnknown, page, nil
+		}
 		return browserautomation.WorkerSuccess, page, nil
 	case OutcomeSuccessWithDrift:
 		page := preparedPageFromResult(result)

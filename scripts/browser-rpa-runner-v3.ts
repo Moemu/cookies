@@ -231,7 +231,21 @@ export async function executePlan(
           };
         }
         results.push({ id: step.id, status: "submitted", readback: reconciliation });
-        const fieldDrifted = reconciliation.field_reconciliation?.status === "drifted";
+        const fieldStatus = reconciliation.field_reconciliation?.status;
+        if (fieldStatus === "not_checked") {
+          return {
+            schema_version: "oceanengine-playwright-rpa-result/v2",
+            outcome: "result_unknown",
+            error_code: "field_reconciliation_not_checked",
+            error_message: "the object ID was found but required persisted fields could not be checked",
+            final_click_performed: true,
+            ...(reconciliation.created_object_id ? { created_object_id: reconciliation.created_object_id } : {}),
+            reconciliation: reconciliation.status,
+            field_reconciliation: reconciliation.field_reconciliation,
+            steps: results,
+          };
+        }
+        const fieldDrifted = fieldStatus === "drifted";
         return {
           schema_version: "oceanengine-playwright-rpa-result/v2",
           outcome: fieldDrifted ? "success_with_drift" : "success",

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import test from 'node:test'
 import { controlledExecutionApi } from '../src/features/browser-rpa-execution/api.ts'
 
@@ -47,4 +49,11 @@ test('controlled execution API supports the complete Runner v3 browser flow', as
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('controlled execution UI does not report a registry check as a live Edge check', () => {
+  const source = readFileSync(resolve(import.meta.dirname, '../src/features/browser-rpa-execution/BrowserRpaExecutionWorkspace.tsx'), 'utf8')
+  assert.match(source, /控制面登记一致。尚未连接本地 Edge/)
+  assert.match(source, /当前动作没有 Runner v3 单表单协议/)
+  assert.doesNotMatch(source, /Edge 会话绑定有效/)
 })

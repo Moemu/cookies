@@ -16,7 +16,7 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
   const [notice, setNotice] = useState('')
   const [actionPending, setActionPending] = useState(false)
   const [plan, setPlan] = useState<RunnerV3Plan>()
-  const [sessionCheckedAt, setSessionCheckedAt] = useState('')
+  const [bindingCheckedAt, setBindingCheckedAt] = useState('')
   const [reviewed, setReviewed] = useState(false)
   const [isRefreshPending, startRefreshTransition] = useTransition()
   const requestId = useRef(0)
@@ -90,8 +90,8 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
       if (action === 'check') {
         const workspace = await controlledExecutionApi.getWorkspace(projectId, run.id)
         setTransport({ kind: 'ready', workspace })
-        setSessionCheckedAt(new Date().toISOString())
-        setNotice(sessionReady(workspace) ? 'Edge 会话绑定有效。账户、Profile 和站点策略一致。' : 'Edge 会话不可用。请修复下方失败项。')
+        setBindingCheckedAt(new Date().toISOString())
+        setNotice(registeredBindingReady(workspace) ? '控制面登记一致。尚未连接本地 Edge；Prepare 将执行真实连接检查。' : '控制面登记不一致。请修复下方失败项。')
       } else if (action === 'plan') {
         const nextPlan = await controlledExecutionApi.generatePlan(projectId, run.id)
         setPlan(nextPlan)
@@ -115,8 +115,8 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
         setReviewed(false)
         if (updated.state === 'environment_check') {
           setPlan(undefined)
-          setSessionCheckedAt('')
-          setNotice('当前对象已创建并回写平台 ID。请检查会话，然后生成下一个对象计划。')
+          setBindingCheckedAt('')
+          setNotice('当前对象已创建并回写平台 ID。请核对控制面登记，然后生成下一个对象计划。')
         } else {
           setNotice('Submit 已执行。请检查平台结果和写后证据。')
         }
@@ -160,7 +160,7 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
     busy={actionPending || isRefreshPending}
     notice={notice}
     plan={plan}
-    sessionCheckedAt={sessionCheckedAt}
+    bindingCheckedAt={bindingCheckedAt}
     reviewed={reviewed}
     onReviewed={setReviewed}
     onWorkflow={runWorkflow}
@@ -169,12 +169,12 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
   />
 }
 
-function WorkspaceReady({ workspace, busy, notice, plan, sessionCheckedAt, reviewed, onReviewed, onWorkflow, onRefresh, onControl }: {
+function WorkspaceReady({ workspace, busy, notice, plan, bindingCheckedAt, reviewed, onReviewed, onWorkflow, onRefresh, onControl }: {
   workspace: Extract<ControlledExecutionTransportState, { kind: 'ready' }>['workspace']
   busy: boolean
   notice: string
   plan: RunnerV3Plan | undefined
-  sessionCheckedAt: string
+  bindingCheckedAt: string
   reviewed: boolean
   onReviewed: (value: boolean) => void
   onWorkflow: (action: 'check' | 'plan' | 'prepare' | 'submit') => void
@@ -193,7 +193,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionCheckedAt, revie
       <div>
         <span className="section-label">Controlled Browser RPA</span>
         <h2>受控执行中心</h2>
-        <p>按顺序检查会话、生成计划、执行 Prepare、复核差异，再使用一次性授权执行 Submit。</p>
+        <p>按顺序核对控制面登记、生成计划、执行真实 Edge Prepare、复核差异，再使用一次性授权执行 Submit。</p>
       </div>
       <button className="secondary-button" onClick={onRefresh} disabled={busy}><RefreshCw size={15} />从服务端刷新</button>
     </header>
@@ -204,12 +204,12 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionCheckedAt, revie
       workspace={workspace}
       plan={plan}
       busy={busy}
-      sessionCheckedAt={sessionCheckedAt}
+      bindingCheckedAt={bindingCheckedAt}
       reviewed={reviewed}
       onReviewed={onReviewed}
       onWorkflow={onWorkflow}
     />
-    <SessionAndTargetPanel workspace={workspace} sessionCheckedAt={sessionCheckedAt} />
+    <SessionAndTargetPanel workspace={workspace} bindingCheckedAt={bindingCheckedAt} />
     {plan ? <PlanPanel plan={plan} /> : null}
     {evidence.length ? <ReadbackPanel evidence={evidence} /> : null}
     {evidence.length ? <CreatedObjectsPanel evidence={evidence} /> : null}
@@ -244,26 +244,27 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionCheckedAt, revie
   </section>
 }
 
-function ExecutionFlowPanel({ workspace, plan, busy, sessionCheckedAt, reviewed, onReviewed, onWorkflow }: {
+function ExecutionFlowPanel({ workspace, plan, busy, bindingCheckedAt, reviewed, onReviewed, onWorkflow }: {
   workspace: ControlledExecutionWorkspace
   plan?: RunnerV3Plan
   busy: boolean
-  sessionCheckedAt: string
+  bindingCheckedAt: string
   reviewed: boolean
   onReviewed: (value: boolean) => void
   onWorkflow: (action: 'check' | 'plan' | 'prepare' | 'submit') => void
 }) {
   const { run, evidence, lease } = workspace
-  const checked = Boolean(sessionCheckedAt)
-  const edgeReady = checked && sessionReady(workspace)
+  const checked = Boolean(bindingCheckedAt)
+  const bindingReady = checked && registeredBindingReady(workspace)
+  const actionSupported = runnerV3ActionSupported(run.authority.action)
   const planReady = Boolean(plan && plan.blocked_reasons.length === 0 && !plan.allow_remote_write)
   const prepared = ['awaiting_confirmation', 'submitting', 'verifying', 'succeeded', 'failed', 'partial', 'result_unknown'].includes(run.state)
   const drift = fieldDrift(evidence)
   const leaseReady = Boolean(lease && !lease.released_at && new Date(lease.heartbeat_deadline).getTime() > Date.now())
-  const canPrepare = edgeReady && planReady && (run.state === 'queued' || run.state === 'environment_check')
+  const canPrepare = bindingReady && actionSupported && planReady && (run.state === 'queued' || run.state === 'environment_check')
   const canSubmit = run.state === 'awaiting_confirmation' && prepared && reviewed && !drift && leaseReady
   const steps = [
-    { label: '检查 Edge 会话', done: edgeReady },
+    { label: '核对控制面登记', done: bindingReady },
     { label: '生成 Runner v3 计划', done: planReady },
     { label: '执行 Prepare', done: prepared },
     { label: '复核回读与差异', done: prepared && reviewed },
@@ -273,10 +274,11 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionCheckedAt, reviewed,
     <header><div><span className="section-label">Operation flow</span><h3>执行操作闭环</h3></div><small>Submit 会跨越最终点击边界。确认令牌仅在当前请求内存中存在。</small></header>
     <ol>{steps.map((step, index) => <li key={step.label} className={step.done ? 'complete' : ''}><span>{step.done ? <CircleCheck size={15} /> : index + 1}</span>{step.label}</li>)}</ol>
     <div className="controlled-execution-flow-actions">
-      <button className="secondary-button" disabled={busy || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('check')}><MonitorCheck size={15} />检查会话</button>
-      <button className="secondary-button" disabled={busy || !edgeReady || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('plan')}><ListChecks size={15} />生成计划</button>
+      <button className="secondary-button" disabled={busy || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('check')}><MonitorCheck size={15} />核对登记</button>
+      <button className="secondary-button" disabled={busy || !bindingReady || !actionSupported || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('plan')}><ListChecks size={15} />生成计划</button>
       <button className="secondary-button" disabled={busy || !canPrepare} onClick={() => onWorkflow('prepare')}><Play size={15} />执行 Prepare</button>
     </div>
+    {!actionSupported ? <p className="danger-copy">当前动作没有 Runner v3 单表单协议。系统不会生成可执行计划。</p> : null}
     {run.state === 'awaiting_confirmation' ? <div className="controlled-execution-confirm">
       <label><input type="checkbox" checked={reviewed} onChange={event => onReviewed(event.target.checked)} disabled={busy || drift} />我已核对当前账户、目标对象、字段回读、差异和最终点击边界。</label>
       <button className="primary-button" disabled={busy || !canSubmit} onClick={() => onWorkflow('submit')}><Send size={15} />确认并执行 Submit</button>
@@ -286,18 +288,19 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionCheckedAt, reviewed,
   </section>
 }
 
-function SessionAndTargetPanel({ workspace, sessionCheckedAt }: { workspace: ControlledExecutionWorkspace; sessionCheckedAt: string }) {
+function SessionAndTargetPanel({ workspace, bindingCheckedAt }: { workspace: ControlledExecutionWorkspace; bindingCheckedAt: string }) {
   const { run, environment, profile, policy } = workspace
   const accountMatches = environment.account_id === run.account_id && profile.account_id === run.account_id && policy.account_id === run.account_id
   const projectAllowed = !run.authority.parent_platform_project_id || policy.allowed_platform_project_ids.includes(run.authority.parent_platform_project_id)
-  const ready = sessionReady(workspace)
-  return <section className="controlled-execution-context" aria-label="Edge 会话和目标">
-    <article className={ready ? 'ready' : 'blocked'}><header><MonitorCheck size={18} /><b>Edge 会话</b></header><dl>
-      <div><dt>状态</dt><dd>{sessionCheckedAt ? ready ? '可用' : '不可用' : '等待手动检查'}</dd></div>
+  const ready = registeredBindingReady(workspace)
+  return <section className="controlled-execution-context" aria-label="Edge 登记和目标">
+    <article className={ready ? 'ready' : 'blocked'}><header><MonitorCheck size={18} /><b>控制面 Edge 登记</b></header><dl>
+      <div><dt>登记状态</dt><dd>{bindingCheckedAt ? ready ? '一致' : '不一致' : '等待核对'}</dd></div>
       <div><dt>环境</dt><dd>{environment.mode} · Edge {environment.browser_version}</dd></div>
       <div><dt>Profile</dt><dd>{profile.state}</dd></div>
-      <div><dt>账户一致</dt><dd>{accountMatches ? '是' : '否'}</dd></div>
-      {sessionCheckedAt ? <div><dt>检查时间</dt><dd>{formatTime(sessionCheckedAt)}</dd></div> : null}
+      <div><dt>登记账户一致</dt><dd>{accountMatches ? '是' : '否'}</dd></div>
+      <div><dt>真实 Edge</dt><dd>尚未连接；Prepare 时检查</dd></div>
+      {bindingCheckedAt ? <div><dt>核对时间</dt><dd>{formatTime(bindingCheckedAt)}</dd></div> : null}
     </dl></article>
     <article className={projectAllowed ? 'ready' : 'blocked'}><header><FileCheck2 size={18} /><b>平台目标</b></header><dl>
       <div><dt>当前广告账户</dt><dd>{run.account_id}</dd></div>
@@ -367,10 +370,16 @@ function PlatformResultPanel({ run, evidence }: { run: BrowserRpaRun; evidence: 
   </section>
 }
 
-function sessionReady(workspace: ControlledExecutionWorkspace) {
+function registeredBindingReady(workspace: ControlledExecutionWorkspace) {
   const { run, environment, profile, policy } = workspace
   return environment.healthy && profile.state === 'ready'
     && environment.account_id === run.account_id && profile.account_id === run.account_id && policy.account_id === run.account_id
+}
+
+function runnerV3ActionSupported(action: string) {
+  return action === 'create_project_and_promotions'
+    || action === 'create_promotions_in_existing_project'
+    || action === 'update_promotion_budget'
 }
 
 function fieldDrift(evidence: BrowserRpaEvidence[]) {
