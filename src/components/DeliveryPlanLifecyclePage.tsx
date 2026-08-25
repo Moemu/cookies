@@ -11,6 +11,7 @@ import {
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
 import { api, type ApiAssetVersionPointer, type ApiConnectorAccount } from '../data/api'
+import { fromShanghaiEndDate, fromShanghaiStartDate, toShanghaiDateInput } from '../lib/deliverySchedule'
 import { projectPath } from '../lib/router'
 import type { DataState, ProjectRecord } from '../types'
 import { StateBoundary } from './StateBoundary'
@@ -20,6 +21,8 @@ const deliveryCarrierOptions = [
   { value: '', label: '请选择投放载体' },
   { value: 'orange_landing_page', label: '橙子落地页' },
   { value: 'owned_landing_page', label: '自研落地页' },
+  { value: 'byte_miniapp', label: '字节小程序（暂不支持）', disabled: true },
+  { value: 'wechat_miniapp', label: '微信小程序（暂不支持）', disabled: true },
 ] as const
 const orangeOptimizationTargetOptions = [
   { value: 'button_redirect', label: '按钮跳转' },
@@ -308,13 +311,13 @@ function BudgetScheduleFields({ draft, changeDraft }: FieldProps) {
     }))}/></label>
     <label>币种<input aria-label="币种" readOnly value={draft.budget.currency}/></label>
     <label>投放周期<select id="schedule_mode" aria-label="投放周期" value={draft.schedule.mode} onChange={event => changeDraft(current => ({ ...current, schedule: { ...current.schedule, mode: event.target.value as DeliveryPlanDraft['schedule']['mode'] } }))}><option value="long_term">从今天起长期投放</option><option value="fixed_range">设置开始和结束日期</option></select></label>
-    <label>开始时间<input id="schedule_start" aria-label="开始时间" type="datetime-local" value={toDateTimeLocal(draft.schedule.startAt)} onChange={event => changeDraft(current => ({
+    <label>开始日期<input id="schedule_start" aria-label="开始日期" type="date" value={toShanghaiDateInput(draft.schedule.startAt)} onChange={event => changeDraft(current => ({
       ...current,
-      schedule: { ...current.schedule, startAt: fromDateTimeLocal(event.target.value) },
+      schedule: { ...current.schedule, startAt: fromShanghaiStartDate(event.target.value) },
     }))}/></label>
-    {draft.schedule.mode === 'fixed_range' ? <label>结束时间<input id="schedule_end" aria-label="结束时间" type="datetime-local" value={toDateTimeLocal(draft.schedule.endAt)} onChange={event => changeDraft(current => ({
+    {draft.schedule.mode === 'fixed_range' ? <label>结束日期<input id="schedule_end" aria-label="结束日期" type="date" value={toShanghaiDateInput(draft.schedule.endAt)} onChange={event => changeDraft(current => ({
       ...current,
-      schedule: { ...current.schedule, endAt: fromDateTimeLocal(event.target.value) },
+      schedule: { ...current.schedule, endAt: fromShanghaiEndDate(event.target.value) },
     }))}/></label> : null}
     <label>时区<input aria-label="投放时区" readOnly value={draft.schedule.timezone}/></label>
   </div>
@@ -325,7 +328,7 @@ function TrackingFields({ draft, changeDraft }: FieldProps) {
     <label><span className="delivery-field-label">投放载体{!draft.tracking.deliveryCarrier ? <em>必填</em> : null}</span><select id="tracking_delivery_carrier" aria-label="投放载体" aria-required="true" required className={!draft.tracking.deliveryCarrier ? 'field-missing' : undefined} value={draft.tracking.deliveryCarrier} onChange={event => changeDraft(current => ({
       ...current,
       tracking: { ...current.tracking, deliveryCarrier: event.target.value as DeliveryPlanDraft['tracking']['deliveryCarrier'] },
-    }))}>{deliveryCarrierOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+    }))}>{deliveryCarrierOptions.map(option => <option key={option.value} value={option.value} disabled={'disabled' in option && option.disabled}>{option.label}</option>)}</select></label>
     {draft.tracking.deliveryCarrier === 'owned_landing_page' ? <label><span className="delivery-field-label">自研落地页链接{!draft.tracking.landingPage ? <em>必填</em> : null}</span><input id="tracking_landing_page" aria-label="自研落地页链接" aria-required="true" className={!draft.tracking.landingPage ? 'field-missing' : undefined} type="url" required value={draft.tracking.landingPage} onChange={event => changeDraft(current => ({
       ...current,
       tracking: { ...current.tracking, landingPage: event.target.value },
@@ -466,18 +469,10 @@ function draftFromVersion(version: DeliveryPlanVersion): DeliveryPlanDraft {
   }
 }
 
-function toDateTimeLocal(value: string) {
-  return value ? new Date(value).toISOString().slice(0, 16) : ''
-}
-
 function todayInShanghaiISO() {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date())
   const value = Object.fromEntries(parts.map(part => [part.type, part.value]))
   return `${value.year}-${value.month}-${value.day}T00:00:00+08:00`
-}
-
-function fromDateTimeLocal(value: string) {
-  return value ? new Date(`${value}:00+08:00`).toISOString() : ''
 }
 
 function formatMinor(value: number) {
