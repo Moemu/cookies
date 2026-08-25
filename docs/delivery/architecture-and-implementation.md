@@ -10,7 +10,16 @@ Delivery 的新写入只有一条配置路径：不可变 `DeliveryIntent` 绑�
 - 磁力引擎当前确定性返回 `CAPABILITY_PENDING`，不猜测未经校准的字段。
 - PlanVersion 的 canonical hash 等于其平台配置 canonical hash；Approval 继续绑定计划、配置、意图和 ChangeSet 的不可变身份。
 
-当前实现已包含 `DeliveryDecisionEngine` 与 `CompiledDeliveryWorkflow` 的 Phase C 权威主线，但不包含 Computer Use、真实平台 API 写入或 Connector。Decision 选择会生成新的不可变平台配置版本和工作流，并严格停在 `ready_for_final_approval`；它不创建正式 Approval，也不代表广告平台已执行。
+当前实现已包含 `DeliveryDecisionEngine` 与 `CompiledDeliveryWorkflow` 的 Phase C 权威主线。Decision 选择会生成新的不可变平台配置版本和工作流，并严格停在 `ready_for_final_approval`；它不创建正式 Approval，也不代表广告平台已执行。
+
+Phase D 已接入 Browser RPA 控制面和 OceanEngine Runner v3。控制面可以将
+Cookies 配置编译为项目或单元计划。它支持顺序创建项目和多个单元，并回写平台
+ID。它也支持已绑定单元的预算修改。素材替换、暂停和启用仍被前端与编译器阻止。
+
+真实 Edge 会话检查已接入控制面。该检查验证 DevTools WebSocket、巨量登录状态和
+页面广告账户。完整 Cookies UI 到平台 ID 回写的实测仍未完成。当前 Cookies 没有
+可用于新建单元的巨量素材。详细状态见
+[`oceanengine-runner-v3-control-plane-closeout.md`](./oceanengine-runner-v3-control-plane-closeout.md)。
 
 ## 写入边界
 
@@ -64,7 +73,7 @@ CompiledWorkflow 显式绑定平台、账户引用、配置身份与 hash，以�
 - Mock/Replay 的受控步骤故障单独记录为 `runner_failure`。
 - 每个 run 都包含最终 `PHASE_C_REMOTE_WRITE_PROHIBITED` 边界观测；可执行动作集合不包含 `remote_write`，数据库再次要求 `remote_write_enabled=false`。
 
-运营反馈以独立不可变记录追加：`accepted` 与 `rejected` 记录理由和相关 diff；`modified` 额外冻结最终 `PlatformConfiguration` 及其 canonical hash。反馈不会更新或覆盖原始 Decision、Selection、Run、步骤或证据。真实平台 Shadow、Connector 与 Computer Use 不属于本阶段。
+运营反馈以独立不可变记录追加：`accepted` 与 `rejected` 记录理由和相关 diff；`modified` 额外冻结最终 `PlatformConfiguration` 及其 canonical hash。反馈不会更新或覆盖原始 Decision、Selection、Run、步骤或证据。该 Mock/Replay 段不执行真实平台写入。真实写入使用独立的 Browser RPA 权威链。
 
 ## OutcomeSimulation 与监控
 

@@ -13,6 +13,16 @@ COOKIES_BROWSER_RPA_EDGE_SESSION_FILE=C:\Users\USER\AppData\Local\cookies\browse
 The worker uses the persistent Edge session file. Runner v3 resolves the
 current DevTools WebSocket before each process starts.
 
+The control plane also runs a read-only session probe. It checks:
+
+- the DevTools WebSocket;
+- one signed-in `ad.oceanengine.com` page;
+- the exact `aadvid` account in the page URL.
+
+The probe does not read cookies or browser storage. It does not navigate,
+click, fill, upload, or submit. Prepare repeats the probe before it opens the
+form.
+
 The control plane executes two phases:
 
 1. `prepare` fills the form and stops before the final click.
@@ -22,9 +32,14 @@ The raw confirmation token stays in process memory. It is not stored in run
 evidence. Runner v3 writes one authority-consumption record below
 `COOKIES_BROWSER_RPA_AUTHORITY_STATE_ROOT`.
 
-The v3 control-plane converter supports one promotion budget edit and one
-promotion create in a bound existing project. Each run binds exact numeric
-account and platform object IDs. The site policy must allow the exact form.
+The v3 control-plane converter supports these actions:
+
+- create one project and then create its promotions;
+- create promotions in one bound existing project;
+- update one bound promotion budget.
+
+Each run binds exact numeric account and platform object IDs. The site policy
+must allow the exact form.
 
 ## Delivery configuration planning
 
@@ -44,13 +59,13 @@ project form and one form for each promotion.
 `V3BindingsFromMappings` accepts confirmed `PlatformEntityMapping` records only.
 It keeps Cookies draft IDs separate from OceanEngine object IDs.
 
-One Browser RPA run executes one form. A project plus its promotions must use
-staged controlled runs. The compiler rejects a compound remote write before
-Edge receives a plan.
+One Browser RPA stage executes one form. A project and its promotions run in
+order. After each successful stage, the worker saves the platform object ID.
+The next promotion stage uses the saved project ID. A field drift stops later
+stages but keeps IDs that were already confirmed.
 
 The following actions stop before browser execution:
 
-- project and promotion compound creation;
 - promotion material replacement;
 - promotion pause or resume.
 
@@ -65,3 +80,6 @@ COOKIES_BROWSER_RPA_RUNNER_PROTOCOL=legacy
 This selects `scripts/browser-rpa-runner.ts`. The control plane does not
 automatically fall back from v3 to legacy. This rule prevents one approved
 run from changing protocols without a new process configuration.
+
+The current delivery status and remaining evidence gap are in
+`docs/delivery/oceanengine-runner-v3-control-plane-closeout.md`.

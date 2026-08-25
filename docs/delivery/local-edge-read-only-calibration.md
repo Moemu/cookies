@@ -98,6 +98,16 @@ The check passes only when both attachments return the same browser-context ID a
 
 The login check uses only the page host and path. It does not inspect credentials or browser storage.
 
+The Browser RPA control plane uses a separate run-scoped probe:
+
+```text
+POST /api/platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:check-session
+```
+
+This probe also compares the page `aadvid` with the run account. It returns
+only booleans and a fixed reason. It does not return the raw page URL or
+observed account value. Prepare repeats this probe before form execution.
+
 Stop the tool session:
 
 ```powershell

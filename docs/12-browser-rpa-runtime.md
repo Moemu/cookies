@@ -4,7 +4,7 @@
 | --- | --- |
 | 定位 | 智能投放系统受控操作广告平台 UI 的共享执行基座 |
 | 默认生产模式 | 企业受控远程设备/虚拟机，任务独占浏览器会话 |
-| 文档版本 | v0.5 |
+| 文档版本 | v0.6 |
 | 文档状态 | 草案 |
 
 ## 1. 设计结论
@@ -53,6 +53,11 @@ Control Plane 不理解抖音/快手业务字段；平台页面流程由 Deliver
 7. 结果未知进入人工/对账，不自动重复点击。
 8. 结束后释放租约，保存脱敏证据和结构化审计。
 
+本地 Runner v3 使用只读会话探针完成第 2 步。探针连接当前 Edge 的
+DevTools WebSocket。它检查巨量页面登录状态和 URL 中的精确 `aadvid`。
+探针不读取 Cookie、浏览器存储、请求头或页面业务文本。它不导航或修改页面。
+Prepare 必须重复探针，不能信任前端保存的旧检查结果。
+
 ### 5.1 生产 Authority 验收边界
 
 上述流程是生产目标，不是仅凭数据模型、fake Worker 或浏览器校准即可完成的验收。执行传输已由确定性 Playwright RPA（`rparunner.PlaywrightRPAAdapter`，经 `COOKIES_BROWSER_RPA_ENABLED` 门控）承担，但尚无独立可审计的生产执行身份；由同一 Codex 主体创建 ChangeSet、批准并点击，只能证明控制面状态机和页面接缝可工作，不能证明职责分离、授权真实性、会话归属或生产执行可信度。
@@ -100,6 +105,7 @@ Control Plane 不理解抖音/快手业务字段；平台页面流程由 Deliver
 - `POST /platform/v1/browser-rpa/runs`。
 - `GET /platform/v1/browser-rpa/runs/{id}`、`/events`、`/evidence`。
 - `POST /platform/v1/browser-rpa/runs/{id}:pause|resume|cancel|takeover`。
+- `POST /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:check-session`：只读检查本地 Edge CDP、登录和账户匹配。
 - `POST /platform/v1/browser-rpa/runs/{id}/confirmations`。
 - `/platform/v1/browser-rpa/environments/*`、`devices/*`、`profiles/*`。
 - `POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}/controlled-change-sets`：从已确认推广单元 Mapping 创建一次预算或授权素材变更。
@@ -145,3 +151,4 @@ Switch 激活都会阻断。当前 Skill 已在授权测试对象完成启用与
 | v0.3 | 2026-08-14 | 增加操作人绑定的独立暂停权威链与 fake/no-write 路径；生产暂停仍需当轮授权 |
 | v0.4 | 2026-08-14 | 增加从暂停出发、严格重检预算/排期/素材/落地页/身份/Kill Switch 的独立启用权威链；不作为自动补偿 |
 | v0.5 | 2026-08-19 | 执行传输从 Computer Use 迁移到 Playwright RPA（Go 子进程 + CDP 附加已登录 Edge）；控制面改名 browser-rpa，表与 API 前缀元数据级改名；见 docs/delivery/browser-rpa-migration-amendment.md |
+| v0.6 | 2026-08-25 | 增加真实 Edge 只读会话探针、Prepare 二次检查、Runner v3 顺序项目/单元创建和平台 ID 回写；完整 Cookies 端到端实测因缺少可用巨量素材延期 |

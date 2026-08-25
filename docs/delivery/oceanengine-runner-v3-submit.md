@@ -86,6 +86,19 @@ npm run browser-rpa:edge -- status
 npm run browser-rpa:edge -- check
 ```
 
+For a control-plane run, use the execution-center “检查 Edge 会话” action. It
+calls:
+
+```text
+POST /api/platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:check-session
+```
+
+The response contains only safe status values. It does not return the CDP
+endpoint, page URL, browser target, cookie or observed account value.
+
+Prepare runs the same probe again. A prior UI check does not authorize a later
+write.
+
 Use one persistent authenticated Edge session.
 
 Do not start a new Edge process for each form step.
@@ -173,3 +186,12 @@ Use exact names and IDs.
 After deletion, search both exact names.
 
 Both searches must return zero rows.
+
+## Control-plane validation status
+
+Direct Runner v3 live evidence covers project and promotion create/edit.
+
+The complete Cookies UI to platform-ID write-back path is not yet live
+validated. Current Cookies data has no usable OceanEngine material for a new
+promotion. See
+[`oceanengine-runner-v3-control-plane-closeout.md`](./oceanengine-runner-v3-control-plane-closeout.md).

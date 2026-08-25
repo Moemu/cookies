@@ -102,20 +102,33 @@ Delivery ChangeSet/Approval/Execution ──> BrowserRpaRun (control plane)
 
 - Runner v3 reads `COOKIES_BROWSER_RPA_EDGE_SESSION_FILE` and resolves the
   current local Edge WebSocket before each process starts.
+- `POST .../runs/{run_id}:check-session` performs a read-only live probe. It
+  checks CDP availability, OceanEngine login state and exact `aadvid` account
+  match. Prepare repeats this check.
 - The old endpoint-based runner remains available only when
   `COOKIES_BROWSER_RPA_RUNNER_PROTOCOL=legacy`.
 - Login, captchas and 2FA remain human-only (contract §4 of the runtime
   doc); the runner attaches to an already authenticated session and never
   records credentials.
-- First v3 control-plane action: `update_promotion_budget` on one exact
-  promotion edit form. Prepare stops at `保存并关闭`. Submit consumes one
-  confirmation and permits one final click.
+- The v3 control plane supports `create_project_and_promotions`,
+  `create_promotions_in_existing_project` and `update_promotion_budget`.
+- Project and promotion creates run as ordered single-form stages. Each
+  confirmed platform ID is saved before the next stage starts.
+- Prepare stops at `保存并关闭`. Submit consumes one confirmation and permits
+  one final click.
+- An unchecked write-back field is not success. The adapter returns
+  `result_unknown` when `field_reconciliation_status=not_checked`.
 
 ## 6. Open items
 
-- Add one-form v3 contracts for compound creation, material replacement,
-  pause, and resume. The control plane rejects these actions until then.
-- Pause/enable/materials/create actions gain RPA plans only after their own
-  calibration records land in the manifest.
+- Add one-form v3 control-plane contracts for material replacement, pause and
+  resume. The control plane rejects these actions until then.
+- Complete set-level write-back checks for landing pages and call-to-action
+  selections.
+- Run the complete Cookies UI to platform-ID write-back path when Cookies has
+  a usable OceanEngine material.
 - Removal of the legacy `/api/platform/v1/computer-use/**` alias after one
   release.
+
+The PR #66 closeout is in
+[`oceanengine-runner-v3-control-plane-closeout.md`](./oceanengine-runner-v3-control-plane-closeout.md).
