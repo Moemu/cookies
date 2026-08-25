@@ -39,6 +39,17 @@ func TestDeliveryHTTPExposesPlanAndControlledActions(t *testing.T) {
 	}
 }
 
+func TestDeliveryHTTPMapsImmutableContractIdentityConflict(t *testing.T) {
+	server := New(&immutableIdentityConflictApplicationStub{applicationStub: applicationStub{}})
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodPatch, "/api/delivery/v1/projects/project_1/plans/plan_1", `{
+		"expected_version":4,"intent":{},"platform_configuration":{}
+	}`))
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"IMMUTABLE_IDENTITY_CONFLICT"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestMechanisticSimulationHTTPUsesPlanVersionWithoutExecution(t *testing.T) {
 	app := &mechanisticApplicationStub{applicationStub: applicationStub{}}
 	server := New(app)
@@ -503,6 +514,12 @@ func (s *applicationStub) CreatePlan(context.Context, contract.ActorContext, con
 }
 func (s *applicationStub) UpdatePlan(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.UpdatePlanRequest) (delivery.DeliveryPlan, error) {
 	return s.plan, nil
+}
+
+type immutableIdentityConflictApplicationStub struct{ applicationStub }
+
+func (s *immutableIdentityConflictApplicationStub) UpdatePlan(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.UpdatePlanRequest) (delivery.DeliveryPlan, error) {
+	return delivery.DeliveryPlan{}, delivery.ErrImmutableContractIdentityConflict
 }
 func (s *applicationStub) ListPlans(context.Context, contract.ActorContext, contract.ProjectID, int) ([]delivery.DeliveryPlan, error) {
 	return []delivery.DeliveryPlan{s.plan}, nil

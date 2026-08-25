@@ -1006,6 +1006,8 @@ func writeError(writer http.ResponseWriter, request *http.Request, err error) {
 		status, code, message, retryable = http.StatusConflict, "INVALID_STATE", "当前状态不允许该操作", false
 	case errors.Is(err, delivery.ErrPlanVersionConflict):
 		status, code, message, retryable = http.StatusConflict, "VERSION_CONFLICT", "计划已被更新，请刷新后重试", false
+	case errors.Is(err, delivery.ErrImmutableContractIdentityConflict):
+		status, code, message, retryable = http.StatusConflict, "IMMUTABLE_IDENTITY_CONFLICT", "配置版本身份已被下游工作流占用，请刷新后重新保存", false
 	case errors.Is(err, delivery.ErrStalePlanVersion):
 		status, code, message, retryable = http.StatusConflict, "STALE_PLAN_VERSION", "变更集引用的计划版本已过期，请重新创建", false
 	case errors.Is(err, delivery.ErrApprovalRequired):

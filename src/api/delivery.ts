@@ -895,9 +895,10 @@ export const deliveryPlanApi = {
     const intent = plan.currentVersion.deliveryIntent
     if (!intent) throw new DeliveryApiError('LEGACY_CONFIGURATION_UNSUPPORTED', 409, '当前计划没有可编辑的业务意图。')
     const nextVersion = plan.currentVersionNumber + 1
-    const nextIntent = { ...intent, version_number: nextVersion, canonical_hash: undefined }
+    const nextIntent = { ...intent, intent_id: planRevisionIdentity('intent', plan.id, nextVersion), version_number: nextVersion, canonical_hash: undefined }
     const nextConfiguration = {
       ...configuration,
+      configuration_id: planRevisionIdentity('configuration', plan.id, nextVersion),
       version_number: nextVersion,
       canonical_hash: undefined,
       intent: { schema_version: 'delivery-intent/v1' as const, intent_id: nextIntent.intent_id, version_number: nextVersion },
@@ -1575,7 +1576,7 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
     state: 'resolved', display_name_snapshot: draft.sourceStrategyVersion,
   }
   const intent: DeliveryIntent = {
-    schema_version: 'delivery-intent/v1', intent_id: `intent-${identity}`, version_number: versionNumber,
+    schema_version: 'delivery-intent/v1', intent_id: planRevisionIdentity('intent', identity, versionNumber), version_number: versionNumber,
     hash_algorithm: 'RFC8785-JCS-SHA256(canonical_payload)',
     payload: {
       payload_schema_version: 'delivery-intent/v1', marketing_objective: draft.objective,
@@ -1593,7 +1594,7 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
     ? draft.budget.totalMinor
     : Math.max(0, Math.floor(draft.budget.totalMinor / Math.max(1, Math.ceil((Date.parse(draft.schedule.endAt) - Date.parse(draft.schedule.startAt)) / 86_400_000))))
   const configuration: PlatformConfiguration = {
-    schema_version: 'delivery-platform-configuration/v2', configuration_id: `configuration-${identity}`, version_number: versionNumber,
+    schema_version: 'delivery-platform-configuration/v2', configuration_id: planRevisionIdentity('configuration', identity, versionNumber), version_number: versionNumber,
     platform: 'ocean_engine', profile_version: 'oceanengine-configuration/v1', hash_algorithm: 'RFC8785-JCS-SHA256(canonical_payload)',
     payload: {
       profile: 'ocean_engine',
@@ -1625,6 +1626,10 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
     compilation_metadata: { field_evidence: [{ field: 'project', state: 'operator_reviewed' }], steps: ['manual_mapping'], evidence_refs: [] },
   }
   return { intent, platform_configuration: configuration }
+}
+
+function planRevisionIdentity(kind: 'intent' | 'configuration', identity: string, versionNumber: number) {
+  return `${kind}-${identity}-plan-v${versionNumber}`
 }
 
 function toDeliveryPlan(plan: WireDeliveryPlan): DeliveryPlan {
