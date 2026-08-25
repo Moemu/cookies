@@ -14,7 +14,7 @@ const manifest = readJSON(
 );
 const evidence = readJSON(manifest.session_evidence_ref);
 const writeCalibrationEvidence = readJSON(
-  "docs/delivery/evidence/oceanengine-d3-write-calibration-2026-08-16.json",
+  "docs/delivery/evidence/oceanengine-d3-write-calibration-2026-08-24.json",
 );
 const skillInstructions = readText(
   "internal/systems/delivery/platformskills/skills/oceanengine-ecommerce-manual/SKILL.md",

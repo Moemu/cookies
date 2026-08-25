@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/oceanengine-readonly-calibration-result-v1.schema.json",
+  "title": "OceanEngine Read-only Calibration Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "plan_sha256", "observed_at", "outcome", "error_code", "browser_detached", "steps"],
+  "properties": {
+    "schema_version": { "const": "oceanengine-readonly-calibration-result/v1" },
+    "plan_sha256": { "$ref": "#/$defs/hash" },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "outcome": { "enum": ["success", "failed", "rejected"] },
+    "error_code": { "enum": ["ok", "invalid_plan", "cdp_unavailable", "host_not_allowed", "account_context_missing", "account_mismatch", "page_type_mismatch", "scope_missing", "locator_missing", "locator_not_unique", "readback_failed", "internal"] },
+    "browser_detached": { "const": true },
+    "page": { "$ref": "#/$defs/page" },
+    "structure_summary": { "$ref": "#/$defs/structure" },
+    "steps": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/stepResult" }
+    }
+  },
+  "$defs": {
+    "safeId": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$" },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "key"],
+      "properties": {
+        "kind": { "enum": ["visible_text", "role_name", "attribute"] },
+        "key": { "enum": ["create_project", "project_budget_column", "project_section", "promotion_operational_state"] }
+      }
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "page_kind", "path_sha256", "account_context_sha256", "account_context_state", "session_context_sha256"],
+      "properties": {
+        "host": { "const": "ad.oceanengine.com" },
+        "page_kind": { "const": "promotion_list" },
+        "path_sha256": { "$ref": "#/$defs/hash" },
+        "account_context_sha256": { "$ref": "#/$defs/hash" },
+        "account_context_state": { "const": "matched" },
+        "session_context_sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "structure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["main_count", "heading_count", "button_count", "textbox_count", "table_count", "row_count"],
+      "properties": {
+        "main_count": { "type": "integer", "minimum": 0 },
+        "heading_count": { "type": "integer", "minimum": 0 },
+        "button_count": { "type": "integer", "minimum": 0 },
+        "textbox_count": { "type": "integer", "minimum": 0 },
+        "table_count": { "type": "integer", "minimum": 0 },
+        "row_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "stepResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/safeId" },
+        "kind": { "enum": ["identify_page", "scope_check", "locator_unique", "presence_check", "readback"] },
+        "status": { "enum": ["passed", "failed"] },
+        "locator": { "$ref": "#/$defs/locator" },
+        "element_count": { "type": "integer", "minimum": 0 },
+        "visible": { "type": "boolean" },
+        "accessible_name_state": { "enum": ["empty", "present"] },
+        "accessible_name_sha256": { "$ref": "#/$defs/hash" },
+        "value_state": { "enum": ["empty", "present"] },
+        "value_kind": { "enum": ["text", "boolean", "number"] },
+        "value_sha256": { "$ref": "#/$defs/hash" }
+      }
+    }
+  }
+}

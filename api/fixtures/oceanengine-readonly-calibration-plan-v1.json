@@ -1,0 +1,19 @@
+{
+  "schema_version": "oceanengine-readonly-calibration-plan/v1",
+  "plan_id": "promotion-list-readonly-fixture",
+  "platform": "ocean_engine",
+  "browser": "msedge",
+  "allowed_hosts": ["ad.oceanengine.com"],
+  "account_context": {
+    "source": "url_query_sha256",
+    "query_key": "aadvid",
+    "expected_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "steps": [
+    { "id": "identify-page", "kind": "identify_page", "page_kind": "promotion_list" },
+    { "id": "scope-budget", "kind": "scope_check", "locator": { "kind": "visible_text", "name_key": "project_budget_column" } },
+    { "id": "unique-budget", "kind": "locator_unique", "locator": { "kind": "visible_text", "name_key": "project_budget_column" } },
+    { "id": "presence-create", "kind": "presence_check", "locator": { "kind": "visible_text", "name_key": "create_project" } },
+    { "id": "read-budget", "kind": "readback", "locator": { "kind": "visible_text", "name_key": "project_budget_column" }, "value_source": "text" }
+  ]
+}

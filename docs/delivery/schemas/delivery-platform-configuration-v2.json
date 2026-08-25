@@ -232,7 +232,12 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "call_to_action": { "type": "string" },
+        "call_to_action": {
+          "type": "array",
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
         "source_label": { "type": "string" },
         "comments_enabled": { "type": "boolean" },
         "smart_generation_enabled": { "type": "boolean" },

@@ -2,8 +2,12 @@ package delivery
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/browserautomation"
@@ -17,6 +21,13 @@ type browserRpaAuthorityRepository interface {
 	GetControlledChangeSet(context.Context, contract.OrganizationID, contract.ProjectID, string) (ControlledChangeSet, error)
 	GetRemoteWriteApproval(context.Context, contract.OrganizationID, contract.ProjectID, string) (RemoteWriteApproval, error)
 	AttachBrowserRpaRun(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, time.Time) (ControlledExecution, error)
+}
+
+type browserRpaStagedCreateRepository interface {
+	GetPlanVersion(context.Context, contract.OrganizationID, contract.ProjectID, string, int) (DeliveryPlanVersion, error)
+	CreatePlatformEntityMapping(context.Context, PlatformEntityMapping) (PlatformEntityMapping, error)
+	GetPlatformEntityMappingByInternalObject(context.Context, contract.OrganizationID, contract.ProjectID, string, string, string) (PlatformEntityMapping, error)
+	ConfirmPlatformEntityMapping(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string, string) (PlatformEntityMapping, error)
 }
 
 // BrowserRpaAuthorityProvider projects the immutable Delivery authority into
@@ -47,13 +58,113 @@ func (p BrowserRpaAuthorityProvider) BindRun(ctx context.Context, authority brow
 		return mapBrowserRpaAuthorityError(err)
 	}
 	if execution.BrowserRpaRunID == runID && execution.Status == "running" {
-		return nil
+		return p.initializeStagedMappings(ctx, authority, runID, now)
 	}
 	if execution.BrowserRpaRunID != "" || execution.Status != "pending" {
 		return browserautomation.ErrInvalidContract
 	}
 	_, err = p.Repository.AttachBrowserRpaRun(ctx, authority.OrganizationID, authority.ProjectID, execution.ID, execution.Version, runID, now)
-	return mapBrowserRpaAuthorityError(err)
+	if err != nil {
+		return mapBrowserRpaAuthorityError(err)
+	}
+	return p.initializeStagedMappings(ctx, authority, runID, now)
+}
+
+func (p BrowserRpaAuthorityProvider) initializeStagedMappings(ctx context.Context, authority browserautomation.AuthorityBinding, runID string, now time.Time) error {
+	if authority.Action != string(ControlledActionCreateProjectAndPromotions) && authority.Action != string(ControlledActionCreatePromotionsInExistingProject) {
+		return nil
+	}
+	repo, ok := p.Repository.(browserRpaStagedCreateRepository)
+	if !ok {
+		// Keep in-memory authority fixtures compatible. Production repositories
+		// implement the staged mapping interface.
+		return nil
+	}
+	version, err := repo.GetPlanVersion(ctx, authority.OrganizationID, authority.ProjectID, authority.PlanID, authority.PlanVersion)
+	if errors.Is(err, ErrNotFound) {
+		// Historical authority fixtures can predate immutable plan storage. The
+		// Runner compiler still fails closed if such a run requests automation.
+		return nil
+	}
+	if err != nil || version.PlatformConfiguration == nil || version.PlatformConfiguration.Payload.OceanEngine == nil || version.PlatformConfiguration.Payload.OceanEngine.Project == nil {
+		return browserautomation.ErrInvalidContract
+	}
+	ocean := version.PlatformConfiguration.Payload.OceanEngine
+	type target struct{ kind, id string }
+	targets := make([]target, 0, len(ocean.Promotions)+1)
+	if authority.Action == string(ControlledActionCreateProjectAndPromotions) {
+		targets = append(targets, target{"project", ocean.Project.ProjectDraftID})
+	}
+	for _, promotion := range ocean.Promotions {
+		targets = append(targets, target{"promotion", promotion.PromotionDraftID})
+	}
+	for _, item := range targets {
+		existing, getErr := repo.GetPlatformEntityMappingByInternalObject(ctx, authority.OrganizationID, authority.ProjectID, authority.AccountReferenceID, item.kind, item.id)
+		if getErr == nil {
+			if existing.Status == PlatformEntityMappingConfirmed || (existing.Status == PlatformEntityMappingPending && existing.BusinessExecutionID == authority.BusinessExecutionID && existing.BrowserRpaRunID == runID) {
+				continue
+			}
+			return browserautomation.ErrInvalidContract
+		}
+		if !errors.Is(getErr, ErrNotFound) {
+			return mapBrowserRpaAuthorityError(getErr)
+		}
+		mapping := PlatformEntityMapping{
+			SchemaVersion: PlatformEntityMappingV1, ID: stagedMappingID(authority.BusinessExecutionID, item.kind, item.id),
+			OrganizationID: authority.OrganizationID, ProjectID: authority.ProjectID, AccountReferenceID: authority.AccountReferenceID,
+			PlanID: authority.PlanID, ConfigurationID: version.PlatformConfiguration.ConfigurationID,
+			BusinessExecutionID: authority.BusinessExecutionID, BrowserRpaRunID: runID,
+			InternalObjectKind: item.kind, InternalObjectID: item.id, PlatformObjectKind: item.kind,
+			Status: PlatformEntityMappingPending, Version: 1, CreatedAt: now, UpdatedAt: now,
+		}
+		if _, createErr := repo.CreatePlatformEntityMapping(ctx, mapping); createErr != nil {
+			return mapBrowserRpaAuthorityError(createErr)
+		}
+	}
+	return nil
+}
+
+func stagedMappingID(executionID, kind, internalID string) string {
+	digest := sha256.Sum256([]byte(strings.Join([]string{executionID, kind, internalID}, "\x00")))
+	return "platformmapping_" + hex.EncodeToString(digest[:16])
+}
+
+func (p BrowserRpaAuthorityProvider) RecordCreatedObject(ctx context.Context, authority browserautomation.AuthorityBinding, runID string, page browserautomation.PreparedPage, resultEvidenceID, listEvidenceID string, _ time.Time) (bool, error) {
+	repo, ok := p.Repository.(browserRpaStagedCreateRepository)
+	if !ok || page.InternalObjectID == "" || (page.InternalObjectKind != "project" && page.InternalObjectKind != "promotion") || !numericPlatformID(page.Readback["platform_object_id"]) || page.Readback["reconciliation"] != "matched" || page.Readback["field_reconciliation_status"] == "not_checked" {
+		return false, browserautomation.ErrInvalidContract
+	}
+	mapping, err := repo.GetPlatformEntityMappingByInternalObject(ctx, authority.OrganizationID, authority.ProjectID, authority.AccountReferenceID, page.InternalObjectKind, page.InternalObjectID)
+	if err != nil || mapping.BusinessExecutionID != authority.BusinessExecutionID || mapping.BrowserRpaRunID != runID {
+		return false, browserautomation.ErrInvalidContract
+	}
+	if _, err = repo.ConfirmPlatformEntityMapping(ctx, authority.OrganizationID, authority.ProjectID, mapping.ID, mapping.Version, resultEvidenceID, listEvidenceID); err != nil {
+		return false, mapBrowserRpaAuthorityError(err)
+	}
+	execution, err := p.Repository.GetControlledExecution(ctx, authority.OrganizationID, authority.ProjectID, authority.BusinessExecutionID)
+	if err != nil {
+		return false, mapBrowserRpaAuthorityError(err)
+	}
+	switch execution.Status {
+	case "running":
+		return false, nil
+	case "succeeded":
+		return true, nil
+	default:
+		return false, fmt.Errorf("%w: staged execution status %s", browserautomation.ErrInvalidContract, execution.Status)
+	}
+}
+
+func numericPlatformID(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (p BrowserRpaAuthorityProvider) VerifyAuthority(ctx context.Context, authority browserautomation.AuthorityBinding, runID string, now time.Time) error {
@@ -101,7 +212,7 @@ func (p BrowserRpaAuthorityProvider) load(ctx context.Context, organizationID co
 
 func (p BrowserRpaAuthorityProvider) authorityFromLoaded(execution ControlledExecution, change ControlledChangeSet, approval RemoteWriteApproval) (browserautomation.AuthorityBinding, error) {
 	binding := approval.Binding
-	value := browserautomation.AuthorityBinding{SchemaVersion: browserautomation.AuthoritySchemaV1, OrganizationID: execution.OrganizationID, ProjectID: execution.ProjectID, BusinessExecutionID: execution.ID, ChangeSetID: change.ID, ApprovalID: approval.ID, ApprovalActionHash: approval.ActionHash, AccountReferenceID: binding.AccountReferenceID, ParentPlatformProjectID: binding.ParentPlatformProjectID, TargetMappingID: binding.TargetMappingID, TargetMappingVersion: binding.TargetMappingVersion, TargetPlatformObjectID: binding.TargetPlatformObjectID, TargetPlatformObjectKind: binding.TargetPlatformObjectKind, OperatorPrincipalID: binding.OperatorPrincipalID, SupersedesControlledChangeSetID: binding.SupersedesControlledChangeSetID, ObjectFingerprint: binding.ObjectFingerprint, Action: string(approval.Action), ProjectBudgetMode: binding.ProjectBudgetMode, ProjectBudgetLimitMinor: binding.ProjectBudgetLimitMinor, PromotionBudgetLimitMinor: binding.PromotionBudgetLimitMinor, BudgetLimitMinor: approval.BudgetLimitMinor, Currency: approval.Currency, PlanCanonicalHash: binding.PlanCanonicalHash, IntentCanonicalHash: binding.IntentCanonicalHash, FeedbackCanonicalHash: binding.OperatorFeedbackCanonicalHash, DecisionCanonicalHash: binding.DecisionCanonicalHash, ConfigurationCanonicalHash: binding.ConfigurationCanonicalHash, WorkflowID: binding.WorkflowID, WorkflowCanonicalHash: binding.WorkflowCanonicalHash, WorkflowStepID: browserRpaRemoteWriteStepID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion}
+	value := browserautomation.AuthorityBinding{SchemaVersion: browserautomation.AuthoritySchemaV1, OrganizationID: execution.OrganizationID, ProjectID: execution.ProjectID, BusinessExecutionID: execution.ID, ChangeSetID: change.ID, ApprovalID: approval.ID, ApprovalActionHash: approval.ActionHash, AccountReferenceID: binding.AccountReferenceID, ParentPlatformProjectID: binding.ParentPlatformProjectID, TargetMappingID: binding.TargetMappingID, TargetMappingVersion: binding.TargetMappingVersion, TargetPlatformObjectID: binding.TargetPlatformObjectID, TargetPlatformObjectKind: binding.TargetPlatformObjectKind, OperatorPrincipalID: binding.OperatorPrincipalID, SupersedesControlledChangeSetID: binding.SupersedesControlledChangeSetID, ObjectFingerprint: binding.ObjectFingerprint, Action: string(approval.Action), PlanID: binding.PlanID, PlanVersion: binding.PlanVersion, ProjectBudgetMode: binding.ProjectBudgetMode, ProjectBudgetLimitMinor: binding.ProjectBudgetLimitMinor, PromotionBudgetLimitMinor: binding.PromotionBudgetLimitMinor, BudgetLimitMinor: approval.BudgetLimitMinor, Currency: approval.Currency, PlanCanonicalHash: binding.PlanCanonicalHash, IntentCanonicalHash: binding.IntentCanonicalHash, FeedbackCanonicalHash: binding.OperatorFeedbackCanonicalHash, DecisionCanonicalHash: binding.DecisionCanonicalHash, ConfigurationCanonicalHash: binding.ConfigurationCanonicalHash, WorkflowID: binding.WorkflowID, WorkflowCanonicalHash: binding.WorkflowCanonicalHash, WorkflowStepID: browserRpaRemoteWriteStepID, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion}
 	if binding.PromotionMutation != nil {
 		value.PromotionMutation = toBrowserRpaPromotionMutation(*binding.PromotionMutation)
 	}

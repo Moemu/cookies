@@ -253,16 +253,13 @@
       "required_state": "unknown",
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "营销目的" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_landingtype" },
       "playwright_rpa": {
         "operation": "choose_exact_visible_option",
-        "scope": { "kind": "visible_text", "value": "营销目的" },
-        "target": {
-          "kind": "visible_text",
-          "value": "提升线上商品或店铺的营销效果"
-        },
+        "scope": { "kind": "attribute", "value": "data-e2e=createproject_landingtype" },
+        "target": { "kind": "attribute", "value": "data-e2e=createproject_landingtype" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "营销场景" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createproject_landingtype" },
         "observed_options": ["应用", "销售线索", "电商", "商品", "内容营销"]
       },
       "evidence_state": "observed",
@@ -295,13 +292,13 @@
       "required_state": "unknown",
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "营销场景" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_cdpmarketinggoal" },
       "playwright_rpa": {
         "operation": "choose_exact_visible_option",
-        "scope": { "kind": "visible_text", "value": "营销场景" },
-        "target": { "kind": "visible_text", "value": "短视频+图文" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createproject_cdpmarketinggoal" },
+        "target": { "kind": "attribute", "value": "data-e2e=createproject_cdpmarketinggoal" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "营销产品" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createproject_cdpmarketinggoal" },
         "observed_options": ["短视频+图文"],
         "input_constraints": {
           "live": "blocked_by_platform_capability"
@@ -317,14 +314,14 @@
       "owner": "platform_dynamic_reference",
       "page_family": "project_create",
       "value_type": "dynamic_reference",
-      "condition": "marketing_purpose not in [ecommerce]",
+      "condition": "marketing_purpose == ecommerce",
       "condition_dimensions": ["marketing_purpose"],
       "condition_state": "evaluable",
       "condition_rule": {
         "all": [
           {
             "dimension": "marketing_purpose",
-            "operator": "not_in",
+            "operator": "equals",
             "values": ["ecommerce"]
           }
         ]
@@ -332,13 +329,13 @@
       "required_state": "conditional",
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "visible_text", "value": "营销产品" },
+      "locator": { "kind": "attribute", "value": "data-auto-id=productSelect" },
       "playwright_rpa": {
         "operation": "open_reference_picker",
-        "scope": { "kind": "visible_text", "value": "营销产品" },
-        "target": { "kind": "visible_text", "value": "点击选择商品" },
+        "scope": { "kind": "attribute", "value": "data-auto-id=productSelect" },
+        "target": { "kind": "attribute", "value": "data-auto-id=productSelect" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "优化目标" },
+        "readback": { "kind": "attribute", "value": "data-auto-id=productSelect" },
         "input_constraints": {
           "reference_kind": "existing_product",
           "required_reference_fields": "namespace,object_kind,scope,id,state",
@@ -376,19 +373,22 @@
       "required_state": "conditional",
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "role_name", "value": "button:选择" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_appselect_input__ocInput" },
       "playwright_rpa": {
         "operation": "open_reference_picker",
-        "scope": { "kind": "visible_text", "value": "投放载体" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createproject_appselect_input__ocInput" },
+        "scope_alternates": [{ "kind": "attribute", "value": "data-e2e=createproject_subscribeUrlInput_input__ocInput" }],
         "target": {
           "kind": "role_name",
           "value": "textbox:请输入应用下载链接或选择已有应用"
         },
+        "target_alternates": [{ "kind": "attribute", "value": "data-e2e=createproject_subscribeUrlInput_input__ocInput" }],
         "expected_target_count": 1,
         "readback": {
           "kind": "role_name",
           "value": "textbox:请输入应用下载链接或选择已有应用"
         },
+        "readback_alternates": [{ "kind": "attribute", "value": "data-e2e=createproject_subscribeUrlInput_input__ocInput" }],
         "input_constraints": {
           "reference_kind": "existing_application",
           "persistence": "unsubmitted_local_only"
@@ -457,16 +457,16 @@
       "required_state": "conditional",
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "安卓" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_appTypeShift" },
       "playwright_rpa": {
         "operation": "choose_exact_visible_option",
-        "scope": { "kind": "visible_text", "value": "投放载体" },
-        "target": { "kind": "visible_text", "value": "安卓" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createproject_appTypeShift" },
+        "scope_alternates": [{ "kind": "attribute", "value": "data-auto-id=subscribeAppTypeSelect" }],
+        "target": { "kind": "attribute", "value": "data-e2e=createproject_appTypeShift" },
+        "target_alternates": [{ "kind": "attribute", "value": "data-auto-id=subscribeAppTypeSelect" }],
         "expected_target_count": 1,
-        "readback": {
-          "kind": "role_name",
-          "value": "textbox:请输入应用下载链接或选择已有应用"
-        },
+        "readback": { "kind": "attribute", "value": "data-e2e=createproject_appTypeShift" },
+        "readback_alternates": [{ "kind": "attribute", "value": "data-auto-id=subscribeAppTypeSelect" }],
         "observed_options": ["安卓", "iOS", "鸿蒙"],
         "input_constraints": {
           "app_download_and_launch_options": "安卓,iOS,鸿蒙",
@@ -538,13 +538,13 @@
       "required_state": "unknown",
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "获取线索方式" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_assetType_multioption" },
       "playwright_rpa": {
         "operation": "choose_exact_visible_option",
-        "scope": { "kind": "visible_text", "value": "获取线索方式" },
-        "target": { "kind": "visible_text", "value": "智能优选" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createproject_assetType_multioption" },
+        "target": { "kind": "attribute", "value": "data-e2e=createproject_assetType_multioption" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "投放载体" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createproject_assetType_multioption" },
         "observed_options": ["智能优选", "自定义"]
       },
       "evidence_state": "observed",
@@ -553,11 +553,11 @@
     {
       "key": "project.carrier",
       "semantic_label": "投放载体",
-      "value_labels": { "landing_page": "落地页（类型未细分）", "orange_landing_page_and_im": "橙子落地页和私信", "orange_landing_page": "橙子落地页", "owned_landing_page": "自研落地页", "im": "私信", "byte_miniapp": "字节小程序", "wechat_miniapp": "微信小程序" },
+      "value_labels": { "landing_page": "落地页（类型未细分）", "orange_landing_page_and_im": "橙子落地页和私信", "orange_landing_page": "橙子落地页", "owned_landing_page": "自研落地页", "douyin_account": "抖音号", "im": "私信", "byte_miniapp": "字节小程序", "wechat_miniapp": "微信小程序" },
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "dynamic_enum",
-      "condition": "marketing_purpose in [ecommerce,lead_generation]",
+      "condition": "marketing_purpose in [ecommerce,lead_generation,content_marketing]",
       "condition_dimensions": [
         "marketing_purpose",
         "marketing_scenario",
@@ -569,23 +569,27 @@
           {
             "dimension": "marketing_purpose",
             "operator": "in",
-            "values": ["ecommerce", "lead_generation"]
+            "values": ["ecommerce", "lead_generation", "content_marketing"]
           }
         ]
       },
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "投放载体" },
+      "locator": { "kind": "attribute", "value": "data-auto-id=assetType" },
       "playwright_rpa": {
         "operation": "choose_exact_visible_option",
-        "scope": { "kind": "visible_text", "value": "投放载体" },
-        "target": { "kind": "visible_text", "value": "橙子落地页" },
+        "scope": { "kind": "attribute", "value": "data-auto-id=assetType" },
+        "scope_alternates": [{ "kind": "attribute", "value": "data-e2e=createproject_promotionType" }],
+        "target": { "kind": "attribute", "value": "data-auto-id=assetType" },
+        "target_alternates": [{ "kind": "attribute", "value": "data-e2e=createproject_promotionType" }],
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "优化目标" },
+        "readback": { "kind": "attribute", "value": "data-auto-id=assetType" },
+        "readback_alternates": [{ "kind": "attribute", "value": "data-e2e=createproject_promotionType" }],
         "observed_options": [
           "橙子落地页",
           "自研落地页",
+          "抖音号",
           "抖音私信页",
           "字节小程序",
           "微信小程序"
@@ -629,13 +633,16 @@
       "required_state": "observed_required",
       "editable_state": "conditional",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "label", "value": "优化目标" },
+      "locator": { "kind": "attribute", "value": "data-auto-id=external-action-select" },
       "playwright_rpa": {
         "operation": "open_reference_picker",
-        "scope": { "kind": "visible_text", "value": "优化目标" },
-        "target": { "kind": "role_name", "value": "textbox:请选择" },
+        "scope": { "kind": "attribute", "value": "data-auto-id=external-action-select" },
+        "scope_alternates": [{ "kind": "attribute", "value": "data-auto-id=optimizeTargetCrowdGrass" }],
+        "target": { "kind": "attribute", "value": "data-auto-id=external-action-select" },
+        "target_alternates": [{ "kind": "attribute", "value": "data-auto-id=optimizeTargetCrowdGrass" }],
         "expected_target_count": 1,
-        "readback": { "kind": "role_name", "value": "textbox:请选择" },
+        "readback": { "kind": "attribute", "value": "data-auto-id=external-action-select" },
+        "readback_alternates": [{ "kind": "attribute", "value": "data-auto-id=optimizeTargetCrowdGrass" }],
         "input_constraints": {
           "orange_landing_page_picker": "optimization_target_name",
           "owned_landing_page_picker": "optimization_target_name,event_asset_name,event_asset_type",
@@ -662,13 +669,13 @@
       "required_state": "unknown",
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "投放模式" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_deliverymode" },
       "playwright_rpa": {
         "operation": "choose_exact_visible_option",
-        "scope": { "kind": "visible_text", "value": "投放模式" },
-        "target": { "kind": "visible_text", "value": "手动投放" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createproject_deliverymode" },
+        "target": { "kind": "attribute", "value": "data-e2e=createproject_deliverymode" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "投放版位" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createproject_deliverymode" },
         "observed_options": ["自动投放(UBMax)", "手动投放"]
       },
       "evidence_state": "observed",
@@ -703,8 +710,8 @@
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "深度优化方式" },
-      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "深度优化方式" }, "target": { "kind": "visible_text", "value": "不启用" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "深度优化方式" }, "observed_options": ["不启用", "成交ROI", "净成交下单", "净成交ROI"] },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_deepbidtype" },
+      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "attribute", "value": "data-e2e=createproject_deepbidtype" }, "target": { "kind": "attribute", "value": "data-e2e=createproject_deepbidtype" }, "expected_target_count": 1, "readback": { "kind": "attribute", "value": "data-e2e=createproject_deepbidtype" }, "observed_options": ["不启用", "成交ROI", "净成交下单", "净成交ROI"] },
       "evidence_state": "observed",
       "consumers": [
         "OceanEngineConfiguration",
@@ -720,24 +727,25 @@
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "boolean",
-      "condition": "marketing_purpose in [lead_generation,ecommerce]",
-      "condition_dimensions": ["marketing_purpose"],
+      "condition": "marketing_purpose in [lead_generation,ecommerce] and delivery_mode == ubmax",
+      "condition_dimensions": ["marketing_purpose", "delivery_mode"],
       "condition_state": "evaluable",
       "condition_rule": {
         "all": [
-          { "dimension": "marketing_purpose", "operator": "in", "values": ["lead_generation", "ecommerce"] }
+          { "dimension": "marketing_purpose", "operator": "in", "values": ["lead_generation", "ecommerce"] },
+          { "dimension": "delivery_mode", "operator": "equals", "values": ["ubmax"] }
         ]
       },
       "required_state": "observed_optional",
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "AIGC动态创意" },
+      "locator": { "kind": "attribute", "value": "data-auto-id=aigcDynamicCreativeSwitch" },
       "playwright_rpa": {
         "operation": "toggle",
-        "scope": { "kind": "visible_text", "value": "AIGC动态创意" },
-        "target": { "kind": "role_name", "value": "switch" },
+        "scope": { "kind": "attribute", "value": "data-auto-id=aigcDynamicCreativeSwitch" },
+        "target": { "kind": "attribute", "value": "data-auto-id=aigcDynamicCreativeSwitch" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "AIGC动态创意" },
+        "readback": { "kind": "attribute", "value": "data-auto-id=aigcDynamicCreativeSwitch" },
         "observed_options": ["开启", "关闭"]
       },
       "evidence_state": "observed",
@@ -752,13 +760,13 @@
       "required_state": "unknown",
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
-      "locator": { "kind": "visible_text", "value": "受众倾向与过滤" },
+      "locator": { "kind": "attribute", "value": "data-auto-id=audienceModule" },
       "playwright_rpa": {
         "operation": "configure_object",
-        "scope": { "kind": "visible_text", "value": "受众倾向与过滤" },
-        "target": { "kind": "visible_text", "value": "新建定向" },
+        "scope": { "kind": "attribute", "value": "data-auto-id=audienceModule" },
+        "target": { "kind": "attribute", "value": "data-auto-id=audienceModule" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "地域" },
+        "readback": { "kind": "attribute", "value": "data-auto-id=audienceModule" },
         "observed_options": ["地域", "性别", "年龄", "自定义人群", "已安装用户", "过滤已转化用户"],
         "input_constraints": { "persistence": "unsubmitted_local_only" }
       },
@@ -778,13 +786,13 @@
       "required_state": "unknown",
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "投放时间" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_scheduletypeselect" },
       "playwright_rpa": {
         "operation": "configure_object",
-        "scope": { "kind": "visible_text", "value": "投放时间" },
-        "target": { "kind": "visible_text", "value": "从今天起长期投放" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createproject_scheduletypeselect" },
+        "target": { "kind": "attribute", "value": "data-e2e=createproject_scheduletypeselect" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "投放时段" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createproject_scheduletypeselect" },
         "observed_options": [
           "从今天起长期投放",
           "设置开始和结束日期",
@@ -813,13 +821,13 @@
       "required_state": "conditional",
       "editable_state": "observed_editable",
       "enum_state": "observed_open_set",
-      "locator": { "kind": "visible_text", "value": "日预算" },
+      "locator": { "kind": "attribute", "value": "data-auto-id=budgetModule" },
       "playwright_rpa": {
         "operation": "fill_money",
-        "scope": { "kind": "visible_text", "value": "日预算" },
-        "target": { "kind": "role_name", "value": "spinbutton" },
+        "scope": { "kind": "attribute", "value": "data-auto-id=budgetModule" },
+        "target": { "kind": "attribute", "value": "data-auto-id=budgetModule" },
         "expected_target_count": 1,
-        "readback": { "kind": "role_name", "value": "spinbutton" },
+        "readback": { "kind": "attribute", "value": "data-auto-id=budgetModule" },
         "input_constraints": {
           "input_unit": "CNY_yuan",
           "model_unit": "CNY_fen",
@@ -850,9 +858,12 @@
       "playwright_rpa": {
         "operation": "choose_exact_visible_option",
         "scope": { "kind": "visible_text", "value": "竞价策略" },
-        "target": { "kind": "visible_text", "value": "稳定成本" },
+        "scope_alternates": [{ "kind": "attribute", "value": "data-e2e=createproject_flowcontrolmode" }],
+        "target": { "kind": "visible_text", "value": "竞价策略" },
+        "target_alternates": [{ "kind": "attribute", "value": "data-e2e=createproject_flowcontrolmode" }],
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "日预算" },
+        "readback": { "kind": "visible_text", "value": "竞价策略" },
+        "readback_alternates": [{ "kind": "attribute", "value": "data-e2e=createproject_flowcontrolmode" }],
         "observed_options": ["稳定成本", "最大转化"]
       },
       "evidence_state": "observed",
@@ -873,11 +884,13 @@
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "付费方式" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_pricetype" },
       "playwright_rpa": {
-        "operation": "no_action",
-        "blocked_state": "platform_pending",
-        "reason": "Some charging-mode branches require an optimization-target semantic key that the model does not contain."
+        "operation": "configure_object",
+        "scope": { "kind": "attribute", "value": "data-e2e=createproject_pricetype" },
+        "target": { "kind": "attribute", "value": "data-e2e=createproject_pricetype" },
+        "expected_target_count": 1,
+        "readback": { "kind": "attribute", "value": "data-e2e=createproject_pricetype" }
       },
       "evidence_state": "observed",
       "consumers": [
@@ -913,13 +926,13 @@
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
-      "locator": { "kind": "visible_text", "value": "出价" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_adBid" },
       "playwright_rpa": {
         "operation": "fill_money",
-        "scope": { "kind": "visible_text", "value": "出价" },
-        "target": { "kind": "role_name", "value": "spinbutton" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createproject_adBid" },
+        "target": { "kind": "attribute", "value": "data-e2e=createproject_adBid" },
         "expected_target_count": 1,
-        "readback": { "kind": "role_name", "value": "spinbutton" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createproject_adBid" },
         "input_constraints": {
           "input_unit": "CNY_yuan",
           "model_unit": "CNY_fen",
@@ -961,13 +974,13 @@
       "required_state": "observed_optional",
       "editable_state": "conditional",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "搜索快投" },
+      "locator": { "kind": "attribute", "value": "data-auto-id=feedSearchModule" },
       "playwright_rpa": {
         "operation": "configure_object",
-        "scope": { "kind": "visible_text", "value": "搜索快投" },
-        "target": { "kind": "visible_text", "value": "关键词" },
+        "scope": { "kind": "attribute", "value": "data-auto-id=feedSearchModule" },
+        "target": { "kind": "attribute", "value": "data-auto-id=feedSearchModule" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "出价系数" },
+        "readback": { "kind": "attribute", "value": "data-auto-id=feedSearchModule" },
         "observed_options": ["关键词", "出价系数", "定向拓展"],
         "input_constraints": { "persistence": "unsubmitted_local_only" }
       },
@@ -983,13 +996,13 @@
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "visible_text", "value": "第三方监测链接" },
+      "locator": { "kind": "attribute", "value": "data-auto-id=detectLinkModule" },
       "playwright_rpa": {
         "operation": "configure_object",
-        "scope": { "kind": "visible_text", "value": "第三方监测链接" },
-        "target": { "kind": "role_name", "value": "textbox:请输入链接地址" },
+        "scope": { "kind": "attribute", "value": "data-auto-id=detectLinkModule" },
+        "target": { "kind": "attribute", "value": "data-auto-id=detectLinkModule" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "展示" },
+        "readback": { "kind": "attribute", "value": "data-auto-id=detectLinkModule" },
         "observed_options": ["展示", "有效触点", "视频播放", "视频播完", "视频有效播放"],
         "input_constraints": { "format": "URL", "persistence": "unsubmitted_local_only" }
       },
@@ -1004,13 +1017,13 @@
       "required_state": "observed_required",
       "editable_state": "observed_editable",
       "enum_state": "observed_open_set",
-      "locator": { "kind": "label", "value": "项目名称" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_projectname" },
       "playwright_rpa": {
         "operation": "fill_text",
-        "scope": { "kind": "visible_text", "value": "项目名称" },
-        "target": { "kind": "role_name", "value": "textbox:请输入项目名称" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createproject_projectname" },
+        "target": { "kind": "attribute", "value": "data-e2e=createproject_projectname" },
         "expected_target_count": 1,
-        "readback": { "kind": "role_name", "value": "textbox:请输入项目名称" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createproject_projectname" },
         "input_constraints": {
           "max_length": 50,
           "persistence": "unsubmitted_local_only"
@@ -1043,10 +1056,10 @@
       "required_state": "conditional",
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "label", "value": "商品目录" },
+      "locator": { "kind": "attribute", "value": "data-auto-id=productCatalogue" },
       "playwright_rpa": {
         "operation": "open_reference_picker",
-        "scope": { "kind": "visible_text", "value": "商品目录" },
+        "scope": { "kind": "attribute", "value": "data-auto-id=productCatalogue" },
         "target": {
           "kind": "role_name",
           "value": "textbox:请选择或输入搜索商品目录"
@@ -1075,28 +1088,28 @@
       "owner": "oceanengine_configuration",
       "page_family": "project_create",
       "value_type": "object",
-      "condition": "marketing_purpose == product_catalog",
+      "condition": "marketing_purpose in [ecommerce,product_catalog]",
       "condition_dimensions": ["marketing_purpose"],
       "condition_state": "evaluable",
       "condition_rule": {
         "all": [
           {
             "dimension": "marketing_purpose",
-            "operator": "equals",
-            "values": ["product_catalog"]
+            "operator": "in",
+            "values": ["ecommerce", "product_catalog"]
           }
         ]
       },
       "required_state": "unknown",
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "版位" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createproject_selectPlacement" },
       "playwright_rpa": {
         "operation": "configure_object",
-        "scope": { "kind": "visible_text", "value": "投放版位" },
-        "target": { "kind": "visible_text", "value": "通投智选" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createproject_selectPlacement" },
+        "target": { "kind": "attribute", "value": "data-e2e=createproject_selectPlacement" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "投放位置" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createproject_selectPlacement" },
         "observed_options": ["通投智选", "首选媒体", "全选", "今日头条", "西瓜视频", "抖音", "番茄系媒体", "穿山甲"]
       },
       "evidence_state": "observed",
@@ -1126,13 +1139,13 @@
       "required_state": "unknown",
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
-      "locator": { "kind": "visible_text", "value": "商品定向" },
+      "locator": { "kind": "attribute", "value": "data-auto-id=dpaAudienceModule" },
       "playwright_rpa": {
         "operation": "configure_object",
-        "scope": { "kind": "visible_text", "value": "商品定向" },
-        "target": { "kind": "visible_text", "value": "RTA重定向" },
+        "scope": { "kind": "attribute", "value": "data-auto-id=dpaAudienceModule" },
+        "target": { "kind": "attribute", "value": "data-e2e=createproject_dpaRtaSwitch__ocRadioGroup" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "商品投放条件" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createproject_dpaTargetType__ocRadioGroup" },
         "observed_options": ["RTA重定向", "地域匹配", "商品投放条件"],
         "input_constraints": { "persistence": "unsubmitted_local_only" }
       },
@@ -1193,13 +1206,13 @@
       "required_state": "unknown",
       "editable_state": "conditional",
       "enum_state": "observed_open_set",
-      "locator": { "kind": "visible_text", "value": "编辑项目" },
+      "locator": { "kind": "attribute", "value": "data-auto-id=createProjectLogicSlot" },
       "playwright_rpa": {
         "operation": "configure_object",
-        "scope": { "kind": "visible_text", "value": "编辑项目" },
-        "target": { "kind": "visible_text", "value": "排期与预算" },
+        "scope": { "kind": "attribute", "value": "data-auto-id=createProjectLogicSlot" },
+        "target": { "kind": "attribute", "value": "data-auto-id=createProjectLogicSlot" },
         "expected_target_count": 1,
-        "readback": { "kind": "role_name", "value": "button:保存并关闭" },
+        "readback": { "kind": "attribute", "value": "data-auto-id=createProjectLogicSlot" },
         "observed_options": [
           "营销产品与目标",
           "投放模式",
@@ -1236,13 +1249,13 @@
       "required_state": "observed_required",
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "visible_text", "value": "投放身份" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_selectIesAccount__createSelectIes_select" },
       "playwright_rpa": {
         "operation": "open_reference_picker",
-        "scope": { "kind": "visible_text", "value": "投放身份" },
-        "target": { "kind": "placeholder", "value": "请选择投放抖音号" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createad_selectIesAccount__createSelectIes_select" },
+        "target": { "kind": "attribute", "value": "data-e2e=createad_selectIesAccount__createSelectIes_select" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "抖音号授权" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createad_selectIesAccount__createSelectIes_select" },
         "input_constraints": { "selection": "first_available_semantic_option" }
       },
       "evidence_state": "observed",
@@ -1261,13 +1274,13 @@
       "required_state": "observed_required",
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "visible_text", "value": "基础素材" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_materialSelected" },
       "playwright_rpa": {
         "operation": "open_reference_picker",
-        "scope": { "kind": "visible_text", "value": "基础素材" },
-        "target": { "kind": "role_name", "value": "button:添加视频" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createad_materialSelected" },
+        "target": { "kind": "attribute", "value": "data-e2e=createad_materialSelected_video" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "视频(1/10)" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createad_materialSelected_video" },
         "observed_options": ["添加视频", "添加图片", "添加图文"],
         "input_constraints": {
           "video_max": 10,
@@ -1291,13 +1304,13 @@
       "required_state": "observed_required",
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "placeholder", "value": "请选择橙子落地页链接" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_normalPageUrl" },
       "playwright_rpa": {
         "operation": "open_reference_picker",
-        "scope": { "kind": "visible_text", "value": "落地页" },
-        "target": { "kind": "placeholder", "value": "请选择橙子落地页链接" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createad_normalPageUrl" },
+        "target": { "kind": "attribute", "value": "data-e2e=createad_normalPageUrl_select" },
         "expected_target_count": 1,
-        "readback": { "kind": "placeholder", "value": "请选择橙子落地页链接" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createad_orangePageUrl__createExternalUrl__createCardInfo" },
         "input_constraints": { "selection": "first_available_semantic_card" }
       },
       "evidence_state": "observed",
@@ -1315,19 +1328,13 @@
       "required_state": "observed_required",
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
-      "locator": {
-        "kind": "attribute",
-        "value": "data-auto-id=oc-create-product-img-add-button"
-      },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_productImg" },
       "playwright_rpa": {
         "operation": "open_reference_picker",
-        "scope": { "kind": "visible_text", "value": "产品主图" },
-        "target": {
-          "kind": "attribute",
-          "value": "data-auto-id=oc-create-product-img-add-button"
-        },
+        "scope": { "kind": "attribute", "value": "data-e2e=createad_productImg" },
+        "target": { "kind": "attribute", "value": "data-e2e=createad_productImg" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "已添加：1/10" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createad_productImg" },
         "input_constraints": {
           "max_items": 10,
           "selection_precedence": "selected_product_main_image>first_available_my_image>local_upload_when_authorized",
@@ -1352,19 +1359,13 @@
       "required_state": "observed_required",
       "editable_state": "observed_editable",
       "enum_state": "observed_open_set",
-      "locator": {
-        "kind": "placeholder",
-        "value": "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交"
-      },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_productSelling__createRecommendTag" },
       "playwright_rpa": {
         "operation": "fill_text",
-        "scope": { "kind": "visible_text", "value": "产品卖点" },
-        "target": {
-          "kind": "placeholder",
-          "value": "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交"
-        },
+        "scope": { "kind": "attribute", "value": "data-e2e=createad_productSelling__createRecommendTag" },
+        "target": { "kind": "attribute", "value": "data-e2e=createad_productSelling__createRecommendTag" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "1/10" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createad_productSelling__createRecommendTag" },
         "input_constraints": {
           "min_chinese_characters": 6,
           "max_chinese_characters": 9,
@@ -1393,13 +1394,13 @@
       },
       "playwright_rpa": {
         "operation": "choose_exact_visible_option",
-        "scope": { "kind": "visible_text", "value": "所属类别" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createad_yuntuCategory" },
         "target": {
           "kind": "attribute",
           "value": "data-e2e=createad_yuntuCategory"
         },
         "expected_target_count": 1,
-        "readback": { "kind": "placeholder", "value": "请选择" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createad_yuntuCategory" },
         "observed_options": ["其他", "零售"],
         "input_constraints": { "selection": "first_available_cascader_path" }
       },
@@ -1419,13 +1420,13 @@
       "required_state": "observed_required",
       "editable_state": "observed_editable",
       "enum_state": "sample_only",
-      "locator": { "kind": "visible_text", "value": "单元预算" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_adBudget" },
       "playwright_rpa": {
         "operation": "fill_money",
-        "scope": { "kind": "visible_text", "value": "单元预算" },
-        "target": { "kind": "role_name", "value": "spinbutton:单元预算" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createad_adBudget" },
+        "target": { "kind": "attribute", "value": "data-e2e=createad_adBudget" },
         "expected_target_count": 1,
-        "readback": { "kind": "role_name", "value": "spinbutton:300" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createad_adBudget" },
         "input_constraints": {
           "input_unit": "CNY_yuan",
           "model_unit": "CNY_fen",
@@ -1451,16 +1452,13 @@
       "required_state": "observed_required",
       "editable_state": "observed_editable",
       "enum_state": "sample_only",
-      "locator": { "kind": "visible_text", "value": "单元出价" },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_adBid" },
       "playwright_rpa": {
         "operation": "fill_money",
-        "scope": { "kind": "visible_text", "value": "单元出价" },
-        "target": { "kind": "role_name", "value": "spinbutton:单元出价" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createad_adBid" },
+        "target": { "kind": "attribute", "value": "data-e2e=createad_adBid" },
         "expected_target_count": 1,
-        "readback": {
-          "kind": "visible_text",
-          "value": "current_page_bid_validation"
-        },
+        "readback": { "kind": "attribute", "value": "data-e2e=createad_adBid" },
         "input_constraints": {
           "input_unit": "CNY_yuan",
           "model_unit": "CNY_fen",
@@ -1490,8 +1488,8 @@
       "required_state": "observed_optional",
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "visible_text", "value": "原生锚点" },
-      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "原生锚点" }, "target": { "kind": "visible_text", "value": "手动选择" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "原生锚点" }, "observed_options": ["不启用", "自动选择", "手动选择"] },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_anchorSelect" },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "attribute", "value": "data-e2e=createad_anchorSelect" }, "target": { "kind": "attribute", "value": "data-e2e=createad_anchorSelect" }, "expected_target_count": 1, "readback": { "kind": "attribute", "value": "data-e2e=createad_anchorSelect" }, "observed_options": ["不启用", "自动选择", "手动选择"] },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1504,8 +1502,8 @@
       "required_state": "observed_optional",
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "直达链接" },
-      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "直达链接" }, "target": { "kind": "visible_text", "value": "自动" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "直达链接" }, "observed_options": ["自动", "手动"] },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_openUrl" },
+      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "attribute", "value": "data-e2e=createad_openUrl" }, "target": { "kind": "attribute", "value": "data-e2e=createad_openUrl" }, "expected_target_count": 1, "readback": { "kind": "attribute", "value": "data-e2e=createad_openUrl" }, "observed_options": ["自动生成", "手动填写"] },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1518,8 +1516,8 @@
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "visible_text", "value": "直达链接内容" },
-      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "直达链接内容" }, "target": { "kind": "visible_text", "value": "添加直达链接" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "备用链接" } },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_openUrl_input" },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "attribute", "value": "data-e2e=createad_openUrl_input" }, "target": { "kind": "attribute", "value": "data-e2e=createad_openUrl_input" }, "expected_target_count": 1, "readback": { "kind": "attribute", "value": "data-e2e=createad_openUrl_input" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1532,8 +1530,8 @@
       "required_state": "conditional",
       "editable_state": "conditional",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "visible_text", "value": "产品名称" },
-      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "产品名称" }, "target": { "kind": "visible_text", "value": "产品名称" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "产品主图" } },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_productName__ocInput__ocRow" },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "attribute", "value": "data-e2e=createad_productName__ocInput__ocRow" }, "target": { "kind": "attribute", "value": "data-e2e=createad_productName__ocInput__ocRow" }, "expected_target_count": 1, "readback": { "kind": "attribute", "value": "data-e2e=createad_productName__ocInput__ocRow" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1546,8 +1544,8 @@
       "required_state": "observed_optional",
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "visible_text", "value": "创意组件" },
-      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "创意组件" }, "target": { "kind": "visible_text", "value": "添加组件" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "创意组件" } },
+      "locator": { "kind": "attribute", "value": "data-auto-id=componentInfo" },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "attribute", "value": "data-auto-id=componentInfo" }, "target": { "kind": "attribute", "value": "data-auto-id=componentInfo" }, "expected_target_count": 1, "readback": { "kind": "attribute", "value": "data-auto-id=componentInfo" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1560,8 +1558,8 @@
       "required_state": "conditional",
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "行动号召" },
-      "playwright_rpa": { "operation": "configure_object", "scope": { "kind": "visible_text", "value": "行动号召" }, "target": { "kind": "role_name", "value": "combobox:行动号召" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "combobox:行动号召" } },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_actionText__createRecommendTag" },
+      "playwright_rpa": { "operation": "configure_object", "scope": { "kind": "attribute", "value": "data-e2e=createad_actionText__createRecommendTag" }, "target": { "kind": "attribute", "value": "data-e2e=createad_actionText__createRecommendTag" }, "expected_target_count": 1, "readback": { "kind": "attribute", "value": "data-e2e=createad_actionText__createRecommendTag" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1574,8 +1572,8 @@
       "required_state": "conditional",
       "editable_state": "observed_editable",
       "enum_state": "observed_open_set",
-      "locator": { "kind": "label", "value": "来源" },
-      "playwright_rpa": { "operation": "fill_text", "scope": { "kind": "visible_text", "value": "来源" }, "target": { "kind": "role_name", "value": "textbox:来源" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "textbox:来源" } },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_source" },
+      "playwright_rpa": { "operation": "fill_text", "scope": { "kind": "attribute", "value": "data-e2e=createad_source" }, "target": { "kind": "attribute", "value": "data-e2e=createad_source" }, "expected_target_count": 1, "readback": { "kind": "attribute", "value": "data-e2e=createad_source" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1588,8 +1586,8 @@
       "required_state": "observed_optional",
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "评论" },
-      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "visible_text", "value": "评论" }, "target": { "kind": "visible_text", "value": "开启" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "评论" }, "observed_options": ["开启", "关闭"] },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_comment" },
+      "playwright_rpa": { "operation": "choose_exact_visible_option", "scope": { "kind": "attribute", "value": "data-e2e=createad_comment" }, "target": { "kind": "attribute", "value": "data-e2e=createad_comment" }, "expected_target_count": 1, "readback": { "kind": "attribute", "value": "data-e2e=createad_comment" }, "observed_options": ["不启用", "启用"] },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1602,8 +1600,8 @@
       "required_state": "observed_optional",
       "editable_state": "observed_editable",
       "enum_state": "observed_current_set",
-      "locator": { "kind": "visible_text", "value": "智能生成" },
-      "playwright_rpa": { "operation": "configure_object", "scope": { "kind": "visible_text", "value": "智能生成" }, "target": { "kind": "role_name", "value": "checkbox:智能生成" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "checkbox:智能生成" } },
+      "locator": { "kind": "visible_text", "value": "开启智能生成" },
+      "playwright_rpa": { "operation": "configure_object", "scope": { "kind": "visible_text", "value": "开启智能生成" }, "target": { "kind": "visible_text", "value": "开启智能生成" }, "expected_target_count": 1, "readback": { "kind": "visible_text", "value": "开启智能生成" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1616,8 +1614,8 @@
       "required_state": "observed_optional",
       "editable_state": "observed_editable",
       "enum_state": "dynamic_reference",
-      "locator": { "kind": "visible_text", "value": "品牌名称" },
-      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "visible_text", "value": "品牌名称" }, "target": { "kind": "role_name", "value": "combobox:品牌名称" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "combobox:品牌名称" } },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_cdpBrand" },
+      "playwright_rpa": { "operation": "open_reference_picker", "scope": { "kind": "attribute", "value": "data-e2e=createad_cdpBrand" }, "target": { "kind": "attribute", "value": "data-e2e=createad_cdpBrand" }, "expected_target_count": 1, "readback": { "kind": "attribute", "value": "data-e2e=createad_cdpBrand" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "PlatformSkill"]
     },
@@ -1630,8 +1628,8 @@
       "required_state": "observed_required",
       "editable_state": "observed_editable",
       "enum_state": "observed_open_set",
-      "locator": { "kind": "label", "value": "单元名称" },
-      "playwright_rpa": { "operation": "fill_text", "scope": { "kind": "visible_text", "value": "单元名称" }, "target": { "kind": "role_name", "value": "textbox:请输入单元名称" }, "expected_target_count": 1, "readback": { "kind": "role_name", "value": "textbox:请输入单元名称" } },
+      "locator": { "kind": "attribute", "value": "data-e2e=createad_adName" },
+      "playwright_rpa": { "operation": "fill_text", "scope": { "kind": "attribute", "value": "data-e2e=createad_adName" }, "target": { "kind": "attribute", "value": "data-e2e=createad_adName" }, "expected_target_count": 1, "readback": { "kind": "attribute", "value": "data-e2e=createad_adName" } },
       "evidence_state": "observed",
       "consumers": ["OceanEngineConfiguration", "CompiledDeliveryWorkflow", "PlatformSkill"]
     },
@@ -1646,10 +1644,10 @@
       "locator": { "kind": "visible_text", "value": "编辑单元" },
       "playwright_rpa": {
         "operation": "configure_object",
-        "scope": { "kind": "visible_text", "value": "编辑单元" },
-        "target": { "kind": "visible_text", "value": "单元素材" },
+        "scope": { "kind": "attribute", "value": "data-e2e=createad_save_confirm" },
+        "target": { "kind": "attribute", "value": "data-e2e=createad_save_confirm" },
         "expected_target_count": 1,
-        "readback": { "kind": "role_name", "value": "button:保存并关闭" },
+        "readback": { "kind": "attribute", "value": "data-e2e=createad_save_confirm" },
         "observed_options": [
           "投放身份",
           "基础素材",
@@ -1721,14 +1719,14 @@
       "locator": { "kind": "role_name", "value": "button:换视频" },
       "playwright_rpa": {
         "operation": "open_reference_picker",
-        "scope": { "kind": "visible_text", "value": "基础素材" },
+        "scope": { "kind": "role_name", "value": "button:换视频" },
         "target": { "kind": "role_name", "value": "button:换视频" },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "共3255个视频" },
+        "readback": { "kind": "visible_text", "value": "共22个视频" },
         "observed_options": ["换视频", "添加图片", "添加图文"],
         "input_constraints": {
           "wait_for_loaded_total_before_decision": true,
-          "video_library_items": 3255,
+          "video_library_items": 22,
           "image_library_items": 1722,
           "image_text_library_items": 284,
           "selection_policy": "first_available_semantic_item",
@@ -1758,13 +1756,19 @@
       },
       "playwright_rpa": {
         "operation": "toggle",
-        "scope": { "kind": "visible_text", "value": "项目" },
+        "scope": {
+          "kind": "attribute",
+          "value": "data-e2e=promotion_project_on-off"
+        },
         "target": {
           "kind": "attribute",
           "value": "data-e2e=promotion_project_on-off"
         },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "已暂停" },
+        "readback": {
+          "kind": "attribute",
+          "value": "data-e2e=promotion_project_on-off"
+        },
         "observed_options": ["启用", "暂停"],
         "input_constraints": {
           "observed_model_value": false,
@@ -1794,13 +1798,19 @@
       },
       "playwright_rpa": {
         "operation": "toggle",
-        "scope": { "kind": "visible_text", "value": "单元" },
+        "scope": {
+          "kind": "attribute",
+          "value": "data-e2e=promotion_promotion_on-off"
+        },
         "target": {
           "kind": "attribute",
           "value": "data-e2e=promotion_promotion_on-off"
         },
         "expected_target_count": 1,
-        "readback": { "kind": "visible_text", "value": "项目已暂停" },
+        "readback": {
+          "kind": "attribute",
+          "value": "data-e2e=promotion_promotion_on-off"
+        },
         "observed_options": ["启用", "暂停"],
         "input_constraints": {
           "observed_model_value": true,
@@ -1834,6 +1844,7 @@
         "project.carrier",
         "project.optimization_target_reference",
         "project.delivery_mode",
+        "project.aigc_dynamic_creative",
         "project.targeting",
         "project.schedule",
         "project.daily_budget_minor",
@@ -1874,11 +1885,10 @@
       ],
       "field_keys": [
         "project.deep_optimization_mode",
-        "project.aigc_dynamic_creative",
         "project.delivery_mode",
+        "project.placement_strategy",
         "project.bidding_strategy",
         "project.charging_mode",
-        "project.bid_minor",
         "project.search_boost"
       ],
       "status": "covered",
@@ -2172,7 +2182,25 @@
     {
       "id": "OE-PROJECT-EDIT",
       "path": ["project_edit", "existing_project"],
-      "field_keys": ["project.editable_surface"],
+      "field_keys": [
+        "project.marketing_purpose",
+        "project.marketing_scenario",
+        "project.marketing_product_reference",
+        "project.carrier",
+        "project.optimization_target_reference",
+        "project.deep_optimization_mode",
+        "project.delivery_mode",
+        "project.placement_strategy",
+        "project.targeting",
+        "project.schedule",
+        "project.daily_budget_minor",
+        "project.bidding_strategy",
+        "project.charging_mode",
+        "project.search_boost",
+        "project.monitoring_references",
+        "project.project_name",
+        "project.editable_surface"
+      ],
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true,
@@ -2210,11 +2238,32 @@
     {
       "id": "OE-PROMOTION-EDIT",
       "path": ["promotion_edit"],
-      "field_keys": ["promotion.editable_surface"],
+      "field_keys": [
+        "promotion.delivery_identity",
+        "promotion.base_materials",
+        "promotion.landing_page_reference",
+        "promotion.product_image_references",
+        "promotion.product_selling_points",
+        "promotion.category",
+        "promotion.daily_budget",
+        "promotion.bid",
+        "promotion.native_anchor_reference",
+        "promotion.direct_link_mode",
+        "promotion.direct_link_reference",
+        "promotion.product_reference",
+        "promotion.creative_component_references",
+        "promotion.call_to_action",
+        "promotion.source_label",
+        "promotion.comments_enabled",
+        "promotion.smart_generation_enabled",
+        "promotion.brand_reference",
+        "promotion.promotion_name",
+        "promotion.editable_surface"
+      ],
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true,
-      "reason": "an existing unit exposed identity, materials, copy, native anchor, landing page, deep links, product information, creative components, settings and name without crossing save"
+      "reason": "the self-created unit edit page reuses all 19 create fields and exposes the save boundary; identity is readonly while materials, copy, landing page, product information, settings, budget, bid and name remain observable without saving"
     },
     {
       "id": "OE-D3-PROMOTION-BUDGET-EDIT",
@@ -2241,7 +2290,7 @@
       "status": "covered",
       "evidence_state": "observed",
       "exit_verified": true,
-      "reason": "after asynchronous loading completed, a different existing video was selected and saved, then the original video was found by enabling the audit-rejected-material filter, restored, saved and verified"
+      "reason": "after asynchronous loading completed, a different existing video was selected and saved, then the original video was selected from the existing-asset picker, restored, saved and verified"
     },
     {
       "id": "OE-D3-PROJECT-ENABLE",

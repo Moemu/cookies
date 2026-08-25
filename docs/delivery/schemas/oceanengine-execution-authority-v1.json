@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/docs/delivery/schemas/oceanengine-execution-authority-v1.json",
+  "title": "OceanEngine local execution authority v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "authority_id",
+    "plan_sha256",
+    "confirm_token_sha256",
+    "issued_at",
+    "expires_at",
+    "account_reference",
+    "permitted_plan_kind",
+    "maximum_money_cny",
+    "schedule_date",
+    "maximum_final_clicks"
+  ],
+  "properties": {
+    "schema_version": {"const": "browser-rpa-execution-authority/v1"},
+    "authority_id": {"type": "string", "minLength": 1},
+    "plan_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "confirm_token_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "issued_at": {"type": "string", "minLength": 20},
+    "expires_at": {"type": "string", "minLength": 20},
+    "account_reference": {"type": "string", "minLength": 1},
+    "permitted_plan_kind": {"enum": ["project_create", "project_edit", "promotion_create", "promotion_edit"]},
+    "maximum_money_cny": {"type": "number", "exclusiveMinimum": 0},
+    "schedule_date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "maximum_final_clicks": {"const": 1}
+  }
+}

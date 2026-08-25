@@ -182,3 +182,23 @@ func TestOrganizationVerifyDoesNotReportEveryPlatformFailureAsVersionConflict(t 
 		}
 	}
 }
+
+func TestProjectVerifyReportsSpecificFailure(t *testing.T) {
+	tests := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{connector.ErrImmutableConflict, http.StatusConflict, "VERSION_CONFLICT"},
+		{connector.ErrAccountSessionInvalid, http.StatusUnprocessableEntity, "CONNECTOR_ACCOUNT_SESSION_INVALID"},
+		{connector.ErrAccountVerificationUnavailable, http.StatusBadGateway, "CONNECTOR_ACCOUNT_VERIFY_UNAVAILABLE"},
+	}
+	for _, test := range tests {
+		server := New(nil, nil, authorizerStub{}, accountManagerStub{verifyErr: test.err})
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request(http.MethodPost, "/api/connector/v1/projects/project_1/accounts/oeacct_safe/verify", "", connector.ScopeSync))
+		if response.Code != test.status || !strings.Contains(response.Body.String(), test.code) {
+			t.Fatalf("error=%v status=%d body=%s", test.err, response.Code, response.Body.String())
+		}
+	}
+}

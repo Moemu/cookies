@@ -79,6 +79,11 @@ test('delivery plan client writes DeliveryIntent plus tagged PlatformConfigurati
   assert.equal(written.platform_configuration.payload.ocean_engine.project.budget_and_bidding.daily_budget_minor, longTerm.budget.totalMinor)
   assert.equal(written.platform_configuration.payload.ocean_engine.project.optimization_target_reference.semantic_key, 'in_app_order')
   assert.equal(written.platform_configuration.payload.ocean_engine.promotions[0].settings.call_to_action, undefined)
+
+  await deliveryPlanApi.update('project_1', 'plan_1', 4, draft())
+  assert.equal(written.expected_version, 4)
+  assert.equal(written.intent.intent_id, 'intent-plan_1-plan-v5')
+  assert.equal(written.platform_configuration.configuration_id, 'configuration-plan_1-plan-v5')
 })
 
 function draft(): DeliveryPlanDraft {

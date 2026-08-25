@@ -1,0 +1,27 @@
+{
+  "schema_version": "oceanengine-form-plan-compiler-input/v1",
+  "account_reference": "redacted:test-account",
+  "parent_context": {
+    "carrier": "orange_landing_page",
+    "optimization_target": "in_app_order",
+    "deep_optimization": "disabled",
+    "delivery_mode": "manual",
+    "placement_mode": "automatic",
+    "search_targeting_expansion": true
+  },
+  "values": {
+    "project.marketing_purpose": "电商",
+    "project.marketing_scenario": "短视频+图文",
+    "project.marketing_product_reference": "redacted:managed-product",
+    "project.carrier": "橙子落地页",
+    "project.optimization_target_reference": "app内下单",
+    "project.deep_optimization_mode": "不启用",
+    "project.delivery_mode": "手动投放",
+    "project.placement_strategy": "通投智选",
+    "project.schedule": {"start": "2026-08-25", "end": "2026-08-25"},
+    "project.daily_budget": "300",
+    "project.search_bid_coefficient": "1.00",
+    "project.search_targeting_expansion": "启用",
+    "project.project_name": "CODEX-CAL-PROJECT-CREATE"
+  }
+}

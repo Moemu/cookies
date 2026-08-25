@@ -144,6 +144,21 @@ func PlanCanonicalHash(version DeliveryPlanVersion) (string, error) {
 	})
 }
 
+func planCanonicalHashMatches(version DeliveryPlanVersion, expected string) (bool, error) {
+	hash, err := PlanCanonicalHash(version)
+	if err != nil {
+		return false, err
+	}
+	if hash == expected {
+		return true, nil
+	}
+	if !version.IsPlatformConfigurationV2() {
+		return false, nil
+	}
+	legacyHash, compatible, err := version.PlatformConfiguration.computeLegacySingleCallToActionHash()
+	return compatible && legacyHash == expected, err
+}
+
 func ApprovalActionHash(approval DeliveryApproval) (string, error) {
 	return contract.CanonicalJSONHash(approvalActionPayload{
 		OrganizationID:              approval.OrganizationID,
@@ -172,11 +187,11 @@ func ApprovalActionHash(approval DeliveryApproval) (string, error) {
 }
 
 func validatePlanCanonicalHash(version DeliveryPlanVersion) error {
-	hash, err := PlanCanonicalHash(version)
+	matches, err := planCanonicalHashMatches(version, version.CanonicalHash)
 	if err != nil {
 		return err
 	}
-	if version.CanonicalHash == "" || hash != version.CanonicalHash {
+	if version.CanonicalHash == "" || !matches {
 		return fmt.Errorf("%w: plan canonical hash does not match the immutable version", ErrApprovalContentMismatch)
 	}
 	return nil

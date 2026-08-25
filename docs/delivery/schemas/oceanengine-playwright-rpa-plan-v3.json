@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/docs/delivery/schemas/oceanengine-playwright-rpa-plan-v3.json",
+  "title": "OceanEngine Playwright RPA plan v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "plan_kind", "browser", "mode", "status", "account_reference", "parent_condition_manifest_id", "parent_context", "blocked_reasons", "steps", "allow_remote_write", "maximum_final_clicks"],
+  "properties": {
+    "schema_version": {"const": "oceanengine-playwright-rpa-plan/v3"},
+    "plan_kind": {"enum": ["project_create", "project_edit", "promotion_create", "promotion_edit"]},
+    "browser": {"const": "msedge"},
+    "mode": {"enum": ["prepare", "submit"]},
+    "status": {"enum": ["ready", "blocked"]},
+    "account_reference": {"type": "string", "minLength": 1},
+    "object_reference": {"type": "string", "minLength": 1},
+    "parent_project_reference": {"type": "string", "minLength": 1},
+    "parent_condition_manifest_id": {"type": "string", "minLength": 1},
+    "parent_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["carrier", "optimization_target", "deep_optimization", "delivery_mode", "placement_mode"],
+      "properties": {
+        "carrier": {"type": "string", "minLength": 1},
+        "optimization_target": {"type": "string", "minLength": 1},
+        "deep_optimization": {"type": "string", "minLength": 1},
+        "delivery_mode": {"type": "string", "minLength": 1},
+        "placement_mode": {"type": "string", "minLength": 1},
+        "search_targeting_expansion": {"type": "boolean"},
+        "parent_references": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}}
+      }
+    },
+    "blocked_reasons": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "execution_authority": {"$ref": "oceanengine-execution-authority-v1.json"},
+    "steps": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "page_kind", "remote_write", "blocked"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["identify_page", "field_action", "readback", "final_click_boundary"]},
+          "page_kind": {"enum": ["project_create", "project_edit", "promotion_create", "promotion_edit"]},
+          "field_key": {"type": "string", "minLength": 1},
+          "operation": {"type": "string", "minLength": 1},
+          "scope": {"type": "string", "minLength": 1},
+          "target": {"type": "string", "minLength": 1},
+          "value": {},
+          "value_state": {"enum": ["provided", "missing"]},
+          "required": {"type": "boolean"},
+          "remote_write": {"type": "boolean"},
+          "blocked": {"type": "boolean"},
+          "block_reason": {"type": "string", "minLength": 1}
+        },
+        "allOf": [
+          {"if": {"properties": {"kind": {"const": "field_action"}}, "required": ["kind"]}, "then": {"required": ["field_key", "operation", "scope", "target", "value_state", "required"], "properties": {"remote_write": {"const": false}, "blocked": {"const": false}}}},
+          {"if": {"properties": {"kind": {"const": "final_click_boundary"}}, "required": ["kind"]}, "then": {"required": ["target"], "properties": {"remote_write": {"const": true}}}}
+        ]
+      }
+    },
+    "allow_remote_write": {"type": "boolean"},
+    "maximum_final_clicks": {"enum": [0, 1]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"mode": {"const": "prepare"}}, "required": ["mode"]},
+      "then": {
+        "properties": {
+          "allow_remote_write": {"const": false},
+          "maximum_final_clicks": {"const": 0},
+          "steps": {
+            "contains": {
+              "type": "object",
+              "required": ["kind", "blocked", "block_reason"],
+              "properties": {
+                "kind": {"const": "final_click_boundary"},
+                "blocked": {"const": true},
+                "block_reason": {"const": "PREPARE_PLAN_REMOTE_WRITE_PROHIBITED"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"mode": {"const": "submit"}}, "required": ["mode"]},
+      "then": {
+        "required": ["execution_authority"],
+        "properties": {
+          "status": {"const": "ready"},
+          "blocked_reasons": {"maxItems": 0},
+          "allow_remote_write": {"const": true},
+          "maximum_final_clicks": {"const": 1},
+          "steps": {
+            "contains": {
+              "type": "object",
+              "required": ["kind", "blocked"],
+              "properties": {
+                "kind": {"const": "final_click_boundary"},
+                "blocked": {"const": false}
+              },
+              "not": {"required": ["block_reason"]}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

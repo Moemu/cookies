@@ -2,6 +2,7 @@ package rparunner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -96,5 +97,45 @@ func TestRunnerMissingCommandIsInfrastructureFailure(t *testing.T) {
 	_, err := runner.Run(context.Background(), basePlan("prepare"))
 	if !errors.Is(err, ErrRunnerInfrastructure) {
 		t.Fatalf("expected infrastructure failure, got %v", err)
+	}
+}
+
+func TestRunnerV3PassesRawPlanAndParsesResultV2(t *testing.T) {
+	runner := testRunner(t, "success")
+	plan := json.RawMessage(`{"schema_version":"oceanengine-playwright-rpa-plan/v3","mode":"submit","steps":[{"id":"identify"}]}`)
+	result, err := runner.RunV3(context.Background(), plan, "one-time-token", t.TempDir())
+	if err != nil {
+		t.Fatalf("run v3: %v", err)
+	}
+	if result.SchemaVersion != ResultSchemaV2 || !result.FinalClickPerformed {
+		t.Fatalf("unexpected v3 result %+v", result)
+	}
+	if result.CreatedObjectID != "promotion_v3_test" || result.Reconciliation != "matched" {
+		t.Fatalf("v3 reconciliation not forwarded: %+v", result)
+	}
+	if result.FieldReconciliation == nil {
+		t.Fatalf("v3 field reconciliation not forwarded: %+v", result)
+	}
+}
+
+func TestRunnerV3RejectsWrongPlanSchema(t *testing.T) {
+	runner := testRunner(t, "success")
+	_, err := runner.RunV3(context.Background(), json.RawMessage(`{"schema_version":"wrong/v0","mode":"prepare"}`), "", "")
+	if !errors.Is(err, ErrRunnerInfrastructure) {
+		t.Fatalf("expected infrastructure failure, got %v", err)
+	}
+}
+
+func TestRunnerV3PassesPersistentEdgeSessionFile(t *testing.T) {
+	runner := testRunner(t, "success")
+	runner.EdgeSessionFile = `C:\Users\test\AppData\Local\cookies\browser-rpa\session.json`
+	plan := json.RawMessage(`{"schema_version":"oceanengine-playwright-rpa-plan/v3","mode":"prepare","steps":[{"id":"identify"}]}`)
+	result, err := runner.RunV3(context.Background(), plan, "", "")
+	if err != nil {
+		t.Fatalf("run v3 with session file: %v", err)
+	}
+	arguments, ok := result.Steps[0].Readback["runner_args"].([]any)
+	if !ok || len(arguments) != 2 || arguments[0] != "--session-file" || arguments[1] != runner.EdgeSessionFile {
+		t.Fatalf("runner arguments = %#v", result.Steps[0].Readback)
 	}
 }

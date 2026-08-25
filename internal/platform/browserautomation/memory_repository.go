@@ -416,6 +416,22 @@ func (r *MemoryRepository) AuthorizeControlledAction(_ context.Context, identity
 	return attempt, nil
 }
 
+func (r *MemoryRepository) CompleteControlledAction(_ context.Context, org contract.OrganizationID, project contract.ProjectID, attemptID, status string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key, attempt := range r.attempts {
+		if attempt.OrganizationID == org && attempt.ProjectID == project && attempt.ID == attemptID {
+			if attempt.Status != ControlledActionAuthorized {
+				return ErrInvalidTransition
+			}
+			attempt.Status = status
+			r.attempts[key] = attempt
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
 func (r *MemoryRepository) AuthorizeTakeoverAction(_ context.Context, run BrowserRpaRun, expected int64, identity FinalConfirmation, digest string, lease SessionLease, attempt ControlledActionAttempt, step RunStep, evidence Evidence, event RunEvent, now time.Time) (BrowserRpaRun, ControlledActionAttempt, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

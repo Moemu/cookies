@@ -231,7 +231,7 @@ func insertPlanVersion(ctx context.Context, executor planVersionExecutor, versio
 			return err
 		}
 		if storedIntentSchema != intent.SchemaVersion || storedIntentHash != intent.CanonicalHash || storedIntentAlgorithm != intent.HashAlgorithm || !equalJSONDocuments(storedIntentJSON, intentJSON) {
-			return fmt.Errorf("delivery intent immutable identity conflict")
+			return fmt.Errorf("%w: delivery intent", ErrImmutableContractIdentityConflict)
 		}
 		configuration := version.PlatformConfiguration
 		if _, err := executor.ExecContext(ctx, `INSERT INTO delivery_platform_configurations (
@@ -248,7 +248,7 @@ func insertPlanVersion(ctx context.Context, executor planVersionExecutor, versio
 			return err
 		}
 		if storedConfigurationSchema != configuration.SchemaVersion || storedPlatform != string(configuration.Platform) || storedProfile != configuration.ProfileVersion || storedConfigurationIntentID != configuration.Intent.IntentID || storedIntentVersion != configuration.Intent.VersionNumber || storedConfigurationIntentHash != configuration.Intent.CanonicalHash || storedConfigurationHash != configuration.CanonicalHash || storedConfigurationAlgorithm != configuration.HashAlgorithm || !equalJSONDocuments(storedConfigurationJSON, configurationJSON) {
-			return fmt.Errorf("delivery platform configuration immutable identity conflict")
+			return fmt.Errorf("%w: delivery platform configuration", ErrImmutableContractIdentityConflict)
 		}
 	}
 	payload, err := json.Marshal(version)
@@ -282,11 +282,11 @@ func decodePlanVersion(payload []byte, canonicalHash string) (DeliveryPlanVersio
 		value.RuntimeStatus = PlanRuntimeLegacyUnsupported
 		value.ReadOnly = true
 	}
-	calculated, err := PlanCanonicalHash(value)
+	matches, err := planCanonicalHashMatches(value, canonicalHash)
 	if err != nil {
 		return DeliveryPlanVersion{}, err
 	}
-	if calculated != canonicalHash {
+	if !matches {
 		return DeliveryPlanVersion{}, fmt.Errorf("delivery plan version canonical hash mismatch")
 	}
 	return value, nil

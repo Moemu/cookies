@@ -1,0 +1,28 @@
+{
+  "schema_version": "oceanengine-readonly-calibration-result/v1",
+  "plan_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "observed_at": "2026-08-21T00:00:00.000Z",
+  "outcome": "success",
+  "error_code": "ok",
+  "browser_detached": true,
+  "page": {
+    "host": "ad.oceanengine.com",
+    "page_kind": "promotion_list",
+    "path_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "account_context_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "account_context_state": "matched",
+    "session_context_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "structure_summary": {
+    "main_count": 1,
+    "heading_count": 2,
+    "button_count": 4,
+    "textbox_count": 1,
+    "table_count": 1,
+    "row_count": 2
+  },
+  "steps": [
+    { "id": "identify-page", "kind": "identify_page", "status": "passed" },
+    { "id": "read-budget", "kind": "readback", "status": "passed", "locator": { "kind": "visible_text", "key": "project_budget_column" }, "element_count": 1, "visible": true, "accessible_name_state": "present", "accessible_name_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "value_state": "present", "value_kind": "text", "value_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
+  ]
+}

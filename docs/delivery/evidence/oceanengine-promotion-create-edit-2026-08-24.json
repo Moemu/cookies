@@ -1,0 +1,37 @@
+{
+  "schema_version": "oceanengine-promotion-create-edit-evidence/v1",
+  "observed_at": "2026-08-24T22:30:00.000+08:00",
+  "account_context": "redacted_current_test_account",
+  "parent_conditions": {
+    "marketing_purpose": "ecommerce",
+    "carrier": "owned_landing_page",
+    "delivery_mode": "manual",
+    "optimization_target": "in_app_order",
+    "deep_optimization": "disabled",
+    "schedule": "2026-08-25"
+  },
+  "promotion_create": {
+    "result": "success",
+    "daily_budget_cny": 300,
+    "bid_cny": 0.01,
+    "category": "retail/general_2c_ecommerce",
+    "video_count": 1,
+    "product_image_count": 1,
+    "managed_landing_page_count_after_async_load": 25
+  },
+  "promotion_edit": {
+    "result": "success",
+    "readback_complete": true,
+    "landing_page_persistence": "platform_replaced_selected_reference"
+  },
+  "element_location": {
+    "image_picker": "img_and_card_checkbox",
+    "landing_page_picker": "async_loaded_rows",
+    "text_only_asset_location": false
+  },
+  "cleanup": {
+    "promotion_deleted": true,
+    "project_deleted": true,
+    "exact_name_search_rows_after_delete": 0
+  }
+}

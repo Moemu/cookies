@@ -34,6 +34,9 @@ func TestProductionBrowserRPAMountIsSafeByDefault(t *testing.T) {
 	if !strings.Contains(mainSource, "rparunner.NewPlaywrightRPAAdapter") {
 		t.Fatal("automated Browser RPA worker must wire the real Playwright adapter")
 	}
+	if !strings.Contains(mainSource, "plancompile.V3Compiler") || !strings.Contains(mainSource, "EdgeSessionFile") {
+		t.Fatal("automated Browser RPA worker must wire the v3 plan converter and persistent Edge session")
+	}
 	if strings.Contains(mainSource, "browserautomation.DeterministicFakeAdapter") {
 		t.Fatal("production API must not wire the deterministic fake Browser RPA adapter")
 	}

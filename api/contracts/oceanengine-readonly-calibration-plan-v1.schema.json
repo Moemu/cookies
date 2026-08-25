@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/api/contracts/oceanengine-readonly-calibration-plan-v1.schema.json",
+  "title": "OceanEngine Read-only Calibration Plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "plan_id", "platform", "browser", "allowed_hosts", "account_context", "steps"],
+  "properties": {
+    "schema_version": { "const": "oceanengine-readonly-calibration-plan/v1" },
+    "plan_id": { "$ref": "#/$defs/safeId" },
+    "platform": { "const": "ocean_engine" },
+    "browser": { "const": "msedge" },
+    "allowed_hosts": {
+      "type": "array",
+      "const": ["ad.oceanengine.com"]
+    },
+    "account_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "query_key", "expected_sha256"],
+      "properties": {
+        "source": { "const": "url_query_sha256" },
+        "query_key": { "const": "aadvid" },
+        "expected_sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "safeId": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$" },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "locator": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name_key"],
+          "properties": {
+            "kind": { "const": "visible_text" },
+            "name_key": { "enum": ["create_project", "project_budget_column", "project_section"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "role", "name_key"],
+          "properties": {
+            "kind": { "const": "role_name" },
+            "role": { "enum": ["button", "heading", "spinbutton", "textbox"] },
+            "name_key": { "enum": ["create_project", "project_budget_column", "project_section"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "attribute_key", "value_key"],
+          "properties": {
+            "kind": { "const": "attribute" },
+            "attribute_key": { "const": "data-e2e" },
+            "value_key": { "enum": ["promotion_operational_state"] }
+          }
+        }
+      ]
+    },
+    "step": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "page_kind"],
+          "properties": {
+            "id": { "$ref": "#/$defs/safeId" },
+            "kind": { "const": "identify_page" },
+            "page_kind": { "const": "promotion_list" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "locator"],
+          "properties": {
+            "id": { "$ref": "#/$defs/safeId" },
+            "kind": { "const": "scope_check" },
+            "locator": { "$ref": "#/$defs/locator" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "locator"],
+          "properties": {
+            "id": { "$ref": "#/$defs/safeId" },
+            "kind": { "const": "locator_unique" },
+            "locator": { "$ref": "#/$defs/locator" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "locator"],
+          "properties": {
+            "id": { "$ref": "#/$defs/safeId" },
+            "kind": { "const": "presence_check" },
+            "locator": { "$ref": "#/$defs/locator" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "locator", "value_source"],
+          "properties": {
+            "id": { "$ref": "#/$defs/safeId" },
+            "kind": { "const": "readback" },
+            "locator": { "$ref": "#/$defs/locator" },
+            "value_source": { "enum": ["text", "input_value", "aria_checked", "aria_value_now"] }
+          }
+        }
+      ]
+    }
+  }
+}

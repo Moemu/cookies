@@ -14,6 +14,49 @@ import (
 	"github.com/shikanon/cookies/internal/systems/delivery/calibrationmanifest"
 )
 
+func TestOceanEnginePromotionSettingsReadsLegacyCallToAction(t *testing.T) {
+	var legacy OceanEnginePromotionSettings
+	if err := json.Unmarshal([]byte(`{"call_to_action":"查看详情","source_label":"ecommerce"}`), &legacy); err != nil {
+		t.Fatalf("unmarshal legacy settings: %v", err)
+	}
+	if len(legacy.CallToAction) != 1 || legacy.CallToAction[0] != "查看详情" || legacy.SourceLabel != "ecommerce" {
+		t.Fatalf("unexpected legacy settings: %#v", legacy)
+	}
+
+	var current OceanEnginePromotionSettings
+	if err := json.Unmarshal([]byte(`{"call_to_action":["查看详情","立即预订"]}`), &current); err != nil {
+		t.Fatalf("unmarshal current settings: %v", err)
+	}
+	if len(current.CallToAction) != 2 || current.CallToAction[1] != "立即预订" {
+		t.Fatalf("unexpected current settings: %#v", current)
+	}
+}
+
+func TestPlatformConfigurationAcceptsLegacySingleCallToActionHash(t *testing.T) {
+	intent := validDeliveryIntent(t)
+	configuration := validOceanEnginePlatformConfiguration(t, intent, 1)
+	configuration.Payload.OceanEngine = cloneOceanConfigurationForTest(configuration.Payload.OceanEngine)
+	configuration.Payload.OceanEngine.Promotions[0].Settings.CallToAction = []string{"查看详情"}
+	legacyHash, compatible, err := configuration.computeLegacySingleCallToActionHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !compatible {
+		t.Fatal("expected legacy hash compatibility")
+	}
+	configuration.CanonicalHash = legacyHash
+	if err = configuration.Validate(); err != nil {
+		t.Fatalf("validate legacy hash: %v", err)
+	}
+	version := DeliveryPlanVersion{
+		SchemaVersion: DeliveryPlanVersionSchemaV2, CanonicalHash: legacyHash,
+		DeliveryIntent: &intent, PlatformConfiguration: &configuration,
+	}
+	if err = validatePlanCanonicalHash(version); err != nil {
+		t.Fatalf("validate plan legacy hash: %v", err)
+	}
+}
+
 func TestDeliveryContractFixturesMatchGoDomainValidation(t *testing.T) {
 	fixtureDirectory := filepath.Join("..", "..", "..", "docs", "delivery", "fixtures")
 
@@ -370,6 +413,14 @@ func TestPlatformConfigurationValidationErrorsAreStable(t *testing.T) {
 			value.Payload.OceanEngine = cloneOceanConfigurationForTest(value.Payload.OceanEngine)
 			value.Payload.OceanEngine.Promotions[1].PromotionDraftID = value.Payload.OceanEngine.Promotions[0].PromotionDraftID
 		}},
+		{name: "too many call-to-action values", code: ContractErrorInvalidPromotion, edit: func(value *PlatformConfiguration) {
+			value.Payload.OceanEngine = cloneOceanConfigurationForTest(value.Payload.OceanEngine)
+			value.Payload.OceanEngine.Promotions[0].Settings.CallToAction = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}
+		}},
+		{name: "duplicate call-to-action value", code: ContractErrorInvalidPromotion, edit: func(value *PlatformConfiguration) {
+			value.Payload.OceanEngine = cloneOceanConfigurationForTest(value.Payload.OceanEngine)
+			value.Payload.OceanEngine.Promotions[0].Settings.CallToAction = []string{"查看详情", "查看详情"}
+		}},
 		{name: "invalid promotion reference", code: ContractErrorInvalidReference, edit: func(value *PlatformConfiguration) {
 			value.Payload.OceanEngine = cloneOceanConfigurationForTest(value.Payload.OceanEngine)
 			value.Payload.OceanEngine.Promotions[0].BaseMaterialReferences[0].ID = ""
@@ -466,7 +517,7 @@ func validOceanEnginePlatformConfiguration(t *testing.T, intent DeliveryIntent, 
 			CopyItems:              []OceanEngineCopyItem{{Text: "verified ecommerce copy"}},
 			LandingPageReference:   &StableReference{Namespace: "oceanengine", ObjectKind: "landing_page", Scope: "account:6391", State: ReferenceUnresolved, Reason: "page selection is pending"},
 			ProductReference:       referencePointer(resolvedReference("oceanengine", "product", "account:6391", "product-1")),
-			Settings:               OceanEnginePromotionSettings{CallToAction: "platform_pending", SourceLabel: "ecommerce", CommentsEnabled: &comments},
+			Settings:               OceanEnginePromotionSettings{CallToAction: []string{"platform_pending"}, SourceLabel: "ecommerce", CommentsEnabled: &comments},
 			PromotionName:          "ecommerce-promotion-" + string(rune('1'+index)),
 		}
 	}

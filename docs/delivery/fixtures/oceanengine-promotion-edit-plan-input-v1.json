@@ -1,0 +1,37 @@
+{
+  "schema_version": "oceanengine-form-plan-compiler-input/v1",
+  "account_reference": "redacted:test-account",
+  "object_reference": "redacted:existing-promotion",
+  "parent_project_reference": "redacted:parent-project",
+  "parent_context": {
+    "carrier": "owned_landing_page",
+    "optimization_target": "in_app_order",
+    "deep_optimization": "conversion_roi",
+    "delivery_mode": "manual",
+    "placement_mode": "automatic"
+  },
+  "values": {
+    "promotion.delivery_identity": "redacted:managed-identity",
+    "promotion.base_materials": ["redacted:managed-video"],
+    "promotion.copy_materials": ["校准文案"],
+    "promotion.product_image_references": {
+      "selection_kind": "image_card",
+      "index": 0,
+      "minimum_visible": 1,
+      "confirm_button": "确定"
+    },
+    "promotion.product_selling_points": ["限时好物值得选"],
+    "promotion.landing_page_reference": "redacted:managed-owned-landing-page",
+    "promotion.call_to_action": ["查看详情", "立即购买", "立即预订", "了解详情", "点击购买"],
+    "promotion.source_label": "测试品牌",
+    "promotion.comments_enabled": false,
+    "promotion.category": "零售/综合类2C电商",
+    "promotion.brand_reference": {
+      "selection_kind": "text_option",
+      "label": "淘宝"
+    },
+    "promotion.daily_budget": "300",
+    "promotion.roi_coefficient": "0.01",
+    "promotion.promotion_name": "CODEX-CAL-PROMOTION-EDIT"
+  }
+}

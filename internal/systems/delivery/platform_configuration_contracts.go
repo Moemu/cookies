@@ -1,6 +1,7 @@
 package delivery
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -343,6 +344,17 @@ func canonicalReferences(values []StableReference) []canonicalStableReference {
 	return out
 }
 
+func canonicalStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	out := make([]string, len(values))
+	for i := range values {
+		out[i] = strings.TrimSpace(values[i])
+	}
+	return out
+}
+
 func (i DeliveryIntent) CanonicalPayload() any {
 	return canonicalDeliveryIntentPayload{
 		PayloadSchemaVersion:    strings.TrimSpace(i.Payload.PayloadSchemaVersion),
@@ -546,7 +558,7 @@ type OceanEngineCopyItem struct {
 }
 
 type OceanEnginePromotionSettings struct {
-	CallToAction           string           `json:"call_to_action,omitempty"`
+	CallToAction           []string         `json:"call_to_action,omitempty"`
 	SourceLabel            string           `json:"source_label,omitempty"`
 	CommentsEnabled        *bool            `json:"comments_enabled,omitempty"`
 	SmartGenerationEnabled *bool            `json:"smart_generation_enabled,omitempty"`
@@ -554,6 +566,34 @@ type OceanEnginePromotionSettings struct {
 	DirectLinkMode         string           `json:"direct_link_mode,omitempty"`
 	CategoryReference      *StableReference `json:"category_reference,omitempty"`
 	BrandReference         *StableReference `json:"brand_reference,omitempty"`
+}
+
+// UnmarshalJSON keeps plans from before the CTA multi-select change readable.
+// New writes continue to use the array form.
+func (s *OceanEnginePromotionSettings) UnmarshalJSON(data []byte) error {
+	type settingsAlias OceanEnginePromotionSettings
+	var wire struct {
+		settingsAlias
+		CallToAction json.RawMessage `json:"call_to_action"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*s = OceanEnginePromotionSettings(wire.settingsAlias)
+	if len(wire.CallToAction) == 0 || string(wire.CallToAction) == "null" {
+		return nil
+	}
+	if wire.CallToAction[0] == '[' {
+		return json.Unmarshal(wire.CallToAction, &s.CallToAction)
+	}
+	var legacy string
+	if err := json.Unmarshal(wire.CallToAction, &legacy); err != nil {
+		return err
+	}
+	if legacy != "" {
+		s.CallToAction = []string{legacy}
+	}
+	return nil
 }
 
 type OceanEnginePromotionDraft struct {
@@ -649,7 +689,7 @@ type canonicalOceanEngineProject struct {
 }
 
 type canonicalOceanEnginePromotionSettings struct {
-	CallToAction           string                    `json:"call_to_action,omitempty"`
+	CallToAction           []string                  `json:"call_to_action,omitempty"`
 	SourceLabel            string                    `json:"source_label,omitempty"`
 	CommentsEnabled        *bool                     `json:"comments_enabled,omitempty"`
 	SmartGenerationEnabled *bool                     `json:"smart_generation_enabled,omitempty"`
@@ -743,7 +783,7 @@ func canonicalOceanConfiguration(value *OceanEngineConfiguration) *canonicalOcea
 			DirectLinkReference: canonicalReferencePointer(promotion.DirectLinkReference), ProductReference: canonicalReferencePointer(promotion.ProductReference),
 			CreativeComponentReferences: canonicalReferences(promotion.CreativeComponentReferences), PromotionName: strings.TrimSpace(promotion.PromotionName),
 			Settings: canonicalOceanEnginePromotionSettings{
-				CallToAction: strings.TrimSpace(promotion.Settings.CallToAction), SourceLabel: strings.TrimSpace(promotion.Settings.SourceLabel), CommentsEnabled: promotion.Settings.CommentsEnabled,
+				CallToAction: canonicalStrings(promotion.Settings.CallToAction), SourceLabel: strings.TrimSpace(promotion.Settings.SourceLabel), CommentsEnabled: promotion.Settings.CommentsEnabled,
 				SmartGenerationEnabled: promotion.Settings.SmartGenerationEnabled, ClientDownloadEnabled: promotion.Settings.ClientDownloadEnabled, DirectLinkMode: strings.TrimSpace(promotion.Settings.DirectLinkMode),
 				CategoryReference: canonicalReferencePointer(promotion.Settings.CategoryReference), BrandReference: canonicalReferencePointer(promotion.Settings.BrandReference),
 			},
@@ -761,6 +801,55 @@ func (c PlatformConfiguration) CanonicalPayload() any {
 
 func (c PlatformConfiguration) ComputeCanonicalHash() (string, error) {
 	return contract.CanonicalJSONHash(c.CanonicalPayload())
+}
+
+func (c PlatformConfiguration) computeLegacySingleCallToActionHash() (string, bool, error) {
+	payload, err := json.Marshal(c.CanonicalPayload())
+	if err != nil {
+		return "", false, err
+	}
+	var value map[string]any
+	if err = json.Unmarshal(payload, &value); err != nil {
+		return "", false, err
+	}
+	oceanEngine, ok := value["ocean_engine"].(map[string]any)
+	if !ok {
+		return "", false, nil
+	}
+	promotions, ok := oceanEngine["promotions"].([]any)
+	if !ok {
+		return "", false, nil
+	}
+	converted := false
+	for _, item := range promotions {
+		promotion, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		settings, ok := promotion["settings"].(map[string]any)
+		if !ok {
+			continue
+		}
+		callToAction, exists := settings["call_to_action"]
+		if !exists {
+			continue
+		}
+		items, ok := callToAction.([]any)
+		if !ok || len(items) != 1 {
+			return "", false, nil
+		}
+		text, ok := items[0].(string)
+		if !ok {
+			return "", false, nil
+		}
+		settings["call_to_action"] = text
+		converted = true
+	}
+	if !converted {
+		return "", false, nil
+	}
+	hash, err := contract.CanonicalJSONHash(value)
+	return hash, true, err
 }
 
 // FinalizePlatformConfiguration computes the immutable business hash and
@@ -830,7 +919,13 @@ func (c PlatformConfiguration) validateStructure() error {
 		return err
 	}
 	if c.CanonicalHash == "" || c.CanonicalHash != hash {
-		return contractFailure(ContractErrorCanonicalHashMismatch, "canonical_hash", "platform configuration hash does not match its canonical payload")
+		legacyHash, compatible, legacyErr := c.computeLegacySingleCallToActionHash()
+		if legacyErr != nil {
+			return legacyErr
+		}
+		if !compatible || c.CanonicalHash != legacyHash {
+			return contractFailure(ContractErrorCanonicalHashMismatch, "canonical_hash", "platform configuration hash does not match its canonical payload")
+		}
 	}
 	return nil
 }
@@ -901,6 +996,17 @@ func validateOceanEngineConfiguration(configuration OceanEngineConfiguration) er
 		seen[promotion.PromotionDraftID] = true
 		if promotion.Settings.DirectLinkMode != "" && promotion.Settings.DirectLinkMode != "automatic" && promotion.Settings.DirectLinkMode != "manual" {
 			return contractFailure(ContractErrorInvalidPromotion, field+".settings.direct_link_mode", "direct link mode must be automatic or manual")
+		}
+		if len(promotion.Settings.CallToAction) > 10 {
+			return contractFailure(ContractErrorInvalidPromotion, field+".settings.call_to_action", "at most 10 call-to-action values are allowed")
+		}
+		seenCallToAction := map[string]bool{}
+		for _, value := range promotion.Settings.CallToAction {
+			value = strings.TrimSpace(value)
+			if value == "" || seenCallToAction[value] {
+				return contractFailure(ContractErrorInvalidPromotion, field+".settings.call_to_action", "call-to-action values must be non-empty and unique")
+			}
+			seenCallToAction[value] = true
 		}
 		if promotion.DeliveryIdentity.Mode != "account_info" && promotion.DeliveryIdentity.Mode != "douyin_account" {
 			return contractFailure(ContractErrorInvalidPromotion, field+".delivery_identity.mode", "identity must be account_info or douyin_account")

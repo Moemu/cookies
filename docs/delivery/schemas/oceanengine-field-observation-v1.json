@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/docs/delivery/schemas/oceanengine-field-observation-v1.json",
+  "title": "OceanEngine Field Observation v1",
+  "description": "Read-only per-case field-level observation record produced by the OceanEngine field capture runner. Stores hashes and states only; never raw page text, URLs, query values, or account identifiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_id", "plan_sha256", "case_id", "path", "declared_conditions", "observed_at", "fields", "outcome", "error_code", "evidence_sha256"],
+  "properties": {
+    "schema_version": { "const": "oceanengine-field-observation/v1" },
+    "manifest_id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{0,79}$" },
+    "plan_sha256": { "$ref": "#/$defs/hash" },
+    "case_id": { "type": "string", "pattern": "^OE-[A-Z0-9-]{1,64}$" },
+    "path": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 6,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,47}$" }
+    },
+    "declared_conditions": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,47}$" },
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_-]{0,47}$" }
+    },
+    "reason": { "type": "string", "pattern": "^[ -~]{1,200}$" },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "page": { "$ref": "#/$defs/page" },
+    "fields": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fieldObservation" },
+      "maxItems": 64
+    },
+    "outcome": { "enum": ["success", "partial", "blocked_case", "failed", "rejected"] },
+    "error_code": { "$ref": "#/$defs/errorCode" },
+    "evidence_sha256": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "errorCode": { "enum": ["ok", "invalid_plan", "invalid_manifest", "cdp_unavailable", "host_not_allowed", "account_context_missing", "account_mismatch", "page_type_mismatch", "case_not_found", "case_blocked", "internal"] },
+    "locatorKind": { "enum": ["text", "label", "placeholder", "role", "attribute"] },
+    "roleName": { "enum": ["button", "textbox", "spinbutton", "checkbox", "switch", "radio", "combobox", "searchbox", "link", "tab", "heading", "dialog", "table", "row", "cell", "menuitem", "option"] },
+    "operation": { "enum": ["choose_exact_visible_option", "open_reference_picker", "fill_text", "fill_money", "toggle", "configure_object", "no_action"] },
+    "fieldStatus": { "enum": ["observed", "scope_missing", "scope_ambiguous", "target_missing", "target_ambiguous", "blocked_by_condition", "blocked_spec"] },
+    "nameState": { "enum": ["present", "empty", "unreadable", "not_attempted"] },
+    "valueState": { "enum": ["present", "empty", "unreadable", "not_attempted"] },
+    "valueKind": { "enum": ["text", "boolean", "number"] },
+    "structureSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["main_count", "heading_count", "button_count", "textbox_count", "table_count", "row_count"],
+      "properties": {
+        "main_count": { "type": "integer", "minimum": 0 },
+        "heading_count": { "type": "integer", "minimum": 0 },
+        "button_count": { "type": "integer", "minimum": 0 },
+        "textbox_count": { "type": "integer", "minimum": 0 },
+        "table_count": { "type": "integer", "minimum": 0 },
+        "row_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "page_kind", "path_sha256", "account_context_sha256", "account_context_state", "create_marker_present", "edit_marker_present", "session_context_sha256", "structure_summary"],
+      "properties": {
+        "host": { "const": "ad.oceanengine.com" },
+        "page_kind": { "enum": ["project_list", "project_create", "project_edit", "promotion_list", "promotion_create", "promotion_edit", "unknown"] },
+        "path_sha256": { "$ref": "#/$defs/hash" },
+        "account_context_sha256": { "$ref": "#/$defs/hash" },
+        "account_context_state": { "const": "matched" },
+        "create_marker_present": { "type": "boolean" },
+        "edit_marker_present": { "type": "boolean" },
+        "session_context_sha256": { "$ref": "#/$defs/hash" },
+        "structure_summary": { "$ref": "#/$defs/structureSummary" }
+      }
+    },
+    "fieldObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "semantic_label_state", "operation", "scope", "target", "readback", "status"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,79}$" },
+        "semantic_label_state": { "enum": ["present", "absent"] },
+        "operation": { "$ref": "#/$defs/operation" },
+        "unmet_condition_dimensions": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,47}$" }
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "element_count", "visible"],
+          "properties": {
+            "kind": { "enum": ["resolved", "unresolvable"] },
+            "element_count": { "type": "integer", "minimum": 0 },
+            "visible": { "type": "boolean" }
+          }
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "element_count", "visible", "accessible_name_state"],
+          "properties": {
+            "kind": { "enum": ["resolved", "unresolvable"] },
+            "element_count": { "type": "integer", "minimum": 0 },
+            "visible": { "type": "boolean" },
+            "accessible_name_state": { "$ref": "#/$defs/nameState" },
+            "accessible_name_sha256": { "$ref": "#/$defs/hash" }
+          }
+        },
+        "readback": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "resolved", "value_state"],
+          "properties": {
+            "kind": { "enum": ["resolved", "unresolvable"] },
+            "resolved": { "type": "boolean" },
+            "value_kind": { "$ref": "#/$defs/valueKind" },
+            "value_state": { "$ref": "#/$defs/valueState" },
+            "value_sha256": { "$ref": "#/$defs/hash" }
+          }
+        },
+        "status": { "$ref": "#/$defs/fieldStatus" }
+      }
+    }
+  }
+}

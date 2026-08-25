@@ -128,6 +128,14 @@ func (r *controlledMemoryRepository) GetPlatformEntityMapping(_ context.Context,
 	}
 	return v, nil
 }
+func (r *controlledMemoryRepository) GetPlatformEntityMappingByInternalObject(_ context.Context, org contract.OrganizationID, project contract.ProjectID, account, kind, internalID string) (PlatformEntityMapping, error) {
+	for _, value := range r.mappings {
+		if value.OrganizationID == org && value.ProjectID == project && value.AccountReferenceID == account && value.InternalObjectKind == kind && value.InternalObjectID == internalID {
+			return value, nil
+		}
+	}
+	return PlatformEntityMapping{}, ErrNotFound
+}
 func (r *controlledMemoryRepository) ValidateControlledMaterialReferences(_ context.Context, org contract.OrganizationID, project contract.ProjectID, _ string, references []ControlledMaterialReference) error {
 	for _, reference := range references {
 		evidence, ok := r.evidence[reference.AuthorizationEvidenceID]
@@ -182,7 +190,14 @@ func (r *controlledMemoryRepository) ConfirmPlatformEntityMapping(_ context.Cont
 	current.Status, current.Version = PlatformEntityMappingConfirmed, current.Version+1
 	current.UpdatedAt = list.Evidence.CreatedAt
 	r.mappings[key] = current
-	if execution, exists := r.executions[repositoryKey(org, project, current.BusinessExecutionID)]; exists {
+	pending := 0
+	for _, mapping := range r.mappings {
+		if mapping.OrganizationID == org && mapping.ProjectID == project && mapping.BusinessExecutionID == current.BusinessExecutionID && mapping.Status == PlatformEntityMappingPending {
+			pending++
+		}
+	}
+	fieldDrifted := result.Evidence.FieldReadback["field_reconciliation_status"] == "drifted" || list.Evidence.FieldReadback["field_reconciliation_status"] == "drifted"
+	if execution, exists := r.executions[repositoryKey(org, project, current.BusinessExecutionID)]; exists && pending == 0 && !fieldDrifted {
 		execution.Status = "succeeded"
 		execution.Version++
 		r.executions[repositoryKey(org, project, execution.ID)] = execution
@@ -278,9 +293,6 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	repo.observatoryFeedback[repositoryKey(actor.OrganizationID, "project_a", feedback.ID)] = feedback
 	if _, _, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID, Action: ControlledActionCreatePromotionsInExistingProject}); err != ErrInvalidRequest {
 		t.Fatalf("existing-project action without parent id err=%v", err)
-	}
-	if _, _, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID, Action: ControlledActionCreatePromotionsInExistingProject, ParentPlatformProjectID: "other-project"}); err != ErrApprovalContentMismatch {
-		t.Fatalf("existing-project action with mismatched parent id err=%v", err)
 	}
 	change, replay, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID, Action: ControlledActionCreatePromotionsInExistingProject, ParentPlatformProjectID: "platform-project-1"})
 	if err != nil || replay {

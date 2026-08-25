@@ -271,6 +271,8 @@ type AuthorityBinding struct {
 	PromotionRestart                *PromotionRestartBinding  `json:"promotion_restart,omitempty"`
 	ObjectFingerprint               string                    `json:"object_fingerprint"`
 	Action                          string                    `json:"action"`
+	PlanID                          string                    `json:"plan_id,omitempty"`
+	PlanVersion                     int                       `json:"plan_version,omitempty"`
 	ProjectBudgetMode               string                    `json:"project_budget_mode,omitempty"`
 	ProjectBudgetLimitMinor         int64                     `json:"project_budget_limit_minor"`
 	PromotionBudgetLimitMinor       int64                     `json:"promotion_budget_limit_minor"`
@@ -582,7 +584,7 @@ var runTransitions = map[RunState][]RunState{
 	RunPreparing:            {RunAwaitingTakeover, RunAwaitingConfirmation, RunFailed, RunPartial, RunResultUnknown, RunCancelled},
 	RunAwaitingConfirmation: {RunAwaitingTakeover, RunPreparing, RunSubmitting, RunFailed, RunCancelled},
 	RunSubmitting:           {RunVerifying, RunFailed, RunPartial, RunResultUnknown},
-	RunVerifying:            {RunSucceeded, RunFailed, RunPartial, RunResultUnknown},
+	RunVerifying:            {RunEnvironmentCheck, RunSucceeded, RunFailed, RunPartial, RunResultUnknown},
 	RunSucceeded:            {}, RunFailed: {}, RunPartial: {}, RunResultUnknown: {}, RunCancelled: {},
 }
 

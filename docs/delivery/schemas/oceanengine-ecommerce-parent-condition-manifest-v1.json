@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/docs/delivery/schemas/oceanengine-ecommerce-parent-condition-manifest-v1.json",
+  "title": "OceanEngine ecommerce parent-condition manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_id",
+    "evidence_ref",
+    "remote_write_authorized",
+    "dimensions",
+    "field_definitions",
+    "project_field_definitions",
+    "base_project_fields",
+    "base_promotion_fields",
+    "carrier_rules",
+    "delivery_rules",
+    "optimization_rules",
+    "deep_optimization_rules",
+    "placement_rules",
+    "search_targeting_expansion_rule",
+    "blocked_branches"
+  ],
+  "properties": {
+    "schema_version": {"const": "oceanengine-ecommerce-parent-condition-manifest/v1"},
+    "manifest_id": {"type": "string", "minLength": 1},
+    "evidence_ref": {"type": "string", "minLength": 1},
+    "remote_write_authorized": {"const": false},
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/UniqueStrings"},
+      "required": ["carrier", "optimization_target", "deep_optimization", "delivery_mode", "placement_mode"]
+    },
+    "field_definitions": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/FieldControl"}
+    },
+    "project_field_definitions": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/FieldControl"}
+    },
+    "base_project_fields": {"$ref": "#/$defs/UniqueStrings"},
+    "base_promotion_fields": {"$ref": "#/$defs/UniqueStrings"},
+    "carrier_rules": {"$ref": "#/$defs/RuleMap"},
+    "delivery_rules": {"$ref": "#/$defs/RuleMap"},
+    "optimization_rules": {"$ref": "#/$defs/RuleMap"},
+    "deep_optimization_rules": {"$ref": "#/$defs/RuleMap"},
+    "placement_rules": {"$ref": "#/$defs/RuleMap"},
+    "search_targeting_expansion_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requires_search_boost"],
+      "properties": {"requires_search_boost": {"const": "enabled"}}
+    },
+    "blocked_branches": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1}
+    }
+  },
+  "$defs": {
+    "UniqueStrings": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "FieldControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "scope", "target", "required"],
+      "properties": {
+        "operation": {
+          "enum": [
+            "open_reference_picker",
+            "configure_object",
+            "choose_exact_visible_option",
+            "fill_text",
+            "fill_money",
+            "fill_decimal",
+            "toggle"
+          ]
+        },
+        "scope": {"type": "string", "minLength": 1},
+        "target": {"type": "string", "minLength": 1},
+        "required": {"type": "boolean"}
+      }
+    },
+    "RuleMap": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/Rule"}
+    },
+    "Rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "add_fields": {"$ref": "#/$defs/UniqueStrings"},
+        "remove_fields": {"$ref": "#/$defs/UniqueStrings"},
+        "project_add_fields": {"$ref": "#/$defs/UniqueStrings"},
+        "project_remove_fields": {"$ref": "#/$defs/UniqueStrings"},
+        "required_parent_reference": {"type": "string", "minLength": 1},
+        "required_optimization_target": {"type": "string", "minLength": 1},
+        "required_delivery_modes": {"$ref": "#/$defs/UniqueStrings"},
+        "required_delivery_mode": {"type": "string", "minLength": 1},
+        "landing_page_target": {"type": "string", "minLength": 1},
+        "billing": {"enum": ["oCPM", "CPC", "CPM"]},
+        "search_boost": {"enum": ["enabled", "disabled"]},
+        "project_roi_coefficient": {"type": "boolean"},
+        "available_media": {"$ref": "#/$defs/UniqueStrings"},
+        "material_limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["video", "image", "image_text", "copy"],
+          "properties": {
+            "video": {"type": "integer", "minimum": 1},
+            "image": {"type": "integer", "minimum": 1},
+            "image_text": {"type": "integer", "minimum": 1},
+            "copy": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    }
+  }
+}

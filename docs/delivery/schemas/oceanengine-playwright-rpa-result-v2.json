@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shikanon/cookies/docs/delivery/schemas/oceanengine-playwright-rpa-result-v2.json",
+  "title": "OceanEngine Playwright RPA result v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "outcome", "error_code", "final_click_performed", "steps"],
+  "properties": {
+    "schema_version": {"const": "oceanengine-playwright-rpa-result/v2"},
+    "outcome": {"enum": ["success", "success_with_drift", "blocked", "failed", "result_unknown"]},
+    "error_code": {"type": "string", "minLength": 1},
+    "error_message": {"type": "string"},
+    "final_click_performed": {"type": "boolean"},
+    "created_object_id": {"type": "string", "minLength": 1},
+    "reconciliation": {"enum": ["not_started", "matched", "not_found", "not_applicable"]},
+    "field_reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "fields"],
+      "properties": {
+        "status": {"enum": ["matched", "drifted", "not_checked"]},
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field_key", "status"],
+            "properties": {
+              "field_key": {"type": "string", "minLength": 1},
+              "expected": {
+                "oneOf": [
+                  {"type": "string"},
+                  {"type": "array", "maxItems": 10, "uniqueItems": true, "items": {"type": "string"}}
+                ]
+              },
+              "observed": {
+                "oneOf": [
+                  {"type": "string"},
+                  {"type": "array", "maxItems": 10, "uniqueItems": true, "items": {"type": "string"}}
+                ]
+              },
+              "status": {"enum": ["matched", "drifted", "not_checked"]}
+            }
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "status": {"enum": ["succeeded", "blocked_boundary", "submitted", "result_unknown", "failed"]},
+          "readback": {},
+          "error_code": {"type": "string", "minLength": 1},
+          "error_message": {"type": "string"},
+          "page_reference": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

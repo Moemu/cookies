@@ -31,6 +31,23 @@ stdin.on('close', () => {
   if (mode === 'noisy') {
     process.stdout.write('warning: third-party library noise on stdout\n')
   }
+  if (plan.schema_version === 'oceanengine-playwright-rpa-plan/v3') {
+    const notChecked = mode === 'v3-not-checked'
+    process.stdout.write(JSON.stringify({
+      schema_version: 'oceanengine-playwright-rpa-result/v2',
+      outcome: 'success',
+      error_code: 'ok',
+      final_click_performed: plan.mode === 'submit',
+      created_object_id: 'promotion_v3_test',
+      reconciliation: 'matched',
+      field_reconciliation: {
+        status: notChecked ? 'not_checked' : 'matched',
+        fields: [{ field_key: 'promotion.landing_page_reference', expected: 'landing_test', ...(notChecked ? {} : { observed: 'landing_test' }), status: notChecked ? 'not_checked' : 'matched' }],
+      },
+      steps: [{ id: plan.steps?.[0]?.id ?? 'step', status: 'succeeded', readback: { runner_args: process.argv.slice(3) } }],
+    }))
+    return
+  }
   process.stdout.write(JSON.stringify({
     schema_version: 'oceanengine-playwright-rpa-result/v1',
     outcome: 'success',

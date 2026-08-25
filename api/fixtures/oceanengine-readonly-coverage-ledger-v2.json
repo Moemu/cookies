@@ -1,0 +1,473 @@
+{
+  "schema_version": "oceanengine-readonly-coverage-ledger/v2",
+  "observed_at": "2026-08-21T09:29:27.503Z",
+  "platform": "ocean_engine",
+  "allowed_host": "ad.oceanengine.com",
+  "scope": "current_page_only",
+  "completion_state": "partial_current_page_only",
+  "source_inventory": {
+    "manifest_page_family_count": 6,
+    "manifest_field_count": 51,
+    "locator_fixture_count": 4,
+    "coordinate_fallback_allowed": false,
+    "remote_write_authorized": false
+  },
+  "account_context_sha256": "a8c499f7e22dc70d392d8de9b7bd093a4e7371cb17ba3e53c4bf8e0eea15667c",
+  "targets": [
+    {
+      "target": "account_context",
+      "attempted": true,
+      "status": "confirmed_shell",
+      "reason": "current_page_confirmed",
+      "checks": {
+        "https_host": "not_applicable",
+        "page_type": "not_applicable",
+        "account_context": "passed",
+        "necessary_structure": "not_applicable",
+        "locator_uniqueness": "not_applicable"
+      },
+      "drift_state": "stable",
+      "locators": []
+    },
+    {
+      "target": "project_list",
+      "attempted": true,
+      "status": "confirmed_shell",
+      "reason": "current_page_confirmed",
+      "checks": {
+        "https_host": "passed",
+        "page_type": "passed",
+        "account_context": "passed",
+        "necessary_structure": "passed",
+        "locator_uniqueness": "passed"
+      },
+      "drift_state": "stable",
+      "locators": [
+        {
+          "key": "create_project",
+          "kind": "visible_text",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "8f7dd39de18a85ef7781f838018013d7aa71f6d47a7cb5d1f82f4f81ba115ff2",
+          "source": "real_current_page"
+        },
+        {
+          "key": "project_budget_column",
+          "kind": "visible_text",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "cec4245ae1d28e31e638d63f7c09f90628613f5e23b33189fbc0f2dd8a5f3c82",
+          "source": "real_current_page"
+        }
+      ],
+      "page_evidence_sha256": "c7eafe77b20705d6167e1b17ed04a3eae32336209a14ebe2949cfceb5d639ebf"
+    },
+    {
+      "target": "project_create",
+      "attempted": true,
+      "status": "not_accessible",
+      "reason": "current_page_different",
+      "checks": {
+        "https_host": "not_run",
+        "page_type": "not_run",
+        "account_context": "not_run",
+        "necessary_structure": "not_run",
+        "locator_uniqueness": "not_run"
+      },
+      "drift_state": "verification_pending",
+      "locators": []
+    },
+    {
+      "target": "project_edit",
+      "attempted": true,
+      "status": "confirmed_shell",
+      "reason": "current_page_confirmed",
+      "checks": {
+        "https_host": "passed",
+        "page_type": "passed",
+        "account_context": "passed",
+        "necessary_structure": "passed",
+        "locator_uniqueness": "passed"
+      },
+      "drift_state": "stable",
+      "locators": [
+        {
+          "key": "project_marketing_purpose",
+          "kind": "visible_text",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "ddfcfc1de47803deca3b994082d143ab924e7c3d3d0baecdf3d15298f47b6e9d",
+          "source": "real_current_page"
+        },
+        {
+          "key": "project_name",
+          "kind": "stable_test_attribute",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "aeeb2c96e388a669e231be8e90a6c8c2d3cf858ad9442b924d3b5be87b346093",
+          "source": "real_current_page"
+        },
+        {
+          "key": "project_deep_optimization",
+          "kind": "stable_test_attribute",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "82c03bd3b1f5fbd55e8ac3fb68c926275107e0d98fac38ed951b9e1fef2175e4",
+          "source": "real_current_page"
+        }
+      ],
+      "page_evidence_sha256": "78bac3fdaa652df077da8eae3899775bb564e4604a4cf423d96aad8870280e7f"
+    },
+    {
+      "target": "promotion_list",
+      "attempted": true,
+      "status": "confirmed_shell",
+      "reason": "current_page_confirmed",
+      "checks": {
+        "https_host": "passed",
+        "page_type": "passed",
+        "account_context": "passed",
+        "necessary_structure": "passed",
+        "locator_uniqueness": "passed"
+      },
+      "drift_state": "stable",
+      "locators": [
+        {
+          "key": "create_promotion",
+          "kind": "visible_text",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "e5fb29410fc120bc2710350e5575b7bb32d2b80c11227bf14c640fa6644f1011",
+          "source": "real_current_page"
+        },
+        {
+          "key": "promotion_budget_column",
+          "kind": "visible_text",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "a51f145a1561c3cb7780db8839f15b00358d8876345bc35f9ef79e4e8ed7d82b",
+          "source": "real_current_page"
+        }
+      ],
+      "page_evidence_sha256": "e36c54e4396c99bb5c7dc0f852aaf01c03097326e38d44fbab8feb20b619f2f0"
+    },
+    {
+      "target": "promotion_create",
+      "attempted": true,
+      "status": "not_accessible",
+      "reason": "current_page_different",
+      "checks": {
+        "https_host": "not_run",
+        "page_type": "not_run",
+        "account_context": "not_run",
+        "necessary_structure": "not_run",
+        "locator_uniqueness": "not_run"
+      },
+      "drift_state": "verification_pending",
+      "locators": []
+    },
+    {
+      "target": "promotion_edit",
+      "attempted": true,
+      "status": "confirmed_shell",
+      "reason": "current_page_confirmed",
+      "checks": {
+        "https_host": "passed",
+        "page_type": "passed",
+        "account_context": "passed",
+        "necessary_structure": "passed",
+        "locator_uniqueness": "passed"
+      },
+      "drift_state": "stable",
+      "locators": [
+        {
+          "key": "promotion_name",
+          "kind": "stable_test_attribute",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "274b694495434185107fdde9fd9930739d0e535c019640f5da88758d232d77c5",
+          "source": "real_current_page"
+        },
+        {
+          "key": "save_and_close",
+          "kind": "visible_text",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "ff67ea2f13502d529760ad93152faa8e6a1773ac76bae7d0ea43a834622fd763",
+          "source": "real_current_page"
+        }
+      ],
+      "page_evidence_sha256": "7f202f6dda7427a5b53b7545b4dd06e7ffa63c4d7311c2efd5eaa22938aa5e00"
+    },
+    {
+      "target": "material_relation_summary",
+      "attempted": true,
+      "status": "confirmed_shell",
+      "reason": "current_page_confirmed",
+      "checks": {
+        "https_host": "passed",
+        "page_type": "passed",
+        "account_context": "passed",
+        "necessary_structure": "passed",
+        "locator_uniqueness": "passed"
+      },
+      "drift_state": "stable",
+      "locators": [
+        {
+          "key": "material_overview",
+          "kind": "visible_text",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "2041767d4d75213912f433e8ef34258e28e876861cc4a14301e51e60230a5321",
+          "source": "real_current_page"
+        }
+      ],
+      "page_evidence_sha256": "7b58c3e63a3f9a4f6ebc166770b9e86235fddec5ee7e1754ecbfc38ae2efc426"
+    },
+    {
+      "target": "report_overview",
+      "attempted": true,
+      "status": "confirmed_shell",
+      "reason": "current_page_confirmed",
+      "checks": {
+        "https_host": "passed",
+        "page_type": "passed",
+        "account_context": "passed",
+        "necessary_structure": "passed",
+        "locator_uniqueness": "passed"
+      },
+      "drift_state": "stable",
+      "locators": [
+        {
+          "key": "data_center",
+          "kind": "visible_text",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "f4ab7ecdaee762e813963f7b98d36f4e343537b9e62710b6f23381dbfc1f6a62",
+          "source": "real_current_page"
+        },
+        {
+          "key": "project_report",
+          "kind": "visible_text",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "0944eba7c2638e112dba30d73cbdef17092be9236f58e09e2727407b5a4e7ea7",
+          "source": "real_current_page"
+        },
+        {
+          "key": "promotion_report",
+          "kind": "visible_text",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "647063623294ac80002165b94d0fd0a767f74bdae823e32cbb2d5e6bacf712d3",
+          "source": "real_current_page"
+        },
+        {
+          "key": "material_report",
+          "kind": "visible_text",
+          "element_count": 1,
+          "visible": true,
+          "unique": true,
+          "accessible_name_sha256": "0866fe72d2d287e5b7d3b9fa1f3b36e9ee2f47b1bf9acc08c5f60315ff36ad85",
+          "source": "real_current_page"
+        }
+      ],
+      "page_evidence_sha256": "1e8e315bb6d2b95ccd2d507505b32611795d3419d77eeea89da92a2aa70b7e51"
+    }
+  ],
+  "rejected_locators": [],
+  "page_evidence": [
+    {
+      "target": "project_list",
+      "before": {
+        "evidence_sha256": "e084fe0741efad84e5f566bc2c02b04244c9d7dd442e93335dc37b8f97b91c9d",
+        "observable_object_count": 10,
+        "population_state": "populated",
+        "page_state_sha256": "30da4993fc3847d767be28500a52496a3b724d1a8fcdf7f2a4deb3ba743f54d0"
+      },
+      "after": {
+        "evidence_sha256": "bf0c0eca5c1de7c08c5055de1fd9c54a1dbee84b75e57f5e6751b7329533ab80",
+        "observable_object_count": 10,
+        "population_state": "populated",
+        "page_state_sha256": "30da4993fc3847d767be28500a52496a3b724d1a8fcdf7f2a4deb3ba743f54d0"
+      },
+      "no_write_proof": {
+        "proof_state": "confirmed",
+        "comparison_scope": "current_page_observable_counts_and_status",
+        "write_actions_executed": 0,
+        "mutation_api_surface": "absent",
+        "new_object_count": 0,
+        "observable_state_change_count": 0,
+        "draft_residual_count": 0,
+        "draft_residual_delta": 0,
+        "same_page_target": true,
+        "same_account_context": true
+      },
+      "evidence_sha256": "c7eafe77b20705d6167e1b17ed04a3eae32336209a14ebe2949cfceb5d639ebf"
+    },
+    {
+      "target": "promotion_list",
+      "before": {
+        "evidence_sha256": "b0d441f21953295ca9003c65e2f93addd0e02398f70da61a992634d138613e48",
+        "observable_object_count": 10,
+        "population_state": "populated",
+        "page_state_sha256": "3d52f34eb005c150568bef8d8ae23246477c5debb733f9f283784fbf9d4e69cd"
+      },
+      "after": {
+        "evidence_sha256": "8d3fb007465842c3122deffe216c2910582bd73ab6b9c5c0c4ac688c3ff1a4a5",
+        "observable_object_count": 10,
+        "population_state": "populated",
+        "page_state_sha256": "3d52f34eb005c150568bef8d8ae23246477c5debb733f9f283784fbf9d4e69cd"
+      },
+      "no_write_proof": {
+        "proof_state": "confirmed",
+        "comparison_scope": "current_page_observable_counts_and_status",
+        "write_actions_executed": 0,
+        "mutation_api_surface": "absent",
+        "new_object_count": 0,
+        "observable_state_change_count": 0,
+        "draft_residual_count": 0,
+        "draft_residual_delta": 0,
+        "same_page_target": true,
+        "same_account_context": true
+      },
+      "evidence_sha256": "e36c54e4396c99bb5c7dc0f852aaf01c03097326e38d44fbab8feb20b619f2f0"
+    },
+    {
+      "target": "promotion_edit",
+      "before": {
+        "evidence_sha256": "51bf07d8e96acbb0a60ddd934d5d3e9f1f8efc7eae78d470bdd2393ca279b918",
+        "observable_object_count": 0,
+        "population_state": "unknown",
+        "page_state_sha256": "64e5e0c02e3c61b3d81abd10535d27e0d3afe1b6b6fd48ae71c27688a9163e70"
+      },
+      "after": {
+        "evidence_sha256": "11492edd9efa751f060aa41c5e44d0802a913b0dccbdec3b3e64a0a3c77f6b34",
+        "observable_object_count": 0,
+        "population_state": "unknown",
+        "page_state_sha256": "64e5e0c02e3c61b3d81abd10535d27e0d3afe1b6b6fd48ae71c27688a9163e70"
+      },
+      "no_write_proof": {
+        "proof_state": "confirmed",
+        "comparison_scope": "current_page_observable_counts_and_status",
+        "write_actions_executed": 0,
+        "mutation_api_surface": "absent",
+        "new_object_count": 0,
+        "observable_state_change_count": 0,
+        "draft_residual_count": 0,
+        "draft_residual_delta": 0,
+        "same_page_target": true,
+        "same_account_context": true
+      },
+      "evidence_sha256": "7f202f6dda7427a5b53b7545b4dd06e7ffa63c4d7311c2efd5eaa22938aa5e00"
+    },
+    {
+      "target": "project_edit",
+      "before": {
+        "evidence_sha256": "d8418d435d82d099b05b943a9aa5fd9dc8f2d4906741adea5a15622a625af207",
+        "observable_object_count": 0,
+        "population_state": "empty",
+        "page_state_sha256": "2e14079bda27e58f87025627ad7552baba08d82f0c860f264329c6d38023e77d"
+      },
+      "after": {
+        "evidence_sha256": "b762c85788d1fe9207d74d434271917f2c37ebe48918a830dc60fa9a32e245a2",
+        "observable_object_count": 0,
+        "population_state": "empty",
+        "page_state_sha256": "2e14079bda27e58f87025627ad7552baba08d82f0c860f264329c6d38023e77d"
+      },
+      "no_write_proof": {
+        "proof_state": "confirmed",
+        "comparison_scope": "current_page_observable_counts_and_status",
+        "write_actions_executed": 0,
+        "mutation_api_surface": "absent",
+        "new_object_count": 0,
+        "observable_state_change_count": 0,
+        "draft_residual_count": 0,
+        "draft_residual_delta": 0,
+        "same_page_target": true,
+        "same_account_context": true
+      },
+      "evidence_sha256": "78bac3fdaa652df077da8eae3899775bb564e4604a4cf423d96aad8870280e7f"
+    },
+    {
+      "target": "report_overview",
+      "before": {
+        "evidence_sha256": "506e77409b209a062d5f8c9da5a6a93846332b7add8a471198f761a6b97d962b",
+        "observable_object_count": 0,
+        "population_state": "empty",
+        "page_state_sha256": "72629db2e71c2c24d088e6c736fe525fe8c930ed0d3c908cd7779a664f77651d"
+      },
+      "after": {
+        "evidence_sha256": "5091e784d5bb3b6d5687f84b01d95f0b765fe39ee9d24a7862be3a1b96ea8d35",
+        "observable_object_count": 0,
+        "population_state": "empty",
+        "page_state_sha256": "72629db2e71c2c24d088e6c736fe525fe8c930ed0d3c908cd7779a664f77651d"
+      },
+      "no_write_proof": {
+        "proof_state": "confirmed",
+        "comparison_scope": "current_page_observable_counts_and_status",
+        "write_actions_executed": 0,
+        "mutation_api_surface": "absent",
+        "new_object_count": 0,
+        "observable_state_change_count": 0,
+        "draft_residual_count": 0,
+        "draft_residual_delta": 0,
+        "same_page_target": true,
+        "same_account_context": true
+      },
+      "evidence_sha256": "1e8e315bb6d2b95ccd2d507505b32611795d3419d77eeea89da92a2aa70b7e51"
+    },
+    {
+      "target": "material_relation_summary",
+      "before": {
+        "evidence_sha256": "08d30af90cb2fad6ac4787fdc46bd859afcb110970ed178b88098f25d41865d6",
+        "observable_object_count": 0,
+        "population_state": "empty",
+        "page_state_sha256": "2ffec7aecea98a625060570ec88c220846bc7067477fb6793707c067d1520cf9"
+      },
+      "after": {
+        "evidence_sha256": "241a1e87c68272d17024f4b7344bd3f27b8b850ea1802b890b747036052f9481",
+        "observable_object_count": 0,
+        "population_state": "empty",
+        "page_state_sha256": "2ffec7aecea98a625060570ec88c220846bc7067477fb6793707c067d1520cf9"
+      },
+      "no_write_proof": {
+        "proof_state": "confirmed",
+        "comparison_scope": "current_page_observable_counts_and_status",
+        "write_actions_executed": 0,
+        "mutation_api_surface": "absent",
+        "new_object_count": 0,
+        "observable_state_change_count": 0,
+        "draft_residual_count": 0,
+        "draft_residual_delta": 0,
+        "same_page_target": true,
+        "same_account_context": true
+      },
+      "evidence_sha256": "7b58c3e63a3f9a4f6ebc166770b9e86235fddec5ee7e1754ecbfc38ae2efc426"
+    }
+  ],
+  "no_write_proof": {
+    "proof_state": "confirmed",
+    "comparison_scope": "current_page_observable_counts_and_status",
+    "write_actions_executed": 0,
+    "mutation_api_surface": "absent",
+    "confirmed_page_count": 6,
+    "total_new_object_count": 0,
+    "total_observable_state_change_count": 0,
+    "total_draft_residual_count": 0
+  },
+  "evidence_sha256": "2127f31f0d6059363ad6404e2822a39f5bebda2d5d40c949707c6d0e17e466bf"
+}

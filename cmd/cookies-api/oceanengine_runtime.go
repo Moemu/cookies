@@ -110,7 +110,6 @@ func (f oceanEngineConnectorReaderFactory) Open(ctx context.Context, request con
 var _ connector.ReaderFactory = oceanEngineConnectorReaderFactory{}
 
 type oceanEngineAccountProbe struct {
-	sessions        insights.OceanEngineSessionRepository
 	accountSessions connector.AccountSessionStore
 	cipher          insights.SecretCipher
 	baseURL         string
@@ -118,35 +117,17 @@ type oceanEngineAccountProbe struct {
 }
 
 func (p oceanEngineAccountProbe) Verify(ctx context.Context, organizationID, projectID, accountID, externalID string) (int64, error) {
-	var ciphertext []byte
-	var keyVersion string
-	var sessionVersion int64
-	if projectID == "" {
-		if p.accountSessions == nil {
-			return 0, fmt.Errorf("Ocean Engine account session access is not configured")
-		}
-		session, err := p.accountSessions.GetAccountSession(ctx, organizationID, accountID)
-		if err != nil {
-			return 0, err
-		}
-		if session.Status == connector.AccountSessionDisabled {
-			return 0, fmt.Errorf("Ocean Engine account session is disabled")
-		}
-		ciphertext, keyVersion, sessionVersion = session.SessionCiphertext, session.SessionKeyVersion, session.Version
-	} else {
-		if p.sessions == nil {
-			return 0, fmt.Errorf("Ocean Engine Project session access is not configured")
-		}
-		session, err := p.sessions.GetProjectOceanEngineSession(ctx, contract.OrganizationID(organizationID), contract.ProjectID(projectID))
-		if err != nil {
-			return 0, err
-		}
-		if session.Status != insights.OceanEngineSessionReady {
-			return 0, fmt.Errorf("Ocean Engine session is not ready")
-		}
-		ciphertext, keyVersion = session.SessionCiphertext, session.SessionKeyVersion
+	if p.accountSessions == nil {
+		return 0, fmt.Errorf("Ocean Engine account session access is not configured")
 	}
-	plaintext, err := p.cipher.Decrypt(ciphertext, keyVersion)
+	session, err := p.accountSessions.GetAccountSession(ctx, organizationID, accountID)
+	if err != nil {
+		return 0, err
+	}
+	if session.Status == connector.AccountSessionDisabled {
+		return 0, fmt.Errorf("Ocean Engine account session is disabled")
+	}
+	plaintext, err := p.cipher.Decrypt(session.SessionCiphertext, session.SessionKeyVersion)
 	if err != nil {
 		return 0, err
 	}
@@ -185,7 +166,7 @@ func (p oceanEngineAccountProbe) Verify(ctx context.Context, organizationID, pro
 		}
 		return 0, fmt.Errorf("Ocean Engine account verification failed")
 	}
-	return sessionVersion, nil
+	return session.Version, nil
 }
 
 var _ connector.AccountProbe = oceanEngineAccountProbe{}
