@@ -1,0 +1,121 @@
+{
+  "schema_version": "oceanengine-ecommerce-parent-condition-manifest/v1",
+  "manifest_id": "oceanengine-ecommerce-parent-condition-2026-08-24",
+  "evidence_ref": "docs/delivery/evidence/oceanengine-ecommerce-parent-condition-matrix-2026-08-24.json",
+  "remote_write_authorized": false,
+  "dimensions": {
+    "carrier": ["orange_landing_page", "owned_landing_page", "byte_miniapp", "wechat_miniapp"],
+    "optimization_target": ["button_jump", "in_app_order", "click", "impression", "store_call", "store_stay"],
+    "deep_optimization": ["disabled", "conversion_roi", "net_order", "net_roi"],
+    "delivery_mode": ["ubmax", "manual"],
+    "placement_mode": ["automatic", "preferred_media"]
+  },
+  "project_field_definitions": {
+    "project.marketing_purpose": {"operation": "choose_exact_visible_option", "scope": "营销目的", "target": "电商", "required": true},
+    "project.marketing_scenario": {"operation": "choose_exact_visible_option", "scope": "营销场景", "target": "短视频+图文", "required": true},
+    "project.marketing_product_reference": {"operation": "open_reference_picker", "scope": "营销产品", "target": "更换", "required": true},
+    "project.carrier": {"operation": "choose_exact_visible_option", "scope": "投放载体", "target": "橙子落地页", "required": true},
+    "project.optimization_target_reference": {"operation": "choose_exact_visible_option", "scope": "优化目标", "target": "请选择", "required": true},
+    "project.deep_optimization_mode": {"operation": "choose_exact_visible_option", "scope": "深度优化方式", "target": "不启用", "required": true},
+    "project.delivery_mode": {"operation": "choose_exact_visible_option", "scope": "投放模式", "target": "自动投放(UBMax)", "required": true},
+    "project.aigc_dynamic_creative": {"operation": "toggle", "scope": "素材补充方式", "target": "AIGC动态创意", "required": false},
+    "project.placement_strategy": {"operation": "choose_exact_visible_option", "scope": "投放位置", "target": "通投智选", "required": true},
+    "project.placement_media": {"operation": "configure_object", "scope": "媒体选择", "target": "全选", "required": true},
+    "project.schedule": {"operation": "configure_object", "scope": "投放时间", "target": "设置开始和结束日期", "required": true},
+    "project.daily_budget": {"operation": "fill_money", "scope": "日预算", "target": "spinbutton", "required": true},
+    "project.bid": {"operation": "fill_money", "scope": "出价", "target": "spinbutton", "required": true},
+    "project.roi_coefficient": {"operation": "fill_decimal", "scope": "净成交ROI系数", "target": "spinbutton", "required": true},
+    "project.search_bid_coefficient": {"operation": "fill_decimal", "scope": "出价系数", "target": "请输入", "required": true},
+    "project.search_targeting_expansion": {"operation": "choose_exact_visible_option", "scope": "定向拓展", "target": "启用", "required": false},
+    "project.project_name": {"operation": "fill_text", "scope": "项目名称", "target": "请输入项目名称", "required": true}
+  },
+  "base_project_fields": [
+    "project.marketing_purpose",
+    "project.marketing_scenario",
+    "project.marketing_product_reference",
+    "project.carrier",
+    "project.optimization_target_reference",
+    "project.deep_optimization_mode",
+    "project.delivery_mode",
+    "project.schedule",
+    "project.daily_budget",
+    "project.project_name"
+  ],
+  "field_definitions": {
+    "promotion.delivery_identity": {"operation": "open_reference_picker", "scope": "投放身份", "target": "请选择投放抖音号", "required": true},
+    "promotion.base_materials": {"operation": "open_reference_picker", "scope": "基础素材", "target": "添加素材", "required": true},
+    "promotion.copy_materials": {"operation": "configure_object", "scope": "文案素材", "target": "请输入5-55个字的标题或输入关键词后选择推荐标题", "required": true},
+    "promotion.landing_page_reference": {"operation": "open_reference_picker", "scope": "落地页", "target": "请选择橙子落地页链接", "required": true},
+    "promotion.direct_link_mode": {"operation": "choose_exact_visible_option", "scope": "直达链接生成方式", "target": "自动生成", "required": false},
+    "promotion.direct_link_reference": {"operation": "open_reference_picker", "scope": "直达链接内容", "target": "请填写Schema直达链接，保证可跳转并打开APP", "required": false},
+    "promotion.direct_link_backup_reference": {"operation": "open_reference_picker", "scope": "直达链接备用链接", "target": "请填写Universal link直达链接，保证可跳转并打开APP", "required": false},
+    "promotion.product_name": {"operation": "fill_text", "scope": "产品信息", "target": "请输入", "required": false},
+    "promotion.product_image_references": {"operation": "open_reference_picker", "scope": "产品主图", "target": "产品主图", "required": true},
+    "promotion.product_selling_points": {"operation": "configure_object", "scope": "产品卖点", "target": "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交", "required": true},
+    "promotion.native_anchor_reference": {"operation": "open_reference_picker", "scope": "创意组件", "target": "原生锚点", "required": false},
+    "promotion.call_to_action": {"operation": "choose_exact_visible_option", "scope": "行动号召", "target": "查看详情", "required": true},
+    "promotion.source_label": {"operation": "fill_text", "scope": "来源", "target": "请输入来源", "required": true},
+    "promotion.comments_enabled": {"operation": "choose_exact_visible_option", "scope": "单元评论", "target": "不启用", "required": true},
+    "promotion.smart_generation_enabled": {"operation": "toggle", "scope": "行动号召", "target": "开启智能生成", "required": false},
+    "promotion.category": {"operation": "choose_exact_visible_option", "scope": "所属类别", "target": "请选择", "required": true},
+    "promotion.brand_reference": {"operation": "open_reference_picker", "scope": "品牌名称", "target": "选择或手动输入品牌", "required": true},
+    "promotion.daily_budget": {"operation": "fill_money", "scope": "单元预算", "target": "spinbutton", "required": true},
+    "promotion.bid": {"operation": "fill_money", "scope": "单元出价", "target": "spinbutton", "required": true},
+    "promotion.roi_coefficient": {"operation": "fill_decimal", "scope": "ROI系数", "target": "spinbutton", "required": true},
+    "promotion.pangle_bid_coefficient": {"operation": "fill_decimal", "scope": "穿山甲系数", "target": "spinbutton", "required": true},
+    "promotion.promotion_name": {"operation": "fill_text", "scope": "单元名称", "target": "请输入", "required": true}
+  },
+  "base_promotion_fields": [
+    "promotion.delivery_identity",
+    "promotion.base_materials",
+    "promotion.copy_materials",
+    "promotion.landing_page_reference",
+    "promotion.direct_link_mode",
+    "promotion.direct_link_reference",
+    "promotion.direct_link_backup_reference",
+    "promotion.product_name",
+    "promotion.product_image_references",
+    "promotion.product_selling_points",
+    "promotion.native_anchor_reference",
+    "promotion.call_to_action",
+    "promotion.source_label",
+    "promotion.comments_enabled",
+    "promotion.smart_generation_enabled",
+    "promotion.category",
+    "promotion.brand_reference",
+    "promotion.promotion_name"
+  ],
+  "carrier_rules": {
+    "orange_landing_page": {"landing_page_target": "请选择橙子落地页链接"},
+    "owned_landing_page": {"landing_page_target": "请选择或填写自研落地页链接"},
+    "byte_miniapp": {"required_parent_reference": "byte_miniapp_reference"},
+    "wechat_miniapp": {"required_parent_reference": "wechat_miniapp_reference"}
+  },
+  "delivery_rules": {
+    "ubmax": {"project_add_fields": ["project.aigc_dynamic_creative", "project.bid"], "material_limits": {"video": 30, "image": 50, "image_text": 10, "copy": 10}},
+    "manual": {"project_add_fields": ["project.placement_strategy", "project.search_bid_coefficient", "project.search_targeting_expansion"], "add_fields": ["promotion.daily_budget", "promotion.bid"], "material_limits": {"video": 10, "image": 10, "image_text": 10, "copy": 10}}
+  },
+  "optimization_rules": {
+    "button_jump": {"project_remove_fields": ["project.deep_optimization_mode"], "billing": "oCPM", "search_boost": "enabled"},
+    "in_app_order": {"billing": "oCPM", "search_boost": "enabled"},
+    "click": {"project_remove_fields": ["project.deep_optimization_mode"], "billing": "CPC", "search_boost": "disabled", "remove_fields": ["promotion.native_anchor_reference"]},
+    "impression": {"project_remove_fields": ["project.deep_optimization_mode"], "billing": "CPM", "search_boost": "disabled", "remove_fields": ["promotion.native_anchor_reference"]},
+    "store_call": {"project_remove_fields": ["project.deep_optimization_mode"], "billing": "oCPM", "search_boost": "enabled"},
+    "store_stay": {"project_remove_fields": ["project.deep_optimization_mode"], "billing": "oCPM", "search_boost": "enabled"}
+  },
+  "deep_optimization_rules": {
+    "disabled": {},
+    "conversion_roi": {"required_optimization_target": "in_app_order", "required_delivery_modes": ["manual", "ubmax"], "remove_fields": ["promotion.bid"], "add_fields": ["promotion.roi_coefficient"], "search_boost": "disabled"},
+    "net_order": {"required_optimization_target": "in_app_order", "required_delivery_modes": ["ubmax"]},
+    "net_roi": {"required_optimization_target": "in_app_order", "required_delivery_modes": ["ubmax"], "project_remove_fields": ["project.bid"], "project_add_fields": ["project.roi_coefficient"], "project_roi_coefficient": true}
+  },
+  "placement_rules": {
+    "automatic": {},
+    "preferred_media": {"required_delivery_mode": "manual", "project_add_fields": ["project.placement_media"], "available_media": ["今日头条", "西瓜视频", "抖音", "番茄系媒体", "穿山甲"], "add_fields": ["promotion.pangle_bid_coefficient"]}
+  },
+  "search_targeting_expansion_rule": {"requires_search_boost": "enabled"},
+  "blocked_branches": {
+    "ecommerce_live": "platform_unavailable",
+    "promotion_budget_edit": "platform_minimum_equals_authority_maximum"
+  }
+}

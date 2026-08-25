@@ -1,0 +1,68 @@
+{
+  "schema_version": "oceanengine-runner-v3-live-validation-evidence/v1",
+  "observed_at": "2026-08-25T13:12:13+08:00",
+  "account_context": "redacted_current_test_account",
+  "browser_session": {
+    "browser": "msedge",
+    "mode": "current_user",
+    "cdp_transport": "direct_websocket_from_devtools_active_port",
+    "session_status": "running",
+    "http_discovery_404_is_stale_proof": false
+  },
+  "business_validation": {
+    "execution_path": "runner_v3_prepare_plus_runner_v3_submit",
+    "runner_v3_live_prepare": "success_at_final_click_boundary",
+    "runner_v3_live_submit_executed": true,
+    "project_create": "success",
+    "promotion_create": "success",
+    "project_edit_readback": "success_same_object_id",
+    "promotion_edit_readback": "success_same_object_id",
+    "schedule_date": "2026-08-26",
+    "project_daily_budget_cny": 300,
+    "promotion_daily_budget_cny": 300,
+    "promotion_bid_cny": 0.01
+  },
+  "created_object_references_sha256": {
+    "project_id": "b5d8258b29dce4d481fec0e684dcc559bdc178f343d7b0dd4a3514840e5eb92d",
+    "promotion_id": "33f8cfdcf41e58e46f7e164487413f06835b7f73c5d11071a4c47d8bf44bebf1"
+  },
+  "asynchronous_assets": {
+    "managed_landing_page_rows_after_load": 25,
+    "my_images_usable_cards": 1,
+    "image_selection_method": "img_element_and_card_selection_state"
+  },
+  "field_reconciliation": {
+    "promotion_create": {
+      "landing_page_reference": {
+        "result": "not_checked",
+        "selected_reference_sha256": "87486f6915a4685e2210d29f8ddee235a2760ffe1519d32465f0ad7a0f036af7"
+      },
+      "call_to_action": {
+        "result": "drifted",
+        "requested": "查看详情",
+        "persisted": "立即预订"
+      }
+    },
+    "promotion_edit": "matched_same_object_id",
+    "project_edit": "matched_same_object_id"
+  },
+  "cleanup": {
+    "promotion_deleted_before_project": true,
+    "project_deleted": true,
+    "promotion_exact_name_rows_after_delete": 0,
+    "project_exact_name_rows_after_delete": 0
+  },
+  "coverage": {
+    "project_create_and_edit": "live_validated",
+    "promotion_create_and_edit": "live_validated",
+    "runner_v3_prepare": "live_validated",
+    "runner_v3_submit": "project_and_promotion_create_edit_live_validated",
+    "runner_v3_post_submit_field_reconciliation": "live_validated"
+  },
+  "dynamic_field_findings": {
+    "promotion.product_image_references": "required_and_uses_oc_create_product_img_add_button",
+    "promotion.product_selling_points": "required_and_needs_enter_to_commit_each_item",
+    "promotion.category": "required_hierarchical_selection",
+    "promotion.brand_reference": "required_and_supports_custom_brand_name"
+  }
+}

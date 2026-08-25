@@ -122,7 +122,7 @@ func completePrepareReadback(run browserautomation.BrowserRpaRun, result RpaResu
 
 func observedObjectID(result RpaResult) (string, bool) {
 	for _, step := range result.Steps {
-		if value, ok := step.Readback["object_id"]; ok && value != "" {
+		if value, ok := step.Readback["object_id"].(string); ok && value != "" {
 			return value, true
 		}
 	}
@@ -270,7 +270,7 @@ func preparedPageFromResult(result RpaResult) browserautomation.PreparedPage {
 			continue
 		}
 		page.BeforeFacts = step.BeforeFacts
-		page.Readback = step.Readback
+		page.Readback = stringReadback(step.Readback)
 		page.DiffKeys = step.DiffKeys
 		page.PageRef = step.PageReference
 		page.ScreenshotRef = step.ScreenshotPath
@@ -280,4 +280,19 @@ func preparedPageFromResult(result RpaResult) browserautomation.PreparedPage {
 		page.DiffKeys = []string{}
 	}
 	return page
+}
+
+func stringReadback(values map[string]any) map[string]string {
+	if values == nil {
+		return nil
+	}
+	readback := make(map[string]string, len(values))
+	for key, value := range values {
+		if text, ok := value.(string); ok {
+			readback[key] = text
+			continue
+		}
+		readback[key] = fmt.Sprint(value)
+	}
+	return readback
 }

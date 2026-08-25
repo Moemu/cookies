@@ -1,0 +1,28 @@
+{
+  "schema_version": "oceanengine-parent-condition-evidence/v1",
+  "observed_at": "2026-08-24T09:28:00.000Z",
+  "account_context": "redacted_current_test_account",
+  "project_count": 12,
+  "promotion_count": 0,
+  "promotion_drafts_discarded": 12,
+  "schedule": "2026-08-25",
+  "minimum_project_budget_cny": 300,
+  "minimum_bid_cny_when_present": 0.01,
+  "observations": [
+    "manual material limits are video 10, image 10, image-text 10, and copy 10",
+    "UBMax material limits are video 30, image 50, image-text 10, and copy 10",
+    "manual conversion ROI replaces promotion bid with promotion ROI coefficient",
+    "click and impression remove the native anchor field",
+    "preferred media adds the Pangle bid coefficient field",
+    "owned landing page changes the landing-page selector target",
+    "net order and net ROI do not support manual delivery",
+    "copy materials and direct-link backup are present on the promotion form"
+  ],
+  "blocked": [
+    {"branch": "ecommerce_live", "reason": "platform_unavailable"},
+    {"branch": "byte_miniapp", "reason": "no managed miniapp reference in the account"},
+    {"branch": "wechat_miniapp", "reason": "no managed miniapp reference in the account"},
+    {"branch": "promotion_budget_edit", "reason": "no reversible value inside the authority boundary"}
+  ],
+  "remote_write_authorized": false
+}

@@ -47,8 +47,36 @@ func (r Runner) Run(ctx context.Context, plan RpaPlan) (RpaResult, error) {
 	if err != nil {
 		return RpaResult{}, fmt.Errorf("%w: encode plan: %v", ErrRunnerInfrastructure, err)
 	}
+	return r.runPayload(ctx, payload, plan.Mode, nil)
+}
+
+// RunV3 passes a schema-validated v3 plan to the TypeScript runner without
+// projecting it through the frozen v2 Go model. The confirmation token is a
+// process argument and is never added to the plan or result document.
+func (r Runner) RunV3(ctx context.Context, plan json.RawMessage, confirmToken, authorityStateDirectory string) (RpaResult, error) {
+	var header struct {
+		SchemaVersion string `json:"schema_version"`
+		Mode          string `json:"mode"`
+	}
+	if err := json.Unmarshal(plan, &header); err != nil {
+		return RpaResult{}, fmt.Errorf("%w: decode v3 plan header: %v", ErrRunnerInfrastructure, err)
+	}
+	if header.SchemaVersion != PlanSchemaV3 {
+		return RpaResult{}, fmt.Errorf("%w: unexpected plan schema %q", ErrRunnerInfrastructure, header.SchemaVersion)
+	}
+	extraArgs := []string{}
+	if confirmToken != "" {
+		extraArgs = append(extraArgs, "--confirm-token", confirmToken)
+	}
+	if authorityStateDirectory != "" {
+		extraArgs = append(extraArgs, "--authority-state-dir", authorityStateDirectory)
+	}
+	return r.runPayload(ctx, plan, header.Mode, extraArgs)
+}
+
+func (r Runner) runPayload(ctx context.Context, payload []byte, mode string, extraArgs []string) (RpaResult, error) {
 	timeout := r.PrepareTimeout
-	if plan.Mode == "submit" {
+	if mode == "submit" {
 		timeout = r.SubmitTimeout
 	}
 	if timeout <= 0 {
@@ -61,6 +89,7 @@ func (r Runner) Run(ctx context.Context, plan RpaPlan) (RpaResult, error) {
 		return RpaResult{}, fmt.Errorf("%w: runner command is not configured", ErrRunnerInfrastructure)
 	}
 	args := append(append([]string{}, r.Command[1:]...), r.ScriptPath, r.CDPEndpoint)
+	args = append(args, extraArgs...)
 	cmd := exec.CommandContext(ctx, r.Command[0], args...)
 	cmd.Dir = r.WorkDir
 	cmd.Stdin = bytes.NewReader(payload)
@@ -86,18 +115,20 @@ func parseResult(payload []byte) (RpaResult, error) {
 	}
 	var result RpaResult
 	if err := json.Unmarshal(trimmed, &result); err == nil {
-		if result.SchemaVersion != ResultSchemaV1 {
+		if result.SchemaVersion != ResultSchemaV1 && result.SchemaVersion != ResultSchemaV2 {
 			return RpaResult{}, fmt.Errorf("unexpected result schema %q", result.SchemaVersion)
 		}
 		return result, nil
 	}
 	// Tolerate third-party noise on stdout: recover the last line that looks
 	// like the result document.
-	marker := []byte(`{"schema_version":"` + ResultSchemaV1)
-	if start := bytes.LastIndex(trimmed, marker); start >= 0 {
-		var recovered RpaResult
-		if err := json.Unmarshal(trimmed[start:], &recovered); err == nil {
-			return recovered, nil
+	for _, schema := range []string{ResultSchemaV2, ResultSchemaV1} {
+		marker := []byte(`{"schema_version":"` + schema)
+		if start := bytes.LastIndex(trimmed, marker); start >= 0 {
+			var recovered RpaResult
+			if err := json.Unmarshal(trimmed[start:], &recovered); err == nil {
+				return recovered, nil
+			}
 		}
 	}
 	return RpaResult{}, fmt.Errorf("unparseable result document: %w", errJSON)

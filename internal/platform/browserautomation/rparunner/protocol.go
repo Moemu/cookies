@@ -8,6 +8,8 @@ package rparunner
 const (
 	PlanSchemaV2   = "oceanengine-playwright-rpa/v2"
 	ResultSchemaV1 = "oceanengine-playwright-rpa-result/v1"
+	PlanSchemaV3   = "oceanengine-playwright-rpa-plan/v3"
+	ResultSchemaV2 = "oceanengine-playwright-rpa-result/v2"
 
 	SelectorVersion = "playwright-rpa-locator/v1"
 	ActionVersion   = "playwright-rpa-action/v1"
@@ -62,7 +64,7 @@ type StepResult struct {
 	ID             string            `json:"id"`
 	Status         string            `json:"status"`
 	BeforeFacts    map[string]string `json:"before_facts,omitempty"`
-	Readback       map[string]string `json:"readback,omitempty"`
+	Readback       map[string]any    `json:"readback,omitempty"`
 	DiffKeys       []string          `json:"diff_keys,omitempty"`
 	PageReference  string            `json:"page_reference,omitempty"`
 	ScreenshotPath string            `json:"screenshot_path,omitempty"`
@@ -74,6 +76,9 @@ type RpaResult struct {
 	ErrorCode           string       `json:"error_code"`
 	ErrorMessage        string       `json:"error_message,omitempty"`
 	FinalClickPerformed bool         `json:"final_click_performed"`
+	CreatedObjectID     string       `json:"created_object_id,omitempty"`
+	Reconciliation      string       `json:"reconciliation,omitempty"`
+	FieldReconciliation any          `json:"field_reconciliation,omitempty"`
 	Steps               []StepResult `json:"steps,omitempty"`
 }
 
@@ -93,8 +98,9 @@ const (
 
 // Outcomes reported by the runner, mirroring browserautomation.WorkerOutcome.
 const (
-	OutcomeSuccess       = "success"
-	OutcomeFailed        = "failed"
-	OutcomePartial       = "partial"
-	OutcomeResultUnknown = "result_unknown"
+	OutcomeSuccess          = "success"
+	OutcomeSuccessWithDrift = "success_with_drift"
+	OutcomeFailed           = "failed"
+	OutcomePartial          = "partial"
+	OutcomeResultUnknown    = "result_unknown"
 )

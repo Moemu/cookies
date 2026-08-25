@@ -31,6 +31,7 @@ type SessionMetadata = {
   profile_name: string
   profile_path: string
   cdp_endpoint: string
+  cdp_websocket_endpoint?: string
   cdp_host: '127.0.0.1'
   cdp_port: number
   started_at: string
@@ -107,6 +108,15 @@ export function currentUserProfilePath(localAppData = process.env.LOCALAPPDATA) 
   return resolve(localAppData, 'Microsoft', 'Edge', 'User Data', edgeProfileName)
 }
 
+export function parseDevToolsActivePort(source: string, expectedPort?: number) {
+  const [portLine = '', browserPath = ''] = source.split(/\r?\n/)
+  const port = Number.parseInt(portLine, 10)
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid DevTools port')
+  if (expectedPort !== undefined && port !== expectedPort) throw new Error('DevTools port does not match session metadata')
+  if (!/^\/devtools\/browser\/[A-Za-z0-9-]+$/.test(browserPath)) throw new Error('Invalid DevTools browser path')
+  return { port, websocket_endpoint: `ws://127.0.0.1:${port}${browserPath}` }
+}
+
 function currentUserDataRoot(localAppData = process.env.LOCALAPPDATA) {
   return resolve(currentUserProfilePath(localAppData), '..')
 }
@@ -130,6 +140,22 @@ async function readMetadata(paths: SessionPaths): Promise<SessionMetadata | unde
   } catch {
     return undefined
   }
+}
+
+export async function resolveSessionPlaywrightEndpoint(metadataPath: string) {
+  const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as SessionMetadata
+  if (metadata.schema_version !== sessionSchema) throw new Error('Unsupported Edge session metadata')
+  if (metadata.state !== 'running') throw new Error('Edge session is not running')
+  assertLoopbackEndpoint(metadata.cdp_endpoint)
+  if (metadata.mode !== 'current_user') return metadata.cdp_endpoint
+  const activePort = parseDevToolsActivePort(
+    await readFile(join(resolve(metadata.profile_path, '..'), 'DevToolsActivePort'), 'utf8'),
+    metadata.cdp_port,
+  )
+  if (metadata.cdp_websocket_endpoint && metadata.cdp_websocket_endpoint !== activePort.websocket_endpoint) {
+    throw new Error('DevTools WebSocket endpoint does not match session metadata')
+  }
+  return activePort.websocket_endpoint
 }
 
 async function unusedPort(): Promise<number> {

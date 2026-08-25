@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
-import { currentUserProfilePath, edgeArguments, isLikelyOceanEngineLogin, sanitizePageURL, sessionPaths } from '../scripts/browser-rpa-edge-session.js'
+import { currentUserProfilePath, edgeArguments, isLikelyOceanEngineLogin, parseDevToolsActivePort, sanitizePageURL, sessionPaths } from '../scripts/browser-rpa-edge-session.js'
 
 test('session files stay under LOCALAPPDATA and use the managed Default profile', () => {
   const localAppData = resolve('C:/Users/test/AppData/Local')
@@ -28,6 +28,15 @@ test('current profile mode points to the existing Edge Default Profile without c
   const localAppData = resolve('C:/Users/test/AppData/Local')
   assert.equal(currentUserProfilePath(localAppData), join(localAppData, 'Microsoft', 'Edge', 'User Data', 'Default'))
   assert.notEqual(currentUserProfilePath(localAppData), sessionPaths(localAppData).profile)
+})
+
+test('DevToolsActivePort resolves the direct Edge WebSocket', () => {
+  assert.deepEqual(parseDevToolsActivePort('9222\n/devtools/browser/31c9459a-f827-47e9-94aa-b625164dfaae\n', 9222), {
+    port: 9222,
+    websocket_endpoint: 'ws://127.0.0.1:9222/devtools/browser/31c9459a-f827-47e9-94aa-b625164dfaae',
+  })
+  assert.throws(() => parseDevToolsActivePort('9222\n/not-devtools\n', 9222), /browser path/)
+  assert.throws(() => parseDevToolsActivePort('9223\n/devtools/browser/31c9459a-f827-47e9-94aa-b625164dfaae\n', 9222), /does not match/)
 })
 
 test('page diagnostics remove query strings and fragments', () => {
