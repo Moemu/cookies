@@ -196,7 +196,8 @@ func (r *controlledMemoryRepository) ConfirmPlatformEntityMapping(_ context.Cont
 			pending++
 		}
 	}
-	if execution, exists := r.executions[repositoryKey(org, project, current.BusinessExecutionID)]; exists && pending == 0 {
+	fieldDrifted := result.Evidence.FieldReadback["field_reconciliation_status"] == "drifted" || list.Evidence.FieldReadback["field_reconciliation_status"] == "drifted"
+	if execution, exists := r.executions[repositoryKey(org, project, current.BusinessExecutionID)]; exists && pending == 0 && !fieldDrifted {
 		execution.Status = "succeeded"
 		execution.Version++
 		r.executions[repositoryKey(org, project, execution.ID)] = execution

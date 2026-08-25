@@ -252,7 +252,8 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 	if err := w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step); err != nil {
 		return BrowserRpaRun{}, err
 	}
-	if stagedCreateAction(run.Authority.Action) && outcome == WorkerSuccess && page.InternalObjectID != "" {
+	stagedObjectObserved := stagedCreateAction(run.Authority.Action) && (outcome == WorkerSuccess || outcome == WorkerPartial) && page.InternalObjectID != ""
+	if stagedObjectObserved {
 		if page.Readback == nil {
 			page.Readback = map[string]string{}
 		}
@@ -264,7 +265,7 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 	if err != nil {
 		return BrowserRpaRun{}, err
 	}
-	if stagedCreateAction(run.Authority.Action) && outcome == WorkerSuccess && page.InternalObjectID != "" {
+	if stagedObjectObserved {
 		reconciliationStep := RunStep{ID: step.ID + "-reconcile", RunID: run.ID, Sequence: step.Sequence + 1, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(TakeoverListConfirmed), Status: StepSucceeded, Attempt: 1, Version: 1}
 		if err := w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, reconciliationStep); err != nil {
 			return BrowserRpaRun{}, err
@@ -281,7 +282,7 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 		if recordErr != nil {
 			return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunFailed, BlockResultReconciliation)
 		}
-		if !complete {
+		if outcome == WorkerSuccess && !complete {
 			return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunEnvironmentCheck, "")
 		}
 	}

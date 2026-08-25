@@ -407,7 +407,8 @@ func (r MySQLRepository) ConfirmPlatformEntityMapping(ctx context.Context, org c
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM delivery_platform_entity_mappings WHERE organization_id=? AND project_id=? AND business_execution_id=? AND status='pending_verification'`, org, project, value.BusinessExecutionID).Scan(&pendingMappings); err != nil {
 		return PlatformEntityMapping{}, err
 	}
-	if pendingMappings > 0 {
+	fieldDrifted := resultEvidence.Evidence.FieldReadback["field_reconciliation_status"] == "drifted" || listEvidence.Evidence.FieldReadback["field_reconciliation_status"] == "drifted"
+	if pendingMappings > 0 || fieldDrifted {
 		if err := tx.Commit(); err != nil {
 			return PlatformEntityMapping{}, err
 		}

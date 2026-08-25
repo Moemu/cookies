@@ -34,6 +34,15 @@ type stagedWorkerAdapter struct{ stage int }
 func (a *stagedWorkerAdapter) Prepare(context.Context, BrowserRpaRun) (PreparedPage, error) {
 	return PreparedPage{Readback: map[string]string{}, DiffKeys: []string{}, InternalObjectKind: []string{"project", "promotion"}[a.stage], InternalObjectID: []string{"project-draft-1", "promotion-draft-1"}[a.stage]}, nil
 }
+
+type driftedStagedWorkerAdapter struct{}
+
+func (driftedStagedWorkerAdapter) Prepare(context.Context, BrowserRpaRun) (PreparedPage, error) {
+	return PreparedPage{Readback: map[string]string{}, DiffKeys: []string{}, InternalObjectKind: "promotion", InternalObjectID: "promotion-draft-1"}, nil
+}
+func (driftedStagedWorkerAdapter) Submit(context.Context, BrowserRpaRun, ControlledActionAttempt, string) (WorkerOutcome, PreparedPage, error) {
+	return WorkerPartial, PreparedPage{Readback: map[string]string{"platform_object_id": "7683558668450021382", "reconciliation": "matched", "field_reconciliation_status": "drifted"}, DiffKeys: []string{"promotion.call_to_action"}, InternalObjectKind: "promotion", InternalObjectID: "promotion-draft-1"}, nil
+}
 func (a *stagedWorkerAdapter) Submit(context.Context, BrowserRpaRun, ControlledActionAttempt, string) (WorkerOutcome, PreparedPage, error) {
 	stage := a.stage
 	a.stage++
@@ -123,6 +132,32 @@ func TestWorkerAdvancesStagedCreatesAndUsesFreshConfirmationPerObject(t *testing
 		if pair[0] == "" || pair[1] == "" || pair[0] == pair[1] {
 			t.Fatalf("evidence pair=%#v", pair)
 		}
+	}
+}
+
+func TestWorkerWritesStagedObjectIDAndStopsOnFieldDrift(t *testing.T) {
+	worker, service, _, run, _ := fakeWorkerFixture(WorkerSuccess)
+	provider := &stagedRecorderProvider{}
+	service.AuthorityProvider = provider
+	worker.Service = service
+	worker.Adapter = driftedStagedWorkerAdapter{}
+	run.Authority.Action = "create_project_and_promotions"
+	repo := service.Repository.(*MemoryRepository)
+	repo.runs[scopeKey(run.OrganizationID, run.ProjectID, run.ID)] = run
+	prepared, err := worker.Prepare(context.Background(), run.OrganizationID, run.ProjectID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := service.IssueFinalConfirmation(context.Background(), run.OrganizationID, run.ProjectID, run.ID, prepared.Version, prepared.Authority.ApprovalActionHash, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := worker.Submit(context.Background(), WorkerSubmitRequest{Authorize: AuthorizeActionRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: "submit_drift", ConfirmationID: issued.Confirmation.ID, Token: issued.Token, LeaseID: "lease_1", FencingToken: 1, IdempotencyKey: "attempt_drift"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.State != RunPartial || len(provider.recorded) != 1 || provider.recorded[0].Readback["platform_object_id"] == "" {
+		t.Fatalf("result=%#v recorded=%#v", result, provider.recorded)
 	}
 }
 
