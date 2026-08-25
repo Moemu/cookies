@@ -199,6 +199,15 @@ export type RunnerV3Plan = {
   object_reference?: string
   parent_project_reference?: string
   blocked_reasons: string[]
+  object_availability?: Array<{
+    field_key: string
+    object_kind: string
+    internal_object_id: string
+    display_name?: string
+    platform_object_id?: string
+    available: boolean
+    reason?: string
+  }>
   steps: RunnerV3PlanStep[]
   allow_remote_write: boolean
   maximum_final_clicks: number

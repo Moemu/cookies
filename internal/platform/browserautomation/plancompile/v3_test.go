@@ -3,6 +3,7 @@ package plancompile
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -133,5 +134,41 @@ func TestV3CompilerRejectsCompoundFormsBeforeBrowserWrite(t *testing.T) {
 	_, err := compiler.CompilePrepareV3(context.Background(), run, browserautomation.SitePolicy{AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create"}})
 	if err == nil || !strings.Contains(err.Error(), "staged controlled runs") {
 		t.Fatalf("compound error = %v", err)
+	}
+}
+
+func TestV3CompilerReportsUnavailableObjectsBeforeProjectCreate(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	product := configuration.Payload.OceanEngine.Project.MarketingProductReference
+	product.Namespace = "cookies"
+	product.ID = "product_internal_1"
+	product.AuditAttributes = nil
+	intent.Payload.ProductReferences[0] = *product
+	planHash := strings.Repeat("a", 64)
+	compiler := V3Compiler{Source: v3SourceStub{version: delivery.DeliveryPlanVersion{CanonicalHash: planHash, DeliveryIntent: &intent, PlatformConfiguration: &configuration}}, Now: func() time.Time { return now }}
+	run := browserautomation.BrowserRpaRun{OrganizationID: "org_1", ProjectID: "project_1", AccountID: "1855554434276391", Authority: browserautomation.AuthorityBinding{Action: "create_project_and_promotions", PlanID: "plan_1", PlanVersion: 1, PlanCanonicalHash: planHash, ConfigurationCanonicalHash: configuration.CanonicalHash}}
+	policy := browserautomation.SitePolicy{AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create"}}
+
+	raw, err := compiler.CompilePrepareV3(context.Background(), run, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan v3Plan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Status != "blocked" || !slices.Contains(plan.BlockedReasons, unavailablePlatformObjectsReason) {
+		t.Fatalf("blocked plan = %#v", plan)
+	}
+	missing := slices.IndexFunc(plan.ObjectAvailability, func(value V3ObjectAvailability) bool {
+		return value.FieldKey == "project.marketing_product_reference" && !value.Available
+	})
+	if missing < 0 || plan.ObjectAvailability[missing].InternalObjectID != "product_internal_1" {
+		t.Fatalf("object availability = %#v", plan.ObjectAvailability)
+	}
+	attempt := browserautomation.ControlledActionAttempt{ID: "attempt_1", Status: browserautomation.ControlledActionAuthorized, CreatedAt: now}
+	if _, err := compiler.CompileSubmitV3(context.Background(), run, attempt, policy, "token"); err == nil || !strings.Contains(err.Error(), unavailablePlatformObjectsReason) {
+		t.Fatalf("submit error = %v", err)
 	}
 }

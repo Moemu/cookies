@@ -422,7 +422,11 @@ func stableReferenceSpec(ref delivery.StableReference, allowed []delivery.Stable
 	}) {
 		return nil, fmt.Errorf("reference %s is outside the delivery intent", ref.ID)
 	}
-	value := map[string]any{"selection_kind": "async_row", "object_id": ref.ID, "confirm_button": "确定"}
+	platformID := platformReferenceID(ref)
+	if platformID == "" {
+		return nil, fmt.Errorf("reference %s has no OceanEngine platform ID", ref.ID)
+	}
+	value := map[string]any{"selection_kind": "async_row", "object_id": platformID, "confirm_button": "确定"}
 	if ref.DisplayNameSnapshot != "" {
 		value["label"] = ref.DisplayNameSnapshot
 	}

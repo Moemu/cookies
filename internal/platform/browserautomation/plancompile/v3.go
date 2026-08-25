@@ -77,21 +77,22 @@ type v3ExecutionAuthority struct {
 }
 
 type v3Plan struct {
-	SchemaVersion             string                `json:"schema_version"`
-	PlanKind                  string                `json:"plan_kind"`
-	Browser                   string                `json:"browser"`
-	Mode                      string                `json:"mode"`
-	Status                    string                `json:"status"`
-	AccountReference          string                `json:"account_reference"`
-	ObjectReference           string                `json:"object_reference,omitempty"`
-	ParentProjectReference    string                `json:"parent_project_reference,omitempty"`
-	ParentConditionManifestID string                `json:"parent_condition_manifest_id"`
-	ParentContext             v3ParentContext       `json:"parent_context"`
-	BlockedReasons            []string              `json:"blocked_reasons"`
-	ExecutionAuthority        *v3ExecutionAuthority `json:"execution_authority,omitempty"`
-	Steps                     []v3Step              `json:"steps"`
-	AllowRemoteWrite          bool                  `json:"allow_remote_write"`
-	MaximumFinalClicks        int                   `json:"maximum_final_clicks"`
+	SchemaVersion             string                 `json:"schema_version"`
+	PlanKind                  string                 `json:"plan_kind"`
+	Browser                   string                 `json:"browser"`
+	Mode                      string                 `json:"mode"`
+	Status                    string                 `json:"status"`
+	AccountReference          string                 `json:"account_reference"`
+	ObjectReference           string                 `json:"object_reference,omitempty"`
+	ParentProjectReference    string                 `json:"parent_project_reference,omitempty"`
+	ParentConditionManifestID string                 `json:"parent_condition_manifest_id"`
+	ParentContext             v3ParentContext        `json:"parent_context"`
+	BlockedReasons            []string               `json:"blocked_reasons"`
+	ObjectAvailability        []V3ObjectAvailability `json:"object_availability,omitempty"`
+	ExecutionAuthority        *v3ExecutionAuthority  `json:"execution_authority,omitempty"`
+	Steps                     []v3Step               `json:"steps"`
+	AllowRemoteWrite          bool                   `json:"allow_remote_write"`
+	MaximumFinalClicks        int                    `json:"maximum_final_clicks"`
 }
 
 func (c V3Compiler) CompilePrepareV3(ctx context.Context, run browserautomation.BrowserRpaRun, policy browserautomation.SitePolicy) (json.RawMessage, error) {
@@ -109,6 +110,9 @@ func (c V3Compiler) CompileSubmitV3(ctx context.Context, run browserautomation.B
 	plan, err := c.preparePlan(ctx, run, policy)
 	if err != nil {
 		return nil, err
+	}
+	if len(plan.BlockedReasons) != 0 {
+		return nil, fmt.Errorf("Runner v3 plan is blocked: %s", strings.Join(plan.BlockedReasons, ","))
 	}
 	plan.Mode = "submit"
 	plan.AllowRemoteWrite = true
@@ -183,6 +187,17 @@ func (c V3Compiler) preparePlan(ctx context.Context, run browserautomation.Brows
 		}
 		return decodePlannedForm(set.Forms[1])
 	case "create_project_and_promotions":
+		availability := configurationObjectAvailability(*configuration)
+		if slices.ContainsFunc(availability, func(value V3ObjectAvailability) bool { return !value.Available }) {
+			required := true
+			return v3Plan{
+				SchemaVersion: rparunner.PlanSchemaV3, PlanKind: "project_create", Browser: "msedge", Mode: "prepare", Status: "blocked",
+				AccountReference: run.AccountID, ParentConditionManifestID: v3ParentManifestID,
+				BlockedReasons: []string{unavailablePlatformObjectsReason}, ObjectAvailability: availability,
+				Steps:            []v3Step{{ID: "001-object-availability", Kind: "preflight", PageKind: "project_create", Required: &required, Blocked: true, BlockReason: unavailablePlatformObjectsReason}},
+				AllowRemoteWrite: false, MaximumFinalClicks: 0,
+			}, nil
+		}
 		set, compileErr := CompileConfigurationV3(*version.PlatformConfiguration, version.DeliveryIntent, run.AccountID, V3ObjectBindings{}, c.now())
 		if compileErr != nil {
 			return v3Plan{}, compileErr
