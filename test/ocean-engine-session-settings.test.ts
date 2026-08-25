@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-test("巨量 Connector 由 Project 持有且只提交受控输入", () => {
+test("巨量 Connector 复用组织 Cookie 且按 Project 绑定账号", () => {
   const settings = readFileSync(
     new URL("../src/components/OceanEngineSessionSettings.tsx", import.meta.url),
     "utf8",
@@ -33,7 +33,9 @@ test("巨量 Connector 由 Project 持有且只提交受控输入", () => {
   assert.match(settings, /sessionInputRef\.current\) sessionInputRef\.current\.value = ''/);
   assert.match(settings, /api\.verifyProjectConnectorAccount\(projectId/);
   assert.match(settings, /api\.syncProjectConnectorAccount\(projectId/);
-  assert.match(settings, /账号只归属当前 Project/);
+  assert.match(settings, /Cookie 会话归属当前组织账号/);
+  assert.match(settings, /Plan 只能选择已绑定当前 Project 的账号/);
+  assert.match(settings, /可复用该组织内成功请求的完整 Cookie/);
   assert.doesNotMatch(settings, /useProject/);
   assert.doesNotMatch(settings, /useState\([^)]*session/i);
   assert.doesNotMatch(settings, /localStorage|sessionStorage/);
