@@ -498,6 +498,7 @@ func main() {
 			WorkDir:             ".",
 			EvidenceRoot:        cfg.BrowserRPA.EvidenceRoot,
 			EdgeSessionFile:     cfg.BrowserRPA.EdgeSessionFile,
+			SessionProbeScript:  cfg.BrowserRPA.SessionProbeScript,
 			AuthorityStateRoot:  cfg.BrowserRPA.AuthorityStateRoot,
 			V3Compiler:          plancompile.V3Compiler{Source: delivery.MySQLRepository{DB: db}},
 			PrepareTimeout:      time.Duration(cfg.BrowserRPA.PrepareTimeoutSeconds) * time.Second,

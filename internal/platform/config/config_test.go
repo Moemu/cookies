@@ -53,7 +53,7 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		value.Creative.BrandFilmPlannerModelAlias != "cookies.text.standard" {
 		t.Fatalf("unexpected Creative planner defaults: %#v", value.Creative)
 	}
-	if value.BrowserRPA.RunnerProtocol != "v3" || value.BrowserRPA.ScriptPath != "scripts/browser-rpa-runner-v3.ts" || !strings.HasSuffix(strings.ReplaceAll(value.BrowserRPA.EdgeSessionFile, "\\", "/"), "cookies/browser-rpa/session.json") {
+	if value.BrowserRPA.RunnerProtocol != "v3" || value.BrowserRPA.ScriptPath != "scripts/browser-rpa-runner-v3.ts" || value.BrowserRPA.SessionProbeScript != "scripts/browser-rpa-session-probe.ts" || !strings.HasSuffix(strings.ReplaceAll(value.BrowserRPA.EdgeSessionFile, "\\", "/"), "cookies/browser-rpa/session.json") {
 		t.Fatalf("unexpected Browser RPA defaults: %#v", value.BrowserRPA)
 	}
 }

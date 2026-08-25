@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
 import { currentUserProfilePath, edgeArguments, isLikelyOceanEngineLogin, parseDevToolsActivePort, sanitizePageURL, sessionPaths } from '../scripts/browser-rpa-edge-session.js'
+import { inspectOceanEnginePages } from '../scripts/browser-rpa-session-probe.js'
 
 test('session files stay under LOCALAPPDATA and use the managed Default profile', () => {
   const localAppData = resolve('C:/Users/test/AppData/Local')
@@ -53,10 +54,18 @@ test('login check uses only the safe page location', () => {
   assert.equal(isLikelyOceanEngineLogin({ protocol: 'https:', host: 'open.oceanengine.com', pathname: '/' }), false)
 })
 
+test('session probe waits for a matching OceanEngine account URL', () => {
+  assert.equal(inspectOceanEnginePages(['edge://newtab/'], '1855554434276391').reason, 'oceanengine_page_missing')
+  assert.equal(inspectOceanEnginePages(['https://ad.oceanengine.com/login?aadvid=1855554434276391'], '1855554434276391').reason, 'login_required')
+  assert.equal(inspectOceanEnginePages(['https://ad.oceanengine.com/campaign?aadvid=2'], '1855554434276391').reason, 'account_mismatch')
+  assert.equal(inspectOceanEnginePages(['https://ad.oceanengine.com/campaign?aadvid=1855554434276391'], '1855554434276391').status, 'ready')
+})
+
 test('session check has no credential, storage, network, or page-write operation', () => {
   const source = [
     readFileSync(resolve(import.meta.dirname, '../scripts/browser-rpa-edge-session.ts'), 'utf8'),
     readFileSync(resolve(import.meta.dirname, '../scripts/browser-rpa-edge-attach-once.mjs'), 'utf8'),
+    readFileSync(resolve(import.meta.dirname, '../scripts/browser-rpa-session-probe.ts'), 'utf8'),
   ].join('\n')
   for (const forbidden of [
     /\.cookies\s*\(/,

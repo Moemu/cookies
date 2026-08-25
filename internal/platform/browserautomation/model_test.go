@@ -77,7 +77,7 @@ func TestPlatformOpenAPIExposesControlledRunWithoutCompileTimeBlockReason(t *tes
 		t.Fatal(err)
 	}
 	text := string(contents)
-	for _, fragment := range []string{"createBrowserRpaRun", "issueBrowserRpaFinalConfirmation", "BrowserRpaAuthorityBinding:", "BrowserRpaPromotionControl:", "BrowserRpaPromotionRestart:", "FINAL_CONFIRMATION_REQUIRED", "RESULT_RECONCILIATION_REQUIRED"} {
+	for _, fragment := range []string{"createBrowserRpaRun", "issueBrowserRpaFinalConfirmation", "checkBrowserRpaEdgeSession", "BrowserRpaEdgeSessionProbe:", "BrowserRpaAuthorityBinding:", "BrowserRpaPromotionControl:", "BrowserRpaPromotionRestart:", "FINAL_CONFIRMATION_REQUIRED", "RESULT_RECONCILIATION_REQUIRED"} {
 		if !strings.Contains(text, fragment) {
 			t.Fatalf("platform OpenAPI missing %q", fragment)
 		}

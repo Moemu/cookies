@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { CircleAlert, CircleCheck, Clock3, FileCheck2, Hand, ListChecks, MonitorCheck, Pause, Play, RefreshCw, Send, ShieldAlert, XCircle } from 'lucide-react'
 import { controlledExecutionApi, ControlledExecutionApiError } from './api'
-import type { BrowserRpaEvidence, BrowserRpaRun, BrowserRpaRunEvent, ControlledExecutionTransportState, ControlledExecutionWorkspace, RunnerV3Plan } from './model'
+import type { BrowserRpaEvidence, BrowserRpaRun, BrowserRpaRunEvent, ControlledExecutionTransportState, ControlledExecutionWorkspace, EdgeSessionProbe, RunnerV3Plan } from './model'
 import { isTerminalControlledExecutionState, presentControlledExecution, shortHash } from './presentation'
 import './browser-rpa-execution.css'
 
@@ -16,7 +16,7 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
   const [notice, setNotice] = useState('')
   const [actionPending, setActionPending] = useState(false)
   const [plan, setPlan] = useState<RunnerV3Plan>()
-  const [bindingCheckedAt, setBindingCheckedAt] = useState('')
+  const [sessionProbe, setSessionProbe] = useState<EdgeSessionProbe>()
   const [reviewed, setReviewed] = useState(false)
   const [isRefreshPending, startRefreshTransition] = useTransition()
   const requestId = useRef(0)
@@ -89,9 +89,10 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
     try {
       if (action === 'check') {
         const workspace = await controlledExecutionApi.getWorkspace(projectId, run.id)
+        const probe = await controlledExecutionApi.checkSession(projectId, run.id)
         setTransport({ kind: 'ready', workspace })
-        setBindingCheckedAt(new Date().toISOString())
-        setNotice(registeredBindingReady(workspace) ? '控制面登记一致。尚未连接本地 Edge；Prepare 将执行真实连接检查。' : '控制面登记不一致。请修复下方失败项。')
+        setSessionProbe(probe)
+        setNotice(registeredBindingReady(workspace) && probe.status === 'ready' ? 'Edge 会话可用。CDP、登录状态和广告账户均匹配。' : 'Edge 会话不可用。请修复下方失败项。')
       } else if (action === 'plan') {
         const nextPlan = await controlledExecutionApi.generatePlan(projectId, run.id)
         setPlan(nextPlan)
@@ -115,8 +116,8 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
         setReviewed(false)
         if (updated.state === 'environment_check') {
           setPlan(undefined)
-          setBindingCheckedAt('')
-          setNotice('当前对象已创建并回写平台 ID。请核对控制面登记，然后生成下一个对象计划。')
+          setSessionProbe(undefined)
+          setNotice('当前对象已创建并回写平台 ID。请重新检查 Edge 会话，然后生成下一个对象计划。')
         } else {
           setNotice('Submit 已执行。请检查平台结果和写后证据。')
         }
@@ -160,7 +161,7 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
     busy={actionPending || isRefreshPending}
     notice={notice}
     plan={plan}
-    bindingCheckedAt={bindingCheckedAt}
+    sessionProbe={sessionProbe}
     reviewed={reviewed}
     onReviewed={setReviewed}
     onWorkflow={runWorkflow}
@@ -169,12 +170,12 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
   />
 }
 
-function WorkspaceReady({ workspace, busy, notice, plan, bindingCheckedAt, reviewed, onReviewed, onWorkflow, onRefresh, onControl }: {
+function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed, onReviewed, onWorkflow, onRefresh, onControl }: {
   workspace: Extract<ControlledExecutionTransportState, { kind: 'ready' }>['workspace']
   busy: boolean
   notice: string
   plan: RunnerV3Plan | undefined
-  bindingCheckedAt: string
+  sessionProbe: EdgeSessionProbe | undefined
   reviewed: boolean
   onReviewed: (value: boolean) => void
   onWorkflow: (action: 'check' | 'plan' | 'prepare' | 'submit') => void
@@ -193,7 +194,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, bindingCheckedAt, revie
       <div>
         <span className="section-label">Controlled Browser RPA</span>
         <h2>受控执行中心</h2>
-        <p>按顺序核对控制面登记、生成计划、执行真实 Edge Prepare、复核差异，再使用一次性授权执行 Submit。</p>
+        <p>按顺序检查真实 Edge 会话、生成计划、执行 Prepare、复核差异，再使用一次性授权执行 Submit。</p>
       </div>
       <button className="secondary-button" onClick={onRefresh} disabled={busy}><RefreshCw size={15} />从服务端刷新</button>
     </header>
@@ -204,12 +205,12 @@ function WorkspaceReady({ workspace, busy, notice, plan, bindingCheckedAt, revie
       workspace={workspace}
       plan={plan}
       busy={busy}
-      bindingCheckedAt={bindingCheckedAt}
+      sessionProbe={sessionProbe}
       reviewed={reviewed}
       onReviewed={onReviewed}
       onWorkflow={onWorkflow}
     />
-    <SessionAndTargetPanel workspace={workspace} bindingCheckedAt={bindingCheckedAt} />
+    <SessionAndTargetPanel workspace={workspace} sessionProbe={sessionProbe} />
     {plan ? <PlanPanel plan={plan} /> : null}
     {evidence.length ? <ReadbackPanel evidence={evidence} /> : null}
     {evidence.length ? <CreatedObjectsPanel evidence={evidence} /> : null}
@@ -244,18 +245,18 @@ function WorkspaceReady({ workspace, busy, notice, plan, bindingCheckedAt, revie
   </section>
 }
 
-function ExecutionFlowPanel({ workspace, plan, busy, bindingCheckedAt, reviewed, onReviewed, onWorkflow }: {
+function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onReviewed, onWorkflow }: {
   workspace: ControlledExecutionWorkspace
   plan?: RunnerV3Plan
   busy: boolean
-  bindingCheckedAt: string
+  sessionProbe: EdgeSessionProbe | undefined
   reviewed: boolean
   onReviewed: (value: boolean) => void
   onWorkflow: (action: 'check' | 'plan' | 'prepare' | 'submit') => void
 }) {
   const { run, evidence, lease } = workspace
-  const checked = Boolean(bindingCheckedAt)
-  const bindingReady = checked && registeredBindingReady(workspace)
+  const sessionReady = Boolean(sessionProbe?.status === 'ready' && sessionProbe.cdp_available && sessionProbe.logged_in && sessionProbe.account_matched)
+  const bindingReady = registeredBindingReady(workspace) && sessionReady
   const actionSupported = runnerV3ActionSupported(run.authority.action)
   const planReady = Boolean(plan && plan.blocked_reasons.length === 0 && !plan.allow_remote_write)
   const prepared = ['awaiting_confirmation', 'submitting', 'verifying', 'succeeded', 'failed', 'partial', 'result_unknown'].includes(run.state)
@@ -264,7 +265,7 @@ function ExecutionFlowPanel({ workspace, plan, busy, bindingCheckedAt, reviewed,
   const canPrepare = bindingReady && actionSupported && planReady && (run.state === 'queued' || run.state === 'environment_check')
   const canSubmit = run.state === 'awaiting_confirmation' && prepared && reviewed && !drift && leaseReady
   const steps = [
-    { label: '核对控制面登记', done: bindingReady },
+    { label: '检查真实 Edge 会话', done: bindingReady },
     { label: '生成 Runner v3 计划', done: planReady },
     { label: '执行 Prepare', done: prepared },
     { label: '复核回读与差异', done: prepared && reviewed },
@@ -274,7 +275,7 @@ function ExecutionFlowPanel({ workspace, plan, busy, bindingCheckedAt, reviewed,
     <header><div><span className="section-label">Operation flow</span><h3>执行操作闭环</h3></div><small>Submit 会跨越最终点击边界。确认令牌仅在当前请求内存中存在。</small></header>
     <ol>{steps.map((step, index) => <li key={step.label} className={step.done ? 'complete' : ''}><span>{step.done ? <CircleCheck size={15} /> : index + 1}</span>{step.label}</li>)}</ol>
     <div className="controlled-execution-flow-actions">
-      <button className="secondary-button" disabled={busy || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('check')}><MonitorCheck size={15} />核对登记</button>
+      <button className="secondary-button" disabled={busy || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('check')}><MonitorCheck size={15} />检查 Edge 会话</button>
       <button className="secondary-button" disabled={busy || !bindingReady || !actionSupported || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('plan')}><ListChecks size={15} />生成计划</button>
       <button className="secondary-button" disabled={busy || !canPrepare} onClick={() => onWorkflow('prepare')}><Play size={15} />执行 Prepare</button>
     </div>
@@ -288,19 +289,22 @@ function ExecutionFlowPanel({ workspace, plan, busy, bindingCheckedAt, reviewed,
   </section>
 }
 
-function SessionAndTargetPanel({ workspace, bindingCheckedAt }: { workspace: ControlledExecutionWorkspace; bindingCheckedAt: string }) {
+function SessionAndTargetPanel({ workspace, sessionProbe }: { workspace: ControlledExecutionWorkspace; sessionProbe: EdgeSessionProbe | undefined }) {
   const { run, environment, profile, policy } = workspace
   const accountMatches = environment.account_id === run.account_id && profile.account_id === run.account_id && policy.account_id === run.account_id
   const projectAllowed = !run.authority.parent_platform_project_id || policy.allowed_platform_project_ids.includes(run.authority.parent_platform_project_id)
-  const ready = registeredBindingReady(workspace)
+  const registered = registeredBindingReady(workspace)
+  const ready = registered && sessionProbe?.status === 'ready'
   return <section className="controlled-execution-context" aria-label="Edge 登记和目标">
-    <article className={ready ? 'ready' : 'blocked'}><header><MonitorCheck size={18} /><b>控制面 Edge 登记</b></header><dl>
-      <div><dt>登记状态</dt><dd>{bindingCheckedAt ? ready ? '一致' : '不一致' : '等待核对'}</dd></div>
+    <article className={ready ? 'ready' : 'blocked'}><header><MonitorCheck size={18} /><b>真实 Edge 会话</b></header><dl>
+      <div><dt>控制面登记</dt><dd>{registered ? '一致' : '不一致'}</dd></div>
       <div><dt>环境</dt><dd>{environment.mode} · Edge {environment.browser_version}</dd></div>
       <div><dt>Profile</dt><dd>{profile.state}</dd></div>
       <div><dt>登记账户一致</dt><dd>{accountMatches ? '是' : '否'}</dd></div>
-      <div><dt>真实 Edge</dt><dd>尚未连接；Prepare 时检查</dd></div>
-      {bindingCheckedAt ? <div><dt>核对时间</dt><dd>{formatTime(bindingCheckedAt)}</dd></div> : null}
+      <div><dt>DevTools WebSocket</dt><dd>{sessionProbe ? sessionProbe.cdp_available ? '可用' : '不可用' : '等待检查'}</dd></div>
+      <div><dt>巨量页面已登录</dt><dd>{sessionProbe ? sessionProbe.logged_in ? '是' : '否' : '等待检查'}</dd></div>
+      <div><dt>页面账户匹配</dt><dd>{sessionProbe ? sessionProbe.account_matched ? '是' : '否' : '等待检查'}</dd></div>
+      {sessionProbe ? <><div><dt>结果</dt><dd>{sessionProbeReason(sessionProbe.reason)}</dd></div><div><dt>检查时间</dt><dd>{formatTime(sessionProbe.checked_at)}</dd></div></> : null}
     </dl></article>
     <article className={projectAllowed ? 'ready' : 'blocked'}><header><FileCheck2 size={18} /><b>平台目标</b></header><dl>
       <div><dt>当前广告账户</dt><dd>{run.account_id}</dd></div>
@@ -534,6 +538,16 @@ function WorkspaceState({ kind, message, onRetry }: { kind: 'loading' | 'empty' 
 
 function controlNotice(action: 'pause' | 'resume' | 'cancel' | 'takeover' | 'release_takeover') {
   return ({ pause: '已请求暂停执行流程；这不会改变平台推广单元状态。', resume: '已请求恢复执行流程；服务端将先重新识别页面与账户。', cancel: '已请求取消；证据与审计记录保持可读。', takeover: '已请求人工接管；请等待服务端确认租约状态。', release_takeover: '已请求释放人工接管。' })[action]
+}
+
+function sessionProbeReason(reason: EdgeSessionProbe['reason']) {
+  return ({
+    session_ready: '会话可用',
+    cdp_unavailable: 'DevTools WebSocket 不可用',
+    oceanengine_page_missing: '未找到巨量引擎页面',
+    login_required: '巨量引擎需要登录',
+    account_mismatch: '页面广告账户不匹配',
+  } as const)[reason]
 }
 
 function formatMinor(value: number) {

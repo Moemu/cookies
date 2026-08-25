@@ -44,6 +44,7 @@ type AdapterConfig struct {
 	WorkDir             string
 	EvidenceRoot        string
 	EdgeSessionFile     string
+	SessionProbeScript  string
 	AuthorityStateRoot  string
 	V3Compiler          V3PlanCompiler
 	PrepareTimeout      time.Duration
@@ -69,6 +70,7 @@ func NewPlaywrightRPAAdapter(cfg AdapterConfig, store browserautomation.Reposito
 		Heartbeat:          heartbeat,
 		EvidenceRoot:       cfg.EvidenceRoot,
 		EdgeSessionFile:    cfg.EdgeSessionFile,
+		SessionProbeScript: cfg.SessionProbeScript,
 		AuthorityStateRoot: cfg.AuthorityStateRoot,
 		FallbackCDP:        cfg.FallbackCDPEndpoint,
 	}
@@ -86,12 +88,27 @@ type PlaywrightRPAAdapter struct {
 	Heartbeat          LeaseHeartbeater
 	EvidenceRoot       string
 	EdgeSessionFile    string
+	SessionProbeScript string
 	AuthorityStateRoot string
 	FallbackCDP        string
 }
 
 var _ browserautomation.WorkerAdapter = PlaywrightRPAAdapter{}
 var _ browserautomation.WorkerPlanAdapter = PlaywrightRPAAdapter{}
+var _ browserautomation.WorkerSessionProbeAdapter = PlaywrightRPAAdapter{}
+
+func (a PlaywrightRPAAdapter) CheckSession(ctx context.Context, run browserautomation.BrowserRpaRun) (browserautomation.EdgeSessionProbe, error) {
+	if _, _, err := a.resolveSession(ctx, run); err != nil {
+		return browserautomation.EdgeSessionProbe{}, err
+	}
+	if a.protocol() != ProtocolV3 {
+		return browserautomation.EdgeSessionProbe{}, fmt.Errorf("%w: Edge session probe requires Runner v3", browserautomation.ErrEnvironmentUnavailable)
+	}
+	return sessionProbeRunner{
+		Command: a.Runner.Command, ScriptPath: a.SessionProbeScript, WorkDir: a.Runner.WorkDir,
+		SessionFile: a.EdgeSessionFile, Timeout: a.Runner.PrepareTimeout,
+	}.Run(ctx, run.AccountID)
+}
 
 func (a PlaywrightRPAAdapter) Plan(ctx context.Context, run browserautomation.BrowserRpaRun) (json.RawMessage, error) {
 	_, policy, err := a.resolveSession(ctx, run)

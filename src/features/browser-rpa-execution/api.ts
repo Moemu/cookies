@@ -7,6 +7,7 @@ import type {
   BrowserRpaRunEvent,
   BrowserRpaSitePolicy,
   ControlledExecutionWorkspace,
+  EdgeSessionProbe,
   IssuedFinalConfirmation,
   RunnerV3Plan,
 } from './model'
@@ -51,6 +52,9 @@ export const controlledExecutionApi = {
 
   generatePlan(projectId: string, runId: string) {
     return request<RunnerV3Plan>(runPath(projectId, runId, ':plan'), { method: 'POST' })
+  },
+  checkSession(projectId: string, runId: string) {
+    return request<EdgeSessionProbe>(runPath(projectId, runId, ':check-session'), { method: 'POST' })
   },
   acquireLease(projectId: string, runId: string, expectedVersion: number) {
     return request<{ run: BrowserRpaRun; lease: BrowserRpaLease }>(`${runPath(projectId, runId)}/leases`, {

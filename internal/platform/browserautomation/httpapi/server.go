@@ -83,6 +83,12 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	r.SetPathValue("run_id", parts[0])
 	r.SetPathValue("action", parts[1])
 	switch parts[1] {
+	case "check-session":
+		if !s.automatedWorker {
+			writeError(w, http.StatusNotFound, "automated worker is not mounted")
+			return
+		}
+		s.checkSession(w, r)
 	case "plan":
 		if !s.automatedWorker {
 			writeError(w, http.StatusNotFound, "automated worker is not mounted")
@@ -106,6 +112,15 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusNotFound, "not found")
 	}
+}
+
+func (s *Server) checkSession(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.execute")
+	if !ok {
+		return
+	}
+	value, err := s.worker.CheckSession(r.Context(), actor.OrganizationID, project, r.PathValue("run_id"))
+	writeResult(w, value, err)
 }
 
 func (s *Server) plan(w http.ResponseWriter, r *http.Request) {

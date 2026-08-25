@@ -63,6 +63,7 @@ type BrowserRPA struct {
 	ScriptPath            string
 	EvidenceRoot          string
 	EdgeSessionFile       string
+	SessionProbeScript    string
 	AuthorityStateRoot    string
 	PrepareTimeoutSeconds int
 	SubmitTimeoutSeconds  int
@@ -631,6 +632,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			ScriptPath:            valueOr(lookup, "COOKIES_BROWSER_RPA_SCRIPT", browserRpaScript),
 			EvidenceRoot:          valueOr(lookup, "COOKIES_BROWSER_RPA_EVIDENCE_ROOT", ".data/browser-rpa-evidence"),
 			EdgeSessionFile:       valueOr(lookup, "COOKIES_BROWSER_RPA_EDGE_SESSION_FILE", filepath.Join(valueOr(lookup, "LOCALAPPDATA", ".data"), "cookies", "browser-rpa", "session.json")),
+			SessionProbeScript:    valueOr(lookup, "COOKIES_BROWSER_RPA_SESSION_PROBE_SCRIPT", "scripts/browser-rpa-session-probe.ts"),
 			AuthorityStateRoot:    valueOr(lookup, "COOKIES_BROWSER_RPA_AUTHORITY_STATE_ROOT", filepath.Join(valueOr(lookup, "LOCALAPPDATA", ".data"), "cookies", "browser-rpa", "authority-consumed")),
 			PrepareTimeoutSeconds: intValueOr(lookup, "COOKIES_BROWSER_RPA_PREPARE_TIMEOUT_SECONDS", 180),
 			SubmitTimeoutSeconds:  intValueOr(lookup, "COOKIES_BROWSER_RPA_SUBMIT_TIMEOUT_SECONDS", 300),

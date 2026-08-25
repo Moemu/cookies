@@ -174,6 +174,17 @@ export type BrowserRpaLease = {
   released_at?: string
 }
 
+export type EdgeSessionProbe = {
+  schema_version: 'browser-rpa-edge-session-probe/v1'
+  checked_at: string
+  status: 'ready' | 'blocked'
+  reason: 'session_ready' | 'cdp_unavailable' | 'oceanengine_page_missing' | 'login_required' | 'account_mismatch'
+  cdp_available: boolean
+  oceanengine_page_available: boolean
+  logged_in: boolean
+  account_matched: boolean
+}
+
 export type RunnerV3PlanStep = {
   id: string
   kind: string

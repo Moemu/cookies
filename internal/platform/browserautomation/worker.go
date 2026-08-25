@@ -55,6 +55,32 @@ type WorkerPlanAdapter interface {
 	Plan(context.Context, BrowserRpaRun) (json.RawMessage, error)
 }
 
+const EdgeSessionProbeSchemaV1 = "browser-rpa-edge-session-probe/v1"
+
+// EdgeSessionProbe contains only safe session facts. It never exposes a CDP
+// endpoint, page URL, browser target, cookie, or account value from the page.
+type EdgeSessionProbe struct {
+	SchemaVersion            string    `json:"schema_version"`
+	CheckedAt                time.Time `json:"checked_at"`
+	Status                   string    `json:"status"`
+	Reason                   string    `json:"reason"`
+	CDPAvailable             bool      `json:"cdp_available"`
+	OceanEnginePageAvailable bool      `json:"oceanengine_page_available"`
+	LoggedIn                 bool      `json:"logged_in"`
+	AccountMatched           bool      `json:"account_matched"`
+}
+
+func (p EdgeSessionProbe) Ready() bool {
+	return p.Status == "ready" && p.CDPAvailable && p.OceanEnginePageAvailable && p.LoggedIn && p.AccountMatched
+}
+
+// WorkerSessionProbeAdapter is optional for legacy adapters. The production
+// Runner v3 adapter implements it. Worker.Prepare repeats the probe so a UI
+// result cannot become an unsafe, stale authorization.
+type WorkerSessionProbeAdapter interface {
+	CheckSession(context.Context, BrowserRpaRun) (EdgeSessionProbe, error)
+}
+
 // CreatedObjectRecorder saves a reconciled platform identity before the
 // worker advances to the next staged form. A false complete value means that
 // the same run has another approved form to execute.
@@ -65,6 +91,15 @@ type CreatedObjectRecorder interface {
 type DeterministicFakeAdapter struct {
 	Outcome   WorkerOutcome
 	AccountID string
+}
+
+func (a DeterministicFakeAdapter) CheckSession(_ context.Context, run BrowserRpaRun) (EdgeSessionProbe, error) {
+	matched := a.AccountID == "" || a.AccountID == run.AccountID
+	status, reason := "ready", "session_ready"
+	if !matched {
+		status, reason = "blocked", "account_mismatch"
+	}
+	return EdgeSessionProbe{SchemaVersion: EdgeSessionProbeSchemaV1, CheckedAt: time.Now().UTC(), Status: status, Reason: reason, CDPAvailable: true, OceanEnginePageAvailable: true, LoggedIn: true, AccountMatched: matched}, nil
 }
 
 func (a DeterministicFakeAdapter) Prepare(_ context.Context, run BrowserRpaRun) (PreparedPage, error) {
@@ -121,6 +156,18 @@ type Worker struct {
 	Adapter WorkerAdapter
 }
 
+func (w Worker) CheckSession(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) (EdgeSessionProbe, error) {
+	run, err := w.Service.Repository.GetRun(ctx, org, project, runID)
+	if err != nil {
+		return EdgeSessionProbe{}, err
+	}
+	probe, ok := w.Adapter.(WorkerSessionProbeAdapter)
+	if !ok {
+		return EdgeSessionProbe{}, ErrEnvironmentUnavailable
+	}
+	return probe.CheckSession(ctx, run)
+}
+
 func (w Worker) Plan(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) (json.RawMessage, error) {
 	run, err := w.Service.Repository.GetRun(ctx, org, project, runID)
 	if err != nil {
@@ -156,6 +203,16 @@ func (w Worker) Prepare(ctx context.Context, org contract.OrganizationID, projec
 	run, err = w.Service.TransitionRun(ctx, org, project, runID, run.Version, RunPreparing, "")
 	if err != nil {
 		return BrowserRpaRun{}, err
+	}
+	if probeAdapter, ok := w.Adapter.(WorkerSessionProbeAdapter); ok {
+		probe, probeErr := probeAdapter.CheckSession(ctx, run)
+		if probeErr != nil || !probe.Ready() {
+			reason := BlockPageDrift
+			if probe.Reason == "account_mismatch" || errors.Is(probeErr, ErrAccountMismatch) {
+				reason = BlockAccountMismatch
+			}
+			return w.Service.TransitionRun(ctx, org, project, runID, run.Version, RunFailed, reason)
+		}
 	}
 	prepared, err := w.Adapter.Prepare(ctx, run)
 	if err != nil {

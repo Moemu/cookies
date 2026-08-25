@@ -23,6 +23,7 @@ test('controlled execution API supports the complete Runner v3 browser flow', as
     if (url.includes('/site-policies/')) value = { id: 'policy_1', account_id: run.account_id, allowed_page_kinds: ['promotion_create'], allowed_platform_project_ids: ['project-platform-1'], version: 1 }
     if (url.includes('/leases/')) value = { id: 'lease_1', run_id: 'run_1', holder: 'user', fencing_token: 3, version: 2, expires_at: '2026-08-25T12:00:00Z', heartbeat_deadline: '2026-08-25T12:00:00Z' }
     if (url.endsWith(':plan')) value = { schema_version: 'oceanengine-playwright-rpa-plan/v3', plan_kind: 'promotion_create', mode: 'prepare', status: 'ready', steps: [], blocked_reasons: [], allow_remote_write: false, maximum_final_clicks: 0 }
+    if (url.endsWith(':check-session')) value = { schema_version: 'browser-rpa-edge-session-probe/v1', checked_at: '2026-08-25T10:00:00Z', status: 'ready', reason: 'session_ready', cdp_available: true, oceanengine_page_available: true, logged_in: true, account_matched: true }
     if (url.endsWith('/confirmations')) value = { confirmation: { id: 'confirmation_1' }, token: 'memory-only-token' }
     return new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }
@@ -34,12 +35,15 @@ test('controlled execution API supports the complete Runner v3 browser flow', as
     assert.equal(workspace.lease?.fencing_token, 3)
 
     await controlledExecutionApi.generatePlan('project_1', 'run_1')
+    const probe = await controlledExecutionApi.checkSession('project_1', 'run_1')
     await controlledExecutionApi.heartbeatLease('project_1', 'run_1', workspace.lease!)
     await controlledExecutionApi.prepare('project_1', 'run_1')
     const confirmation = await controlledExecutionApi.confirm('project_1', run as never)
     await controlledExecutionApi.submit('project_1', run as never, workspace.lease!, confirmation)
 
     assert.equal(calls.find(call => call.url.endsWith(':plan'))?.method, 'POST')
+    assert.equal(calls.find(call => call.url.endsWith(':check-session'))?.method, 'POST')
+    assert.equal(probe.account_matched, true)
     assert.match(calls.find(call => call.url.endsWith('/confirmations'))?.body ?? '', /"binding_hash":"a{64}"/)
     const submit = calls.find(call => call.url.endsWith(':submit'))
     assert.match(submit?.body ?? '', /"fencing_token":3/)
@@ -51,9 +55,10 @@ test('controlled execution API supports the complete Runner v3 browser flow', as
   }
 })
 
-test('controlled execution UI does not report a registry check as a live Edge check', () => {
+test('controlled execution UI reports the real Edge probe and keeps unsupported actions blocked', () => {
   const source = readFileSync(resolve(import.meta.dirname, '../src/features/browser-rpa-execution/BrowserRpaExecutionWorkspace.tsx'), 'utf8')
-  assert.match(source, /控制面登记一致。尚未连接本地 Edge/)
+  assert.match(source, /Edge 会话可用。CDP、登录状态和广告账户均匹配/)
+  assert.match(source, /DevTools WebSocket/)
   assert.match(source, /当前动作没有 Runner v3 单表单协议/)
-  assert.doesNotMatch(source, /Edge 会话绑定有效/)
+  assert.doesNotMatch(source, /尚未连接；Prepare 时检查/)
 })

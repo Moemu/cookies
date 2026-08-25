@@ -172,6 +172,22 @@ func TestPlanPreviewAndLeaseReadSupportTheFrontendExecutionFlow(t *testing.T) {
 	}
 }
 
+func TestSessionCheckUsesTheAutomatedWorkerAndReturnsSafeFacts(t *testing.T) {
+	repo := browserautomation.NewMemoryRepository()
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	run := validHTTPRun(now)
+	_, _, _ = repo.CreateRun(context.Background(), run)
+	service := browserautomation.Service{Repository: repo, Now: func() time.Time { return now }}
+	server := New(service, browserautomation.Worker{Service: service, Adapter: browserautomation.DeterministicFakeAdapter{}}, projectAuthorizer{})
+	request := httptest.NewRequest(http.MethodPost, "/api/platform/v1/browser-rpa/projects/project_1/runs/run_1:check-session", nil)
+	request = request.WithContext(contract.WithRequestContext(request.Context(), contract.RequestContext{RequestID: "req", TraceID: "trace", Actor: contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user"}, Scopes: []contract.Scope{"delivery.execute"}}}))
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"account_matched":true`) || strings.Contains(response.Body.String(), "cdp_endpoint") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestKillSwitchAdministrationRequiresServicePrincipalAndRemainsReadable(t *testing.T) {
 	repo := browserautomation.NewMemoryRepository()
 	service := browserautomation.Service{Repository: repo, Now: func() time.Time { return time.Date(2026, 8, 13, 9, 0, 0, 0, time.UTC) }}

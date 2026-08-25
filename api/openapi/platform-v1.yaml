@@ -404,6 +404,16 @@ paths:
       responses:
         '200': {description: Prepared run., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaRun'}}}}
         '409': {$ref: '#/components/responses/Conflict'}
+  /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:check-session:
+    parameters:
+    - $ref: '#/components/parameters/ProjectID'
+    - $ref: '#/components/parameters/BrowserRpaRunID'
+    post:
+      operationId: checkBrowserRpaEdgeSession
+      summary: Read the local Edge CDP, login, and account-match state without changing the page.
+      responses:
+        '200': {description: Safe local Edge session facts., content: {application/json: {schema: {$ref: '#/components/schemas/BrowserRpaEdgeSessionProbe'}}}}
+        '409': {$ref: '#/components/responses/Conflict'}
   /platform/v1/browser-rpa/projects/{project_id}/runs/{run_id}:submit:
     parameters:
     - $ref: '#/components/parameters/ProjectID'
@@ -3566,6 +3576,19 @@ components:
         created_by: {type: string}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    BrowserRpaEdgeSessionProbe:
+      type: object
+      additionalProperties: false
+      required: [schema_version, checked_at, status, reason, cdp_available, oceanengine_page_available, logged_in, account_matched]
+      properties:
+        schema_version: {type: string, const: browser-rpa-edge-session-probe/v1}
+        checked_at: {type: string, format: date-time}
+        status: {type: string, enum: [ready, blocked]}
+        reason: {type: string, enum: [session_ready, cdp_unavailable, oceanengine_page_missing, login_required, account_mismatch]}
+        cdp_available: {type: boolean}
+        oceanengine_page_available: {type: boolean}
+        logged_in: {type: boolean}
+        account_matched: {type: boolean}
     CreateBrowserRpaRunRequest:
       type: object
       additionalProperties: false
