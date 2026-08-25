@@ -107,6 +107,14 @@ func (a PlaywrightRPAAdapter) Prepare(ctx context.Context, run browserautomation
 			return browserautomation.PreparedPage{}, fmt.Errorf("%w: %v", browserautomation.ErrPageDrift, compileErr)
 		}
 		result, err = a.sessionRunner(env).RunV3(ctx, plan, "", a.AuthorityStateRoot)
+		if err == nil && result.Outcome == OutcomeSuccess {
+			page := preparedPageFromResult(result)
+			appendPlannedDiff(plan, &page)
+			if err := completePrepareReadback(run, result, &page); err != nil {
+				return browserautomation.PreparedPage{}, err
+			}
+			return page, nil
+		}
 	} else {
 		plan, compileErr := a.Compiler.CompilePrepare(run, policy)
 		if compileErr != nil {
@@ -126,6 +134,39 @@ func (a PlaywrightRPAAdapter) Prepare(ctx context.Context, run browserautomation
 		return browserautomation.PreparedPage{}, err
 	}
 	return page, nil
+}
+
+func appendPlannedDiff(payload json.RawMessage, page *browserautomation.PreparedPage) {
+	var plan struct {
+		Steps []struct {
+			Kind       string `json:"kind"`
+			FieldKey   string `json:"field_key"`
+			Operation  string `json:"operation"`
+			Value      any    `json:"value"`
+			ValueState string `json:"value_state"`
+		} `json:"steps"`
+	}
+	if json.Unmarshal(payload, &plan) != nil {
+		return
+	}
+	if page.Readback == nil {
+		page.Readback = map[string]string{}
+	}
+	seen := make(map[string]struct{}, len(page.DiffKeys))
+	for _, key := range page.DiffKeys {
+		seen[key] = struct{}{}
+	}
+	for _, step := range plan.Steps {
+		if step.Kind != "field_action" || step.FieldKey == "" || step.ValueState != "provided" {
+			continue
+		}
+		if _, ok := seen[step.FieldKey]; !ok {
+			page.DiffKeys = append(page.DiffKeys, step.FieldKey)
+			seen[step.FieldKey] = struct{}{}
+		}
+		page.Readback["plan_diff."+step.FieldKey+".operation"] = step.Operation
+		page.Readback["plan_diff."+step.FieldKey+".target"] = stringifyReadback(step.Value)
+	}
 }
 
 // completePrepareReadback promotes the runner-observed object identity into

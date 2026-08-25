@@ -22,9 +22,31 @@ The raw confirmation token stays in process memory. It is not stored in run
 evidence. Runner v3 writes one authority-consumption record below
 `COOKIES_BROWSER_RPA_AUTHORITY_STATE_ROOT`.
 
-The current v3 control-plane converter supports one promotion budget edit.
-The run must bind an exact numeric account, project, and promotion ID. The
-site policy must allow `promotion_edit`.
+The v3 control-plane converter supports one promotion budget edit and one
+promotion create in a bound existing project. Each run binds exact numeric
+account and platform object IDs. The site policy must allow the exact form.
+
+## Delivery configuration planning
+
+`plancompile.CompileConfigurationV3` converts one immutable OceanEngine
+`PlatformConfiguration` into an ordered form-plan set. The set contains one
+project form and one form for each promotion.
+
+- A missing confirmed platform binding produces a create plan.
+- A confirmed numeric platform binding produces an edit plan.
+- A promotion under a new project depends on the created project platform ID.
+- Each form includes the planned field differences shown before confirmation.
+- Budget, bid, Shanghai schedule, and next-day limits are checked first.
+- Material, image, landing-page, product, brand, and category references must be resolved.
+- Intent-owned references must also exist in the bound DeliveryIntent.
+- Only the calibrated ecommerce short-video and image-text account path is accepted.
+
+`V3BindingsFromMappings` accepts confirmed `PlatformEntityMapping` records only.
+It keeps Cookies draft IDs separate from OceanEngine object IDs.
+
+One Browser RPA run executes one form. A project plus its promotions must use
+staged controlled runs. The compiler rejects a compound remote write before
+Edge receives a plan.
 
 The following actions stop before browser execution:
 

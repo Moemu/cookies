@@ -16,7 +16,7 @@ import (
 type stubV3Compiler struct{}
 
 func (stubV3Compiler) CompilePrepareV3(context.Context, browserautomation.BrowserRpaRun, browserautomation.SitePolicy) (json.RawMessage, error) {
-	return json.RawMessage(`{"schema_version":"oceanengine-playwright-rpa-plan/v3","plan_kind":"promotion_edit","mode":"prepare","steps":[{"id":"identify"}]}`), nil
+	return json.RawMessage(`{"schema_version":"oceanengine-playwright-rpa-plan/v3","plan_kind":"promotion_edit","mode":"prepare","steps":[{"id":"identify"},{"id":"budget","kind":"field_action","field_key":"promotion.daily_budget","operation":"fill_money","value":"300.00","value_state":"provided"}]}`), nil
 }
 
 func (stubV3Compiler) CompileSubmitV3(context.Context, browserautomation.BrowserRpaRun, browserautomation.ControlledActionAttempt, browserautomation.SitePolicy, string) (json.RawMessage, error) {
@@ -191,6 +191,9 @@ func TestAdapterRunsV3AndProjectsObjectAndFieldReconciliation(t *testing.T) {
 	}
 	if page.Readback["platform_object_id"] != "promotion_v3_test" || page.Readback["field_reconciliation_status"] != "matched" {
 		t.Fatalf("v3 prepare readback = %#v", page.Readback)
+	}
+	if len(page.DiffKeys) != 1 || page.DiffKeys[0] != "promotion.daily_budget" || page.Readback["plan_diff.promotion.daily_budget.target"] != "300.00" {
+		t.Fatalf("v3 prepare plan diff = %#v / %#v", page.DiffKeys, page.Readback)
 	}
 	outcome, page, err := adapter.Submit(context.Background(), run, browserautomation.ControlledActionAttempt{}, "token")
 	if err != nil || outcome != browserautomation.WorkerSuccess || page.Readback["platform_object_id"] != "promotion_v3_test" {

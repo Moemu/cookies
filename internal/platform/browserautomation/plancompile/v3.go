@@ -126,13 +126,21 @@ func (c V3Compiler) CompileSubmitV3(ctx context.Context, run browserautomation.B
 		issuedAt = c.now().UTC()
 	}
 	tokenDigest := sha256.Sum256([]byte(confirmToken))
+	scheduleDate := issuedAt.In(time.FixedZone("CST", 8*60*60)).Format(time.DateOnly)
+	if run.Authority.Action == "create_project_and_promotions" || run.Authority.Action == "create_promotions_in_existing_project" {
+		version, loadErr := c.Source.GetPlanVersion(ctx, run.OrganizationID, run.ProjectID, run.Authority.PlanID, run.Authority.PlanVersion)
+		if loadErr != nil || version.PlatformConfiguration == nil || version.PlatformConfiguration.Payload.OceanEngine == nil || version.PlatformConfiguration.Payload.OceanEngine.Project == nil {
+			return nil, fmt.Errorf("load schedule for execution authority")
+		}
+		scheduleDate = version.PlatformConfiguration.Payload.OceanEngine.Project.Schedule.StartAt.In(time.FixedZone("CST", 8*60*60)).Format(time.DateOnly)
+	}
 	plan.ExecutionAuthority = &v3ExecutionAuthority{
 		SchemaVersion: "browser-rpa-execution-authority/v1", AuthorityID: attempt.ID,
 		PlanSHA256: planHash, ConfirmTokenSHA256: hex.EncodeToString(tokenDigest[:]),
 		IssuedAt: issuedAt.Format(time.RFC3339Nano), ExpiresAt: issuedAt.Add(10 * time.Minute).Format(time.RFC3339Nano),
 		AccountReference: plan.AccountReference, PermittedPlanKind: plan.PlanKind,
 		MaximumMoneyCNY: run.Authority.BudgetLimitMinor / 100,
-		ScheduleDate:    issuedAt.In(time.FixedZone("CST", 8*60*60)).Format(time.DateOnly), MaximumFinalClicks: 1,
+		ScheduleDate:    scheduleDate, MaximumFinalClicks: 1,
 	}
 	return json.Marshal(plan)
 }
@@ -141,14 +149,8 @@ func (c V3Compiler) preparePlan(ctx context.Context, run browserautomation.Brows
 	if c.Source == nil || run.Authority.PlanID == "" || run.Authority.PlanVersion < 1 {
 		return v3Plan{}, fmt.Errorf("run has no immutable delivery plan binding")
 	}
-	if run.Authority.Action != "update_promotion_budget" || run.Authority.PromotionMutation == nil {
+	if !slices.Contains([]string{"create_project_and_promotions", "create_promotions_in_existing_project", "update_promotion_budget"}, run.Authority.Action) {
 		return v3Plan{}, fmt.Errorf("action %q has no Runner v3 one-form path", run.Authority.Action)
-	}
-	if !numericReference(run.AccountID) || !numericReference(run.Authority.TargetPlatformObjectID) || !numericReference(run.Authority.ParentPlatformProjectID) {
-		return v3Plan{}, fmt.Errorf("Runner v3 needs exact numeric account, promotion, and parent project references")
-	}
-	if !slices.Contains(policy.AllowedPageKinds, v3PromotionEdit) || !slices.Contains(policy.AllowedPlatformProjects, run.Authority.ParentPlatformProjectID) || len(policy.AllowedHosts) == 0 || len(policy.AllowedProtocols) == 0 {
-		return v3Plan{}, fmt.Errorf("site policy does not allow the promotion edit form")
 	}
 	version, err := c.Source.GetPlanVersion(ctx, run.OrganizationID, run.ProjectID, run.Authority.PlanID, run.Authority.PlanVersion)
 	if err != nil {
@@ -160,6 +162,51 @@ func (c V3Compiler) preparePlan(ctx context.Context, run browserautomation.Brows
 	configuration := version.PlatformConfiguration.Payload.OceanEngine
 	if configuration == nil || configuration.Project == nil {
 		return v3Plan{}, fmt.Errorf("bound delivery configuration has no OceanEngine project")
+	}
+	if configuration.Project.AccountReference.State != delivery.ReferenceResolved || configuration.Project.AccountReference.ID != run.AccountID {
+		return v3Plan{}, fmt.Errorf("configuration account path does not match the authorized account")
+	}
+	if len(policy.AllowedHosts) == 0 || len(policy.AllowedProtocols) == 0 {
+		return v3Plan{}, fmt.Errorf("site policy has no allowed OceanEngine origin")
+	}
+	switch run.Authority.Action {
+	case "create_promotions_in_existing_project":
+		if !numericReference(run.AccountID) || !numericReference(run.Authority.ParentPlatformProjectID) || !slices.Contains(policy.AllowedPageKinds, "promotion_create") || !slices.Contains(policy.AllowedPlatformProjects, run.Authority.ParentPlatformProjectID) {
+			return v3Plan{}, fmt.Errorf("site policy does not allow the bound promotion create form")
+		}
+		if len(configuration.Promotions) != 1 {
+			return v3Plan{}, fmt.Errorf("one controlled run requires exactly one promotion form; configuration has %d", len(configuration.Promotions))
+		}
+		set, compileErr := CompileConfigurationV3(*version.PlatformConfiguration, version.DeliveryIntent, run.AccountID, V3ObjectBindings{ProjectPlatformID: run.Authority.ParentPlatformProjectID}, c.now())
+		if compileErr != nil {
+			return v3Plan{}, compileErr
+		}
+		return decodePlannedForm(set.Forms[1])
+	case "create_project_and_promotions":
+		set, compileErr := CompileConfigurationV3(*version.PlatformConfiguration, version.DeliveryIntent, run.AccountID, V3ObjectBindings{}, c.now())
+		if compileErr != nil {
+			return v3Plan{}, compileErr
+		}
+		if len(set.Forms) != 1 {
+			return v3Plan{}, fmt.Errorf("project and promotion creation needs staged controlled runs; generated %d dependent forms", len(set.Forms))
+		}
+		if !slices.Contains(policy.AllowedPageKinds, "project_create") {
+			return v3Plan{}, fmt.Errorf("site policy does not allow the project create form")
+		}
+		return decodePlannedForm(set.Forms[0])
+	case "update_promotion_budget":
+		// Continue with the exact one-field edit contract below.
+	default:
+		return v3Plan{}, fmt.Errorf("action %q has no Runner v3 one-form path", run.Authority.Action)
+	}
+	if run.Authority.PromotionMutation == nil {
+		return v3Plan{}, fmt.Errorf("promotion budget action has no mutation binding")
+	}
+	if !numericReference(run.AccountID) || !numericReference(run.Authority.TargetPlatformObjectID) || !numericReference(run.Authority.ParentPlatformProjectID) {
+		return v3Plan{}, fmt.Errorf("Runner v3 needs exact numeric account, promotion, and parent project references")
+	}
+	if !slices.Contains(policy.AllowedPageKinds, v3PromotionEdit) || !slices.Contains(policy.AllowedPlatformProjects, run.Authority.ParentPlatformProjectID) {
+		return v3Plan{}, fmt.Errorf("site policy does not allow the promotion edit form")
 	}
 	parent, err := parentContext(*configuration.Project)
 	if err != nil {
@@ -184,10 +231,24 @@ func (c V3Compiler) preparePlan(ctx context.Context, run browserautomation.Brows
 	}, nil
 }
 
+func decodePlannedForm(form V3PlannedForm) (v3Plan, error) {
+	var plan v3Plan
+	if err := json.Unmarshal(form.Plan, &plan); err != nil {
+		return v3Plan{}, fmt.Errorf("decode generated form plan: %w", err)
+	}
+	if plan.Status != "ready" || len(plan.BlockedReasons) != 0 {
+		return v3Plan{}, fmt.Errorf("generated form plan is blocked: %s", strings.Join(plan.BlockedReasons, ","))
+	}
+	return plan, nil
+}
+
 func parentContext(project delivery.OceanEngineProjectDraft) (v3ParentContext, error) {
 	optimization := ""
 	if project.OptimizationTargetReference != nil {
-		optimization = strings.TrimSpace(project.OptimizationTargetReference.ID)
+		optimization = strings.TrimSpace(project.OptimizationTargetReference.SemanticKey)
+		if optimization == "" {
+			optimization = strings.TrimSpace(project.OptimizationTargetReference.ID)
+		}
 	}
 	if !slices.Contains([]string{"button_jump", "in_app_order", "click", "impression", "store_call", "store_stay"}, optimization) {
 		return v3ParentContext{}, fmt.Errorf("configuration has no calibrated optimization target key")

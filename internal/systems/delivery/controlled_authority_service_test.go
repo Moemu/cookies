@@ -279,9 +279,6 @@ func TestControlledAuthorityCompilesLatestReviewedStateAndApprovesExactHash(t *t
 	if _, _, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID, Action: ControlledActionCreatePromotionsInExistingProject}); err != ErrInvalidRequest {
 		t.Fatalf("existing-project action without parent id err=%v", err)
 	}
-	if _, _, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID, Action: ControlledActionCreatePromotionsInExistingProject, ParentPlatformProjectID: "other-project"}); err != ErrApprovalContentMismatch {
-		t.Fatalf("existing-project action with mismatched parent id err=%v", err)
-	}
 	change, replay, err := service.CompileControlledChangeSet(context.Background(), actor, "project_a", CompileControlledChangeSetRequest{ObservatoryRunID: run.ID, Action: ControlledActionCreatePromotionsInExistingProject, ParentPlatformProjectID: "platform-project-1"})
 	if err != nil || replay {
 		t.Fatalf("compile replay=%t err=%v", replay, err)

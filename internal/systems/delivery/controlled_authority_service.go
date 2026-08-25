@@ -667,9 +667,9 @@ func (s Service) CompileControlledChangeSet(ctx context.Context, actor contract.
 	if accountID == "" || configuration.Payload.OceanEngine.Project.AccountReference.ID != accountID {
 		return ControlledChangeSet{}, false, ErrInvalidState
 	}
-	if action == ControlledActionCreatePromotionsInExistingProject && configuration.Payload.OceanEngine.Project.ProjectDraftID != parentPlatformProjectID {
-		return ControlledChangeSet{}, false, ErrApprovalContentMismatch
-	}
+	// ProjectDraftID is an internal Cookies identity. ParentPlatformProjectID is
+	// the immutable OceanEngine object binding supplied by the controlled action.
+	// Never compare or substitute these identifiers.
 	projectBudgetMode := effectiveOceanEngineBudgetMode(configuration.Payload.OceanEngine.Project.BudgetAndBidding)
 	projectBudgetLimitMinor := configuration.Payload.OceanEngine.Project.BudgetAndBidding.DailyBudgetMinor
 	promotionBudgetLimitMinor := int64(0)

@@ -27,6 +27,10 @@ const readJSON = (relative: string) => JSON.parse(readFileSync(resolve(root, rel
 const manifest = readJSON("docs/delivery/fixtures/oceanengine-ecommerce-parent-condition-manifest-v1.json") as EcommerceParentConditionManifest;
 const resultSchema = readJSON("docs/delivery/schemas/oceanengine-playwright-rpa-result-v2.json");
 const validateResult = new Ajv2020({ allErrors: true, strict: false }).compile(resultSchema);
+const planSetAjv = new Ajv2020({ allErrors: true, strict: false });
+planSetAjv.addSchema(readJSON("docs/delivery/schemas/oceanengine-execution-authority-v1.json"));
+planSetAjv.addSchema(readJSON("docs/delivery/schemas/oceanengine-playwright-rpa-plan-v3.json"));
+const validatePlanSet = planSetAjv.compile(readJSON("docs/delivery/schemas/oceanengine-configuration-plan-set-v1.json"));
 const runnerSource = readFileSync(resolve(root, "scripts/browser-rpa-runner-v3.ts"), "utf8");
 
 class FakePage implements PageOperations {
@@ -67,6 +71,26 @@ function compilePromotionPlan() {
   const input = readJSON("docs/delivery/fixtures/oceanengine-promotion-create-plan-input-v1.json") as OceanEnginePlanCompilerInput;
   return compileOceanEngineFormPlan("promotion_create", manifest, input);
 }
+
+test("configuration plan set binds a Runner v3 form and displays its differences", () => {
+  const plan = compilePromotionPlan();
+  plan.account_reference = "1855554434276391";
+  plan.parent_project_reference = "7677595885572784182";
+  const value = {
+    schema_version: "oceanengine-configuration-plan-set/v1",
+    configuration_id: "configuration-1",
+    configuration_hash: "a".repeat(64),
+    account_reference: plan.account_reference,
+    forms: [{
+      internal_object_kind: "promotion",
+      internal_object_id: "promotion-draft-1",
+      platform_object_id: "7683558668450021382",
+      plan,
+      diff: [{ field_key: "promotion.call_to_action", operation: "configure_object", target: ["立即预订"] }],
+    }],
+  };
+  assert.equal(validatePlanSet(value), true, JSON.stringify(validatePlanSet.errors));
+});
 
 test("runner v3 executes prepare fields and stops at the final-click boundary", async () => {
   const plan = compilePromotionPlan();
