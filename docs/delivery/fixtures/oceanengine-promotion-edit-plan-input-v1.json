@@ -22,7 +22,7 @@
     },
     "promotion.product_selling_points": ["限时好物值得选"],
     "promotion.landing_page_reference": "redacted:managed-owned-landing-page",
-    "promotion.call_to_action": "查看详情",
+    "promotion.call_to_action": ["查看详情", "立即购买", "立即预订", "了解详情", "点击购买"],
     "promotion.source_label": "测试品牌",
     "promotion.comments_enabled": false,
     "promotion.category": "零售/综合类2C电商",

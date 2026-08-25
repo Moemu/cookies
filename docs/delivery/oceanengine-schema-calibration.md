@@ -350,7 +350,7 @@ carrier
 | `direct_link`           | 直达链接               | `sensitive_reference`          | 当前路径支持自动生成/手动填写                                                            | 电商真实场景可能使用绑定 CID 的淘宝深链；只保存受控引用或密文句柄，不在 Schema、fixture 或日志保存完整链接                                     | `observed` / `operator_reviewed`                 |
 | `backup_link`           | 备用链接               | `sensitive_reference`          | 随手动直达链路                                                                           | 当前初始为 Universal link，Applink 可选；服务端必填条件仍不通过提交探测                                                                        | `observed` / `sample_only`                       |
 | `product_information`   | 产品名称、主图、卖点等 | `object`                       | 随营销产品和商品引用                                                                     | 新建页产品名、主图、卖点均有必填标记；主产品名由项目继承且禁用，可附加一个名称；主图和卖点初始均为 `0/10`                                      | `observed` / `sample_only`                       |
-| `call_to_action`        | 行动号召               | `dynamic_enum`                 | 随落地页/产品链路                                                                        | 新建页有显式必填标记，显示 5 个当前候选并在预览中使用一个初始值；完整集合及平台代码待确认                                                      | `observed` / `sample_only`                       |
+| `call_to_action`        | 行动号召               | `dynamic_enum[]`               | 随落地页/产品链路                                                                        | 多选输入，最多 10 个。当前表单选中 5 个值。预览只显示集合中的一个值，不能用预览值判断集合发生替换。完整集合及平台代码待确认                      | `observed` / `sample_only`                       |
 | `creative_components`   | 创意组件               | `reference_or_object[]`        | 当前样例显示素材库选择、行动号召和智能生成                                               | 素材库资产引用已观察；独立对象还是内嵌配置、数量含义与完整枚举待确认                                                                           | `observed` / `platform_pending`                  |
 | `source_label`          | 来源                   | `string`                       | 单元设置                                                                                 | 新建页有显式必填标记并从当前业务链路预填；输入可编辑，正式服务端校验待确认                                                                     | `observed`                                       |
 | `comment_setting`       | 单元评论               | `dynamic_enum`                 | 单元设置                                                                                 | 显式必填；当前集合为不启用/启用，黄金路径新建初始为启用                                                                                        | `observed` / `sample_only`                       |
@@ -387,7 +387,7 @@ PlatformPromotionDraft
 ├─ native_anchor_ref
 ├─ landing_page_ref + direct_link_ref + backup_link_ref
 ├─ product_information（主产品引用 + 可编辑补充信息）
-├─ creative_components[] / call_to_action
+├─ creative_components[] / call_to_action[]（最多 10 个）
 └─ source_label + comment_setting + category_ref + brand_ref + promotion_name
 ```
 

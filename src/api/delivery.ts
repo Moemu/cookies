@@ -148,7 +148,7 @@ export type PlatformConfiguration = {
         product_reference?: StableReference
         creative_component_references?: StableReference[]
         budget_and_bidding?: { currency: 'CNY'; daily_budget_minor: number; bidding_strategy: string; charging_mode: string; bid_minor?: number }
-        settings: { call_to_action?: string; source_label?: string; comments_enabled?: boolean; smart_generation_enabled?: boolean; client_download_enabled?: boolean; direct_link_mode?: 'automatic' | 'manual'; category_reference?: StableReference; brand_reference?: StableReference }
+        settings: { call_to_action?: string[]; source_label?: string; comments_enabled?: boolean; smart_generation_enabled?: boolean; client_download_enabled?: boolean; direct_link_mode?: 'automatic' | 'manual'; category_reference?: StableReference; brand_reference?: StableReference }
         promotion_name: string
       }>
     }
@@ -1697,7 +1697,7 @@ function toDeliveryPlanVersion(version: WireDeliveryPlanVersion): DeliveryPlanVe
       deliveryCarrier: typedRuntime ? (project?.carrier === 'orange_landing_page' || project?.carrier === 'owned_landing_page' ? project.carrier : '') : version.tracking?.delivery_carrier ?? '',
       landingPage: typedRuntime ? intent?.payload.landing_page_references?.[0]?.id ?? '' : version.tracking?.landing_page ?? '',
       pixelId: typedRuntime ? '' : version.tracking?.pixel_id ?? '',
-      conversionEvent: typedRuntime ? firstPromotion?.settings.call_to_action ?? '' : version.tracking?.conversion_event ?? '',
+      conversionEvent: typedRuntime ? firstPromotion?.settings.call_to_action?.[0] ?? '' : version.tracking?.conversion_event ?? '',
       optimizationTargetId: typedRuntime ? project?.optimization_target_reference?.id ?? '' : version.tracking?.optimization_target_id ?? '',
       optimizationTargetName: typedRuntime ? project?.optimization_target_reference?.display_name_snapshot ?? '' : version.tracking?.optimization_target_name ?? '',
       optimizationTargetSemanticKey: typedRuntime ? project?.optimization_target_reference?.semantic_key ?? '' : '',

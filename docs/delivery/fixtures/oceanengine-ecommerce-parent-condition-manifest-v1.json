@@ -53,7 +53,7 @@
     "promotion.product_image_references": {"operation": "open_reference_picker", "scope": "产品主图", "target": "产品主图", "required": true},
     "promotion.product_selling_points": {"operation": "configure_object", "scope": "产品卖点", "target": "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交", "required": true},
     "promotion.native_anchor_reference": {"operation": "open_reference_picker", "scope": "创意组件", "target": "原生锚点", "required": false},
-    "promotion.call_to_action": {"operation": "choose_exact_visible_option", "scope": "行动号召", "target": "查看详情", "required": true},
+    "promotion.call_to_action": {"operation": "configure_object", "scope": "行动号召", "target": "行动号召", "required": true},
     "promotion.source_label": {"operation": "fill_text", "scope": "来源", "target": "请输入来源", "required": true},
     "promotion.comments_enabled": {"operation": "choose_exact_visible_option", "scope": "单元评论", "target": "不启用", "required": true},
     "promotion.smart_generation_enabled": {"operation": "toggle", "scope": "行动号召", "target": "开启智能生成", "required": false},

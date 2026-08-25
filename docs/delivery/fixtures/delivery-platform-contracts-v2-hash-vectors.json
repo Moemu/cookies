@@ -11,7 +11,7 @@
       "name": "OceanEngine one-project two-promotions profile",
       "kind": "platform",
       "fixture": "delivery-platform-configuration-v2-oceanengine-valid.json",
-      "expected_canonical_hash": "f4bdd42f6f493eda746290e4ed5f2cf0b2ad2517e4cbe36c263176f1046d86e1"
+      "expected_canonical_hash": "7b1c7ab084188287c0e427192244afbc5c065e2cbbf0227c74f732142e1cc81f"
     },
     {
       "name": "Magnetic Engine capability-pending profile",

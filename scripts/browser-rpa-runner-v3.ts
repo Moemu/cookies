@@ -47,8 +47,8 @@ export type FieldReconciliation = {
   status: "matched" | "drifted" | "not_checked";
   fields: Array<{
     field_key: string;
-    expected?: string;
-    observed?: string;
+    expected?: string | string[];
+    observed?: string | string[];
     status: "matched" | "drifted" | "not_checked";
   }>;
 };
@@ -311,6 +311,27 @@ export class PlaywrightPageOperations implements PageOperations {
     return this.page.getByText(step.scope, { exact: true });
   }
 
+  private async selectedCallToActions(page: Page = this.page) {
+    let scope = page.getByText("行动号召", { exact: true });
+    for (let attempt = 0; attempt < 40 && (await scope.count()) === 0; attempt += 1) {
+      await page.waitForTimeout(250);
+      scope = page.getByText("行动号召", { exact: true });
+    }
+    if ((await scope.count()) < 1) return [];
+    const row = scope.first().locator(
+      "xpath=ancestor::div[contains(concat(' ',normalize-space(@class),' '),' oc-row ')][1]",
+    );
+    const tags = row.locator(".oc-tag-text");
+    const values: string[] = [];
+    for (let index = 0; index < await tags.count(); index += 1) {
+      const tag = tags.nth(index);
+      if (!await tag.isVisible()) continue;
+      const value = (await tag.innerText()).trim();
+      if (value && !values.includes(value)) values.push(value);
+    }
+    return values;
+  }
+
   private xpathLiteral(value: string) {
     if (!value.includes("'")) return `'${value}'`;
     if (!value.includes('"')) return `"${value}"`;
@@ -358,10 +379,6 @@ export class PlaywrightPageOperations implements PageOperations {
         const pickerControl = landingInput.locator("xpath=following-sibling::*[contains(@class,'input__suffix')][1]");
         if ((await pickerControl.count()) === 1 && await pickerControl.isVisible()) return pickerControl;
       }
-    }
-    if (step.field_key === "promotion.call_to_action") {
-      const action = this.page.locator(".oc-tag-text").filter({ hasText: step.target });
-      if ((await action.count()) === 1 && await action.isVisible()) return action;
     }
     if (step.field_key === "promotion.comments_enabled") {
       const commentScope = this.page.getByText("单元评论", { exact: true }).last();
@@ -481,10 +498,17 @@ export class PlaywrightPageOperations implements PageOperations {
       }
     }
     if (step.field_key === "promotion.call_to_action") {
-      const selectedAction = this.page.getByText(String(step.value), { exact: true });
-      for (let index = 0; index < await selectedAction.count(); index += 1) {
-        if (await selectedAction.nth(index).isVisible()) return;
+      const values = Array.isArray(step.value) ? step.value.map(String) : [];
+      if (values.length < 1 || values.length > 10 || new Set(values).size !== values.length || values.some((value) => !value.trim())) {
+        throw new RunnerV3Error("invalid_value", `${step.id}: call to action needs 1 to 10 unique values`);
       }
+      const selected = await this.selectedCallToActions();
+      const matches = selected.length === values.length && values.every((value) => selected.includes(value));
+      if (!matches) {
+        throw new RunnerV3Error("operator_required", `${step.id}: call-to-action multi-select mutation is not calibrated`);
+      }
+      this.referenceReadbacks.set(step.id, selected);
+      return;
     }
     if (step.field_key === "promotion.category") {
       const target = await this.targetLocator(step);
@@ -935,7 +959,7 @@ export class PlaywrightPageOperations implements PageOperations {
     const landingExpected = stableReferenceID(plan.steps.find((step) => step.field_key === landingFieldKey)?.value);
     const callToActionFieldKey = "promotion.call_to_action";
     const callToActionValue = plan.steps.find((step) => step.field_key === callToActionFieldKey)?.value;
-    const callToActionExpected = typeof callToActionValue === "string" ? callToActionValue : undefined;
+    const callToActionExpected = Array.isArray(callToActionValue) ? callToActionValue.map(String) : undefined;
     const notChecked = (): FieldReconciliation => ({
       status: "not_checked",
       fields: [
@@ -984,25 +1008,16 @@ export class PlaywrightPageOperations implements PageOperations {
         status: landingStatus,
       });
 
-      const previewTitle = editPage.getByText("单元素材预览", { exact: true });
-      const callToActionObserved = (await previewTitle.count()) > 0
-        ? await previewTitle.first().evaluate((element, candidates) => {
-            let current: Element | null = element.parentElement;
-            for (let depth = 0; current && depth < 10; depth += 1, current = current.parentElement) {
-              const text = current.textContent ?? "";
-              const matches = candidates.filter((candidate) => text.includes(candidate));
-              if (matches.length === 1) return matches[0];
-            }
-            return undefined;
-          }, ["查看详情", "立即购买", "立即预订", "了解详情", "点击购买"])
-        : undefined;
-      const callToActionStatus = !callToActionExpected || !callToActionObserved
+      const callToActionObserved = await this.selectedCallToActions(editPage);
+      const callToActionStatus = !callToActionExpected || callToActionObserved.length === 0
         ? "not_checked"
-        : callToActionObserved === callToActionExpected ? "matched" : "drifted";
+        : callToActionObserved.length === callToActionExpected.length && callToActionExpected.every((value) => callToActionObserved.includes(value))
+          ? "matched"
+          : "drifted";
       fields.push({
         field_key: callToActionFieldKey,
         ...(callToActionExpected ? { expected: callToActionExpected } : {}),
-        ...(callToActionObserved ? { observed: callToActionObserved } : {}),
+        ...(callToActionObserved.length > 0 ? { observed: callToActionObserved } : {}),
         status: callToActionStatus,
       });
 

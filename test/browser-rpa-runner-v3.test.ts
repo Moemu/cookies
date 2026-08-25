@@ -127,11 +127,12 @@ test("runner v3 retains the live promotion adapters", () => {
   assert.match(runnerSource, /\.isChecked\(\)/);
 });
 
-test("promotion reconciliation checks landing page and call to action drift", () => {
+test("promotion reconciliation reads the full call-to-action multi-select", () => {
   assert.match(runnerSource, /promotion\.landing_page_reference/);
   assert.match(runnerSource, /promotion\.call_to_action/);
-  assert.match(runnerSource, /单元素材预览/);
-  assert.match(runnerSource, /立即购买/);
+  assert.match(runnerSource, /selectedCallToActions/);
+  assert.match(runnerSource, /call-to-action multi-select mutation is not calibrated/);
+  assert.doesNotMatch(runnerSource, /const previewTitle = editPage\.getByText\("单元素材预览"/);
 });
 
 test("runner v3 consumes one authority and performs one final click", async () => {

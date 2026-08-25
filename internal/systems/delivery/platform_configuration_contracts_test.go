@@ -370,6 +370,14 @@ func TestPlatformConfigurationValidationErrorsAreStable(t *testing.T) {
 			value.Payload.OceanEngine = cloneOceanConfigurationForTest(value.Payload.OceanEngine)
 			value.Payload.OceanEngine.Promotions[1].PromotionDraftID = value.Payload.OceanEngine.Promotions[0].PromotionDraftID
 		}},
+		{name: "too many call-to-action values", code: ContractErrorInvalidPromotion, edit: func(value *PlatformConfiguration) {
+			value.Payload.OceanEngine = cloneOceanConfigurationForTest(value.Payload.OceanEngine)
+			value.Payload.OceanEngine.Promotions[0].Settings.CallToAction = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}
+		}},
+		{name: "duplicate call-to-action value", code: ContractErrorInvalidPromotion, edit: func(value *PlatformConfiguration) {
+			value.Payload.OceanEngine = cloneOceanConfigurationForTest(value.Payload.OceanEngine)
+			value.Payload.OceanEngine.Promotions[0].Settings.CallToAction = []string{"查看详情", "查看详情"}
+		}},
 		{name: "invalid promotion reference", code: ContractErrorInvalidReference, edit: func(value *PlatformConfiguration) {
 			value.Payload.OceanEngine = cloneOceanConfigurationForTest(value.Payload.OceanEngine)
 			value.Payload.OceanEngine.Promotions[0].BaseMaterialReferences[0].ID = ""
@@ -466,7 +474,7 @@ func validOceanEnginePlatformConfiguration(t *testing.T, intent DeliveryIntent, 
 			CopyItems:              []OceanEngineCopyItem{{Text: "verified ecommerce copy"}},
 			LandingPageReference:   &StableReference{Namespace: "oceanengine", ObjectKind: "landing_page", Scope: "account:6391", State: ReferenceUnresolved, Reason: "page selection is pending"},
 			ProductReference:       referencePointer(resolvedReference("oceanengine", "product", "account:6391", "product-1")),
-			Settings:               OceanEnginePromotionSettings{CallToAction: "platform_pending", SourceLabel: "ecommerce", CommentsEnabled: &comments},
+			Settings:               OceanEnginePromotionSettings{CallToAction: []string{"platform_pending"}, SourceLabel: "ecommerce", CommentsEnabled: &comments},
 			PromotionName:          "ecommerce-promotion-" + string(rune('1'+index)),
 		}
 	}

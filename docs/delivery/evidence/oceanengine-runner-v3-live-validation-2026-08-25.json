@@ -38,9 +38,12 @@
         "selected_reference_sha256": "87486f6915a4685e2210d29f8ddee235a2760ffe1519d32465f0ad7a0f036af7"
       },
       "call_to_action": {
-        "result": "drifted",
-        "requested": "查看详情",
-        "persisted": "立即预订"
+        "result": "not_checked_as_set",
+        "value_kind": "multi_select",
+        "maximum_items": 10,
+        "observed_selected_values": ["查看详情", "立即购买", "立即预订", "了解详情", "点击购买"],
+        "preview_value": "立即预订",
+        "preview_value_does_not_prove_drift": true
       }
     },
     "promotion_edit": "matched_same_object_id",

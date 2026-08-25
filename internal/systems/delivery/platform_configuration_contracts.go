@@ -343,6 +343,17 @@ func canonicalReferences(values []StableReference) []canonicalStableReference {
 	return out
 }
 
+func canonicalStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	out := make([]string, len(values))
+	for i := range values {
+		out[i] = strings.TrimSpace(values[i])
+	}
+	return out
+}
+
 func (i DeliveryIntent) CanonicalPayload() any {
 	return canonicalDeliveryIntentPayload{
 		PayloadSchemaVersion:    strings.TrimSpace(i.Payload.PayloadSchemaVersion),
@@ -546,7 +557,7 @@ type OceanEngineCopyItem struct {
 }
 
 type OceanEnginePromotionSettings struct {
-	CallToAction           string           `json:"call_to_action,omitempty"`
+	CallToAction           []string         `json:"call_to_action,omitempty"`
 	SourceLabel            string           `json:"source_label,omitempty"`
 	CommentsEnabled        *bool            `json:"comments_enabled,omitempty"`
 	SmartGenerationEnabled *bool            `json:"smart_generation_enabled,omitempty"`
@@ -649,7 +660,7 @@ type canonicalOceanEngineProject struct {
 }
 
 type canonicalOceanEnginePromotionSettings struct {
-	CallToAction           string                    `json:"call_to_action,omitempty"`
+	CallToAction           []string                  `json:"call_to_action,omitempty"`
 	SourceLabel            string                    `json:"source_label,omitempty"`
 	CommentsEnabled        *bool                     `json:"comments_enabled,omitempty"`
 	SmartGenerationEnabled *bool                     `json:"smart_generation_enabled,omitempty"`
@@ -743,7 +754,7 @@ func canonicalOceanConfiguration(value *OceanEngineConfiguration) *canonicalOcea
 			DirectLinkReference: canonicalReferencePointer(promotion.DirectLinkReference), ProductReference: canonicalReferencePointer(promotion.ProductReference),
 			CreativeComponentReferences: canonicalReferences(promotion.CreativeComponentReferences), PromotionName: strings.TrimSpace(promotion.PromotionName),
 			Settings: canonicalOceanEnginePromotionSettings{
-				CallToAction: strings.TrimSpace(promotion.Settings.CallToAction), SourceLabel: strings.TrimSpace(promotion.Settings.SourceLabel), CommentsEnabled: promotion.Settings.CommentsEnabled,
+				CallToAction: canonicalStrings(promotion.Settings.CallToAction), SourceLabel: strings.TrimSpace(promotion.Settings.SourceLabel), CommentsEnabled: promotion.Settings.CommentsEnabled,
 				SmartGenerationEnabled: promotion.Settings.SmartGenerationEnabled, ClientDownloadEnabled: promotion.Settings.ClientDownloadEnabled, DirectLinkMode: strings.TrimSpace(promotion.Settings.DirectLinkMode),
 				CategoryReference: canonicalReferencePointer(promotion.Settings.CategoryReference), BrandReference: canonicalReferencePointer(promotion.Settings.BrandReference),
 			},
@@ -901,6 +912,17 @@ func validateOceanEngineConfiguration(configuration OceanEngineConfiguration) er
 		seen[promotion.PromotionDraftID] = true
 		if promotion.Settings.DirectLinkMode != "" && promotion.Settings.DirectLinkMode != "automatic" && promotion.Settings.DirectLinkMode != "manual" {
 			return contractFailure(ContractErrorInvalidPromotion, field+".settings.direct_link_mode", "direct link mode must be automatic or manual")
+		}
+		if len(promotion.Settings.CallToAction) > 10 {
+			return contractFailure(ContractErrorInvalidPromotion, field+".settings.call_to_action", "at most 10 call-to-action values are allowed")
+		}
+		seenCallToAction := map[string]bool{}
+		for _, value := range promotion.Settings.CallToAction {
+			value = strings.TrimSpace(value)
+			if value == "" || seenCallToAction[value] {
+				return contractFailure(ContractErrorInvalidPromotion, field+".settings.call_to_action", "call-to-action values must be non-empty and unique")
+			}
+			seenCallToAction[value] = true
 		}
 		if promotion.DeliveryIdentity.Mode != "account_info" && promotion.DeliveryIdentity.Mode != "douyin_account" {
 			return contractFailure(ContractErrorInvalidPromotion, field+".delivery_identity.mode", "identity must be account_info or douyin_account")

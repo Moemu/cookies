@@ -27,8 +27,18 @@
             "required": ["field_key", "status"],
             "properties": {
               "field_key": {"type": "string", "minLength": 1},
-              "expected": {"type": "string"},
-              "observed": {"type": "string"},
+              "expected": {
+                "oneOf": [
+                  {"type": "string"},
+                  {"type": "array", "maxItems": 10, "uniqueItems": true, "items": {"type": "string"}}
+                ]
+              },
+              "observed": {
+                "oneOf": [
+                  {"type": "string"},
+                  {"type": "array", "maxItems": 10, "uniqueItems": true, "items": {"type": "string"}}
+                ]
+              },
               "status": {"enum": ["matched", "drifted", "not_checked"]}
             }
           }
