@@ -282,11 +282,11 @@ func decodePlanVersion(payload []byte, canonicalHash string) (DeliveryPlanVersio
 		value.RuntimeStatus = PlanRuntimeLegacyUnsupported
 		value.ReadOnly = true
 	}
-	calculated, err := PlanCanonicalHash(value)
+	matches, err := planCanonicalHashMatches(value, canonicalHash)
 	if err != nil {
 		return DeliveryPlanVersion{}, err
 	}
-	if calculated != canonicalHash {
+	if !matches {
 		return DeliveryPlanVersion{}, fmt.Errorf("delivery plan version canonical hash mismatch")
 	}
 	return value, nil

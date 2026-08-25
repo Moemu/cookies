@@ -198,7 +198,7 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
     try {
       const account = await api.claimProjectConnectorAccount(projectId, accountID)
       await load(account.id)
-      setNotice('账号已迁入当前 Project。原会话、同步记录和校准结果保持不变。')
+      setNotice('账号已绑定当前 Project。组织会话、同步记录和校准结果保持不变。')
     } catch (error) {
       setNotice(errorMessage(error))
     } finally {
@@ -207,11 +207,11 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
   }
 
   const selectedAccount = accounts.find(account => account.id === selectedAccountID)
-  const copy = session ? statusCopy[session.status] : { title: '尚未保存会话', detail: '账号和会话只归属当前 Project。' }
+  const copy = session ? statusCopy[session.status] : { title: '尚未保存会话', detail: 'Cookie 会话归属当前组织账号。' }
 
   return <section className="miyun-connection-settings" aria-labelledby="ocean-engine-session-title">
     <div className="miyun-settings-main">
-      <header><div><span>Project 级只读 Connector</span><h2 id="ocean-engine-session-title">巨量投放账号</h2><p>当前 Project 的 Plan 只能选择本页已验证的账号。</p></div><div className="miyun-settings-status-group" aria-live="polite"><span className={`miyun-connection-status ${session?.status === 'ready' ? 'ready' : ''}`}>{session?.status === 'ready' ? <Check size={14} aria-hidden="true" /> : <CircleAlert size={14} aria-hidden="true" />}{loadState === 'loading' ? '正在读取…' : copy.title}</span><small>页面同步于 {formatTime(lastSyncedAt)}</small></div></header>
+      <header><div><span>组织会话 · Project 绑定</span><h2 id="ocean-engine-session-title">巨量投放账号</h2><p>Plan 可选择已绑定当前 Project 的验证账号。</p></div><div className="miyun-settings-status-group" aria-live="polite"><span className={`miyun-connection-status ${session?.status === 'ready' ? 'ready' : ''}`}>{session?.status === 'ready' ? <Check size={14} aria-hidden="true" /> : <CircleAlert size={14} aria-hidden="true" />}{loadState === 'loading' ? '正在读取…' : copy.title}</span><small>页面同步于 {formatTime(lastSyncedAt)}</small></div></header>
       <div className="miyun-settings-secret-policy"><LockKeyhole size={18} aria-hidden="true" /><p><b>账号和凭据分开保存</b>{copy.detail} 原始账号 ID 和 Cookie 都不会进入校准导出。</p></div>
 
       <div className="oe-connector-flow">
@@ -229,7 +229,7 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
             <div className="oe-register-fields"><label htmlFor="ocean-engine-account-id">投放账号 ID<input id="ocean-engine-account-id" name="ocean_engine_account_id" ref={externalIDRef} type="password" autoComplete="off" spellCheck={false} placeholder="仅用于登记，保存后不回显…" /></label><label htmlFor="ocean-engine-account-label">本地显示名称<input id="ocean-engine-account-label" name="ocean_engine_account_label" ref={labelRef} autoComplete="off" maxLength={255} placeholder="例如：历史校准账号…" /></label></div>
             <button className="secondary-button" type="submit" disabled={busy}><Save size={15} aria-hidden="true" />登记账号</button>
           </form>
-          {legacyAccounts.length ? <div className="oe-account-empty"><CircleAlert size={18} aria-hidden="true" /><p><b>待迁入的历史账号</b><span>迁入会保留会话、同步记录和校准结果。一个账号只能归属一个 Project。</span></p>{legacyAccounts.map(account => <button key={account.id} className="secondary-button" type="button" disabled={busy} onClick={() => void claimAccount(account.id)}>迁入 {account.display_label || '未命名账号'}</button>)}</div> : null}
+          {legacyAccounts.length ? <div className="oe-account-empty"><CircleAlert size={18} aria-hidden="true" /><p><b>可绑定的组织账号</b><span>绑定会复用组织会话，并保留同步记录和校准结果。</span></p>{legacyAccounts.map(account => <button key={account.id} className="secondary-button" type="button" disabled={busy} onClick={() => void claimAccount(account.id)}>绑定 {account.display_label || '未命名账号'}</button>)}</div> : null}
         </section>
 
         <section className={`oe-settings-card ${selectedAccountID ? '' : 'disabled'}`} aria-labelledby="oe-session-section-title">
@@ -237,7 +237,7 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
           <form className="miyun-session-form" onSubmit={saveSession}>
             <label htmlFor="ocean-engine-account-session">巨量引擎 Cookie 请求头</label>
             <input id="ocean-engine-account-session" name="ocean_engine_cookie" ref={sessionInputRef} type="password" autoComplete="off" spellCheck={false} placeholder={selectedAccountID ? '粘贴完整 Cookie 值，仅用于本次保存…' : '请先登记投放账号…'} disabled={!selectedAccountID || busy} />
-            <small>从该账号成功的广告列表请求中复制完整 Cookie。保存后，系统立即清空输入框。</small>
+            <small>Cookie 属于组织登录会话。可复用该组织内成功请求的完整 Cookie。保存后，系统立即清空输入框。</small>
             <dl className="miyun-connection-metadata"><div><dt>会话状态</dt><dd>{session ? statusCopy[session.status].title : '尚未保存'}</dd></div><div><dt>最近验证</dt><dd>{formatTime(session?.last_verified_at)}</dd></div></dl>
             <div className="miyun-settings-actions"><button className="secondary-button" type="button" onClick={() => void load(selectedAccountID)} disabled={busy || !selectedAccountID}><RefreshCw size={15} aria-hidden="true" />刷新状态</button><button className="secondary-button" type="button" onClick={() => void verify()} disabled={busy || !session}><Check size={15} aria-hidden="true" />只读验证</button><button className="primary-button" type="submit" disabled={busy || !selectedAccountID}><Save size={15} aria-hidden="true" />保存会话</button></div>
           </form>
@@ -249,6 +249,6 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
       </div>
       {notice ? <p className="miyun-settings-notice" role="status" aria-live="polite">{notice}</p> : null}
     </div>
-    <aside className="miyun-cookie-guide"><h3>安全边界</h3><ol><li><span>01</span><p>账号只归属当前 Project。</p></li><li><span>02</span><p>其他 Project 不能选择或读取此账号。</p></li><li><span>03</span><p>Cookie 只提交到服务端加密存储。</p></li><li><span>04</span><p>验证和同步只使用读取请求。</p></li></ol></aside>
+    <aside className="miyun-cookie-guide"><h3>安全边界</h3><ol><li><span>01</span><p>Cookie 会话归属当前组织账号。</p></li><li><span>02</span><p>Plan 只能选择已绑定当前 Project 的账号。</p></li><li><span>03</span><p>Cookie 只提交到服务端加密存储。</p></li><li><span>04</span><p>验证和同步只使用读取请求。</p></li></ol></aside>
   </section>
 }

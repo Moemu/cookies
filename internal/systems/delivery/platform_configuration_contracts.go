@@ -1,6 +1,7 @@
 package delivery
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -567,6 +568,34 @@ type OceanEnginePromotionSettings struct {
 	BrandReference         *StableReference `json:"brand_reference,omitempty"`
 }
 
+// UnmarshalJSON keeps plans from before the CTA multi-select change readable.
+// New writes continue to use the array form.
+func (s *OceanEnginePromotionSettings) UnmarshalJSON(data []byte) error {
+	type settingsAlias OceanEnginePromotionSettings
+	var wire struct {
+		settingsAlias
+		CallToAction json.RawMessage `json:"call_to_action"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*s = OceanEnginePromotionSettings(wire.settingsAlias)
+	if len(wire.CallToAction) == 0 || string(wire.CallToAction) == "null" {
+		return nil
+	}
+	if wire.CallToAction[0] == '[' {
+		return json.Unmarshal(wire.CallToAction, &s.CallToAction)
+	}
+	var legacy string
+	if err := json.Unmarshal(wire.CallToAction, &legacy); err != nil {
+		return err
+	}
+	if legacy != "" {
+		s.CallToAction = []string{legacy}
+	}
+	return nil
+}
+
 type OceanEnginePromotionDraft struct {
 	DraftSchemaVersion          string                       `json:"draft_schema_version"`
 	PromotionDraftID            string                       `json:"promotion_draft_id"`
@@ -774,6 +803,55 @@ func (c PlatformConfiguration) ComputeCanonicalHash() (string, error) {
 	return contract.CanonicalJSONHash(c.CanonicalPayload())
 }
 
+func (c PlatformConfiguration) computeLegacySingleCallToActionHash() (string, bool, error) {
+	payload, err := json.Marshal(c.CanonicalPayload())
+	if err != nil {
+		return "", false, err
+	}
+	var value map[string]any
+	if err = json.Unmarshal(payload, &value); err != nil {
+		return "", false, err
+	}
+	oceanEngine, ok := value["ocean_engine"].(map[string]any)
+	if !ok {
+		return "", false, nil
+	}
+	promotions, ok := oceanEngine["promotions"].([]any)
+	if !ok {
+		return "", false, nil
+	}
+	converted := false
+	for _, item := range promotions {
+		promotion, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		settings, ok := promotion["settings"].(map[string]any)
+		if !ok {
+			continue
+		}
+		callToAction, exists := settings["call_to_action"]
+		if !exists {
+			continue
+		}
+		items, ok := callToAction.([]any)
+		if !ok || len(items) != 1 {
+			return "", false, nil
+		}
+		text, ok := items[0].(string)
+		if !ok {
+			return "", false, nil
+		}
+		settings["call_to_action"] = text
+		converted = true
+	}
+	if !converted {
+		return "", false, nil
+	}
+	hash, err := contract.CanonicalJSONHash(value)
+	return hash, true, err
+}
+
 // FinalizePlatformConfiguration computes the immutable business hash and
 // validates the tagged structure. A Magnetic Engine capability-pending profile
 // can be finalized and stored, but Validate still returns CAPABILITY_PENDING to
@@ -841,7 +919,13 @@ func (c PlatformConfiguration) validateStructure() error {
 		return err
 	}
 	if c.CanonicalHash == "" || c.CanonicalHash != hash {
-		return contractFailure(ContractErrorCanonicalHashMismatch, "canonical_hash", "platform configuration hash does not match its canonical payload")
+		legacyHash, compatible, legacyErr := c.computeLegacySingleCallToActionHash()
+		if legacyErr != nil {
+			return legacyErr
+		}
+		if !compatible || c.CanonicalHash != legacyHash {
+			return contractFailure(ContractErrorCanonicalHashMismatch, "canonical_hash", "platform configuration hash does not match its canonical payload")
+		}
 	}
 	return nil
 }

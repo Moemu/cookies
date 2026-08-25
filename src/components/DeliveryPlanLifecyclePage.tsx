@@ -106,11 +106,19 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
     if (!projectId) return () => { active = false }
     preserveEditorState.current = false
     setBusy(true)
-    void Promise.all([deliveryPlanApi.list(projectId), api.listProjectConnectorAccounts(projectId)]).then(([records, accountResponse]) => {
+    void Promise.allSettled([deliveryPlanApi.list(projectId), api.listProjectConnectorAccounts(projectId)]).then(([planResult, accountResult]) => {
       if (!active) return
-      const verifiedAccounts = accountResponse.items.filter(account => account.status === 'verified')
-      setPlans(records)
+      const verifiedAccounts = accountResult.status === 'fulfilled'
+        ? accountResult.value.items.filter(account => account.status === 'verified')
+        : []
       setConnectorAccounts(verifiedAccounts)
+      if (planResult.status === 'rejected') {
+        const message = planResult.reason instanceof Error ? planResult.reason.message : '加载投放计划失败'
+        setNotice(accountResult.status === 'rejected' ? `${message}；账号列表也加载失败。` : `${message}。账号列表仍可使用。`)
+        return
+      }
+      const records = planResult.value
+      setPlans(records)
       if (preserveEditorState.current) return
       const preferred = records.find(plan => plan.id === requestedPlanId.current) ?? records[0]
       if (preferred) {
@@ -126,9 +134,8 @@ export function DeliveryPlanLifecyclePage({ state }: { state: DataState }) {
         setInspectedVersionNumber(undefined)
         setNotice('当前 Project 尚无投放计划，可创建第一份计划草稿。')
       }
+      if (accountResult.status === 'rejected') setNotice('投放计划已加载，但账号列表加载失败。请刷新后重试。')
       setDirty(false)
-    }).catch(error => {
-      if (active) setNotice(error instanceof Error ? error.message : '加载投放计划失败')
     }).finally(() => {
       if (active) setBusy(false)
     })
@@ -275,7 +282,7 @@ function TargetAccountFields({ draft, changeDraft, strategyTasks = [], products 
       advertiser: event.target.value
         ? { id: event.target.value, name: connectorAccounts.find(account => account.id === event.target.value)?.display_label || '巨量投放账号', platform: 'ocean_engine' }
         : { id: '', name: '', platform: 'ocean_engine' },
-    }))}><option value="">请选择已验证的 Project 账号</option>{hasPlanAdvertiserOption ? <option value={draft.advertiser.id} disabled>{draft.advertiser.name || '历史账号'}（不属于当前 Project）</option> : null}{connectorAccounts.map(account => <option key={account.id} value={account.id}>{account.display_label || '未命名账号'}</option>)}</select>{!connectorAccounts.length && projectId ? <a href={projectPath(projectId, 'delivery', 'accounts', undefined, '广告账户')}>先登记并验证巨量账号</a> : null}</label>
+    }))}><option value="">请选择已验证的投放账号</option>{hasPlanAdvertiserOption ? <option value={draft.advertiser.id} disabled>{draft.advertiser.name || '历史账号'}（未绑定当前 Project）</option> : null}{connectorAccounts.map(account => <option key={account.id} value={account.id}>{account.display_label || '未命名账号'}</option>)}</select>{!connectorAccounts.length && projectId ? <a href={projectPath(projectId, 'delivery', 'accounts', undefined, '广告账户')}>先绑定并验证巨量账号</a> : null}</label>
     <label><span className="delivery-field-label">策略来源{!draft.strategyReference.taskId ? <em>必填</em> : null}</span><select id="strategy_reference" aria-label="策略来源" aria-required="true" required className={!draft.strategyReference.taskId ? 'field-missing' : undefined} value={draft.strategyReference.taskId} onChange={event => {
       const task = strategyTasks.find(candidate => candidate.id === event.target.value)
       changeDraft(current => ({ ...current, marketingPurpose: '', strategyReference: { taskId: task?.id ?? '', version: task?.version ?? 0 }, sourceStrategyVersion: task ? `${task.id}@v${task.version}` : '' }))
