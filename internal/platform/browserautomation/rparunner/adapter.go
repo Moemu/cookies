@@ -91,6 +91,22 @@ type PlaywrightRPAAdapter struct {
 }
 
 var _ browserautomation.WorkerAdapter = PlaywrightRPAAdapter{}
+var _ browserautomation.WorkerPlanAdapter = PlaywrightRPAAdapter{}
+
+func (a PlaywrightRPAAdapter) Plan(ctx context.Context, run browserautomation.BrowserRpaRun) (json.RawMessage, error) {
+	_, policy, err := a.resolveSession(ctx, run)
+	if err != nil {
+		return nil, err
+	}
+	if a.protocol() != ProtocolV3 || a.V3Compiler == nil {
+		return nil, fmt.Errorf("%w: Runner v3 plan preview is not configured", browserautomation.ErrEnvironmentUnavailable)
+	}
+	plan, err := a.V3Compiler.CompilePrepareV3(ctx, run, policy)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", browserautomation.ErrPageDrift, err)
+	}
+	return plan, nil
+}
 
 func (a PlaywrightRPAAdapter) Prepare(ctx context.Context, run browserautomation.BrowserRpaRun) (browserautomation.PreparedPage, error) {
 	env, policy, err := a.resolveSession(ctx, run)

@@ -68,6 +68,7 @@ func (s *Server) registerRoutes(prefix string) {
 	s.mux.HandleFunc("POST "+prefix+"/projects/{project_id}/runs/{run_id}/takeover-action-attempts", s.authorizeTakeoverAction)
 	s.mux.HandleFunc("POST "+prefix+"/projects/{project_id}/runs/{run_id}/takeover-action-attempts/{attempt_action}", s.takeoverActionAttemptCommand)
 	s.mux.HandleFunc("POST "+prefix+"/projects/{project_id}/runs/{run_id}/leases", s.acquireRunLease)
+	s.mux.HandleFunc("GET "+prefix+"/projects/{project_id}/runs/{run_id}/leases/{lease_id}", s.getRunLease)
 	s.mux.HandleFunc("POST "+prefix+"/projects/{project_id}/runs/{run_id}/leases/{lease_action}", s.runLeaseCommand)
 	s.mux.HandleFunc("POST "+prefix+"/projects/{project_id}/runs/{run_id}/confirmations", s.confirm)
 	s.mux.HandleFunc("POST "+prefix+"/projects/{project_id}/runs/{run_action}", s.command)
@@ -82,6 +83,12 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	r.SetPathValue("run_id", parts[0])
 	r.SetPathValue("action", parts[1])
 	switch parts[1] {
+	case "plan":
+		if !s.automatedWorker {
+			writeError(w, http.StatusNotFound, "automated worker is not mounted")
+			return
+		}
+		s.plan(w, r)
 	case "prepare":
 		if !s.automatedWorker {
 			writeError(w, http.StatusNotFound, "automated worker is not mounted")
@@ -99,6 +106,15 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusNotFound, "not found")
 	}
+}
+
+func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.read")
+	if !ok {
+		return
+	}
+	value, err := s.worker.Plan(r.Context(), actor.OrganizationID, project, r.PathValue("run_id"))
+	writeResult(w, value, err)
 }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
 
@@ -392,6 +408,17 @@ func (s *Server) acquireRunLease(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := s.service.AcquireRunLease(r.Context(), actor.OrganizationID, project, r.PathValue("run_id"), body.ExpectedVersion, actor.Principal.ID)
 	writeResult(w, value, err)
+}
+func (s *Server) getRunLease(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.execute")
+	if !ok {
+		return
+	}
+	lease, err := s.service.Repository.GetLease(r.Context(), actor.OrganizationID, project, r.PathValue("lease_id"))
+	if err == nil && lease.RunID != r.PathValue("run_id") {
+		err = browserautomation.ErrNotFound
+	}
+	writeResult(w, lease, err)
 }
 func (s *Server) runLeaseCommand(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(r.PathValue("lease_action"), ":", 2)

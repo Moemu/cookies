@@ -2,6 +2,7 @@ package browserautomation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 
@@ -41,6 +42,12 @@ var (
 type WorkerAdapter interface {
 	Prepare(context.Context, BrowserRpaRun) (PreparedPage, error)
 	Submit(context.Context, BrowserRpaRun, ControlledActionAttempt, string) (WorkerOutcome, PreparedPage, error)
+}
+
+// WorkerPlanAdapter is optional. Real Runner v3 adapters implement it to
+// expose the exact prepare plan without opening a page or changing a run.
+type WorkerPlanAdapter interface {
+	Plan(context.Context, BrowserRpaRun) (json.RawMessage, error)
 }
 
 type DeterministicFakeAdapter struct {
@@ -100,6 +107,21 @@ func (a DeterministicFakeAdapter) Submit(_ context.Context, run BrowserRpaRun, _
 type Worker struct {
 	Service Service
 	Adapter WorkerAdapter
+}
+
+func (w Worker) Plan(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) (json.RawMessage, error) {
+	run, err := w.Service.Repository.GetRun(ctx, org, project, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.Paused || run.TakeoverActive || terminalState(run.State) {
+		return nil, ErrInvalidTransition
+	}
+	planner, ok := w.Adapter.(WorkerPlanAdapter)
+	if !ok {
+		return nil, ErrEnvironmentUnavailable
+	}
+	return planner.Plan(ctx, run)
 }
 
 func (w Worker) Prepare(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) (BrowserRpaRun, error) {

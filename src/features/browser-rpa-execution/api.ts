@@ -1,8 +1,14 @@
 import type {
   BrowserRpaEvidence,
+  BrowserRpaEnvironment,
+  BrowserRpaLease,
+  BrowserRpaProfile,
   BrowserRpaRun,
   BrowserRpaRunEvent,
+  BrowserRpaSitePolicy,
   ControlledExecutionWorkspace,
+  IssuedFinalConfirmation,
+  RunnerV3Plan,
 } from './model'
 
 export class ControlledExecutionApiError extends Error {
@@ -15,18 +21,65 @@ export class ControlledExecutionApiError extends Error {
 const apiPrefix = '/api/platform/v1/browser-rpa/projects'
 
 /**
- * Thin platform-control-plane client. It intentionally does not import legacy
- * Delivery execute_mock models, and it never exposes a remote-submit method.
+ * Thin platform-control-plane client. It does not import legacy
+ * Delivery execute_mock models. Submit always requires a server-issued
+ * one-time confirmation and a fenced session lease.
  */
 export const controlledExecutionApi = {
   async getWorkspace(projectId: string, runId: string, signal?: AbortSignal): Promise<ControlledExecutionWorkspace> {
     const path = `${apiPrefix}/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`
-    const [run, events, evidence] = await Promise.all([
-      request<BrowserRpaRun>(path, { signal }),
+    const runPromise = request<BrowserRpaRun>(path, { signal })
+    const [run, events, evidence, session] = await Promise.all([
+      runPromise,
       request<{ items?: BrowserRpaRunEvent[] }>(`${path}/events`, { signal }),
       request<{ items?: BrowserRpaEvidence[] }>(`${path}/evidence`, { signal }),
+      runPromise.then(run => Promise.all([
+        request<BrowserRpaEnvironment>(`${apiPrefix}/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(run.environment_id)}`, { signal }),
+        request<BrowserRpaProfile>(`${apiPrefix}/${encodeURIComponent(projectId)}/browser-profiles/${encodeURIComponent(run.profile_id)}`, { signal }),
+        request<BrowserRpaSitePolicy>(`${apiPrefix}/${encodeURIComponent(projectId)}/site-policies/${encodeURIComponent(run.policy_id)}`, { signal }),
+        run.lease_id
+          ? request<BrowserRpaLease>(`${path}/leases/${encodeURIComponent(run.lease_id)}`, { signal }).catch(error => {
+              if (error instanceof ControlledExecutionApiError && (error.status === 403 || error.status === 404)) return undefined
+              throw error
+            })
+          : Promise.resolve(undefined),
+      ])),
     ])
-    return { run, events: events.items ?? [], evidence: evidence.items ?? [] }
+    const [environment, profile, policy, lease] = session
+    return { run, events: events.items ?? [], evidence: evidence.items ?? [], environment, profile, policy, lease }
+  },
+
+  generatePlan(projectId: string, runId: string) {
+    return request<RunnerV3Plan>(runPath(projectId, runId, ':plan'), { method: 'POST' })
+  },
+  acquireLease(projectId: string, runId: string, expectedVersion: number) {
+    return request<{ run: BrowserRpaRun; lease: BrowserRpaLease }>(`${runPath(projectId, runId)}/leases`, {
+      method: 'POST', body: JSON.stringify({ expected_version: expectedVersion }),
+    })
+  },
+  heartbeatLease(projectId: string, runId: string, lease: BrowserRpaLease) {
+    return request<BrowserRpaLease>(`${runPath(projectId, runId)}/leases/${encodeURIComponent(lease.id)}:heartbeat`, {
+      method: 'POST', body: JSON.stringify({ expected_version: lease.version, fencing_token: lease.fencing_token }),
+    })
+  },
+  prepare(projectId: string, runId: string) {
+    return request<BrowserRpaRun>(runPath(projectId, runId, ':prepare'), { method: 'POST' })
+  },
+  confirm(projectId: string, run: BrowserRpaRun) {
+    return request<IssuedFinalConfirmation>(`${runPath(projectId, run.id)}/confirmations`, {
+      method: 'POST',
+      body: JSON.stringify({ expected_version: run.version, binding_hash: run.authority.approval_action_hash }),
+    })
+  },
+  submit(projectId: string, run: BrowserRpaRun, lease: BrowserRpaLease, confirmation: IssuedFinalConfirmation) {
+    return request<BrowserRpaRun>(runPath(projectId, run.id, ':submit'), {
+      method: 'POST',
+      body: JSON.stringify({
+        step_id: `${run.id}-submit`, confirmation_id: confirmation.confirmation.id,
+        token: confirmation.token, lease_id: lease.id, fencing_token: lease.fencing_token,
+        idempotency_key: `${run.id}-submit`,
+      }),
+    })
   },
 
   pause(projectId: string, runId: string, expectedVersion: number) {
@@ -44,6 +97,10 @@ export const controlledExecutionApi = {
   releaseTakeover(projectId: string, runId: string, expectedVersion: number) {
     return control(projectId, runId, expectedVersion, 'release_takeover')
   },
+}
+
+function runPath(projectId: string, runId: string, suffix = '') {
+  return `${apiPrefix}/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}${suffix}`
 }
 
 function control(projectId: string, runId: string, expectedVersion: number, action: 'pause' | 'resume' | 'cancel' | 'takeover' | 'release_takeover') {

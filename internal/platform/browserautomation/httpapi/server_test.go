@@ -16,6 +16,14 @@ import (
 
 type projectAuthorizer struct{}
 
+type planAdapter struct {
+	browserautomation.DeterministicFakeAdapter
+}
+
+func (planAdapter) Plan(context.Context, browserautomation.BrowserRpaRun) (json.RawMessage, error) {
+	return json.RawMessage(`{"schema_version":"oceanengine-playwright-rpa-plan/v3","mode":"prepare","allow_remote_write":false}`), nil
+}
+
 type authorityProvider struct {
 	binding    browserautomation.AuthorityBinding
 	boundRunID string
@@ -120,7 +128,7 @@ func TestTakeoverOnlyServerRegistersScopedResourcesWithoutMountingFakeWorker(t *
 	}
 	run := validHTTPRun(time.Now().UTC())
 	_, _, _ = repo.CreateRun(context.Background(), run)
-	for _, action := range []string{"prepare", "submit"} {
+	for _, action := range []string{"plan", "prepare", "submit"} {
 		response := call(http.MethodPost, "/api/platform/v1/browser-rpa/projects/project_1/runs/run_1:"+action, `{}`, "delivery.execute")
 		if response.Code != http.StatusNotFound {
 			t.Fatalf("fake worker %s unexpectedly mounted: status=%d body=%s", action, response.Code, response.Body.String())
@@ -129,6 +137,38 @@ func TestTakeoverOnlyServerRegistersScopedResourcesWithoutMountingFakeWorker(t *
 	authorization := call(http.MethodPost, "/api/platform/v1/browser-rpa/projects/project_1/runs/run_1/takeover-action-attempts", `{}`, "delivery.execute")
 	if authorization.Code != http.StatusBadRequest || strings.Contains(authorization.Body.String(), "automated worker") {
 		t.Fatalf("manual takeover authorization port status=%d body=%s", authorization.Code, authorization.Body.String())
+	}
+}
+
+func TestPlanPreviewAndLeaseReadSupportTheFrontendExecutionFlow(t *testing.T) {
+	repo := browserautomation.NewMemoryRepository()
+	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+	run := validHTTPRun(now)
+	_, _, _ = repo.CreateRun(context.Background(), run)
+	service := browserautomation.Service{Repository: repo, Now: func() time.Time { return now }}
+	acquired, err := service.AcquireRunLease(context.Background(), run.OrganizationID, run.ProjectID, run.ID, run.Version, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := New(service, browserautomation.Worker{Service: service, Adapter: planAdapter{}}, projectAuthorizer{})
+	call := func(method, path string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(method, path, nil)
+		scope := contract.Scope("delivery.read")
+		if strings.Contains(path, "/leases/") {
+			scope = "delivery.execute"
+		}
+		request = request.WithContext(contract.WithRequestContext(request.Context(), contract.RequestContext{RequestID: "req", TraceID: "trace", Actor: contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user"}, Scopes: []contract.Scope{scope}}}))
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		return response
+	}
+	plan := call(http.MethodPost, "/api/platform/v1/browser-rpa/projects/project_1/runs/run_1:plan")
+	if plan.Code != http.StatusOK || !strings.Contains(plan.Body.String(), `"allow_remote_write":false`) {
+		t.Fatalf("plan status=%d body=%s", plan.Code, plan.Body.String())
+	}
+	lease := call(http.MethodGet, fmt.Sprintf("/api/platform/v1/browser-rpa/projects/project_1/runs/run_1/leases/%s", acquired.Lease.ID))
+	if lease.Code != http.StatusOK || !strings.Contains(lease.Body.String(), `"fencing_token":1`) {
+		t.Fatalf("lease status=%d body=%s", lease.Code, lease.Body.String())
 	}
 }
 

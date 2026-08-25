@@ -127,6 +127,20 @@ func TestAdapterPrepareInjectsServerOwnedReadback(t *testing.T) {
 	}
 }
 
+func TestAdapterPlanReturnsPrepareOnlyV3PlanWithoutRunningBrowser(t *testing.T) {
+	run, env, policy := adapterFixture()
+	adapter := testAdapter(t, "runner-must-not-start", env, policy)
+	adapter.Protocol = ProtocolV3
+	adapter.V3Compiler = stubV3Compiler{}
+	plan, err := adapter.Plan(context.Background(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(plan), `"mode":"prepare"`) || strings.Contains(string(plan), `"allow_remote_write":true`) {
+		t.Fatalf("unexpected preview: %s", plan)
+	}
+}
+
 func TestAdapterPrepareRejectsAccountMismatchingEnvironment(t *testing.T) {
 	run, env, policy := adapterFixture()
 	env.AccountID = "another_account"
