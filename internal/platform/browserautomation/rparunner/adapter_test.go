@@ -2,6 +2,7 @@ package rparunner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,16 @@ import (
 	"github.com/shikanon/cookies/internal/platform/browserautomation"
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
+
+type stubV3Compiler struct{}
+
+func (stubV3Compiler) CompilePrepareV3(context.Context, browserautomation.BrowserRpaRun, browserautomation.SitePolicy) (json.RawMessage, error) {
+	return json.RawMessage(`{"schema_version":"oceanengine-playwright-rpa-plan/v3","plan_kind":"promotion_edit","mode":"prepare","steps":[{"id":"identify"}]}`), nil
+}
+
+func (stubV3Compiler) CompileSubmitV3(context.Context, browserautomation.BrowserRpaRun, browserautomation.ControlledActionAttempt, browserautomation.SitePolicy, string) (json.RawMessage, error) {
+	return json.RawMessage(`{"schema_version":"oceanengine-playwright-rpa-plan/v3","plan_kind":"promotion_edit","mode":"submit","steps":[{"id":"identify"}]}`), nil
+}
 
 type stubCompiler struct {
 	mode string
@@ -149,7 +160,7 @@ func TestAdapterSubmitInfrastructureFailureIsResultUnknown(t *testing.T) {
 	run, env, policy := adapterFixture()
 	env.CDPEndpoint = "garbage"
 	adapter := testAdapter(t, "garbage", env, policy)
-	outcome, _, err := adapter.Submit(context.Background(), run, browserautomation.ControlledActionAttempt{})
+	outcome, _, err := adapter.Submit(context.Background(), run, browserautomation.ControlledActionAttempt{}, "")
 	if err != nil {
 		t.Fatalf("submit must not surface infrastructure errors as authorization failures: %v", err)
 	}
@@ -161,8 +172,40 @@ func TestAdapterSubmitInfrastructureFailureIsResultUnknown(t *testing.T) {
 func TestAdapterSubmitRejectsSuccessWithoutClick(t *testing.T) {
 	run, env, policy := adapterFixture()
 	adapter := testAdapter(t, "success", env, policy)
-	outcome, _, err := adapter.Submit(context.Background(), run, browserautomation.ControlledActionAttempt{})
+	outcome, _, err := adapter.Submit(context.Background(), run, browserautomation.ControlledActionAttempt{}, "")
 	if err == nil || outcome != browserautomation.WorkerFailed {
 		t.Fatalf("success without the final click must fail, got outcome=%s err=%v", outcome, err)
+	}
+}
+
+func TestAdapterRunsV3AndProjectsObjectAndFieldReconciliation(t *testing.T) {
+	run, env, policy := adapterFixture()
+	run.Authority.TargetPlatformObjectID = "promotion_v3_test"
+	adapter := testAdapter(t, "success", env, policy)
+	adapter.Protocol = ProtocolV3
+	adapter.V3Compiler = stubV3Compiler{}
+
+	page, err := adapter.Prepare(context.Background(), run)
+	if err != nil {
+		t.Fatalf("prepare v3: %v", err)
+	}
+	if page.Readback["platform_object_id"] != "promotion_v3_test" || page.Readback["field_reconciliation_status"] != "matched" {
+		t.Fatalf("v3 prepare readback = %#v", page.Readback)
+	}
+	outcome, page, err := adapter.Submit(context.Background(), run, browserautomation.ControlledActionAttempt{}, "token")
+	if err != nil || outcome != browserautomation.WorkerSuccess || page.Readback["platform_object_id"] != "promotion_v3_test" {
+		t.Fatalf("v3 submit outcome=%s page=%#v err=%v", outcome, page, err)
+	}
+}
+
+func TestV3DriftReadbackKeepsObjectAndStructuredFields(t *testing.T) {
+	page := preparedPageFromResult(RpaResult{
+		SchemaVersion: ResultSchemaV2, Outcome: OutcomeSuccessWithDrift, CreatedObjectID: "promotion_1", Reconciliation: "matched",
+		FieldReconciliation: &FieldReconciliation{Status: "drifted", Fields: []ReconciledField{{
+			FieldKey: "promotion.call_to_action", Expected: []any{"查看详情", "立即预订"}, Observed: []any{"立即预订"}, Status: "drifted",
+		}}},
+	})
+	if page.Readback["platform_object_id"] != "promotion_1" || page.Readback["field.promotion.call_to_action.observed"] != `["立即预订"]` || len(page.DiffKeys) != 1 || page.DiffKeys[0] != "promotion.call_to_action" {
+		t.Fatalf("drift readback = %#v", page)
 	}
 }

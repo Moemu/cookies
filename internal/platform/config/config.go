@@ -58,9 +58,12 @@ type Config struct {
 // control plane remains the production baseline.
 type BrowserRPA struct {
 	Enabled               bool
+	RunnerProtocol        string
 	Command               string
 	ScriptPath            string
 	EvidenceRoot          string
+	EdgeSessionFile       string
+	AuthorityStateRoot    string
 	PrepareTimeoutSeconds int
 	SubmitTimeoutSeconds  int
 	CDPEndpointFallback   string
@@ -502,6 +505,14 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if strings.TrimSpace(browserRpaCDPFallback) != "" && environment == EnvironmentProduction {
 		return Config{}, fmt.Errorf("COOKIES_BROWSER_RPA_CDP_ENDPOINT fallback is only permitted outside production; register the endpoint on the execution environment instead")
 	}
+	browserRpaProtocol := valueOr(lookup, "COOKIES_BROWSER_RPA_RUNNER_PROTOCOL", "v3")
+	if browserRpaProtocol != "v3" && browserRpaProtocol != "legacy" {
+		return Config{}, fmt.Errorf("COOKIES_BROWSER_RPA_RUNNER_PROTOCOL must be v3 or legacy")
+	}
+	browserRpaScript := "scripts/browser-rpa-runner-v3.ts"
+	if browserRpaProtocol == "legacy" {
+		browserRpaScript = "scripts/browser-rpa-runner.ts"
+	}
 	config := Config{
 		Environment: environment,
 		HTTPAddr:    valueOr(lookup, "COOKIES_HTTP_ADDR", ":8080"),
@@ -615,9 +626,12 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		},
 		BrowserRPA: BrowserRPA{
 			Enabled:               browserRpaEnabled,
+			RunnerProtocol:        browserRpaProtocol,
 			Command:               valueOr(lookup, "COOKIES_BROWSER_RPA_TSX_COMMAND", "node node_modules/tsx/dist/cli.mjs"),
-			ScriptPath:            valueOr(lookup, "COOKIES_BROWSER_RPA_SCRIPT", "scripts/browser-rpa-runner.ts"),
+			ScriptPath:            valueOr(lookup, "COOKIES_BROWSER_RPA_SCRIPT", browserRpaScript),
 			EvidenceRoot:          valueOr(lookup, "COOKIES_BROWSER_RPA_EVIDENCE_ROOT", ".data/browser-rpa-evidence"),
+			EdgeSessionFile:       valueOr(lookup, "COOKIES_BROWSER_RPA_EDGE_SESSION_FILE", filepath.Join(valueOr(lookup, "LOCALAPPDATA", ".data"), "cookies", "browser-rpa", "session.json")),
+			AuthorityStateRoot:    valueOr(lookup, "COOKIES_BROWSER_RPA_AUTHORITY_STATE_ROOT", filepath.Join(valueOr(lookup, "LOCALAPPDATA", ".data"), "cookies", "browser-rpa", "authority-consumed")),
 			PrepareTimeoutSeconds: intValueOr(lookup, "COOKIES_BROWSER_RPA_PREPARE_TIMEOUT_SECONDS", 180),
 			SubmitTimeoutSeconds:  intValueOr(lookup, "COOKIES_BROWSER_RPA_SUBMIT_TIMEOUT_SECONDS", 300),
 			CDPEndpointFallback:   browserRpaCDPFallback,

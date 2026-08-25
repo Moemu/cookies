@@ -492,16 +492,20 @@ func main() {
 			log.Fatalf("load OceanEngine calibration manifest: %v", err)
 		}
 		adapter := rparunner.NewPlaywrightRPAAdapter(rparunner.AdapterConfig{
+			Protocol:            cfg.BrowserRPA.RunnerProtocol,
 			Command:             strings.Fields(cfg.BrowserRPA.Command),
 			ScriptPath:          cfg.BrowserRPA.ScriptPath,
 			WorkDir:             ".",
 			EvidenceRoot:        cfg.BrowserRPA.EvidenceRoot,
+			EdgeSessionFile:     cfg.BrowserRPA.EdgeSessionFile,
+			AuthorityStateRoot:  cfg.BrowserRPA.AuthorityStateRoot,
+			V3Compiler:          plancompile.V3Compiler{Source: delivery.MySQLRepository{DB: db}},
 			PrepareTimeout:      time.Duration(cfg.BrowserRPA.PrepareTimeoutSeconds) * time.Second,
 			SubmitTimeout:       time.Duration(cfg.BrowserRPA.SubmitTimeoutSeconds) * time.Second,
 			FallbackCDPEndpoint: cfg.BrowserRPA.CDPEndpointFallback,
 		}, browserRpaRepository, browserRpaService, plancompile.Compiler{Manifest: manifest})
 		browserRpaServer = browserautomationhttp.New(browserRpaService, browserautomation.Worker{Service: browserRpaService, Adapter: adapter}, projectStore)
-		log.Printf("browser_rpa_automated_worker=true")
+		log.Printf("browser_rpa_automated_worker=true runner_protocol=%s", cfg.BrowserRPA.RunnerProtocol)
 	}
 	browserRpaServer.MountLegacyAlias()
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,

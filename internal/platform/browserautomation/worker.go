@@ -40,7 +40,7 @@ var (
 
 type WorkerAdapter interface {
 	Prepare(context.Context, BrowserRpaRun) (PreparedPage, error)
-	Submit(context.Context, BrowserRpaRun, ControlledActionAttempt) (WorkerOutcome, PreparedPage, error)
+	Submit(context.Context, BrowserRpaRun, ControlledActionAttempt, string) (WorkerOutcome, PreparedPage, error)
 }
 
 type DeterministicFakeAdapter struct {
@@ -76,7 +76,7 @@ func (a DeterministicFakeAdapter) Prepare(_ context.Context, run BrowserRpaRun) 
 	}
 	return PreparedPage{BeforeFacts: map[string]string{"account_id": run.AccountID, "page_kind": "review"}, Readback: readback, DiffKeys: []string{}, PageRef: "fake://oceanengine/review"}, nil
 }
-func (a DeterministicFakeAdapter) Submit(_ context.Context, run BrowserRpaRun, _ ControlledActionAttempt) (WorkerOutcome, PreparedPage, error) {
+func (a DeterministicFakeAdapter) Submit(_ context.Context, run BrowserRpaRun, _ ControlledActionAttempt, _ string) (WorkerOutcome, PreparedPage, error) {
 	outcome := a.Outcome
 	if outcome == "" {
 		outcome = WorkerSuccess
@@ -168,19 +168,39 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 	if err := w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step); err != nil {
 		return BrowserRpaRun{}, err
 	}
-	outcome, page, adapterErr := w.Adapter.Submit(ctx, run, attempt)
+	outcome, page, adapterErr := w.Adapter.Submit(ctx, run, attempt, request.Authorize.Token)
 	if adapterErr != nil {
 		step.Status = StepFailed
 		step.Version++
 		_ = w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step)
-		return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunFailed, BlockResultReconciliation)
+		_ = w.appendEvidence(ctx, run, step, page)
+		if err := w.Service.Repository.CompleteControlledAction(ctx, run.OrganizationID, run.ProjectID, attempt.ID, ControlledActionFailed); err != nil {
+			return BrowserRpaRun{}, err
+		}
+		reason := BlockPageDrift
+		if errors.Is(adapterErr, ErrAccountMismatch) {
+			reason = BlockAccountMismatch
+		} else if errors.Is(adapterErr, ErrEnvironmentUnavailable) {
+			reason = BlockResultReconciliation
+		}
+		return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunFailed, reason)
 	}
 	if outcome == WorkerResultUnknown {
 		step.Status = StepResultUnknown
 		step.Version++
 		_ = w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step)
 		_ = w.appendEvidence(ctx, run, step, page)
+		if err := w.Service.Repository.CompleteControlledAction(ctx, run.OrganizationID, run.ProjectID, attempt.ID, ControlledActionResultUnknown); err != nil {
+			return BrowserRpaRun{}, err
+		}
 		return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunResultUnknown, BlockResultReconciliation)
+	}
+	attemptStatus := ControlledActionVerified
+	if outcome == WorkerFailed {
+		attemptStatus = ControlledActionFailed
+	}
+	if err := w.Service.Repository.CompleteControlledAction(ctx, run.OrganizationID, run.ProjectID, attempt.ID, attemptStatus); err != nil {
+		return BrowserRpaRun{}, err
 	}
 	run, err = w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunVerifying, "")
 	if err != nil {

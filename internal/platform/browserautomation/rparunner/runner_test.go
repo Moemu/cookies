@@ -125,3 +125,17 @@ func TestRunnerV3RejectsWrongPlanSchema(t *testing.T) {
 		t.Fatalf("expected infrastructure failure, got %v", err)
 	}
 }
+
+func TestRunnerV3PassesPersistentEdgeSessionFile(t *testing.T) {
+	runner := testRunner(t, "success")
+	runner.EdgeSessionFile = `C:\Users\test\AppData\Local\cookies\browser-rpa\session.json`
+	plan := json.RawMessage(`{"schema_version":"oceanengine-playwright-rpa-plan/v3","mode":"prepare","steps":[{"id":"identify"}]}`)
+	result, err := runner.RunV3(context.Background(), plan, "", "")
+	if err != nil {
+		t.Fatalf("run v3 with session file: %v", err)
+	}
+	arguments, ok := result.Steps[0].Readback["runner_args"].([]any)
+	if !ok || len(arguments) != 2 || arguments[0] != "--session-file" || arguments[1] != runner.EdgeSessionFile {
+		t.Fatalf("runner arguments = %#v", result.Steps[0].Readback)
+	}
+}

@@ -56,7 +56,8 @@
           "status": {"enum": ["succeeded", "blocked_boundary", "submitted", "result_unknown", "failed"]},
           "readback": {},
           "error_code": {"type": "string", "minLength": 1},
-          "error_message": {"type": "string"}
+          "error_message": {"type": "string"},
+          "page_reference": {"type": "string", "minLength": 1}
         }
       }
     }

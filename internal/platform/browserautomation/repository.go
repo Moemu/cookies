@@ -40,6 +40,7 @@ type Repository interface {
 	ActiveKillSwitch(context.Context, contract.OrganizationID, Platform) (KillSwitch, bool, error)
 	IssueConfirmation(context.Context, FinalConfirmation) (FinalConfirmation, error)
 	AuthorizeControlledAction(context.Context, FinalConfirmation, string, SessionLease, ControlledActionAttempt, time.Time) (ControlledActionAttempt, error)
+	CompleteControlledAction(context.Context, contract.OrganizationID, contract.ProjectID, string, string) error
 	AuthorizeTakeoverAction(context.Context, BrowserRpaRun, int64, FinalConfirmation, string, SessionLease, ControlledActionAttempt, RunStep, Evidence, RunEvent, time.Time) (BrowserRpaRun, ControlledActionAttempt, error)
 	AppendEvent(context.Context, RunEvent) error
 	AppendEvidence(context.Context, Evidence) error

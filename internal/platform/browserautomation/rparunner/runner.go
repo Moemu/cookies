@@ -28,6 +28,9 @@ type Runner struct {
 	// CDPEndpoint is the DevTools endpoint of the externally authenticated
 	// browser session.
 	CDPEndpoint string
+	// EdgeSessionFile is the persistent local Edge session metadata file.
+	// Runner v3 resolves its current WebSocket endpoint immediately before use.
+	EdgeSessionFile string
 
 	PrepareTimeout time.Duration
 	SubmitTimeout  time.Duration
@@ -37,6 +40,11 @@ type Runner struct {
 // endpoint, so one configured runner can serve many environments.
 func (r Runner) WithCDPEndpoint(endpoint string) Runner {
 	r.CDPEndpoint = endpoint
+	return r
+}
+
+func (r Runner) WithEdgeSessionFile(path string) Runner {
+	r.EdgeSessionFile = path
 	return r
 }
 
@@ -88,7 +96,12 @@ func (r Runner) runPayload(ctx context.Context, payload []byte, mode string, ext
 	if len(r.Command) == 0 {
 		return RpaResult{}, fmt.Errorf("%w: runner command is not configured", ErrRunnerInfrastructure)
 	}
-	args := append(append([]string{}, r.Command[1:]...), r.ScriptPath, r.CDPEndpoint)
+	args := append(append([]string{}, r.Command[1:]...), r.ScriptPath)
+	if r.EdgeSessionFile != "" {
+		args = append(args, "--session-file", r.EdgeSessionFile)
+	} else {
+		args = append(args, r.CDPEndpoint)
+	}
 	args = append(args, extraArgs...)
 	cmd := exec.CommandContext(ctx, r.Command[0], args...)
 	cmd.Dir = r.WorkDir

@@ -2,6 +2,7 @@ package rparunner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -16,6 +17,16 @@ type PlanCompiler interface {
 	CompileSubmit(run browserautomation.BrowserRpaRun, attempt browserautomation.ControlledActionAttempt, policy browserautomation.SitePolicy) (RpaPlan, error)
 }
 
+type V3PlanCompiler interface {
+	CompilePrepareV3(context.Context, browserautomation.BrowserRpaRun, browserautomation.SitePolicy) (json.RawMessage, error)
+	CompileSubmitV3(context.Context, browserautomation.BrowserRpaRun, browserautomation.ControlledActionAttempt, browserautomation.SitePolicy, string) (json.RawMessage, error)
+}
+
+const (
+	ProtocolV3     = "v3"
+	ProtocolLegacy = "legacy"
+)
+
 // LeaseHeartbeater keeps the run lease alive while the subprocess executes.
 // browserautomation.Service satisfies this interface.
 type LeaseHeartbeater interface {
@@ -27,10 +38,14 @@ const heartbeatInterval = 30 * time.Second
 // AdapterConfig carries the process-level executor settings. Per-run values
 // (account, CDP endpoint, policy) come from the control-plane records.
 type AdapterConfig struct {
+	Protocol            string
 	Command             []string
 	ScriptPath          string
 	WorkDir             string
 	EvidenceRoot        string
+	EdgeSessionFile     string
+	AuthorityStateRoot  string
+	V3Compiler          V3PlanCompiler
 	PrepareTimeout      time.Duration
 	SubmitTimeout       time.Duration
 	FallbackCDPEndpoint string
@@ -47,11 +62,15 @@ func NewPlaywrightRPAAdapter(cfg AdapterConfig, store browserautomation.Reposito
 			PrepareTimeout: cfg.PrepareTimeout,
 			SubmitTimeout:  cfg.SubmitTimeout,
 		},
-		Compiler:     compiler,
-		Store:        store,
-		Heartbeat:    heartbeat,
-		EvidenceRoot: cfg.EvidenceRoot,
-		FallbackCDP:  cfg.FallbackCDPEndpoint,
+		Protocol:           cfg.Protocol,
+		Compiler:           compiler,
+		V3Compiler:         cfg.V3Compiler,
+		Store:              store,
+		Heartbeat:          heartbeat,
+		EvidenceRoot:       cfg.EvidenceRoot,
+		EdgeSessionFile:    cfg.EdgeSessionFile,
+		AuthorityStateRoot: cfg.AuthorityStateRoot,
+		FallbackCDP:        cfg.FallbackCDPEndpoint,
 	}
 }
 
@@ -59,12 +78,16 @@ func NewPlaywrightRPAAdapter(cfg AdapterConfig, store browserautomation.Reposito
 // run into a deterministic Playwright plan and executes it in a subprocess
 // attached to the externally authenticated browser session over CDP.
 type PlaywrightRPAAdapter struct {
-	Runner       Runner
-	Compiler     PlanCompiler
-	Store        browserautomation.Repository
-	Heartbeat    LeaseHeartbeater
-	EvidenceRoot string
-	FallbackCDP  string
+	Runner             Runner
+	Protocol           string
+	Compiler           PlanCompiler
+	V3Compiler         V3PlanCompiler
+	Store              browserautomation.Repository
+	Heartbeat          LeaseHeartbeater
+	EvidenceRoot       string
+	EdgeSessionFile    string
+	AuthorityStateRoot string
+	FallbackCDP        string
 }
 
 var _ browserautomation.WorkerAdapter = PlaywrightRPAAdapter{}
@@ -74,12 +97,24 @@ func (a PlaywrightRPAAdapter) Prepare(ctx context.Context, run browserautomation
 	if err != nil {
 		return browserautomation.PreparedPage{}, err
 	}
-	plan, err := a.Compiler.CompilePrepare(run, policy)
-	if err != nil {
-		return browserautomation.PreparedPage{}, fmt.Errorf("%w: %v", browserautomation.ErrPageDrift, err)
+	var result RpaResult
+	if a.protocol() == ProtocolV3 {
+		if a.V3Compiler == nil {
+			return browserautomation.PreparedPage{}, fmt.Errorf("%w: runner v3 compiler is not configured", browserautomation.ErrEnvironmentUnavailable)
+		}
+		plan, compileErr := a.V3Compiler.CompilePrepareV3(ctx, run, policy)
+		if compileErr != nil {
+			return browserautomation.PreparedPage{}, fmt.Errorf("%w: %v", browserautomation.ErrPageDrift, compileErr)
+		}
+		result, err = a.sessionRunner(env).RunV3(ctx, plan, "", a.AuthorityStateRoot)
+	} else {
+		plan, compileErr := a.Compiler.CompilePrepare(run, policy)
+		if compileErr != nil {
+			return browserautomation.PreparedPage{}, fmt.Errorf("%w: %v", browserautomation.ErrPageDrift, compileErr)
+		}
+		plan.EvidenceRoot = a.EvidenceRoot
+		result, err = a.sessionRunner(env).Run(ctx, plan)
 	}
-	plan.EvidenceRoot = a.EvidenceRoot
-	result, err := a.Runner.WithCDPEndpoint(env.CDPEndpoint).Run(ctx, plan)
 	if err != nil {
 		return browserautomation.PreparedPage{}, fmt.Errorf("%w: %v", browserautomation.ErrEnvironmentUnavailable, err)
 	}
@@ -103,6 +138,10 @@ func completePrepareReadback(run browserautomation.BrowserRpaRun, result RpaResu
 	}
 	if objectID, ok := observedObjectID(result); ok {
 		page.Readback["platform_object_id"] = objectID
+	} else if result.SchemaVersion == ResultSchemaV2 && changesExistingPromotion(run.Authority.Action) {
+		// Runner v3 identifies the exact edit URL before it touches a field.
+		// Its prepare result has no created_object_id because no object is created.
+		page.Readback["platform_object_id"] = run.Authority.TargetPlatformObjectID
 	}
 	if !changesExistingPromotion(run.Authority.Action) {
 		return nil
@@ -138,23 +177,34 @@ func changesExistingPromotion(action string) bool {
 	}
 }
 
-func (a PlaywrightRPAAdapter) Submit(ctx context.Context, run browserautomation.BrowserRpaRun, attempt browserautomation.ControlledActionAttempt) (browserautomation.WorkerOutcome, browserautomation.PreparedPage, error) {
+func (a PlaywrightRPAAdapter) Submit(ctx context.Context, run browserautomation.BrowserRpaRun, attempt browserautomation.ControlledActionAttempt, confirmToken string) (browserautomation.WorkerOutcome, browserautomation.PreparedPage, error) {
 	env, policy, err := a.resolveSession(ctx, run)
 	if err != nil {
 		return browserautomation.WorkerFailed, browserautomation.PreparedPage{}, err
 	}
-	plan, err := a.Compiler.CompileSubmit(run, attempt, policy)
-	if err != nil {
-		return browserautomation.WorkerFailed, browserautomation.PreparedPage{}, fmt.Errorf("%w: %v", browserautomation.ErrPageDrift, err)
-	}
-	plan.EvidenceRoot = a.EvidenceRoot
-
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stopHeartbeat := a.keepLeaseAlive(runCtx, cancel, run, attempt)
 	defer stopHeartbeat()
 
-	result, err := a.Runner.WithCDPEndpoint(env.CDPEndpoint).Run(runCtx, plan)
+	var result RpaResult
+	if a.protocol() == ProtocolV3 {
+		if a.V3Compiler == nil {
+			return browserautomation.WorkerFailed, browserautomation.PreparedPage{}, fmt.Errorf("%w: runner v3 compiler is not configured", browserautomation.ErrEnvironmentUnavailable)
+		}
+		plan, compileErr := a.V3Compiler.CompileSubmitV3(runCtx, run, attempt, policy, confirmToken)
+		if compileErr != nil {
+			return browserautomation.WorkerFailed, browserautomation.PreparedPage{}, fmt.Errorf("%w: %v", browserautomation.ErrPageDrift, compileErr)
+		}
+		result, err = a.sessionRunner(env).RunV3(runCtx, plan, confirmToken, a.AuthorityStateRoot)
+	} else {
+		plan, compileErr := a.Compiler.CompileSubmit(run, attempt, policy)
+		if compileErr != nil {
+			return browserautomation.WorkerFailed, browserautomation.PreparedPage{}, fmt.Errorf("%w: %v", browserautomation.ErrPageDrift, compileErr)
+		}
+		plan.EvidenceRoot = a.EvidenceRoot
+		result, err = a.sessionRunner(env).Run(runCtx, plan)
+	}
 	if err != nil {
 		// Infrastructure failure (crash, timeout, kill) leaves the platform
 		// effect unproven either way; the contract only permits query,
@@ -167,6 +217,8 @@ func (a PlaywrightRPAAdapter) Submit(ctx context.Context, run browserautomation.
 	switch result.Outcome {
 	case OutcomeSuccess:
 		return browserautomation.WorkerSuccess, preparedPageFromResult(result), nil
+	case OutcomeSuccessWithDrift:
+		return browserautomation.WorkerPartial, preparedPageFromResult(result), nil
 	case OutcomePartial:
 		return browserautomation.WorkerPartial, preparedPageFromResult(result), nil
 	case OutcomeResultUnknown:
@@ -174,6 +226,21 @@ func (a PlaywrightRPAAdapter) Submit(ctx context.Context, run browserautomation.
 	default:
 		return browserautomation.WorkerFailed, preparedPageFromResult(result), classifyResult(result)
 	}
+}
+
+func (a PlaywrightRPAAdapter) protocol() string {
+	if a.Protocol == "" {
+		return ProtocolLegacy
+	}
+	return a.Protocol
+}
+
+func (a PlaywrightRPAAdapter) sessionRunner(env browserautomation.ExecutionEnvironment) Runner {
+	runner := a.Runner.WithCDPEndpoint(env.CDPEndpoint)
+	if a.protocol() == ProtocolV3 && a.EdgeSessionFile != "" {
+		runner = runner.WithEdgeSessionFile(a.EdgeSessionFile)
+	}
+	return runner
 }
 
 func (a PlaywrightRPAAdapter) resolveSession(ctx context.Context, run browserautomation.BrowserRpaRun) (browserautomation.ExecutionEnvironment, browserautomation.SitePolicy, error) {
@@ -187,7 +254,7 @@ func (a PlaywrightRPAAdapter) resolveSession(ctx context.Context, run browseraut
 	if env.CDPEndpoint == "" {
 		env.CDPEndpoint = a.FallbackCDP
 	}
-	if !env.Healthy || env.CDPEndpoint == "" {
+	if !env.Healthy || (env.CDPEndpoint == "" && (a.protocol() != ProtocolV3 || a.EdgeSessionFile == "")) {
 		return browserautomation.ExecutionEnvironment{}, browserautomation.SitePolicy{}, browserautomation.ErrEnvironmentUnavailable
 	}
 	policy, err := a.Store.GetSitePolicy(ctx, run.OrganizationID, run.ProjectID, run.PolicyID)
@@ -263,18 +330,42 @@ func preparedPageFromResult(result RpaResult) browserautomation.PreparedPage {
 	page := browserautomation.PreparedPage{
 		SelectorVersion: SelectorVersion,
 		ActionVersion:   ActionVersion,
+		Readback:        map[string]string{},
 	}
-	for i := len(result.Steps) - 1; i >= 0; i-- {
-		step := result.Steps[i]
-		if len(step.Readback) == 0 && len(step.BeforeFacts) == 0 {
-			continue
+	for _, step := range result.Steps {
+		for key, value := range stringReadback(step.Readback) {
+			page.Readback[key] = value
 		}
-		page.BeforeFacts = step.BeforeFacts
-		page.Readback = stringReadback(step.Readback)
-		page.DiffKeys = step.DiffKeys
-		page.PageRef = step.PageReference
-		page.ScreenshotRef = step.ScreenshotPath
-		break
+		if len(step.BeforeFacts) > 0 {
+			page.BeforeFacts = step.BeforeFacts
+		}
+		page.DiffKeys = append(page.DiffKeys, step.DiffKeys...)
+		if step.PageReference != "" {
+			page.PageRef = step.PageReference
+		}
+		if step.ScreenshotPath != "" {
+			page.ScreenshotRef = step.ScreenshotPath
+		}
+	}
+	if result.CreatedObjectID != "" {
+		page.Readback["platform_object_id"] = result.CreatedObjectID
+	}
+	if result.Reconciliation != "" {
+		page.Readback["reconciliation"] = result.Reconciliation
+	}
+	if result.FieldReconciliation != nil {
+		page.Readback["field_reconciliation_status"] = result.FieldReconciliation.Status
+		for _, field := range result.FieldReconciliation.Fields {
+			if field.Expected != nil {
+				page.Readback["field."+field.FieldKey+".expected"] = stringifyReadback(field.Expected)
+			}
+			if field.Observed != nil {
+				page.Readback["field."+field.FieldKey+".observed"] = stringifyReadback(field.Observed)
+			}
+			if field.Status == "drifted" {
+				page.DiffKeys = append(page.DiffKeys, field.FieldKey)
+			}
+		}
 	}
 	if page.DiffKeys == nil {
 		page.DiffKeys = []string{}
@@ -288,11 +379,18 @@ func stringReadback(values map[string]any) map[string]string {
 	}
 	readback := make(map[string]string, len(values))
 	for key, value := range values {
-		if text, ok := value.(string); ok {
-			readback[key] = text
-			continue
-		}
-		readback[key] = fmt.Sprint(value)
+		readback[key] = stringifyReadback(value)
 	}
 	return readback
+}
+
+func stringifyReadback(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	payload, err := json.Marshal(value)
+	if err == nil {
+		return string(payload)
+	}
+	return fmt.Sprint(value)
 }

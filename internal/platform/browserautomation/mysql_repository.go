@@ -420,6 +420,21 @@ func (r MySQLRepository) AuthorizeControlledAction(ctx context.Context, identity
 	return attempt, nil
 }
 
+func (r MySQLRepository) CompleteControlledAction(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, attemptID, status string) error {
+	result, err := r.DB.ExecContext(ctx, `UPDATE browser_rpa_controlled_action_attempts SET status=? WHERE organization_id=? AND project_id=? AND id=? AND status=?`, status, org, project, attemptID, ControlledActionAuthorized)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrVersionConflict
+	}
+	return nil
+}
+
 func (r MySQLRepository) AuthorizeTakeoverAction(ctx context.Context, run BrowserRpaRun, expected int64, identity FinalConfirmation, digest string, lease SessionLease, attempt ControlledActionAttempt, step RunStep, evidence Evidence, event RunEvent, now time.Time) (BrowserRpaRun, ControlledActionAttempt, error) {
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {

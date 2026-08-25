@@ -29,6 +29,7 @@ export type RunnerStepResult = {
   readback?: unknown;
   error_code?: string;
   error_message?: string;
+  page_reference?: string;
 };
 
 export type RunnerV3Result = {
@@ -1081,6 +1082,11 @@ async function main() {
     ...(confirmToken ? { confirmToken } : {}),
     authorityStateDirectory,
   });
+  const finalStep = result.steps.at(-1);
+  if (finalStep) {
+    const current = new URL(page.url());
+    finalStep.page_reference = `${current.protocol}//${current.host}${current.pathname}`;
+  }
   await new Promise<void>((resolvePromise, rejectPromise) => {
     process.stdout.write(JSON.stringify(result), (error) => error ? rejectPromise(error) : resolvePromise());
   });

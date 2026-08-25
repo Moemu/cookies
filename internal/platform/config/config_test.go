@@ -53,6 +53,22 @@ func TestStrategyRolloutDefaultsAreSafe(t *testing.T) {
 		value.Creative.BrandFilmPlannerModelAlias != "cookies.text.standard" {
 		t.Fatalf("unexpected Creative planner defaults: %#v", value.Creative)
 	}
+	if value.BrowserRPA.RunnerProtocol != "v3" || value.BrowserRPA.ScriptPath != "scripts/browser-rpa-runner-v3.ts" || !strings.HasSuffix(strings.ReplaceAll(value.BrowserRPA.EdgeSessionFile, "\\", "/"), "cookies/browser-rpa/session.json") {
+		t.Fatalf("unexpected Browser RPA defaults: %#v", value.BrowserRPA)
+	}
+}
+
+func TestBrowserRPALegacyRunnerIsAnExplicitRollbackMode(t *testing.T) {
+	value, err := FromLookup(mapLookup(map[string]string{"COOKIES_BROWSER_RPA_RUNNER_PROTOCOL": "legacy"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.BrowserRPA.ScriptPath != "scripts/browser-rpa-runner.ts" {
+		t.Fatalf("legacy script path = %q", value.BrowserRPA.ScriptPath)
+	}
+	if _, err := FromLookup(mapLookup(map[string]string{"COOKIES_BROWSER_RPA_RUNNER_PROTOCOL": "mixed"})); err == nil {
+		t.Fatal("unknown Browser RPA protocol must fail")
+	}
 }
 
 func TestVolcengineSpeechConfigurationRequiresIndependentAPIKeyAndVoice(t *testing.T) {

@@ -5,7 +5,7 @@ description: Compile and run deterministic Ocean Engine operations with Playwrig
 
 # Ocean Engine Playwright RPA
 
-Production runs are driven by `scripts/browser-rpa-runner.ts` through the browser-rpa control plane; `scripts/oceanengine-playwright-rpa.ts` remains the calibration entry point. Do not operate the page through
+Production runs use `scripts/browser-rpa-runner-v3.ts` through the Browser RPA control plane. The old runner is an explicit rollback mode. `scripts/oceanengine-playwright-rpa.ts` remains the calibration entry point. Do not operate the page through
 free-form visual UI automation. Compile each action from the frozen configuration and
 Manifest. Require one semantic locator to match exactly one element.
 

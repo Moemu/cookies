@@ -26,7 +26,7 @@ func TestBrowserRpaAuthorityIsServerResolvedBoundAndRevalidated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.BoundRunID != "" || resolved.Binding.ApprovalID != approval.ID || resolved.Binding.ApprovalActionHash != approval.ActionHash || resolved.Binding.WorkflowStepID != "submit-platform-configuration" || resolved.Binding.SkillID != binding.SkillID {
+	if resolved.BoundRunID != "" || resolved.Binding.ApprovalID != approval.ID || resolved.Binding.ApprovalActionHash != approval.ActionHash || resolved.Binding.WorkflowStepID != "submit-platform-configuration" || resolved.Binding.SkillID != binding.SkillID || resolved.Binding.PlanID != binding.PlanID || resolved.Binding.PlanVersion != binding.PlanVersion {
 		t.Fatalf("resolved=%+v", resolved)
 	}
 	if err := provider.BindRun(context.Background(), resolved.Binding, "run_1", now); err != nil {

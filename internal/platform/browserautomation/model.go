@@ -271,6 +271,8 @@ type AuthorityBinding struct {
 	PromotionRestart                *PromotionRestartBinding  `json:"promotion_restart,omitempty"`
 	ObjectFingerprint               string                    `json:"object_fingerprint"`
 	Action                          string                    `json:"action"`
+	PlanID                          string                    `json:"plan_id,omitempty"`
+	PlanVersion                     int                       `json:"plan_version,omitempty"`
 	ProjectBudgetMode               string                    `json:"project_budget_mode,omitempty"`
 	ProjectBudgetLimitMinor         int64                     `json:"project_budget_limit_minor"`
 	PromotionBudgetLimitMinor       int64                     `json:"promotion_budget_limit_minor"`

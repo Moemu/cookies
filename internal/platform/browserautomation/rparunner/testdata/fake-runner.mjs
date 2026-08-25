@@ -43,7 +43,7 @@ stdin.on('close', () => {
         status: 'matched',
         fields: [{ field_key: 'promotion.landing_page_reference', expected: 'landing_test', observed: 'landing_test', status: 'matched' }],
       },
-      steps: [{ id: plan.steps?.[0]?.id ?? 'step', status: 'succeeded' }],
+      steps: [{ id: plan.steps?.[0]?.id ?? 'step', status: 'succeeded', readback: { runner_args: process.argv.slice(3) } }],
     }))
     return
   }

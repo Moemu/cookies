@@ -107,7 +107,7 @@ func TestDeterministicFakeAdapterProjectsExactPromotionMutationReadback(t *testi
 	if err != nil || prepared.Readback["platform_object_id"] != "promotion_test" || prepared.Readback["current_state_hash"] != currentHash || prepared.Readback["target_state_hash"] != targetHash || len(prepared.DiffKeys) != 0 {
 		t.Fatalf("prepared=%#v err=%v", prepared, err)
 	}
-	_, outcome, err := adapter.Submit(context.Background(), run, ControlledActionAttempt{})
+	_, outcome, err := adapter.Submit(context.Background(), run, ControlledActionAttempt{}, "")
 	if err != nil || outcome.Readback["platform_object_id"] != "promotion_test" || outcome.Readback["target_state_hash"] != targetHash {
 		t.Fatalf("outcome=%#v err=%v", outcome, err)
 	}
@@ -139,7 +139,7 @@ func TestDeterministicFakeAdapterProjectsEmergencyPauseReadback(t *testing.T) {
 	if err != nil || prepared.Readback["platform_object_id"] != "promotion_test" || prepared.Readback["current_state_hash"] != currentHash || prepared.Readback["target_state_hash"] != targetHash {
 		t.Fatalf("prepared=%#v err=%v", prepared, err)
 	}
-	_, outcome, err := adapter.Submit(context.Background(), run, ControlledActionAttempt{})
+	_, outcome, err := adapter.Submit(context.Background(), run, ControlledActionAttempt{}, "")
 	if err != nil || outcome.Readback["platform_object_id"] != "promotion_test" || outcome.Readback["platform_status"] != "paused" || outcome.Readback["target_state_hash"] != targetHash {
 		t.Fatalf("outcome=%#v err=%v", outcome, err)
 	}
@@ -176,7 +176,7 @@ func TestDeterministicFakeAdapterProjectsControlledRestartRechecks(t *testing.T)
 	if err != nil || run.Authority.validatePreSubmitReadback(prepared.Readback, now) != nil || prepared.Readback["platform_status"] != "paused" || prepared.Readback["materials_available"] != "true" || prepared.Readback["landing_page_available"] != "true" {
 		t.Fatalf("prepared=%#v err=%v", prepared, err)
 	}
-	_, outcome, err := adapter.Submit(context.Background(), run, ControlledActionAttempt{})
+	_, outcome, err := adapter.Submit(context.Background(), run, ControlledActionAttempt{}, "")
 	if err != nil || outcome.Readback["platform_object_id"] != "promotion_test" || outcome.Readback["platform_status"] != "delivering" || outcome.Readback["target_state_hash"] != restart.TargetStateHash {
 		t.Fatalf("outcome=%#v err=%v", outcome, err)
 	}

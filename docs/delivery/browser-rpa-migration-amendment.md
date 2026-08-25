@@ -92,29 +92,29 @@ Delivery ChangeSet/Approval/Execution ──> BrowserRpaRun (control plane)
                                               │  prepare / submit (config-gated)
                                               ▼
                             rparunner.PlaywrightRPAAdapter
-                               │ compile plan (plancompile + frozen manifest)
-                               │ spawn `npx tsx scripts/browser-rpa-runner.ts`
+                               │ compile Runner v3 plan from the bound Delivery plan
+                               │ spawn `node .../tsx scripts/browser-rpa-runner-v3.ts`
                                │ plan JSON on stdin, result JSON on stdout
                                │ lease heartbeat every 30s (TTL 1m)
                                ▼
                           Playwright connectOverCDP ──> operator's logged-in Edge
 ```
 
-- CDP endpoint source: `browser_rpa_environments.cdp_endpoint`, with a
-  non-production-only `COOKIES_BROWSER_RPA_CDP_ENDPOINT` fallback.
+- Runner v3 reads `COOKIES_BROWSER_RPA_EDGE_SESSION_FILE` and resolves the
+  current local Edge WebSocket before each process starts.
+- The old endpoint-based runner remains available only when
+  `COOKIES_BROWSER_RPA_RUNNER_PROTOCOL=legacy`.
 - Login, captchas and 2FA remain human-only (contract §4 of the runtime
   doc); the runner attaches to an already authenticated session and never
   records credentials.
-- First enabled action: read-only `update_promotion_budget` prepare
-  (advances to `awaiting_confirmation` and stops). The real budget click
-  (`button:确定修改`) remains a separately authorized, separately calibrated
-  turn per contract decision #19/#20.
+- First v3 control-plane action: `update_promotion_budget` on one exact
+  promotion edit form. Prepare stops at `保存并关闭`. Submit consumes one
+  confirmation and permits one final click.
 
 ## 6. Open items
 
-- First authorized real submit for `update_promotion_budget`, pending an
-  eligible test object above the 300 CNY calibration ceiling
-  (`distinct_authorized_target_exists: false` in the frozen manifest).
+- Add one-form v3 contracts for compound creation, material replacement,
+  pause, and resume. The control plane rejects these actions until then.
 - Pause/enable/materials/create actions gain RPA plans only after their own
   calibration records land in the manifest.
 - Removal of the legacy `/api/platform/v1/computer-use/**` alias after one

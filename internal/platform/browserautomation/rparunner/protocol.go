@@ -71,15 +71,27 @@ type StepResult struct {
 }
 
 type RpaResult struct {
-	SchemaVersion       string       `json:"schema_version"`
-	Outcome             string       `json:"outcome"`
-	ErrorCode           string       `json:"error_code"`
-	ErrorMessage        string       `json:"error_message,omitempty"`
-	FinalClickPerformed bool         `json:"final_click_performed"`
-	CreatedObjectID     string       `json:"created_object_id,omitempty"`
-	Reconciliation      string       `json:"reconciliation,omitempty"`
-	FieldReconciliation any          `json:"field_reconciliation,omitempty"`
-	Steps               []StepResult `json:"steps,omitempty"`
+	SchemaVersion       string               `json:"schema_version"`
+	Outcome             string               `json:"outcome"`
+	ErrorCode           string               `json:"error_code"`
+	ErrorMessage        string               `json:"error_message,omitempty"`
+	FinalClickPerformed bool                 `json:"final_click_performed"`
+	CreatedObjectID     string               `json:"created_object_id,omitempty"`
+	Reconciliation      string               `json:"reconciliation,omitempty"`
+	FieldReconciliation *FieldReconciliation `json:"field_reconciliation,omitempty"`
+	Steps               []StepResult         `json:"steps,omitempty"`
+}
+
+type ReconciledField struct {
+	FieldKey string `json:"field_key"`
+	Expected any    `json:"expected,omitempty"`
+	Observed any    `json:"observed,omitempty"`
+	Status   string `json:"status"`
+}
+
+type FieldReconciliation struct {
+	Status string            `json:"status"`
+	Fields []ReconciledField `json:"fields"`
 }
 
 // Error codes reported by the runner.
