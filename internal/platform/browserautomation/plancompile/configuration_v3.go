@@ -44,9 +44,9 @@ type V3ConfigurationPlanSet struct {
 	Forms             []V3PlannedForm `json:"forms"`
 }
 
-// V3BindingsFromMappings accepts only confirmed mappings for this exact
-// configuration and account. It never treats an internal draft ID as a
-// platform object ID.
+// V3BindingsFromMappings selects confirmed mappings for the configured
+// objects and account. It ignores mappings for other plans in the project.
+// It never treats an internal draft ID as a platform object ID.
 func V3BindingsFromMappings(configuration delivery.PlatformConfiguration, account string, mappings []delivery.PlatformEntityMapping) (V3ObjectBindings, error) {
 	bindings := V3ObjectBindings{PromotionPlatformIDs: map[string]string{}}
 	ocean := configuration.Payload.OceanEngine
@@ -54,27 +54,33 @@ func V3BindingsFromMappings(configuration delivery.PlatformConfiguration, accoun
 		return V3ObjectBindings{}, fmt.Errorf("configuration has no OceanEngine project")
 	}
 	for _, mapping := range mappings {
-		if mapping.Status != delivery.PlatformEntityMappingConfirmed || mapping.AccountReferenceID != account || mapping.ConfigurationID != configuration.ConfigurationID || !numericReference(mapping.PlatformObjectID) {
+		isProject := mapping.InternalObjectKind == "project" && mapping.InternalObjectID == ocean.Project.ProjectDraftID
+		isPromotion := mapping.InternalObjectKind == "promotion" && slices.ContainsFunc(ocean.Promotions, func(value delivery.OceanEnginePromotionDraft) bool {
+			return value.PromotionDraftID == mapping.InternalObjectID
+		})
+		if !isProject && !isPromotion {
+			continue
+		}
+		if mapping.Status == delivery.PlatformEntityMappingPending {
+			continue
+		}
+		if mapping.Status != delivery.PlatformEntityMappingConfirmed || mapping.AccountReferenceID != account || !numericReference(mapping.PlatformObjectID) {
 			return V3ObjectBindings{}, fmt.Errorf("platform mapping %s is not a confirmed binding for this configuration", mapping.ID)
 		}
 		switch mapping.InternalObjectKind {
 		case "project":
-			if mapping.InternalObjectID != ocean.Project.ProjectDraftID || mapping.PlatformObjectKind != "project" || bindings.ProjectPlatformID != "" {
+			if mapping.PlatformObjectKind != "project" || bindings.ProjectPlatformID != "" {
 				return V3ObjectBindings{}, fmt.Errorf("platform mapping %s does not bind the configured project", mapping.ID)
 			}
 			bindings.ProjectPlatformID = mapping.PlatformObjectID
 		case "promotion":
-			if mapping.PlatformObjectKind != "promotion" || !slices.ContainsFunc(ocean.Promotions, func(value delivery.OceanEnginePromotionDraft) bool {
-				return value.PromotionDraftID == mapping.InternalObjectID
-			}) {
+			if mapping.PlatformObjectKind != "promotion" {
 				return V3ObjectBindings{}, fmt.Errorf("platform mapping %s does not bind a configured promotion", mapping.ID)
 			}
 			if bindings.PromotionPlatformIDs[mapping.InternalObjectID] != "" {
 				return V3ObjectBindings{}, fmt.Errorf("promotion %s has duplicate platform bindings", mapping.InternalObjectID)
 			}
 			bindings.PromotionPlatformIDs[mapping.InternalObjectID] = mapping.PlatformObjectID
-		default:
-			return V3ObjectBindings{}, fmt.Errorf("platform mapping %s has an unsupported object kind", mapping.ID)
 		}
 	}
 	return bindings, nil

@@ -42,7 +42,8 @@ test('controlled execution API supports the complete Runner v3 browser flow', as
     const submit = calls.find(call => call.url.endsWith(':submit'))
     assert.match(submit?.body ?? '', /"fencing_token":3/)
     assert.match(submit?.body ?? '', /"token":"memory-only-token"/)
-    assert.match(submit?.body ?? '', /"idempotency_key":"run_1-submit"/)
+    assert.match(submit?.body ?? '', /"step_id":"run_1-submit-v4"/)
+    assert.match(submit?.body ?? '', /"idempotency_key":"run_1-submit-v4"/)
   } finally {
     globalThis.fetch = originalFetch
   }

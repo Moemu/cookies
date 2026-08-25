@@ -111,9 +111,15 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
         if (!lease) throw new Error('缺少有效租约。请刷新页面后重试。')
         const confirmation = await controlledExecutionApi.confirm(projectId, run)
         // Keep the token only in this call stack. Do not persist it in UI state.
-        await controlledExecutionApi.submit(projectId, run, lease, confirmation)
+        const updated = await controlledExecutionApi.submit(projectId, run, lease, confirmation)
         setReviewed(false)
-        setNotice('Submit 已执行。请检查平台结果和写后证据。')
+        if (updated.state === 'environment_check') {
+          setPlan(undefined)
+          setSessionCheckedAt('')
+          setNotice('当前对象已创建并回写平台 ID。请检查会话，然后生成下一个对象计划。')
+        } else {
+          setNotice('Submit 已执行。请检查平台结果和写后证据。')
+        }
         await load()
       }
     } catch (error) {
@@ -206,6 +212,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionCheckedAt, revie
     <SessionAndTargetPanel workspace={workspace} sessionCheckedAt={sessionCheckedAt} />
     {plan ? <PlanPanel plan={plan} /> : null}
     {evidence.length ? <ReadbackPanel evidence={evidence} /> : null}
+    {evidence.length ? <CreatedObjectsPanel evidence={evidence} /> : null}
     {run.authority.promotion_mutation || run.authority.promotion_control || run.authority.promotion_restart ? <PromotionChangeDiff run={run} /> : null}
 
     <div className="controlled-execution-layout">
@@ -308,7 +315,7 @@ function PlanPanel({ plan }: { plan: RunnerV3Plan }) {
   const boundary = plan.steps.find(step => step.remote_write) ?? plan.steps.at(-1)
   return <section className="controlled-execution-plan" aria-label="Runner v3 执行计划">
     <header><div><span className="section-label">Runner v3 plan</span><h3>{plan.plan_kind}</h3></div><span className={plan.blocked_reasons.length ? 'blocked' : 'ready'}>{plan.blocked_reasons.length ? '计划被阻止' : '计划可执行'}</span></header>
-    <div className="controlled-execution-plan-summary"><span>账户 <b>{plan.account_reference}</b></span><span>项目 <b>{plan.parent_project_reference || '新建'}</b></span><span>单元 <b>{plan.object_reference || '新建'}</b></span><span>字段 <b>{fields.length}</b></span></div>
+    <div className="controlled-execution-plan-summary"><span>账户 <b>{plan.account_reference}</b></span><span>当前阶段 <b>{plan.internal_object_kind === 'project' ? '创建项目' : plan.internal_object_kind === 'promotion' ? '创建单元' : plan.plan_kind}</b></span><span>Cookies 对象 <b>{plan.internal_object_id || '未提供'}</b></span><span>父项目 <b>{plan.parent_project_reference || '等待项目回写'}</b></span><span>字段 <b>{fields.length}</b></span></div>
     {plan.blocked_reasons.length ? <p className="danger-copy">{plan.blocked_reasons.join('；')}</p> : null}
     {objectAvailability.length ? <section className="controlled-execution-object-availability" aria-label="巨量对象可用性">
       <h4>巨量对象可用性</h4>
@@ -319,6 +326,21 @@ function PlanPanel({ plan }: { plan: RunnerV3Plan }) {
     </section> : null}
     <details><summary>查看字段计划和目标值</summary><div className="controlled-execution-plan-fields">{fields.map(step => <div key={step.id}><b>{step.field_key}</b><span>{step.operation}</span><code>{formatPlanValue(step.value)}</code></div>)}</div></details>
     <div className="controlled-execution-boundary"><ShieldAlert size={18} /><div><b>远程写入边界</b><span>{blocked ? '未开放' : boundary?.scope || boundary?.target || boundary?.id || '未定义'}</span><small>{blocked ? '对象可用性校验未通过。系统不会打开平台页面。' : `Prepare：禁止远端写入。Submit：最多 ${Math.max(1, plan.maximum_final_clicks || 1)} 次最终点击。`}</small></div></div>
+  </section>
+}
+
+function CreatedObjectsPanel({ evidence }: { evidence: BrowserRpaEvidence[] }) {
+  const objects = new Map<string, { internalId: string; platformId: string }>()
+  for (const item of evidence) {
+    const readback = item.field_readback ?? item.after_page_facts ?? {}
+    if (readback.reconciliation === 'matched' && readback.platform_object_id) {
+      objects.set(item.object_fingerprint, { internalId: item.object_fingerprint, platformId: readback.platform_object_id })
+    }
+  }
+  if (!objects.size) return null
+  return <section className="controlled-execution-created-objects" aria-label="已匹配平台对象">
+    <header><div><span className="section-label">Runner reconciliation</span><h3>已匹配平台对象</h3></div><span>{objects.size} 个</span></header>
+    {[...objects.values()].map(item => <div key={item.internalId}><b>{item.internalId}</b><code>{item.platformId}</code></div>)}
   </section>
 }
 

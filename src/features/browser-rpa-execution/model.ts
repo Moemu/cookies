@@ -198,6 +198,8 @@ export type RunnerV3Plan = {
   account_reference: string
   object_reference?: string
   parent_project_reference?: string
+  internal_object_kind?: 'project' | 'promotion'
+  internal_object_id?: string
   blocked_reasons: string[]
   object_availability?: Array<{
     field_key: string

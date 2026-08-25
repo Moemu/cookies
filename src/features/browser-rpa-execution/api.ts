@@ -75,9 +75,9 @@ export const controlledExecutionApi = {
     return request<BrowserRpaRun>(runPath(projectId, run.id, ':submit'), {
       method: 'POST',
       body: JSON.stringify({
-        step_id: `${run.id}-submit`, confirmation_id: confirmation.confirmation.id,
+        step_id: `${run.id}-submit-v${run.version}`, confirmation_id: confirmation.confirmation.id,
         token: confirmation.token, lease_id: lease.id, fencing_token: lease.fencing_token,
-        idempotency_key: `${run.id}-submit`,
+        idempotency_key: `${run.id}-submit-v${run.version}`,
       }),
     })
   },

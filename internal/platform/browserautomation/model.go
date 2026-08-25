@@ -584,7 +584,7 @@ var runTransitions = map[RunState][]RunState{
 	RunPreparing:            {RunAwaitingTakeover, RunAwaitingConfirmation, RunFailed, RunPartial, RunResultUnknown, RunCancelled},
 	RunAwaitingConfirmation: {RunAwaitingTakeover, RunPreparing, RunSubmitting, RunFailed, RunCancelled},
 	RunSubmitting:           {RunVerifying, RunFailed, RunPartial, RunResultUnknown},
-	RunVerifying:            {RunSucceeded, RunFailed, RunPartial, RunResultUnknown},
+	RunVerifying:            {RunEnvironmentCheck, RunSucceeded, RunFailed, RunPartial, RunResultUnknown},
 	RunSucceeded:            {}, RunFailed: {}, RunPartial: {}, RunResultUnknown: {}, RunCancelled: {},
 }
 

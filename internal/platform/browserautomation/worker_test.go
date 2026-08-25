@@ -2,11 +2,43 @@ package browserautomation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
+
+type stagedRecorderProvider struct {
+	recorded []PreparedPage
+	pairs    [][2]string
+}
+
+func (*stagedRecorderProvider) ResolveAuthority(context.Context, contract.OrganizationID, contract.ProjectID, string, time.Time) (AuthorityResolution, error) {
+	return AuthorityResolution{}, nil
+}
+func (*stagedRecorderProvider) BindRun(context.Context, AuthorityBinding, string, time.Time) error {
+	return nil
+}
+func (*stagedRecorderProvider) VerifyAuthority(context.Context, AuthorityBinding, string, time.Time) error {
+	return nil
+}
+func (p *stagedRecorderProvider) RecordCreatedObject(_ context.Context, _ AuthorityBinding, _ string, page PreparedPage, resultID, listID string, _ time.Time) (bool, error) {
+	p.recorded = append(p.recorded, page)
+	p.pairs = append(p.pairs, [2]string{resultID, listID})
+	return len(p.recorded) == 2, nil
+}
+
+type stagedWorkerAdapter struct{ stage int }
+
+func (a *stagedWorkerAdapter) Prepare(context.Context, BrowserRpaRun) (PreparedPage, error) {
+	return PreparedPage{Readback: map[string]string{}, DiffKeys: []string{}, InternalObjectKind: []string{"project", "promotion"}[a.stage], InternalObjectID: []string{"project-draft-1", "promotion-draft-1"}[a.stage]}, nil
+}
+func (a *stagedWorkerAdapter) Submit(context.Context, BrowserRpaRun, ControlledActionAttempt, string) (WorkerOutcome, PreparedPage, error) {
+	stage := a.stage
+	a.stage++
+	return WorkerSuccess, PreparedPage{Readback: map[string]string{"platform_object_id": []string{"7677595885572784182", "7683558668450021382"}[stage], "reconciliation": "matched"}, DiffKeys: []string{}, InternalObjectKind: []string{"project", "promotion"}[stage], InternalObjectID: []string{"project-draft-1", "promotion-draft-1"}[stage]}, nil
+}
 
 func TestDeterministicFakeWorkerTerminalOutcomes(t *testing.T) {
 	for _, test := range []struct {
@@ -41,6 +73,56 @@ func TestDeterministicFakeWorkerTerminalOutcomes(t *testing.T) {
 			}
 			_ = now
 		})
+	}
+}
+
+func TestWorkerAdvancesStagedCreatesAndUsesFreshConfirmationPerObject(t *testing.T) {
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	counter := 0
+	provider := &stagedRecorderProvider{}
+	service := Service{Repository: repo, AuthorityProvider: provider, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) {
+		counter++
+		return fmt.Sprintf("%s_%d", prefix, counter), nil
+	}}
+	run := validRun(now)
+	run.Authority.Action = "create_project_and_promotions"
+	if _, _, err := service.CreateRun(context.Background(), CreateRunRequest{Run: run}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AcquireLease(context.Background(), validLease(now)); err != nil {
+		t.Fatal(err)
+	}
+	worker := Worker{Service: service, Adapter: &stagedWorkerAdapter{}}
+	current := run
+	for stage := 0; stage < 2; stage++ {
+		prepared, err := worker.Prepare(context.Background(), current.OrganizationID, current.ProjectID, current.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		issued, err := service.IssueFinalConfirmation(context.Background(), current.OrganizationID, current.ProjectID, current.ID, prepared.Version, prepared.Authority.ApprovalActionHash, "operator")
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err = worker.Submit(context.Background(), WorkerSubmitRequest{Authorize: AuthorizeActionRequest{OrganizationID: current.OrganizationID, ProjectID: current.ProjectID, RunID: current.ID, StepID: fmt.Sprintf("submit_%d", stage), ConfirmationID: issued.Confirmation.ID, Token: issued.Token, LeaseID: "lease_1", FencingToken: 1, IdempotencyKey: fmt.Sprintf("attempt_%d", stage)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := RunEnvironmentCheck
+		if stage == 1 {
+			want = RunSucceeded
+		}
+		if current.State != want {
+			t.Fatalf("stage %d state=%s want=%s", stage, current.State, want)
+		}
+	}
+	if len(provider.recorded) != 2 || provider.recorded[0].InternalObjectKind != "project" || provider.recorded[1].InternalObjectKind != "promotion" {
+		t.Fatalf("recorded=%#v", provider.recorded)
+	}
+	for _, pair := range provider.pairs {
+		if pair[0] == "" || pair[1] == "" || pair[0] == pair[1] {
+			t.Fatalf("evidence pair=%#v", pair)
+		}
 	}
 }
 

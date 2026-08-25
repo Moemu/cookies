@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -44,5 +45,65 @@ func TestBrowserRpaAuthorityIsServerResolvedBoundAndRevalidated(t *testing.T) {
 	}
 	if _, err := provider.ResolveAuthority(context.Background(), change.OrganizationID, change.ProjectID, execution.ID, approval.ExpiresAt); err != browserautomation.ErrInvalidContract {
 		t.Fatalf("expired approval err=%v", err)
+	}
+}
+
+func TestBrowserRpaAuthorityCreatesAndConfirmsAllStagedMappings(t *testing.T) {
+	now := time.Date(2026, 8, 25, 9, 0, 0, 0, time.UTC)
+	repo := newControlledMemoryRepository()
+	binding := validControlledBinding()
+	configuration := PlatformConfiguration{ConfigurationID: binding.ConfigurationID, Payload: PlatformConfigurationPayload{OceanEngine: &OceanEngineConfiguration{
+		Project:    &OceanEngineProjectDraft{ProjectDraftID: "project-draft-1"},
+		Promotions: []OceanEnginePromotionDraft{{PromotionDraftID: "promotion-draft-1"}, {PromotionDraftID: "promotion-draft-2"}},
+	}}}
+	repo.plans[repositoryKey("org_1", "project_1", binding.PlanID)] = DeliveryPlan{
+		ID: binding.PlanID, OrganizationID: "org_1", ProjectID: "project_1",
+		Versions: []DeliveryPlanVersion{{VersionNumber: binding.PlanVersion, PlatformConfiguration: &configuration}},
+	}
+	change := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: "change_staged", OrganizationID: "org_1", ProjectID: "project_1", Binding: binding, Action: ControlledActionCreateProjectAndPromotions, BudgetLimitMinor: 30000, Currency: "CNY", Status: ControlledChangeSetExecuting, Version: 2, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	change.CanonicalHash, _ = change.ComputeCanonicalHash()
+	approval := RemoteWriteApproval{SchemaVersion: RemoteWriteApprovalSchemaV1, ID: "approval_staged", OrganizationID: change.OrganizationID, ProjectID: change.ProjectID, ControlledChangeSetID: change.ID, ControlledChangeSetHash: change.CanonicalHash, Binding: binding, Action: change.Action, Scope: "controlled_remote_write", BudgetLimitMinor: change.BudgetLimitMinor, Currency: change.Currency, ApprovedBy: "approver", ApprovedAt: now, ExpiresAt: now.Add(time.Hour)}
+	approval.ActionHash, _ = approval.ComputeActionHash()
+	execution := ControlledExecution{ID: "execution_staged", OrganizationID: change.OrganizationID, ProjectID: change.ProjectID, ControlledChangeSetID: change.ID, RemoteWriteApprovalID: approval.ID, Status: "pending", Version: 1, CreatedBy: "operator", CreatedAt: now, UpdatedAt: now}
+	repo.changes[repositoryKey(change.OrganizationID, change.ProjectID, change.ID)] = change
+	repo.approvals[repositoryKey(change.OrganizationID, change.ProjectID, change.ID)] = approval
+	repo.executions[repositoryKey(change.OrganizationID, change.ProjectID, execution.ID)] = execution
+
+	provider := BrowserRpaAuthorityProvider{Repository: repo}
+	resolved, err := provider.ResolveAuthority(context.Background(), change.OrganizationID, change.ProjectID, execution.ID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.BindRun(context.Background(), resolved.Binding, "run_staged", now); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.mappings) != 3 {
+		t.Fatalf("staged mappings=%d want=3", len(repo.mappings))
+	}
+
+	targets := []struct{ kind, internalID, platformID string }{
+		{"project", "project-draft-1", "7677595885572784182"},
+		{"promotion", "promotion-draft-1", "7683558668450021382"},
+		{"promotion", "promotion-draft-2", "7683558668450021383"},
+	}
+	for index, target := range targets {
+		mapping, getErr := repo.GetPlatformEntityMappingByInternalObject(context.Background(), change.OrganizationID, change.ProjectID, binding.AccountReferenceID, target.kind, target.internalID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		resultID, listID := fmt.Sprintf("result_%d", index), fmt.Sprintf("list_%d", index)
+		repo.evidence[resultID] = validMappingEvidence(mapping, resultID, "step_"+resultID, index*10+2, browserautomation.TakeoverResultObserved, target.platformID, "pending_review")
+		repo.evidence[listID] = validMappingEvidence(mapping, listID, "step_"+listID, index*10+3, browserautomation.TakeoverListConfirmed, target.platformID, "pending_review")
+		complete, recordErr := provider.RecordCreatedObject(context.Background(), resolved.Binding, "run_staged", browserautomation.PreparedPage{InternalObjectKind: target.kind, InternalObjectID: target.internalID, Readback: map[string]string{"platform_object_id": target.platformID, "reconciliation": "matched"}}, resultID, listID, now)
+		if recordErr != nil {
+			t.Fatal(recordErr)
+		}
+		if complete != (index == len(targets)-1) {
+			t.Fatalf("stage %d complete=%t", index, complete)
+		}
+	}
+	completed, err := repo.GetControlledExecution(context.Background(), change.OrganizationID, change.ProjectID, execution.ID)
+	if err != nil || completed.Status != "succeeded" {
+		t.Fatalf("execution=%#v err=%v", completed, err)
 	}
 }

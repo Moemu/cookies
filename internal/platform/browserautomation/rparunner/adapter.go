@@ -125,6 +125,7 @@ func (a PlaywrightRPAAdapter) Prepare(ctx context.Context, run browserautomation
 		result, err = a.sessionRunner(env).RunV3(ctx, plan, "", a.AuthorityStateRoot)
 		if err == nil && result.Outcome == OutcomeSuccess {
 			page := preparedPageFromResult(result)
+			attachPlannedObject(plan, &page)
 			appendPlannedDiff(plan, &page)
 			if err := completePrepareReadback(run, result, &page); err != nil {
 				return browserautomation.PreparedPage{}, err
@@ -245,6 +246,7 @@ func (a PlaywrightRPAAdapter) Submit(ctx context.Context, run browserautomation.
 	defer stopHeartbeat()
 
 	var result RpaResult
+	var compiledV3Plan json.RawMessage
 	if a.protocol() == ProtocolV3 {
 		if a.V3Compiler == nil {
 			return browserautomation.WorkerFailed, browserautomation.PreparedPage{}, fmt.Errorf("%w: runner v3 compiler is not configured", browserautomation.ErrEnvironmentUnavailable)
@@ -253,6 +255,7 @@ func (a PlaywrightRPAAdapter) Submit(ctx context.Context, run browserautomation.
 		if compileErr != nil {
 			return browserautomation.WorkerFailed, browserautomation.PreparedPage{}, fmt.Errorf("%w: %v", browserautomation.ErrPageDrift, compileErr)
 		}
+		compiledV3Plan = plan
 		result, err = a.sessionRunner(env).RunV3(runCtx, plan, confirmToken, a.AuthorityStateRoot)
 	} else {
 		plan, compileErr := a.Compiler.CompileSubmit(run, attempt, policy)
@@ -273,9 +276,13 @@ func (a PlaywrightRPAAdapter) Submit(ctx context.Context, run browserautomation.
 	}
 	switch result.Outcome {
 	case OutcomeSuccess:
-		return browserautomation.WorkerSuccess, preparedPageFromResult(result), nil
+		page := preparedPageFromResult(result)
+		attachPlannedObject(compiledV3Plan, &page)
+		return browserautomation.WorkerSuccess, page, nil
 	case OutcomeSuccessWithDrift:
-		return browserautomation.WorkerPartial, preparedPageFromResult(result), nil
+		page := preparedPageFromResult(result)
+		attachPlannedObject(compiledV3Plan, &page)
+		return browserautomation.WorkerPartial, page, nil
 	case OutcomePartial:
 		return browserautomation.WorkerPartial, preparedPageFromResult(result), nil
 	case OutcomeResultUnknown:
@@ -428,6 +435,21 @@ func preparedPageFromResult(result RpaResult) browserautomation.PreparedPage {
 		page.DiffKeys = []string{}
 	}
 	return page
+}
+
+func attachPlannedObject(payload json.RawMessage, page *browserautomation.PreparedPage) {
+	if len(payload) == 0 {
+		return
+	}
+	var plan struct {
+		InternalObjectKind string `json:"internal_object_kind"`
+		InternalObjectID   string `json:"internal_object_id"`
+	}
+	if json.Unmarshal(payload, &plan) != nil {
+		return
+	}
+	page.InternalObjectKind = plan.InternalObjectKind
+	page.InternalObjectID = plan.InternalObjectID
 }
 
 func stringReadback(values map[string]any) map[string]string {

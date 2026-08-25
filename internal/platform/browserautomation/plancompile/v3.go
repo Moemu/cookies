@@ -26,6 +26,10 @@ type V3ConfigurationSource interface {
 	GetPlanVersion(context.Context, contract.OrganizationID, contract.ProjectID, string, int) (delivery.DeliveryPlanVersion, error)
 }
 
+type V3MappingSource interface {
+	ListPlatformEntityMappings(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]delivery.PlatformEntityMapping, error)
+}
+
 // V3Compiler converts one immutable Cookies run into one Runner v3 form plan.
 // The first controlled path is promotion budget edit. Other actions fail
 // closed until Runner v3 has an equivalent one-form contract.
@@ -85,6 +89,8 @@ type v3Plan struct {
 	AccountReference          string                 `json:"account_reference"`
 	ObjectReference           string                 `json:"object_reference,omitempty"`
 	ParentProjectReference    string                 `json:"parent_project_reference,omitempty"`
+	InternalObjectKind        string                 `json:"internal_object_kind,omitempty"`
+	InternalObjectID          string                 `json:"internal_object_id,omitempty"`
 	ParentConditionManifestID string                 `json:"parent_condition_manifest_id"`
 	ParentContext             v3ParentContext        `json:"parent_context"`
 	BlockedReasons            []string               `json:"blocked_reasons"`
@@ -178,14 +184,20 @@ func (c V3Compiler) preparePlan(ctx context.Context, run browserautomation.Brows
 		if !numericReference(run.AccountID) || !numericReference(run.Authority.ParentPlatformProjectID) || !slices.Contains(policy.AllowedPageKinds, "promotion_create") || !slices.Contains(policy.AllowedPlatformProjects, run.Authority.ParentPlatformProjectID) {
 			return v3Plan{}, fmt.Errorf("site policy does not allow the bound promotion create form")
 		}
-		if len(configuration.Promotions) != 1 {
-			return v3Plan{}, fmt.Errorf("one controlled run requires exactly one promotion form; configuration has %d", len(configuration.Promotions))
+		bindings, bindingErr := c.stagedBindings(ctx, run, *version.PlatformConfiguration)
+		if bindingErr != nil {
+			return v3Plan{}, bindingErr
 		}
-		set, compileErr := CompileConfigurationV3(*version.PlatformConfiguration, version.DeliveryIntent, run.AccountID, V3ObjectBindings{ProjectPlatformID: run.Authority.ParentPlatformProjectID}, c.now())
+		bindings.ProjectPlatformID = run.Authority.ParentPlatformProjectID
+		set, compileErr := CompileConfigurationV3(*version.PlatformConfiguration, version.DeliveryIntent, run.AccountID, bindings, c.now())
 		if compileErr != nil {
 			return v3Plan{}, compileErr
 		}
-		return decodePlannedForm(set.Forms[1])
+		form, formErr := nextUnboundPromotionForm(set.Forms)
+		if formErr != nil {
+			return v3Plan{}, formErr
+		}
+		return decodePlannedForm(form)
 	case "create_project_and_promotions":
 		availability := configurationObjectAvailability(*configuration)
 		if slices.ContainsFunc(availability, func(value V3ObjectAvailability) bool { return !value.Available }) {
@@ -198,17 +210,27 @@ func (c V3Compiler) preparePlan(ctx context.Context, run browserautomation.Brows
 				AllowRemoteWrite: false, MaximumFinalClicks: 0,
 			}, nil
 		}
-		set, compileErr := CompileConfigurationV3(*version.PlatformConfiguration, version.DeliveryIntent, run.AccountID, V3ObjectBindings{}, c.now())
+		bindings, bindingErr := c.stagedBindings(ctx, run, *version.PlatformConfiguration)
+		if bindingErr != nil {
+			return v3Plan{}, bindingErr
+		}
+		set, compileErr := CompileConfigurationV3(*version.PlatformConfiguration, version.DeliveryIntent, run.AccountID, bindings, c.now())
 		if compileErr != nil {
 			return v3Plan{}, compileErr
 		}
-		if len(set.Forms) != 1 {
-			return v3Plan{}, fmt.Errorf("project and promotion creation needs staged controlled runs; generated %d dependent forms", len(set.Forms))
+		form, formErr := nextStagedCreateForm(set.Forms)
+		if formErr != nil {
+			return v3Plan{}, formErr
 		}
-		if !slices.Contains(policy.AllowedPageKinds, "project_create") {
-			return v3Plan{}, fmt.Errorf("site policy does not allow the project create form")
+		plan, decodeErr := decodePlannedForm(form)
+		if decodeErr != nil {
+			return v3Plan{}, decodeErr
 		}
-		return decodePlannedForm(set.Forms[0])
+		if !slices.Contains(policy.AllowedPageKinds, plan.PlanKind) {
+			return v3Plan{}, fmt.Errorf("site policy does not allow the %s form", plan.PlanKind)
+		}
+		plan.ObjectAvailability = availability
+		return plan, nil
 	case "update_promotion_budget":
 		// Continue with the exact one-field edit contract below.
 	default:
@@ -254,7 +276,39 @@ func decodePlannedForm(form V3PlannedForm) (v3Plan, error) {
 	if plan.Status != "ready" || len(plan.BlockedReasons) != 0 {
 		return v3Plan{}, fmt.Errorf("generated form plan is blocked: %s", strings.Join(plan.BlockedReasons, ","))
 	}
+	plan.InternalObjectKind = form.InternalObjectKind
+	plan.InternalObjectID = form.InternalObjectID
 	return plan, nil
+}
+
+func (c V3Compiler) stagedBindings(ctx context.Context, run browserautomation.BrowserRpaRun, configuration delivery.PlatformConfiguration) (V3ObjectBindings, error) {
+	source, ok := c.Source.(V3MappingSource)
+	if !ok {
+		return V3ObjectBindings{PromotionPlatformIDs: map[string]string{}}, nil
+	}
+	mappings, err := source.ListPlatformEntityMappings(ctx, run.OrganizationID, run.ProjectID, run.AccountID)
+	if err != nil {
+		return V3ObjectBindings{}, fmt.Errorf("load staged platform mappings: %w", err)
+	}
+	return V3BindingsFromMappings(configuration, run.AccountID, mappings)
+}
+
+func nextStagedCreateForm(forms []V3PlannedForm) (V3PlannedForm, error) {
+	for _, form := range forms {
+		if form.PlatformObjectID == "" {
+			return form, nil
+		}
+	}
+	return V3PlannedForm{}, fmt.Errorf("all configured platform objects already have confirmed mappings")
+}
+
+func nextUnboundPromotionForm(forms []V3PlannedForm) (V3PlannedForm, error) {
+	for _, form := range forms {
+		if form.InternalObjectKind == "promotion" && form.PlatformObjectID == "" {
+			return form, nil
+		}
+	}
+	return V3PlannedForm{}, fmt.Errorf("all configured promotions already have confirmed mappings")
 }
 
 func parentContext(project delivery.OceanEngineProjectDraft) (v3ParentContext, error) {

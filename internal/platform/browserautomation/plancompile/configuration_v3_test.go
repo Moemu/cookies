@@ -39,7 +39,7 @@ func TestCompileConfigurationV3CreatesAndEditsBoundObjects(t *testing.T) {
 	}
 }
 
-func TestV3BindingsFromMappingsRequiresConfirmedExactObjects(t *testing.T) {
+func TestV3BindingsFromMappingsUsesConfirmedObjectsAndSkipsPendingStages(t *testing.T) {
 	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
 	configuration, _ := executableConfigurationFixture(now)
 	mappings := []delivery.PlatformEntityMapping{
@@ -51,8 +51,13 @@ func TestV3BindingsFromMappingsRequiresConfirmedExactObjects(t *testing.T) {
 		t.Fatalf("bindings=%#v err=%v", bindings, err)
 	}
 	mappings[1].Status = delivery.PlatformEntityMappingPending
-	if _, err := V3BindingsFromMappings(configuration, "1855554434276391", mappings); err == nil || !strings.Contains(err.Error(), "not a confirmed binding") {
-		t.Fatalf("pending mapping error = %v", err)
+	pending, err := V3BindingsFromMappings(configuration, "1855554434276391", mappings)
+	if err != nil || pending.ProjectPlatformID == "" || pending.PromotionPlatformIDs["promotion-draft-1"] != "" {
+		t.Fatalf("pending bindings=%#v err=%v", pending, err)
+	}
+	mappings = append(mappings, delivery.PlatformEntityMapping{ID: "other-plan", AccountReferenceID: "1855554434276391", InternalObjectKind: "promotion", InternalObjectID: "other-draft", PlatformObjectKind: "promotion", PlatformObjectID: "7683558668450021999", Status: delivery.PlatformEntityMappingConfirmed})
+	if _, err := V3BindingsFromMappings(configuration, "1855554434276391", mappings); err != nil {
+		t.Fatalf("unrelated mapping blocked current configuration: %v", err)
 	}
 }
 

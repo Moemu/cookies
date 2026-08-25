@@ -14,11 +14,16 @@ import (
 )
 
 type v3SourceStub struct {
-	version delivery.DeliveryPlanVersion
+	version  delivery.DeliveryPlanVersion
+	mappings []delivery.PlatformEntityMapping
 }
 
 func (s v3SourceStub) GetPlanVersion(context.Context, contract.OrganizationID, contract.ProjectID, string, int) (delivery.DeliveryPlanVersion, error) {
 	return s.version, nil
+}
+
+func (s v3SourceStub) ListPlatformEntityMappings(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]delivery.PlatformEntityMapping, error) {
+	return s.mappings, nil
 }
 
 func TestV3CompilerConvertsBoundBudgetRunAndIssuesOneTimeAuthority(t *testing.T) {
@@ -125,15 +130,55 @@ func TestV3CompilerRunsOnePromotionCreateFromBoundConfiguration(t *testing.T) {
 	}
 }
 
-func TestV3CompilerRejectsCompoundFormsBeforeBrowserWrite(t *testing.T) {
+func TestV3CompilerSelectsProjectAsFirstStagedCreateForm(t *testing.T) {
 	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
 	configuration, intent := executableConfigurationFixture(now)
 	planHash := strings.Repeat("a", 64)
 	compiler := V3Compiler{Source: v3SourceStub{version: delivery.DeliveryPlanVersion{CanonicalHash: planHash, DeliveryIntent: &intent, PlatformConfiguration: &configuration}}, Now: func() time.Time { return now }}
 	run := browserautomation.BrowserRpaRun{OrganizationID: "org_1", ProjectID: "project_1", AccountID: "1855554434276391", Authority: browserautomation.AuthorityBinding{Action: "create_project_and_promotions", PlanID: "plan_1", PlanVersion: 1, PlanCanonicalHash: planHash, ConfigurationCanonicalHash: configuration.CanonicalHash}}
-	_, err := compiler.CompilePrepareV3(context.Background(), run, browserautomation.SitePolicy{AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create"}})
-	if err == nil || !strings.Contains(err.Error(), "staged controlled runs") {
-		t.Fatalf("compound error = %v", err)
+	raw, err := compiler.CompilePrepareV3(context.Background(), run, browserautomation.SitePolicy{AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan v3Plan
+	if json.Unmarshal(raw, &plan) != nil || plan.PlanKind != "project_create" || plan.InternalObjectKind != "project" || plan.InternalObjectID != "project-draft-1" {
+		t.Fatalf("staged project plan = %#v", plan)
+	}
+}
+
+func TestV3CompilerAdvancesThroughMappedProjectAndPromotions(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	second := configuration.Payload.OceanEngine.Promotions[0]
+	second.PromotionDraftID = "promotion-draft-2"
+	second.PromotionName = "第二个测试单元"
+	configuration.Payload.OceanEngine.Promotions = append(configuration.Payload.OceanEngine.Promotions, second)
+	planHash := strings.Repeat("a", 64)
+	projectMapping := delivery.PlatformEntityMapping{ID: "mapping-project", AccountReferenceID: "1855554434276391", InternalObjectKind: "project", InternalObjectID: "project-draft-1", PlatformObjectKind: "project", PlatformObjectID: "7677595885572784182", Status: delivery.PlatformEntityMappingConfirmed}
+	firstPromotionMapping := delivery.PlatformEntityMapping{ID: "mapping-promotion-1", AccountReferenceID: "1855554434276391", InternalObjectKind: "promotion", InternalObjectID: "promotion-draft-1", PlatformObjectKind: "promotion", PlatformObjectID: "7683558668450021382", Status: delivery.PlatformEntityMappingConfirmed}
+	run := browserautomation.BrowserRpaRun{OrganizationID: "org_1", ProjectID: "project_1", AccountID: "1855554434276391", Authority: browserautomation.AuthorityBinding{Action: "create_project_and_promotions", PlanID: "plan_1", PlanVersion: 1, PlanCanonicalHash: planHash, ConfigurationCanonicalHash: configuration.CanonicalHash}}
+	policy := browserautomation.SitePolicy{AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create", "promotion_create"}}
+
+	compiler := V3Compiler{Source: v3SourceStub{version: delivery.DeliveryPlanVersion{CanonicalHash: planHash, DeliveryIntent: &intent, PlatformConfiguration: &configuration}, mappings: []delivery.PlatformEntityMapping{projectMapping}}, Now: func() time.Time { return now }}
+	raw, err := compiler.CompilePrepareV3(context.Background(), run, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first v3Plan
+	_ = json.Unmarshal(raw, &first)
+	if first.PlanKind != "promotion_create" || first.InternalObjectID != "promotion-draft-1" || first.ParentProjectReference != projectMapping.PlatformObjectID {
+		t.Fatalf("first promotion plan = %#v", first)
+	}
+
+	compiler.Source = v3SourceStub{version: delivery.DeliveryPlanVersion{CanonicalHash: planHash, DeliveryIntent: &intent, PlatformConfiguration: &configuration}, mappings: []delivery.PlatformEntityMapping{projectMapping, firstPromotionMapping}}
+	raw, err = compiler.CompilePrepareV3(context.Background(), run, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var next v3Plan
+	_ = json.Unmarshal(raw, &next)
+	if next.PlanKind != "promotion_create" || next.InternalObjectID != "promotion-draft-2" || next.ParentProjectReference != projectMapping.PlatformObjectID {
+		t.Fatalf("second promotion plan = %#v", next)
 	}
 }
 

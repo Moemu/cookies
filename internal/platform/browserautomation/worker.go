@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
@@ -23,6 +24,10 @@ type PreparedPage struct {
 	Readback    map[string]string
 	DiffKeys    []string
 	PageRef     string
+	// These values identify the exact Cookies draft selected by a staged
+	// create plan. The server compiler supplies them.
+	InternalObjectKind string
+	InternalObjectID   string
 	// Evidence metadata supplied by the executing adapter. Empty values fall
 	// back to the deterministic-fake provenance used by test adapters.
 	ScreenshotRef   string
@@ -48,6 +53,13 @@ type WorkerAdapter interface {
 // expose the exact prepare plan without opening a page or changing a run.
 type WorkerPlanAdapter interface {
 	Plan(context.Context, BrowserRpaRun) (json.RawMessage, error)
+}
+
+// CreatedObjectRecorder saves a reconciled platform identity before the
+// worker advances to the next staged form. A false complete value means that
+// the same run has another approved form to execute.
+type CreatedObjectRecorder interface {
+	RecordCreatedObject(context.Context, AuthorityBinding, string, PreparedPage, string, string, time.Time) (complete bool, err error)
 }
 
 type DeterministicFakeAdapter struct {
@@ -156,7 +168,7 @@ func (w Worker) Prepare(ctx context.Context, org contract.OrganizationID, projec
 	if changesExistingPromotionAction(run.Authority.Action) && run.Authority.validatePreSubmitReadback(prepared.Readback, w.Service.now()) != nil {
 		return w.Service.TransitionRun(ctx, org, project, runID, run.Version, RunFailed, BlockPageDrift)
 	}
-	step := RunStep{ID: run.ID + "-prepare", RunID: run.ID, Sequence: 1, WorkflowStepID: run.Authority.WorkflowStepID, Action: "prepare_and_readback", Status: StepSucceeded, Attempt: 1, Version: 1}
+	step := RunStep{ID: run.ID + "-prepare-v" + strconv.FormatInt(run.Version, 10), RunID: run.ID, Sequence: int(run.Version)*10 + 1, WorkflowStepID: run.Authority.WorkflowStepID, Action: "prepare_and_readback", Status: StepSucceeded, Attempt: 1, Version: 1}
 	if err := w.Service.Repository.PutStep(ctx, org, project, step); err != nil {
 		return BrowserRpaRun{}, err
 	}
@@ -173,7 +185,11 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 	if err != nil {
 		return BrowserRpaRun{}, err
 	}
-	step := RunStep{ID: request.Authorize.StepID, RunID: run.ID, Sequence: 2, WorkflowStepID: run.Authority.WorkflowStepID, Action: "submit_platform_configuration", Status: StepPending, Attempt: 1, Version: 1}
+	stepAction := "submit_platform_configuration"
+	if stagedCreateAction(run.Authority.Action) {
+		stepAction = string(TakeoverResultObserved)
+	}
+	step := RunStep{ID: request.Authorize.StepID, RunID: run.ID, Sequence: int(run.Version)*10 + 2, WorkflowStepID: run.Authority.WorkflowStepID, Action: stepAction, Status: StepPending, Attempt: 1, Version: 1}
 	if err := w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step); err != nil {
 		return BrowserRpaRun{}, err
 	}
@@ -236,8 +252,38 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 	if err := w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step); err != nil {
 		return BrowserRpaRun{}, err
 	}
-	if err := w.appendEvidence(ctx, run, step, page); err != nil {
+	if stagedCreateAction(run.Authority.Action) && outcome == WorkerSuccess && page.InternalObjectID != "" {
+		if page.Readback == nil {
+			page.Readback = map[string]string{}
+		}
+		if page.Readback["platform_status"] == "" {
+			page.Readback["platform_status"] = "pending_review"
+		}
+	}
+	resultEvidenceID, err := w.appendEvidenceWithID(ctx, run, step, page)
+	if err != nil {
 		return BrowserRpaRun{}, err
+	}
+	if stagedCreateAction(run.Authority.Action) && outcome == WorkerSuccess && page.InternalObjectID != "" {
+		reconciliationStep := RunStep{ID: step.ID + "-reconcile", RunID: run.ID, Sequence: step.Sequence + 1, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(TakeoverListConfirmed), Status: StepSucceeded, Attempt: 1, Version: 1}
+		if err := w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, reconciliationStep); err != nil {
+			return BrowserRpaRun{}, err
+		}
+		listEvidenceID, evidenceErr := w.appendEvidenceWithID(ctx, run, reconciliationStep, page)
+		if evidenceErr != nil {
+			return BrowserRpaRun{}, evidenceErr
+		}
+		recorder, ok := w.Service.AuthorityProvider.(CreatedObjectRecorder)
+		if !ok {
+			return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunFailed, BlockResultReconciliation)
+		}
+		complete, recordErr := recorder.RecordCreatedObject(ctx, run.Authority, run.ID, page, resultEvidenceID, listEvidenceID, w.Service.now())
+		if recordErr != nil {
+			return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunFailed, BlockResultReconciliation)
+		}
+		if !complete {
+			return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunEnvironmentCheck, "")
+		}
 	}
 	terminal := RunSucceeded
 	reason := BlockingReason("")
@@ -252,10 +298,15 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 }
 
 func (w Worker) appendEvidence(ctx context.Context, run BrowserRpaRun, step RunStep, page PreparedPage) error {
+	_, err := w.appendEvidenceWithID(ctx, run, step, page)
+	return err
+}
+
+func (w Worker) appendEvidenceWithID(ctx context.Context, run BrowserRpaRun, step RunStep, page PreparedPage) (string, error) {
 	now := w.Service.now()
 	id, err := w.Service.newID("brpa_evidence")
 	if err != nil {
-		return err
+		return "", err
 	}
 	selectorVersion := page.SelectorVersion
 	if selectorVersion == "" {
@@ -265,8 +316,19 @@ func (w Worker) appendEvidence(ctx context.Context, run BrowserRpaRun, step RunS
 	if actionVersion == "" {
 		actionVersion = "deterministic-fake-action/v1"
 	}
-	evidence := Evidence{SchemaVersion: EvidenceSchemaV1, ID: id, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, BeforePageFacts: page.BeforeFacts, AfterPageFacts: page.Readback, FieldReadback: page.Readback, DiffKeys: page.DiffKeys, PageReference: page.PageRef, ScreenshotReference: page.ScreenshotRef, ObjectFingerprint: run.Authority.ObjectFingerprint, SelectorVersion: selectorVersion, ActionVersion: actionVersion, CreatedAt: now}
-	return w.Service.Repository.AppendEvidence(ctx, RedactEvidence(evidence))
+	fingerprint := run.Authority.ObjectFingerprint
+	if page.InternalObjectID != "" {
+		fingerprint = page.InternalObjectID
+	}
+	evidence := Evidence{SchemaVersion: EvidenceSchemaV1, ID: id, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: step.ID, BeforePageFacts: page.BeforeFacts, AfterPageFacts: page.Readback, FieldReadback: page.Readback, DiffKeys: page.DiffKeys, PageReference: page.PageRef, ScreenshotReference: page.ScreenshotRef, ObjectFingerprint: fingerprint, SelectorVersion: selectorVersion, ActionVersion: actionVersion, CreatedAt: now}
+	if err := w.Service.Repository.AppendEvidence(ctx, RedactEvidence(evidence)); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func stagedCreateAction(action string) bool {
+	return action == "create_project_and_promotions" || action == "create_promotions_in_existing_project"
 }
 
 type ControlAction string

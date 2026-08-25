@@ -252,6 +252,27 @@ func (r MySQLRepository) GetPlatformEntityMapping(ctx context.Context, org contr
 	return scanPlatformEntityMapping(r.DB.QueryRowContext(ctx, platformEntityMappingSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
 }
 
+func (r MySQLRepository) GetPlatformEntityMappingByInternalObject(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, account, kind, internalID string) (PlatformEntityMapping, error) {
+	return scanPlatformEntityMapping(r.DB.QueryRowContext(ctx, platformEntityMappingSelect+` WHERE organization_id=? AND project_id=? AND account_reference_id=? AND internal_object_kind=? AND internal_object_id=?`, org, project, account, kind, internalID))
+}
+
+func (r MySQLRepository) ListPlatformEntityMappings(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, account string) ([]PlatformEntityMapping, error) {
+	rows, err := r.DB.QueryContext(ctx, platformEntityMappingSelect+` WHERE organization_id=? AND project_id=? AND account_reference_id=? ORDER BY created_at,id`, org, project, account)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]PlatformEntityMapping, 0)
+	for rows.Next() {
+		value, scanErr := scanPlatformEntityMapping(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 func (r MySQLRepository) ValidateControlledMaterialReferences(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, accountReferenceID string, references []ControlledMaterialReference) error {
 	validated := map[string]struct{}{}
 	for _, reference := range references {
@@ -381,6 +402,16 @@ func (r MySQLRepository) ConfirmPlatformEntityMapping(ctx context.Context, org c
 		if _, err := tx.ExecContext(ctx, `INSERT INTO delivery_platform_entity_mapping_revisions (organization_id,project_id,mapping_id,mapping_version,action,business_execution_id,browser_rpa_run_id,platform_object_id,platform_status,previous_state_action,previous_state_hash,current_state_action,current_state_hash,result_evidence_id,list_evidence_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, org, project, value.ID, expectedVersion+1, action, value.BusinessExecutionID, value.BrowserRpaRunID, platformObjectID, platformStatus, nil, nil, nil, nil, resultEvidenceID, listEvidenceID, listEvidence.Evidence.CreatedAt); err != nil {
 			return PlatformEntityMapping{}, err
 		}
+	}
+	var pendingMappings int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM delivery_platform_entity_mappings WHERE organization_id=? AND project_id=? AND business_execution_id=? AND status='pending_verification'`, org, project, value.BusinessExecutionID).Scan(&pendingMappings); err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	if pendingMappings > 0 {
+		if err := tx.Commit(); err != nil {
+			return PlatformEntityMapping{}, err
+		}
+		return r.GetPlatformEntityMapping(ctx, org, project, id)
 	}
 	completedAt := listEvidence.Evidence.CreatedAt
 	if executionStatus == "running" {
