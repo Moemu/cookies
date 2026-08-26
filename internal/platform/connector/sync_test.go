@@ -74,6 +74,15 @@ func (metricsOnlyReader) Attributes(context.Context, []string, string) (map[stri
 func (testReader) AccountInfo(context.Context) (map[string]any, error) {
 	return map[string]any{"advertiser_id": "raw-account-1", "name": "demo"}, nil
 }
+func (testReader) ImageMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"images": []any{map[string]any{"material_id": "1001", "file_name": "image"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+}
+func (testReader) VideoMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"videos": []any{map[string]any{"material_id": "2001", "video_name": "video"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+}
+func (testReader) OrangeLandingPagesPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"data": []any{map[string]any{"site_id": "3001", "name": "landing"}}, "pagination": map[string]any{"page": 1.0, "size": 30.0, "total": 1.0}}}, nil
+}
 func (testReader) ListPage(_ context.Context, r oceanengine.ListRequest) (map[string]any, error) {
 	if r.Page > 1 {
 		return map[string]any{"data": map[string]any{"ads": []any{}, "pagination": map[string]any{"total_page": 1.0}}}, nil
@@ -119,6 +128,18 @@ type testWriter struct {
 	bindings        []MaterialBinding
 	statuses        []PlatformStatusEvent
 	diagnoses       []PlatformDiagnosisSnapshot
+	platformObjects map[PlatformObjectKind][]PlatformObjectCandidate
+}
+
+func (w *testWriter) ReconcilePlatformObjects(_ context.Context, _, _, _, _ string, kind PlatformObjectKind, _ time.Time, candidates []PlatformObjectCandidate) (PlatformObjectSyncStats, error) {
+	if w.platformObjects == nil {
+		w.platformObjects = map[PlatformObjectKind][]PlatformObjectCandidate{}
+	}
+	w.platformObjects[kind] = append([]PlatformObjectCandidate(nil), candidates...)
+	return PlatformObjectSyncStats{Created: len(candidates)}, nil
+}
+func (w *testWriter) ListPlatformObjects(context.Context, PlatformObjectQuery) ([]PlatformObject, error) {
+	return nil, nil
 }
 
 func (w *testWriter) StartSync(context.Context, SyncRun) (bool, error) {
@@ -193,8 +214,11 @@ func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	if result.ObjectCount != 5 || result.MetricCount != 2 || writer.completed != "completed" {
 		t.Fatalf("result=%#v completed=%s", result, writer.completed)
 	}
-	if len(writer.raw) != 7 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
+	if len(writer.raw) != 10 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
 		t.Fatalf("raw=%d config=%d binding=%d diagnosis=%d status=%d", len(writer.raw), len(writer.configs), len(writer.bindings), len(writer.diagnoses), len(writer.statuses))
+	}
+	if len(writer.platformObjects) != 3 || result.PlatformObjects[PlatformObjectVideoMaterial].Created != 1 {
+		t.Fatalf("platform objects=%#v result=%#v", writer.platformObjects, result.PlatformObjects)
 	}
 	if writer.objects[0].ObjectRef == "raw-account-1" || writer.objects[1].ObjectRef == "raw-promotion-1" || writer.bindings[0].MaterialRef == "raw-material-1" {
 		t.Fatal("raw platform identity leaked")

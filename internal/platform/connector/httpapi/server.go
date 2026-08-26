@@ -75,7 +75,51 @@ func New(reader Reader, syncer Syncer, authorizer ProjectAuthorizer, accounts Ac
 	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/verify", server.verifyAccount)
 	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/revoke", server.revokeAccount)
 	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/launch-batch-calibration", server.projectLaunchBatchCalibration)
+	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/platform-objects", server.listPlatformObjects)
 	return server
+}
+
+func (s *Server) listPlatformObjects(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeRead)
+	if !ok || !s.authorize(r, actor) || !s.projectAccountExists(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref")) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	catalog, ok := s.reader.(connector.PlatformObjectCatalog)
+	if !ok {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	kind := connector.PlatformObjectKind(strings.TrimSpace(r.URL.Query().Get("object_kind")))
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	search := strings.TrimSpace(r.URL.Query().Get("q"))
+	limit := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 200 {
+			writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
+			return
+		}
+		limit = parsed
+	}
+	if (kind != "" && !kind.Valid()) || (status != "" && status != "active" && status != "unavailable") || len(search) > 255 {
+		writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
+		return
+	}
+	values, err := catalog.ListPlatformObjects(r.Context(), connector.PlatformObjectQuery{
+		OrganizationID: string(actor.OrganizationID), ProjectID: r.PathValue("project_id"),
+		AccountID: r.PathValue("account_ref"), Kind: kind, Status: status,
+		Search: search, Cursor: r.URL.Query().Get("cursor"), Limit: limit,
+	})
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "CONNECTOR_READ_FAILED")
+		return
+	}
+	nextCursor := ""
+	if len(values) == limit {
+		nextCursor = values[len(values)-1].ID
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values, "next_cursor": nextCursor})
 }
 
 func (s *Server) getProjectAccountSession(w http.ResponseWriter, r *http.Request) {

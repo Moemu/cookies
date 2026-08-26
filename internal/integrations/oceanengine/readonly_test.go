@@ -2,10 +2,63 @@ package oceanengine
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
+
+func TestAssetLibraryReadersUseApprovedReadOnlyEndpoints(t *testing.T) {
+	requests := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/superior/api/v2/ad/getImageList"},
+		{http.MethodGet, "/superior/api/v2/video/list"},
+		{http.MethodGet, "/platform/api/v1/orange/third_part_list"},
+	}
+	index := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if index >= len(requests) {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		want := requests[index]
+		index++
+		if r.Method != want.method || r.URL.Path != want.path || r.URL.Query().Get("aadvid") != "123" {
+			t.Fatalf("request=%s %s", r.Method, r.URL.RequestURI())
+		}
+		if r.Method == http.MethodPost {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["page"] != float64(2) || body["limit"] != float64(20) {
+				t.Fatalf("body=%#v err=%v", body, err)
+			}
+		} else if r.URL.Query().Get("page") != "2" {
+			t.Fatalf("query=%s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"data":{}}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "123", Session{Cookies: "session=x"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	ctx := context.Background()
+	request := AssetPageRequest{Page: 2, Limit: 20}
+	if _, err = client.ImageMaterialsPage(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.VideoMaterialsPage(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.OrangeLandingPagesPage(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if index != len(requests) {
+		t.Fatalf("requests=%d", index)
+	}
+}
 
 func TestGlobalInfoUsesEnterpriseReadOnlyEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

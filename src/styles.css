@@ -915,6 +915,24 @@ kbd { display: grid; place-items: center; min-width: 18px; height: 18px; backgro
 .oe-sync-facts span { padding: 3px 6px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; font-size: 8px; }
 .oe-sync-actions { display: flex; gap: 7px; align-items: center; }
 .oe-sync-actions button { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; padding: 0 12px; font-size: 10px; white-space: nowrap; }
+.oe-object-counts { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 14px 16px 0; }
+.oe-object-counts button { min-height: 30px; padding: 0 10px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; font-size: 9px; }
+.oe-object-counts button.active { color: var(--cobalt-dark); background: var(--cobalt-soft); border-color: color-mix(in srgb, var(--cobalt) 35%, var(--line)); }
+.oe-object-counts small { margin-left: auto; color: var(--muted); font-size: 9px; }
+.oe-object-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: end; padding: 12px 16px; }
+.oe-object-search label { display: grid; gap: 5px; color: var(--text); font-size: 9px; font-weight: 700; }
+.oe-object-search input { width: 100%; min-width: 0; height: 36px; padding: 0 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 5px; font: inherit; font-size: 10px; }
+.oe-object-search input:focus-visible { border-color: var(--cobalt); outline: 2px solid var(--cobalt-soft); outline-offset: 1px; }
+.oe-object-list { border-top: 1px solid var(--line); }
+.oe-object-list article { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, auto); gap: 14px; align-items: center; min-height: 54px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.oe-object-list article div { min-width: 0; }
+.oe-object-list article b, .oe-object-list article span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oe-object-list article b { font-size: 10px; }
+.oe-object-list article span { margin-top: 4px; color: var(--muted); font-size: 9px; }
+.oe-object-list article code { overflow: hidden; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.oe-object-list .oe-account-empty { margin-bottom: 16px; }
+.oe-object-catalog > .secondary-button { margin: 12px 16px 16px; }
+.delivery-material-platform-object { display: grid; place-items: center; min-height: 92px; color: var(--cobalt-dark); background: var(--cobalt-soft); border-radius: 5px; font-size: 9px; font-weight: 750; letter-spacing: .05em; }
 
 /* Ecommerce pre-roll and hook strategy workspace */
 .performance-mode-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }.performance-mode-tabs button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-height: 58px; padding: 12px 16px; background: var(--surface); border-right: 1px solid var(--line); text-align: left; }.performance-mode-tabs button:last-child { border-right: 0; }.performance-mode-tabs button.active { color: var(--cobalt-dark); background: var(--cobalt-soft); box-shadow: inset 0 -2px var(--cobalt); }.performance-mode-tabs b { font-size: 11px; }.performance-mode-tabs small { color: var(--muted); font-size: 9px; }

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 )
 
 type ListRequest struct {
@@ -26,6 +28,11 @@ type StatQueryRequest struct {
 	Limit      int
 	Host       string
 	Extra      map[string]any
+}
+
+type AssetPageRequest struct {
+	Page  int
+	Limit int
 }
 
 type Reader interface {
@@ -91,6 +98,53 @@ func (c *Client) AccountInfo(ctx context.Context) (map[string]any, error) {
 		}
 	}
 	return value, err
+}
+
+// ImageMaterialsPage reads one image-library page. The endpoint is read-only
+// and was verified by the Connector prototype against the live asset picker.
+func (c *Client) ImageMaterialsPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, limit := normalizeAssetPage(request)
+	body := map[string]any{
+		"sort_by": "create_time", "sort_type": "desc",
+		"metric_names": []string{"stat_cost", "ctr"},
+		"image_modes":  []int{3, 16, 2}, "use_pre_audit_result": true,
+		"is_need_stats_cost": true, "limit": limit, "page": page,
+	}
+	return c.postJSON(ctx, "/superior/api/v2/ad/getImageList", body)
+}
+
+// VideoMaterialsPage reads one video-library page.
+func (c *Client) VideoMaterialsPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, limit := normalizeAssetPage(request)
+	query := url.Values{
+		"image_mode": {"5,15"}, "ad_id": {"0"}, "sort_type": {"desc"},
+		"metric_names": {"create_time,stat_cost,ctr"}, "landing_type": {"17"},
+		"external_action": {"20"}, "page": {strconv.Itoa(page)},
+		"limit": {strconv.Itoa(limit)}, "version": {"v2"}, "operation_platform": {"1"},
+	}
+	return c.getJSON(ctx, "/superior/api/v2/video/list?"+query.Encode())
+}
+
+// OrangeLandingPagesPage reads one Orange third-party landing-page page.
+func (c *Client) OrangeLandingPagesPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, limit := normalizeAssetPage(request)
+	query := url.Values{
+		"page": {strconv.Itoa(page)}, "size": {strconv.Itoa(limit)},
+		"order_mode": {"1"}, "search_mode": {"3"}, "need_uba": {"false"},
+		"audit_status_list": {"0, 9, 1, 10"},
+	}
+	return c.getJSON(ctx, "/platform/api/v1/orange/third_part_list?"+query.Encode())
+}
+
+func normalizeAssetPage(request AssetPageRequest) (int, int) {
+	page, limit := request.Page, request.Limit
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 32
+	}
+	return page, limit
 }
 
 func accountInfoFallbackAllowed(err error) bool {

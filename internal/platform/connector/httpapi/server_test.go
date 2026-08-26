@@ -13,11 +13,24 @@ import (
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
 
-type readerStub struct{ query connector.Query }
+type readerStub struct {
+	query       connector.Query
+	objectQuery connector.PlatformObjectQuery
+	objects     []connector.PlatformObject
+}
 
 func (r *readerStub) Snapshot(_ context.Context, q connector.Query) (connector.CanonicalSnapshot, error) {
 	r.query = q
 	return connector.CanonicalSnapshot{DatasetVersion: connector.DatasetVersion, PredictionCutoff: q.PredictionCutoff}, nil
+}
+
+func (r *readerStub) ReconcilePlatformObjects(context.Context, string, string, string, string, connector.PlatformObjectKind, time.Time, []connector.PlatformObjectCandidate) (connector.PlatformObjectSyncStats, error) {
+	return connector.PlatformObjectSyncStats{}, nil
+}
+
+func (r *readerStub) ListPlatformObjects(_ context.Context, query connector.PlatformObjectQuery) ([]connector.PlatformObject, error) {
+	r.objectQuery = query
+	return r.objects, nil
 }
 
 type syncerStub struct {
@@ -26,13 +39,16 @@ type syncerStub struct {
 }
 type authorizerStub struct{ err error }
 type sessionManagerStub struct{ plaintext string }
-type accountManagerStub struct{ verifyErr error }
+type accountManagerStub struct {
+	verifyErr error
+	accounts  []connector.PlatformAccount
+}
 
 func (s accountManagerStub) Register(context.Context, connector.RegisterAccountRequest) (connector.PlatformAccount, error) {
 	return connector.PlatformAccount{}, nil
 }
 func (s accountManagerStub) List(context.Context, string, string) ([]connector.PlatformAccount, error) {
-	return nil, nil
+	return s.accounts, nil
 }
 func (s accountManagerStub) Claim(context.Context, string, string, string) (connector.PlatformAccount, error) {
 	return connector.PlatformAccount{}, nil
@@ -112,6 +128,27 @@ func TestCanonicalSnapshotRejectsMissingCutoffAndScope(t *testing.T) {
 		if response.Code != test.status {
 			t.Fatalf("path=%s status=%d body=%s", test.path, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestPlatformObjectListScopesProjectAccountAndFilters(t *testing.T) {
+	reader := &readerStub{objects: []connector.PlatformObject{{
+		ID: "oeobj_safe", AccountID: "oeacct_safe", Kind: connector.PlatformObjectVideoMaterial,
+		PlatformObjectID: "123456789", DisplayName: "video-a", Status: "active",
+	}}}
+	accounts := accountManagerStub{accounts: []connector.PlatformAccount{{ID: "oeacct_safe", ProjectID: "project_1", Status: "verified"}}}
+	server := New(reader, nil, authorizerStub{}, accounts)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request(http.MethodGet, "/api/connector/v1/projects/project_1/accounts/oeacct_safe/platform-objects?object_kind=video_material&status=active&q=video&limit=20", "", connector.ScopeRead))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	query := reader.objectQuery
+	if query.OrganizationID != "org_1" || query.ProjectID != "project_1" || query.AccountID != "oeacct_safe" || query.Kind != connector.PlatformObjectVideoMaterial || query.Status != "active" || query.Search != "video" || query.Limit != 20 {
+		t.Fatalf("query=%#v", query)
+	}
+	if !strings.Contains(response.Body.String(), "123456789") {
+		t.Fatalf("object missing from response: %s", response.Body.String())
 	}
 }
 func TestSyncRequiresIdempotencyAndPassesNoCredentialMaterial(t *testing.T) {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { Check, CircleAlert, Database, LockKeyhole, RefreshCw, Save } from 'lucide-react'
-import { ApiRequestError, api, type ApiConnectorAccount, type ApiConnectorAccountSession } from '../data/api'
+import { Check, CircleAlert, Database, LockKeyhole, RefreshCw, Save, Search } from 'lucide-react'
+import { ApiRequestError, api, type ApiConnectorAccount, type ApiConnectorAccountSession, type ApiConnectorPlatformObject, type ApiConnectorPlatformObjectKind } from '../data/api'
 
 type LoadState = 'loading' | 'ready' | 'error'
 const formatter = new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -36,6 +36,16 @@ function syncWindow(days: number) {
 }
 
 const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds))
+const objectKindCopy: Record<ApiConnectorPlatformObjectKind, string> = {
+  image_material: '图片素材', video_material: '视频素材', orange_landing_page: '橙子落地页',
+}
+function objectSyncSummary(value: Awaited<ReturnType<typeof api.syncProjectConnectorAccount>>['platform_objects']) {
+  const stats = Object.values(value ?? {}).reduce((total, item) => ({
+    created: total.created + (item?.created ?? 0), updated: total.updated + (item?.updated ?? 0),
+    unchanged: total.unchanged + (item?.unchanged ?? 0), unavailable: total.unavailable + (item?.unavailable ?? 0),
+  }), { created: 0, updated: 0, unchanged: 0, unavailable: 0 })
+  return `新增 ${stats.created}，更新 ${stats.updated}，未变化 ${stats.unchanged}，失效 ${stats.unavailable}`
+}
 
 export function OceanEngineSessionSettings({ projectId }: { projectId: string }) {
   const externalIDRef = useRef<HTMLInputElement>(null)
@@ -50,6 +60,29 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
   const [busy, setBusy] = useState(false)
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
   const [notice, setNotice] = useState('')
+  const [platformObjects, setPlatformObjects] = useState<ApiConnectorPlatformObject[]>([])
+  const [objectKind, setObjectKind] = useState<ApiConnectorPlatformObjectKind | ''>('')
+  const [objectSearch, setObjectSearch] = useState('')
+  const [nextObjectCursor, setNextObjectCursor] = useState('')
+
+  const loadObjects = useCallback(async (
+    accountID: string,
+    cursor = '',
+    kind: ApiConnectorPlatformObjectKind | '' = objectKind,
+    search = objectSearch,
+  ) => {
+    if (!accountID) {
+      setPlatformObjects([])
+      setNextObjectCursor('')
+      return
+    }
+    const response = await api.listProjectConnectorPlatformObjects(projectId, accountID, {
+      objectKind: kind || undefined, status: 'active', q: search.trim() || undefined,
+      cursor: cursor || undefined, limit: 100,
+    })
+    setPlatformObjects(current => cursor ? [...current, ...response.items] : response.items)
+    setNextObjectCursor(response.next_cursor)
+  }, [objectKind, objectSearch, projectId])
 
   const load = useCallback(async (preferredAccountID = '') => {
     const requestID = ++requestRef.current
@@ -68,13 +101,19 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
       setSelectedAccountID(accountID)
       if (!accountID) {
         setSession(null)
+        setPlatformObjects([])
         setLoadState('ready')
         return
       }
       try {
-        const nextSession = await api.getProjectConnectorAccountSession(projectId, accountID)
+        const [nextSession, objects] = await Promise.all([
+          api.getProjectConnectorAccountSession(projectId, accountID),
+          api.listProjectConnectorPlatformObjects(projectId, accountID, { status: 'active', limit: 100 }),
+        ])
         if (requestID !== requestRef.current) return
         setSession(nextSession)
+        setPlatformObjects(objects.items)
+        setNextObjectCursor(objects.next_cursor)
       } catch (error) {
         if (!(error instanceof ApiRequestError && error.status === 404)) throw error
         setSession(null)
@@ -96,7 +135,13 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
     if (!accountID) return setSession(null)
     setLoadState('loading')
     try {
-      setSession(await api.getProjectConnectorAccountSession(projectId, accountID))
+      const [nextSession, objects] = await Promise.all([
+        api.getProjectConnectorAccountSession(projectId, accountID),
+        api.listProjectConnectorPlatformObjects(projectId, accountID, { status: 'active', limit: 100 }),
+      ])
+      setSession(nextSession)
+      setPlatformObjects(objects.items)
+      setNextObjectCursor(objects.next_cursor)
     } catch (error) {
       if (error instanceof ApiRequestError && error.status === 404) setSession(null)
       else setNotice(errorMessage(error))
@@ -164,7 +209,7 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
     setBusy(true); setNotice('')
     try {
       const window = syncWindow(days)
-      const operation = mode === 'full' ? '历史同步' : days > 30 ? '历史日级补数' : '指标巡检'
+      const operation = mode === 'full' ? '历史同步' : mode === 'inventory_only' ? '巨量对象目录同步' : days > 30 ? '历史日级补数' : '指标巡检'
       const idempotencyKey = `${projectId}-${mode}-${selectedAccountID}-${crypto.randomUUID()}`
       const result = await api.syncProjectConnectorAccount(projectId, selectedAccountID, { ...window, time_zone: 'Asia/Shanghai', currency: 'CNY', sync_mode: mode }, idempotencyKey)
       setNotice(`${operation}已进入后台。页面将持续读取同步状态。`)
@@ -173,7 +218,9 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
         try {
           const status = await api.getProjectConnectorSync(projectId, selectedAccountID, result.run_id)
           if (status.status === 'completed') {
-            setNotice(mode === 'full' ? '历史同步已完成。对象快照和指标窗口已经写入 Connector。' : `${operation}已完成。指标窗口和转换修订已经写入 Connector。`)
+            if (mode !== 'metrics_only') await loadObjects(selectedAccountID)
+            const summary = objectSyncSummary(result.platform_objects)
+            setNotice(mode === 'full' ? `历史同步已完成。对象目录、对象快照和指标窗口已经写入 Connector。${summary}。` : mode === 'inventory_only' ? `巨量对象目录同步已完成。当前 Project 已自动获得对象使用权限。${summary}。` : `${operation}已完成。指标窗口和转换修订已经写入 Connector。`)
             return
           }
           if (status.status === 'failed') {
@@ -208,7 +255,6 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
 
   const selectedAccount = accounts.find(account => account.id === selectedAccountID)
   const copy = session ? statusCopy[session.status] : { title: '尚未保存会话', detail: 'Cookie 会话归属当前组织账号。' }
-
   return <section className="miyun-connection-settings" aria-labelledby="ocean-engine-session-title">
     <div className="miyun-settings-main">
       <header><div><span>组织会话 · Project 绑定</span><h2 id="ocean-engine-session-title">巨量投放账号</h2><p>Plan 可选择已绑定当前 Project 的验证账号。</p></div><div className="miyun-settings-status-group" aria-live="polite"><span className={`miyun-connection-status ${session?.status === 'ready' ? 'ready' : ''}`}>{session?.status === 'ready' ? <Check size={14} aria-hidden="true" /> : <CircleAlert size={14} aria-hidden="true" />}{loadState === 'loading' ? '正在读取…' : copy.title}</span><small>页面同步于 {formatTime(lastSyncedAt)}</small></div></header>
@@ -244,7 +290,27 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
         </section>
 
         <section className={`oe-sync-card ${session?.status === 'ready' ? 'ready' : ''}`} aria-labelledby="oe-sync-section-title">
-          <div className="oe-sync-icon"><Database size={20} aria-hidden="true" /></div><div className="oe-sync-copy"><span>03 · 数据读取</span><h3 id="oe-sync-section-title">历史同步与每日巡检</h3><p>{session?.status === 'ready' ? '对象索引读取真实创建时间。日级补数只读取指标，不重复读取对象详情。' : '完成只读验证后，系统才允许读取数据。'}</p><div className="oe-sync-facts"><span>只读请求</span><span>单日窗口</span><span>转换修订</span></div></div><div className="oe-sync-actions"><button className="secondary-button" type="button" onClick={() => void runSync(180, 'inventory_only')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步对象索引</button><button className="secondary-button" type="button" onClick={() => void runSync(14, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><RefreshCw size={15} aria-hidden="true" />巡检最近 14 天</button><button className="secondary-button" type="button" onClick={() => void runSync(180, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />补齐近 180 天日级指标</button><button className="primary-button" type="button" onClick={() => void runSync(180, 'full')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步最近 180 天</button></div>
+          <div className="oe-sync-icon"><Database size={20} aria-hidden="true" /></div><div className="oe-sync-copy"><span>03 · 数据读取</span><h3 id="oe-sync-section-title">历史同步与每日巡检</h3><p>{session?.status === 'ready' ? '对象目录读取图片、视频和橙子落地页。日级补数只读取指标。' : '完成只读验证后，系统才允许读取数据。'}</p><div className="oe-sync-facts"><span>只读请求</span><span>服务端分页</span><span>转换修订</span></div></div><div className="oe-sync-actions"><button className="secondary-button" type="button" onClick={() => void runSync(180, 'inventory_only')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步巨量对象目录</button><button className="secondary-button" type="button" onClick={() => void runSync(14, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><RefreshCw size={15} aria-hidden="true" />巡检最近 14 天</button><button className="secondary-button" type="button" onClick={() => void runSync(180, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />补齐近 180 天日级指标</button><button className="primary-button" type="button" onClick={() => void runSync(180, 'full')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步最近 180 天</button></div>
+        </section>
+
+        <section className="oe-settings-card oe-object-catalog" aria-labelledby="oe-object-catalog-title">
+          <header className="oe-settings-card-header"><span>04</span><div><h3 id="oe-object-catalog-title">已导入巨量对象</h3><p>这里只显示当前 Project 已获授权的可用对象。</p></div><Database size={18} aria-hidden="true" /></header>
+          <div className="oe-object-counts" aria-label="对象类型筛选">
+            {(Object.keys(objectKindCopy) as ApiConnectorPlatformObjectKind[]).map(kind => <button key={kind} type="button" className={objectKind === kind ? 'active' : ''} onClick={() => {
+              const nextKind = objectKind === kind ? '' : kind
+              setObjectKind(nextKind)
+              void loadObjects(selectedAccountID, '', nextKind, objectSearch)
+            }} disabled={!selectedAccountID || busy}><span>{objectKindCopy[kind]}</span></button>)}
+            <small>当前结果 {platformObjects.length} 个</small>
+          </div>
+          <form className="oe-object-search" onSubmit={event => { event.preventDefault(); void loadObjects(selectedAccountID) }}>
+            <label htmlFor="oe-object-search">搜索对象<input id="oe-object-search" value={objectSearch} onChange={event => setObjectSearch(event.target.value)} placeholder="输入对象名称" disabled={!selectedAccountID || busy} /></label>
+            <button className="secondary-button" type="submit" disabled={!selectedAccountID || busy}><Search size={15} aria-hidden="true" />搜索</button>
+          </form>
+          <div className="oe-object-list" aria-live="polite">
+            {platformObjects.length ? platformObjects.map(value => <article key={value.id}><div><b>{value.display_name || objectKindCopy[value.object_kind]}</b><span>{objectKindCopy[value.object_kind]} · 最近观察 {formatTime(value.observed_at)}</span></div><code title={value.platform_object_id}>{value.platform_object_id}</code></article>) : <div className="oe-account-empty"><CircleAlert size={18} aria-hidden="true" /><p><b>尚无可用对象</b><span>先完成只读验证，再同步巨量对象目录。</span></p></div>}
+          </div>
+          {nextObjectCursor ? <button className="secondary-button" type="button" disabled={busy} onClick={() => void loadObjects(selectedAccountID, nextObjectCursor)}>加载更多对象</button> : null}
         </section>
       </div>
       {notice ? <p className="miyun-settings-notice" role="status" aria-live="polite">{notice}</p> : null}

@@ -10,7 +10,7 @@ import {
   type StableReference,
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
-import type { ApiAssetVersionPointer } from '../data/api'
+import { api, type ApiAssetVersionPointer, type ApiConnectorPlatformObject } from '../data/api'
 import { oceanEngineCalibrationDispositions, visibleOceanEngineManifestFields, type CalibrationDisposition, type VisibleManifestField } from '../lib/oceanengineCalibrationManifest'
 import { fromShanghaiEndDate, fromShanghaiStartDate, toShanghaiDateInput } from '../lib/deliverySchedule'
 import { projectPath } from '../lib/router'
@@ -123,23 +123,33 @@ function updateReference(current: StableReference | undefined, id: string, objec
   return { namespace: 'cookies', object_kind: objectKind, scope: current?.scope ?? 'current_project', state: 'resolved', ...current, id: value }
 }
 
-function MaterialObjectPicker({ label, assets, value, objectKind, onChange }: { label: string; assets: ApiAssetVersionPointer[]; value: StableReference[]; objectKind: string; onChange: (value: StableReference[]) => void }) {
+function MaterialObjectPicker({ label, assets, platformObjects = [], value, objectKind, onChange }: { label: string; assets: ApiAssetVersionPointer[]; platformObjects?: ApiConnectorPlatformObject[]; value: StableReference[]; objectKind: string; onChange: (value: StableReference[]) => void }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [preview, setPreview] = useState<ApiAssetVersionPointer>()
-  const [draftIds, setDraftIds] = useState<string[]>(value.map(reference => reference.id ?? ''))
+  const selectionID = (reference: StableReference) => reference.audit_attributes?.connector_platform_object_id ? `connector:${reference.audit_attributes.connector_platform_object_id}` : reference.id ?? ''
+  const [draftIds, setDraftIds] = useState<string[]>(value.map(selectionID))
   const draftSelected = new Set(draftIds)
   const filteredAssets = assets.filter(asset => `${asset.assetId} ${asset.oceanEngineMaterialId ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const filteredPlatformObjects = platformObjects.filter(item => `${item.display_name} ${item.platform_object_id}`.toLowerCase().includes(query.trim().toLowerCase()))
   const toggle = (asset: ApiAssetVersionPointer) => setDraftIds(current => current.includes(asset.assetId) ? current.filter(id => id !== asset.assetId) : [...current, asset.assetId])
+  const togglePlatformObject = (item: ApiConnectorPlatformObject) => {
+    const id = `connector:${item.id}`
+    setDraftIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
+  }
   const confirm = () => {
-    onChange(draftIds.map(id => {
+    onChange(draftIds.map((id): StableReference => {
+      const platformObject = platformObjects.find(item => `connector:${item.id}` === id)
+      if (platformObject) return { namespace: 'oceanengine', object_kind: platformObject.object_kind, scope: `account:${platformObject.account_id}`, id: platformObject.platform_object_id, version: String(platformObject.version), state: 'resolved' as const, display_name_snapshot: platformObject.display_name || platformObject.platform_object_id, audit_attributes: { connector_platform_object_id: platformObject.id, ocean_engine_material_id: platformObject.platform_object_id } } satisfies StableReference
       const asset = assets.find(item => item.assetId === id)
-      return { namespace: 'cookies', object_kind: objectKind, scope: 'current_project', id, version: String(asset?.humanConfirmedVersion ?? asset?.workingVersion ?? 0), state: 'resolved' as const, display_name_snapshot: id, audit_attributes: { ocean_engine_material_id: asset?.oceanEngineMaterialId ?? '' } }
+      const existing = value.find(reference => selectionID(reference) === id)
+      if (!asset && existing) return existing
+      return { namespace: 'cookies', object_kind: objectKind, scope: 'current_project', id, version: String(asset?.humanConfirmedVersion ?? asset?.workingVersion ?? 0), state: 'resolved' as const, display_name_snapshot: id, audit_attributes: { ocean_engine_material_id: asset?.oceanEngineMaterialId ?? '' } } satisfies StableReference
     }))
     setOpen(false)
   }
-  return <fieldset className="delivery-config-object-picker"><legend>{label}</legend><div className="delivery-config-object-summary"><span>{value.length ? `${value.length} 个素材已选` : '尚未选择素材'}</span><button className="secondary-button" type="button" onClick={() => { setDraftIds(value.map(reference => reference.id ?? '')); setOpen(true) }}>选择素材</button></div>{value.length ? <div className="delivery-config-selected-chips">{value.map(reference => <span key={reference.id}>{reference.display_name_snapshot ?? reference.id}</span>)}</div> : null}{!assets.length ? <p>当前项目没有已确认素材。</p> : null}
-    {open ? <div className="delivery-material-modal-backdrop" role="presentation" onClick={() => setOpen(false)}><section className="delivery-material-modal" style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }} role="dialog" aria-modal="true" aria-label={`${label}选择器`} onClick={event => event.stopPropagation()}><header><div><span className="section-label">MATERIAL PICKER</span><h3>{label}</h3><p>可搜索、预览并多选当前项目已确认素材。</p></div><button className="text-button" type="button" onClick={() => setOpen(false)}>关闭</button></header><div className="delivery-material-modal-toolbar"><input autoFocus placeholder="搜索素材 ID 或巨量素材 ID" value={query} onChange={event => setQuery(event.target.value)}/><span>已选 {draftIds.length} 个</span><button className="text-button" type="button" onClick={() => setDraftIds([])}>清空</button></div><div className="delivery-material-modal-grid">{filteredAssets.map(asset => <label key={asset.id} className={draftSelected.has(asset.assetId) ? 'selected' : ''}><input type="checkbox" checked={draftSelected.has(asset.assetId)} onChange={() => toggle(asset)}/><button type="button" className="delivery-material-preview-button" onClick={() => setPreview(asset)}>{asset.contentUrl ? asset.mediaKind === 'video' ? <video src={asset.contentUrl} preload="metadata"/> : <img src={asset.contentUrl} alt=""/> : <span>无预览</span>}</button><b>{asset.assetId}</b><small>{asset.oceanEngineMaterialId ? '已录入巨量' : '待 RPA 录入'}</small></label>)}{!filteredAssets.length ? <div className="delivery-material-empty">{assets.length ? '没有匹配的素材，请更换搜索条件。' : '当前项目没有可选择的已确认素材。'}</div> : null}</div><footer><button className="secondary-button" type="button" onClick={() => setOpen(false)}>取消</button><button className="primary-button" type="button" onClick={confirm}>确认选择</button></footer>{preview ? <div className="delivery-material-preview-overlay" role="dialog" aria-label="素材预览" onClick={() => setPreview(undefined)}>{preview.contentUrl ? preview.mediaKind === 'video' ? <video src={preview.contentUrl} controls autoPlay onClick={event => event.stopPropagation()}/> : <img src={preview.contentUrl} alt={preview.assetId} onClick={event => event.stopPropagation()}/> : <span>无预览</span>}</div> : null}</section></div> : null}
+  return <fieldset className="delivery-config-object-picker"><legend>{label}</legend><div className="delivery-config-object-summary"><span>{value.length ? `${value.length} 个素材已选` : '尚未选择素材'}</span><button className="secondary-button" type="button" onClick={() => { setDraftIds(value.map(selectionID)); setOpen(true) }}>选择素材</button></div>{value.length ? <div className="delivery-config-selected-chips">{value.map(reference => <span key={`${reference.namespace}-${reference.id}`}>{reference.display_name_snapshot ?? reference.id}</span>)}</div> : null}{!assets.length && !platformObjects.length ? <p>当前 Project 没有可选择素材。</p> : null}
+    {open ? <div className="delivery-material-modal-backdrop" role="presentation" onClick={() => setOpen(false)}><section className="delivery-material-modal" style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }} role="dialog" aria-modal="true" aria-label={`${label}选择器`} onClick={event => event.stopPropagation()}><header><div><span className="section-label">MATERIAL PICKER</span><h3>{label}</h3><p>选择 Cookies 素材，或 Connector 已导入素材。</p></div><button className="text-button" type="button" onClick={() => setOpen(false)}>关闭</button></header><div className="delivery-material-modal-toolbar"><input autoFocus placeholder="搜索素材名称或巨量素材 ID" value={query} onChange={event => setQuery(event.target.value)}/><span>已选 {draftIds.length} 个</span><button className="text-button" type="button" onClick={() => setDraftIds([])}>清空</button></div><div className="delivery-material-modal-grid">{filteredPlatformObjects.map(item => { const selection = `connector:${item.id}`; return <label key={item.id} className={draftSelected.has(selection) ? 'selected' : ''}><input type="checkbox" checked={draftSelected.has(selection)} onChange={() => togglePlatformObject(item)}/><span className="delivery-material-platform-object">Connector</span><b>{item.display_name || item.platform_object_id}</b><small>{item.object_kind === 'video_material' ? '已有巨量视频' : '已有巨量图片'}</small></label> })}{filteredAssets.map(asset => <label key={asset.id} className={draftSelected.has(asset.assetId) ? 'selected' : ''}><input type="checkbox" checked={draftSelected.has(asset.assetId)} onChange={() => toggle(asset)}/><button type="button" className="delivery-material-preview-button" onClick={() => setPreview(asset)}>{asset.contentUrl ? asset.mediaKind === 'video' ? <video src={asset.contentUrl} preload="metadata"/> : <img src={asset.contentUrl} alt=""/> : <span>无预览</span>}</button><b>{asset.assetId}</b><small>{asset.oceanEngineMaterialId ? '已录入巨量' : '待 RPA 录入'}</small></label>)}{!filteredAssets.length && !filteredPlatformObjects.length ? <div className="delivery-material-empty">没有匹配的素材。</div> : null}</div><footer><button className="secondary-button" type="button" onClick={() => setOpen(false)}>取消</button><button className="primary-button" type="button" onClick={confirm}>确认选择</button></footer>{preview ? <div className="delivery-material-preview-overlay" role="dialog" aria-label="素材预览" onClick={() => setPreview(undefined)}>{preview.contentUrl ? preview.mediaKind === 'video' ? <video src={preview.contentUrl} controls autoPlay onClick={event => event.stopPropagation()}/> : <img src={preview.contentUrl} alt={preview.assetId} onClick={event => event.stopPropagation()}/> : <span>无预览</span>}</div> : null}</section></div> : null}
   </fieldset>
 }
 
@@ -147,7 +157,7 @@ function ToggleField({ label, checked, onChange }: { label: string; checked: boo
   return <label className="delivery-config-toggle-field"><span>{label}</span><span className="delivery-config-toggle-control"><span>{checked ? '已开启' : '未开启'}</span><input type="checkbox" role="switch" checked={checked} onChange={event => onChange(event.target.checked)}/></span></label>
 }
 
-function PlatformConfigurationEditor({ value, onChange, products, assets }: { value: PlatformConfiguration; onChange: (value: PlatformConfiguration) => void; products: Array<{ id: string; name: string; oceanEngineProductId?: string }>; assets: ApiAssetVersionPointer[] }) {
+function PlatformConfigurationEditor({ value, onChange, products, assets, platformObjects }: { value: PlatformConfiguration; onChange: (value: PlatformConfiguration) => void; products: Array<{ id: string; name: string; oceanEngineProductId?: string }>; assets: ApiAssetVersionPointer[]; platformObjects: ApiConnectorPlatformObject[] }) {
   const ocean = value.payload.ocean_engine
   if (!ocean?.project) return null
   const updateOcean = (next: OceanConfiguration) => onChange({ ...value, payload: { ...value.payload, ocean_engine: next } })
@@ -222,7 +232,7 @@ function PlatformConfigurationEditor({ value, onChange, products, assets }: { va
           {promotion.delivery_identity.mode === 'authorized_identity' ? <label><span>授权身份 ID</span><input value={promotion.delivery_identity.authorized_identity?.id ?? ''} onChange={event => updatePromotion(index, { delivery_identity: { ...promotion.delivery_identity, authorized_identity: updateReference(promotion.delivery_identity.authorized_identity, event.target.value, 'delivery_identity') } })}/></label> : null}
           <label><span>单元日预算</span><div className="delivery-config-money-input"><input name={`promotion_${index}_daily_budget`} autoComplete="off" type="number" inputMode="decimal" min="0" value={(promotion.budget_and_bidding?.daily_budget_minor ?? 0) / 100} onChange={event => updatePromotion(index, { budget_and_bidding: { currency: 'CNY', bidding_strategy: promotion.budget_and_bidding?.bidding_strategy ?? 'stable_cost', charging_mode: promotion.budget_and_bidding?.charging_mode ?? 'CPC', ...promotion.budget_and_bidding, daily_budget_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元 / 天</small></div></label>
           <label><span>单元出价</span><div className="delivery-config-money-input"><input name={`promotion_${index}_bid`} autoComplete="off" type="number" inputMode="decimal" min="0" step="0.01" value={(promotion.budget_and_bidding?.bid_minor ?? 0) / 100} onChange={event => updatePromotion(index, { budget_and_bidding: { currency: 'CNY', daily_budget_minor: promotion.budget_and_bidding?.daily_budget_minor ?? 0, bidding_strategy: promotion.budget_and_bidding?.bidding_strategy ?? 'stable_cost', charging_mode: promotion.budget_and_bidding?.charging_mode ?? 'CPC', ...promotion.budget_and_bidding, bid_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元</small></div></label>
-          <label><span>落地页引用</span><input value={promotion.landing_page_reference?.id ?? ''} onChange={event => updatePromotion(index, { landing_page_reference: updateReference(promotion.landing_page_reference, event.target.value, 'landing_page') })}/></label>
+          <label><span>橙子落地页</span><select value={promotion.landing_page_reference?.id ?? ''} onChange={event => { const item = platformObjects.find(value => value.object_kind === 'orange_landing_page' && value.platform_object_id === event.target.value); updatePromotion(index, { landing_page_reference: item ? { namespace: 'oceanengine', object_kind: 'orange_landing_page', scope: `account:${item.account_id}`, id: item.platform_object_id, version: String(item.version), state: 'resolved', display_name_snapshot: item.display_name || item.platform_object_id, audit_attributes: { connector_platform_object_id: item.id } } : undefined }) }}><option value="">请选择已导入落地页</option>{platformObjects.filter(item => item.object_kind === 'orange_landing_page').map(item => <option key={item.id} value={item.platform_object_id}>{item.display_name || item.platform_object_id}</option>)}</select></label>
           <label><span>直达链接引用</span><input value={promotion.direct_link_reference?.id ?? ''} onChange={event => updatePromotion(index, { direct_link_reference: updateReference(promotion.direct_link_reference, event.target.value, 'direct_link') })}/></label>
           <label><span>产品引用</span><input value={promotion.product_reference?.id ?? ''} onChange={event => updatePromotion(index, { product_reference: updateReference(promotion.product_reference, event.target.value, 'product') })}/></label>
           <label><span>原生锚点 ID</span><input value={promotion.native_anchor_reference?.id ?? ''} onChange={event => updatePromotion(index, { native_anchor_reference: updateReference(promotion.native_anchor_reference, event.target.value, 'native_anchor') })}/></label>
@@ -236,7 +246,7 @@ function PlatformConfigurationEditor({ value, onChange, products, assets }: { va
           <ToggleField label="允许客户端下载" checked={promotion.settings.client_download_enabled ?? false} onChange={client_download_enabled => updatePromotion(index, { settings: { ...promotion.settings, client_download_enabled } })}/>
         </div>
         <section className="delivery-config-material-editor"><h5>04 素材与文案</h5><div className="delivery-config-unit-fields delivery-config-unit-fields--wide">
-          <MaterialObjectPicker label="基础素材" assets={assets} value={promotion.base_material_references} objectKind="material" onChange={base_material_references => updatePromotion(index, { base_material_references })}/>
+          <MaterialObjectPicker label="基础素材" assets={assets} platformObjects={platformObjects.filter(item => item.object_kind === 'image_material' || item.object_kind === 'video_material')} value={promotion.base_material_references} objectKind="material" onChange={base_material_references => updatePromotion(index, { base_material_references })}/>
           <MaterialObjectPicker label="产品主图" assets={assets.filter(asset => asset.mediaKind === 'image')} value={promotion.product_image_references ?? []} objectKind="product_image" onChange={product_image_references => updatePromotion(index, { product_image_references })}/>
           <label><span>广告文案</span><textarea rows={2} value={promotion.copy_items.map(item => item.text).join('\n')} placeholder="每行一条文案" onChange={event => updatePromotion(index, { copy_items: event.target.value.split('\n').map(text => text.trim()).filter(Boolean).map(text => ({ text })) })}/></label>
           <label><span>产品卖点</span><textarea rows={2} value={promotion.product_selling_points?.join('\n') ?? ''} placeholder="每行一个卖点" onChange={event => updatePromotion(index, { product_selling_points: event.target.value.split('\n').map(text => text.trim()).filter(Boolean) })}/></label>
@@ -258,6 +268,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [editableConfiguration, setEditableConfiguration] = useState<PlatformConfiguration>()
+  const [platformObjects, setPlatformObjects] = useState<ApiConnectorPlatformObject[]>([])
   const refreshGenerationRef = useRef(0)
 
   const selectedPlan = useMemo(() => plans.find(plan => plan.id === selectedId), [plans, selectedId])
@@ -297,6 +308,18 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   useEffect(() => { void refresh() }, [projectId])
   useEffect(() => { if (selectedId) void restoreWorkflow(selectedId) }, [projectId, selectedId])
   useEffect(() => { setEditableConfiguration(platformConfiguration ? structuredClone(platformConfiguration) : undefined) }, [selectedId, selectedPlan?.currentVersionNumber])
+  useEffect(() => {
+    const accountID = editableConfiguration?.payload.ocean_engine?.project?.account_reference?.id
+    if (!accountID) {
+      setPlatformObjects([])
+      return
+    }
+    let active = true
+    void Promise.all((['image_material', 'video_material', 'orange_landing_page'] as const).map(objectKind => api.listProjectConnectorPlatformObjects(projectId, accountID, { objectKind, status: 'active', limit: 100 })))
+      .then(values => { if (active) setPlatformObjects(values.flatMap(value => value.items)) })
+      .catch(() => { if (active) setPlatformObjects([]) })
+    return () => { active = false }
+  }, [editableConfiguration?.payload.ocean_engine?.project?.account_reference?.id, projectId])
   useEffect(() => {
     if (!selectedId) return
     const url = new URL(window.location.href)
@@ -342,7 +365,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
       {!selectedPlan ? <div className="panel-empty">当前 Project 暂无投放计划。<a href={planEditorURL}>前往创建</a></div> : legacyReadOnly ? <section className="delivery-config-config-card">
         <div className="delivery-config-empty-inline"><CircleAlert size={20}/><div><b>历史配置，仅供查看</b><p>这份计划不能继续修改、检查或提交。若要继续投放，请新建计划并选择目标广告平台。</p></div></div>
       </section> : <>
-        {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration} products={currentProject.products ?? []} assets={confirmedAssets}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
+        {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration} products={currentProject.products ?? []} assets={confirmedAssets} platformObjects={platformObjects}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
         {showCalibration && platformConfiguration ? <CalibrationDispositionView value={platformConfiguration}/> : null}
         {showPreflight ? <section className="delivery-config-flow-grid delivery-config-flow-grid--preflight"><article className="delivery-config-preflight-card">
           <header><div><span className="section-label">确认投放</span><h3>检查并确认投放</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `最近执行 ${changeSet.status}` : '尚未投放'}</strong></header>

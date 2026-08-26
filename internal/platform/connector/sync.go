@@ -72,10 +72,11 @@ func (m SyncMode) Valid() bool {
 }
 
 type SyncResult struct {
-	RunID       string `json:"run_id"`
-	Replayed    bool   `json:"replayed"`
-	ObjectCount int    `json:"object_count"`
-	MetricCount int    `json:"metric_count"`
+	RunID           string                                         `json:"run_id"`
+	Replayed        bool                                           `json:"replayed"`
+	ObjectCount     int                                            `json:"object_count"`
+	MetricCount     int                                            `json:"metric_count"`
+	PlatformObjects map[PlatformObjectKind]PlatformObjectSyncStats `json:"platform_objects,omitempty"`
 }
 
 type Synchronizer struct {
@@ -185,6 +186,10 @@ func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result Syn
 			return result, err
 		}
 		result.ObjectCount++
+		result.PlatformObjects, err = s.syncPlatformObjectCatalog(ctx, request, runID, reader, limit, maxPages)
+		if err != nil {
+			return result, err
+		}
 		promotions := []map[string]any{}
 		seenParents := map[string]struct{}{}
 		for page := 1; page <= maxPages; page++ {
