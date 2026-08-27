@@ -5728,6 +5728,12 @@ export type ApiConnectorPlatformObject = {
   object_kind: ApiConnectorPlatformObjectKind; platform_object_id: string
   display_name: string; status: 'active' | 'unavailable'; metadata: Record<string, unknown>
   observed_at: string; version: number; project_granted: true
+  preview_available: boolean; preview_kind?: 'image' | 'video_poster' | 'landing_page'
+  preview_expires_at?: string; preview_url?: string
+  performance?: {
+    available: boolean; spend_minor: number; impressions: number; clicks: number
+    conversions: number; ctr: number; data_through?: string
+  }
 }
 export type ApiLaunchBatchMetricDistribution = { metric: string; p10: number; p50: number; p90: number }
 export type ApiLaunchBatchCalibration = {
@@ -6619,12 +6625,14 @@ export const api = {
   verifyProjectConnectorAccount: (projectId: string, accountId: string) => request<ApiConnectorAccount>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/verify`, 'POST'),
   syncProjectConnectorAccount: (projectId: string, accountId: string, body: { start: string; end: string; time_zone: string; currency: string; sync_mode?: 'full' | 'metrics_only' | 'inventory_only' }, idempotencyKey: string) => request<ApiConnectorSyncResult>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/syncs`, 'POST', body, { 'Idempotency-Key': idempotencyKey }),
   getProjectConnectorSync: (projectId: string, accountId: string, syncId: string) => request<ApiConnectorSyncStatus>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/syncs/${encodeURIComponent(syncId)}`),
-  listProjectConnectorPlatformObjects: (projectId: string, accountId: string, filter: { objectKind?: ApiConnectorPlatformObjectKind; status?: 'active' | 'unavailable'; q?: string; cursor?: string; limit?: number } = {}) => {
+  listProjectConnectorPlatformObjects: (projectId: string, accountId: string, filter: { objectKind?: ApiConnectorPlatformObjectKind; status?: 'active' | 'unavailable'; q?: string; cursor?: string; limit?: number; sortBy?: 'created_at' | 'ctr' | 'conversions'; sortOrder?: 'asc' | 'desc' } = {}) => {
     const search = new URLSearchParams({ limit: String(filter.limit ?? 100) })
     if (filter.objectKind) search.set('object_kind', filter.objectKind)
     if (filter.status) search.set('status', filter.status)
     if (filter.q) search.set('q', filter.q)
     if (filter.cursor) search.set('cursor', filter.cursor)
+    if (filter.sortBy) search.set('sort_by', filter.sortBy)
+    if (filter.sortOrder) search.set('sort_order', filter.sortOrder)
     return request<{ items: ApiConnectorPlatformObject[]; next_cursor: string }>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/platform-objects?${search.toString()}`)
   },
   getProjectConnectorLaunchBatchCalibration: (projectId: string, accountId: string) => request<ApiLaunchBatchCalibration>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/launch-batch-calibration`),

@@ -14,9 +14,31 @@ import (
 )
 
 type readerStub struct {
-	query       connector.Query
-	objectQuery connector.PlatformObjectQuery
-	objects     []connector.PlatformObject
+	query          connector.Query
+	objectQuery    connector.PlatformObjectQuery
+	objects        []connector.PlatformObject
+	preview        connector.PlatformObjectPreview
+	previewQuery   connector.PlatformObjectPreviewQuery
+	previewContent connector.PlatformObjectPreviewContent
+	previews       []connector.PlatformObjectPreview
+	previewCalls   int
+}
+
+func (r *readerStub) ReadPlatformObjectPreview(_ context.Context, _ connector.PlatformObjectPreviewQuery) (connector.PlatformObjectPreviewContent, error) {
+	return r.previewContent, nil
+}
+
+func (r *readerStub) GetPlatformObjectPreview(_ context.Context, query connector.PlatformObjectPreviewQuery) (connector.PlatformObjectPreview, error) {
+	r.previewQuery = query
+	if len(r.previews) > 0 {
+		index := r.previewCalls
+		if index >= len(r.previews) {
+			index = len(r.previews) - 1
+		}
+		r.previewCalls++
+		return r.previews[index], nil
+	}
+	return r.preview, nil
 }
 
 func (r *readerStub) Snapshot(_ context.Context, q connector.Query) (connector.CanonicalSnapshot, error) {
@@ -34,8 +56,10 @@ func (r *readerStub) ListPlatformObjects(_ context.Context, query connector.Plat
 }
 
 type syncerStub struct {
-	mu      sync.Mutex
-	request connector.SyncRequest
+	mu               sync.Mutex
+	request          connector.SyncRequest
+	refreshQuery     connector.PlatformObjectPreviewQuery
+	refreshedPreview connector.PlatformObjectPreview
 }
 type authorizerStub struct{ err error }
 type sessionManagerStub struct{ plaintext string }
@@ -77,6 +101,13 @@ func (s *syncerStub) Sync(_ context.Context, r connector.SyncRequest) (connector
 	defer s.mu.Unlock()
 	s.request = r
 	return connector.SyncResult{RunID: "sync_opaque"}, nil
+}
+
+func (s *syncerStub) RefreshPlatformObjectPreview(_ context.Context, query connector.PlatformObjectPreviewQuery) (connector.PlatformObjectPreview, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refreshQuery = query
+	return s.refreshedPreview, nil
 }
 
 func (s *syncerStub) lastRequest() connector.SyncRequest {
@@ -134,21 +165,92 @@ func TestCanonicalSnapshotRejectsMissingCutoffAndScope(t *testing.T) {
 func TestPlatformObjectListScopesProjectAccountAndFilters(t *testing.T) {
 	reader := &readerStub{objects: []connector.PlatformObject{{
 		ID: "oeobj_safe", AccountID: "oeacct_safe", Kind: connector.PlatformObjectVideoMaterial,
-		PlatformObjectID: "123456789", DisplayName: "video-a", Status: "active",
+		PlatformObjectID: "123456789", DisplayName: "video-a", Status: "active", PreviewAvailable: true, PreviewKind: "video_poster",
+		Performance: &connector.PlatformObjectPerformance{Available: true, SpendMinor: 1234, Impressions: 100, Clicks: 5, Conversions: 2, CTR: 0.05},
 	}}}
 	accounts := accountManagerStub{accounts: []connector.PlatformAccount{{ID: "oeacct_safe", ProjectID: "project_1", Status: "verified"}}}
 	server := New(reader, nil, authorizerStub{}, accounts)
 	response := httptest.NewRecorder()
-	server.ServeHTTP(response, request(http.MethodGet, "/api/connector/v1/projects/project_1/accounts/oeacct_safe/platform-objects?object_kind=video_material&status=active&q=video&limit=20", "", connector.ScopeRead))
+	server.ServeHTTP(response, request(http.MethodGet, "/api/connector/v1/projects/project_1/accounts/oeacct_safe/platform-objects?object_kind=video_material&status=active&q=video&limit=1&sort_by=ctr&sort_order=desc&cursor=offset%3A40", "", connector.ScopeRead))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	query := reader.objectQuery
-	if query.OrganizationID != "org_1" || query.ProjectID != "project_1" || query.AccountID != "oeacct_safe" || query.Kind != connector.PlatformObjectVideoMaterial || query.Status != "active" || query.Search != "video" || query.Limit != 20 {
+	if query.OrganizationID != "org_1" || query.ProjectID != "project_1" || query.AccountID != "oeacct_safe" || query.Kind != connector.PlatformObjectVideoMaterial || query.Status != "active" || query.Search != "video" || query.Limit != 1 || query.SortBy != "ctr" || query.SortOrder != "desc" || query.Offset != 40 {
 		t.Fatalf("query=%#v", query)
 	}
 	if !strings.Contains(response.Body.String(), "123456789") {
 		t.Fatalf("object missing from response: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "/platform-objects/oeobj_safe/preview") || strings.Contains(response.Body.String(), "example.invalid") {
+		t.Fatalf("safe preview URL missing: %s", response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"spend_minor":1234`) || !strings.Contains(response.Body.String(), `"next_cursor":"offset:41"`) {
+		t.Fatalf("performance or sorted cursor missing: %s", response.Body.String())
+	}
+}
+
+func TestPlatformObjectListRejectsInvalidSort(t *testing.T) {
+	accounts := accountManagerStub{accounts: []connector.PlatformAccount{{ID: "oeacct_safe", ProjectID: "project_1", Status: "verified"}}}
+	server := New(&readerStub{}, nil, authorizerStub{}, accounts)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request(http.MethodGet, "/api/connector/v1/projects/project_1/accounts/oeacct_safe/platform-objects?sort_by=spend", "", connector.ScopeRead))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestPlatformObjectPreviewRedirectRequiresProjectGrant(t *testing.T) {
+	reader := &readerStub{preview: connector.PlatformObjectPreview{URL: "https://example.invalid/signed-preview", Kind: "landing_page"}}
+	accounts := accountManagerStub{accounts: []connector.PlatformAccount{{ID: "oeacct_safe", ProjectID: "project_1", Status: "verified"}}}
+	server := New(reader, nil, authorizerStub{}, accounts)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request(http.MethodGet, "/api/connector/v1/projects/project_1/accounts/oeacct_safe/platform-objects/oeobj_safe/preview", "", connector.ScopeRead))
+	if response.Code != http.StatusTemporaryRedirect || response.Header().Get("Location") != "https://example.invalid/signed-preview" {
+		t.Fatalf("status=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), "signed-preview") {
+		t.Fatalf("redirect target leaked in body: %s", response.Body.String())
+	}
+	if reader.previewQuery.OrganizationID != "org_1" || reader.previewQuery.ProjectID != "project_1" || reader.previewQuery.AccountID != "oeacct_safe" || reader.previewQuery.ObjectID != "oeobj_safe" {
+		t.Fatalf("query=%#v", reader.previewQuery)
+	}
+}
+
+func TestPlatformObjectMediaPreviewReturnsSameOriginContent(t *testing.T) {
+	reader := &readerStub{preview: connector.PlatformObjectPreview{URL: "https://example.invalid/signed-preview", Kind: "image"}, previewContent: connector.PlatformObjectPreviewContent{ContentType: "image/jpeg", Data: []byte("safe-image")}}
+	accounts := accountManagerStub{accounts: []connector.PlatformAccount{{ID: "oeacct_safe", ProjectID: "project_1", Status: "verified"}}}
+	server := New(reader, nil, authorizerStub{}, accounts)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request(http.MethodGet, "/api/connector/v1/projects/project_1/accounts/oeacct_safe/platform-objects/oeobj_safe/preview", "", connector.ScopeRead))
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/jpeg" || response.Body.String() != "safe-image" {
+		t.Fatalf("status=%d content-type=%q body=%q", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+}
+
+func TestExpiredPlatformObjectPreviewRefreshesTargetCatalog(t *testing.T) {
+	expired := time.Now().Add(-time.Hour)
+	fresh := time.Now().Add(12 * time.Hour)
+	reader := &readerStub{
+		previews: []connector.PlatformObjectPreview{
+			{URL: "https://example.invalid/expired", Kind: "video_poster", ObjectKind: connector.PlatformObjectVideoMaterial, ExpiresAt: &expired},
+			{URL: "https://example.invalid/fresh", Kind: "video_poster", ObjectKind: connector.PlatformObjectVideoMaterial, ExpiresAt: &fresh},
+		},
+		previewContent: connector.PlatformObjectPreviewContent{ContentType: "image/jpeg", Data: []byte("fresh-image")},
+	}
+	syncer := &syncerStub{refreshedPreview: reader.previews[1]}
+	accounts := accountManagerStub{accounts: []connector.PlatformAccount{{ID: "oeacct_safe", ProjectID: "project_1", Status: "verified"}}}
+	server := New(reader, syncer, authorizerStub{}, accounts)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request(http.MethodGet, "/api/connector/v1/projects/project_1/accounts/oeacct_safe/platform-objects/oeobj_safe/preview", "", connector.ScopeRead))
+	if response.Code != http.StatusOK || response.Body.String() != "fresh-image" {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+	if syncer.refreshQuery.ProjectID != "project_1" || syncer.refreshQuery.AccountID != "oeacct_safe" || syncer.refreshQuery.ObjectID != "oeobj_safe" {
+		t.Fatalf("refresh query=%#v", syncer.refreshQuery)
+	}
+	if reader.previewCalls != 1 {
+		t.Fatalf("preview reads=%d", reader.previewCalls)
 	}
 }
 func TestSyncRequiresIdempotencyAndPassesNoCredentialMaterial(t *testing.T) {
@@ -158,10 +260,18 @@ func TestSyncRequiresIdempotencyAndPassesNoCredentialMaterial(t *testing.T) {
 	value.Header.Set("Idempotency-Key", "sync-request-1")
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, value)
-	if response.Code != http.StatusOK {
+	if response.Code != http.StatusAccepted {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	syncedRequest := syncer.lastRequest()
+	deadline := time.Now().Add(time.Second)
+	var syncedRequest connector.SyncRequest
+	for time.Now().Before(deadline) {
+		syncedRequest = syncer.lastRequest()
+		if syncedRequest.IdempotencyKey != "" {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
 	if syncedRequest.IdempotencyKey != "sync-request-1" || syncedRequest.AccountRef != "account-1" || !syncedRequest.WindowEnd.After(syncedRequest.WindowStart) {
 		t.Fatalf("request=%#v", syncedRequest)
 	}

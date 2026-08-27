@@ -9,7 +9,10 @@ import (
 	"time"
 )
 
-type MySQLRepository struct{ DB *sql.DB }
+type MySQLRepository struct {
+	DB     *sql.DB
+	Cipher AccountSessionCipher
+}
 
 func (r MySQLRepository) ResolveExternalAccountID(ctx context.Context, organizationID, projectID, accountID string) (string, error) {
 	db, err := r.db()

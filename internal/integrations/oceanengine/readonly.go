@@ -136,6 +136,12 @@ func (c *Client) OrangeLandingPagesPage(ctx context.Context, request AssetPageRe
 	return c.getJSON(ctx, "/platform/api/v1/orange/third_part_list?"+query.Encode())
 }
 
+// SignPictureURIs gets new short-lived preview URLs for existing image URIs.
+// The operation does not upload or change platform material.
+func (c *Client) SignPictureURIs(ctx context.Context, uris []string) (map[string]any, error) {
+	return c.postJSON(ctx, "/superior/api/v2/creative/material/picture/sign", map[string]any{"uris": uris})
+}
+
 func normalizeAssetPage(request AssetPageRequest) (int, int) {
 	page, limit := request.Page, request.Limit
 	if page < 1 {

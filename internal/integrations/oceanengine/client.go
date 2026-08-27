@@ -67,6 +67,7 @@ var readOnlyEndpoints = map[Endpoint]struct{}{
 	{http.MethodGet, "/ad/api/account/conf"}:                               {},
 	{http.MethodGet, "/api/ebp/ebp_info/get_global_info"}:                  {},
 	{http.MethodPost, "/superior/api/v2/ad/getImageList"}:                  {},
+	{http.MethodPost, "/superior/api/v2/creative/material/picture/sign"}:   {},
 	{http.MethodGet, "/superior/api/v2/video/list"}:                        {},
 	{http.MethodGet, "/platform/api/v1/orange/third_part_list"}:            {},
 }

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,10 +142,12 @@ func imageMaterialCandidate(item map[string]any) (PlatformObjectCandidate, bool)
 	if !numericPlatformObjectID(id) {
 		return PlatformObjectCandidate{}, false
 	}
+	previewURL, expiresAt := platformPreview(firstString(item, "sign_url"))
 	return PlatformObjectCandidate{
 		Kind: PlatformObjectImageMaterial, PlatformObjectID: id,
 		DisplayName: firstString(item, "file_name"),
 		Metadata:    scalarMetadata(item, "width", "height", "size", "image_mode", "ratio", "create_time"),
+		PreviewURL:  previewURL, PreviewKind: previewKind(previewURL, "image"), PreviewExpiresAt: expiresAt,
 	}, true
 }
 
@@ -152,10 +156,12 @@ func videoMaterialCandidate(item map[string]any) (PlatformObjectCandidate, bool)
 	if !numericPlatformObjectID(id) {
 		return PlatformObjectCandidate{}, false
 	}
+	previewURL, expiresAt := firstPlatformPreview(item, "sign_url", "video_poster")
 	return PlatformObjectCandidate{
 		Kind: PlatformObjectVideoMaterial, PlatformObjectID: id,
 		DisplayName: firstString(item, "video_name"),
 		Metadata:    scalarMetadata(item, "video_filmLength", "image_mode", "is_low_quality", "similar_material_status", "related_creative_count", "create_time"),
+		PreviewURL:  previewURL, PreviewKind: previewKind(previewURL, "video_poster"), PreviewExpiresAt: expiresAt,
 	}, true
 }
 
@@ -164,11 +170,50 @@ func orangeLandingCandidate(item map[string]any) (PlatformObjectCandidate, bool)
 	if !numericPlatformObjectID(id) {
 		return PlatformObjectCandidate{}, false
 	}
+	previewURL, expiresAt := firstPlatformPreview(item, "preview_url", "url")
 	return PlatformObjectCandidate{
 		Kind: PlatformObjectOrangeLandingPage, PlatformObjectID: id,
 		DisplayName: firstString(item, "name"),
 		Metadata:    scalarMetadata(item, "audit_status", "status", "share_mode", "create_time"),
+		PreviewURL:  previewURL, PreviewKind: previewKind(previewURL, "landing_page"), PreviewExpiresAt: expiresAt,
 	}, true
+}
+
+func firstPlatformPreview(item map[string]any, keys ...string) (string, *time.Time) {
+	for _, key := range keys {
+		if raw, ok := item[key].(string); ok {
+			if value, expiresAt := platformPreview(raw); value != "" {
+				return value, expiresAt
+			}
+		}
+	}
+	return "", nil
+}
+
+func platformPreview(raw string) (string, *time.Time) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 8192 {
+		return "", nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return "", nil
+	}
+	for _, key := range []string{"x-orig-expires", "expires", "x-expires"} {
+		seconds, err := strconv.ParseInt(parsed.Query().Get(key), 10, 64)
+		if err == nil && seconds > 0 {
+			value := time.Unix(seconds, 0).UTC()
+			return raw, &value
+		}
+	}
+	return raw, nil
+}
+
+func previewKind(previewURL, kind string) string {
+	if previewURL == "" {
+		return ""
+	}
+	return kind
 }
 
 func scalarMetadata(item map[string]any, keys ...string) map[string]any {

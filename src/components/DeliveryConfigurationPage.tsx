@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, CircleAlert, Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 import {
   DeliveryApiError,
@@ -10,7 +10,7 @@ import {
   type StableReference,
 } from '../api/delivery'
 import { useProject } from '../context/ProjectContext'
-import { api, type ApiAssetVersionPointer, type ApiConnectorPlatformObject } from '../data/api'
+import { ApiRequestError, api, type ApiAssetVersionPointer, type ApiConnectorAccount, type ApiConnectorPlatformObject, type ApiConnectorPlatformObjectKind } from '../data/api'
 import { oceanEngineCalibrationDispositions, visibleOceanEngineManifestFields, type CalibrationDisposition, type VisibleManifestField } from '../lib/oceanengineCalibrationManifest'
 import { fromShanghaiEndDate, fromShanghaiStartDate, toShanghaiDateInput } from '../lib/deliverySchedule'
 import { projectPath } from '../lib/router'
@@ -22,6 +22,7 @@ function formatTime(value?: string) {
 }
 
 function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiRequestError) return error.message
   if (error instanceof DeliveryApiError) {
     if (error.code === 'LEGACY_CONFIGURATION_UNSUPPORTED') return '这份历史配置仅供查看，不能继续提交或修改。请新建投放计划。'
     if (error.code === 'VERSION_CONFLICT') return '计划版本已更新，请刷新后重试。'
@@ -123,15 +124,92 @@ function updateReference(current: StableReference | undefined, id: string, objec
   return { namespace: 'cookies', object_kind: objectKind, scope: current?.scope ?? 'current_project', state: 'resolved', ...current, id: value }
 }
 
-function MaterialObjectPicker({ label, assets, platformObjects = [], value, objectKind, onChange }: { label: string; assets: ApiAssetVersionPointer[]; platformObjects?: ApiConnectorPlatformObject[]; value: StableReference[]; objectKind: string; onChange: (value: StableReference[]) => void }) {
+type PlatformObjectPage = { items: ApiConnectorPlatformObject[]; next_cursor: string }
+type PlatformObjectSort = 'created_at' | 'ctr' | 'conversions'
+type PlatformObjectLoader = (query: string, cursor: string | undefined, sortBy: PlatformObjectSort, sortOrder: 'asc' | 'desc') => Promise<PlatformObjectPage>
+
+function mergePlatformObjects(current: ApiConnectorPlatformObject[], next: ApiConnectorPlatformObject[]) {
+  const values = new Map(current.map(item => [item.id, item]))
+  next.forEach(item => values.set(item.id, item))
+  return [...values.values()]
+}
+
+function formatConnectorSpend(value?: ApiConnectorPlatformObject['performance']) {
+  if (!value?.available) return '--'
+  return `¥${(value.spend_minor / 100).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`
+}
+
+function formatConnectorCTR(value?: ApiConnectorPlatformObject['performance']) {
+  if (!value?.available) return '--'
+  return `${(value.ctr * 100).toFixed(2)}%`
+}
+
+function platformObjectCreatedAt(item: ApiConnectorPlatformObject) {
+  const value = item.metadata.create_time
+  return typeof value === 'string' ? formatTime(value) : '创建时间未知'
+}
+
+function MaterialObjectPicker({ label, assets, platformObjects = [], value, objectKind, loadPlatformObjects, onChange }: { label: string; assets: ApiAssetVersionPointer[]; platformObjects?: ApiConnectorPlatformObject[]; value: StableReference[]; objectKind: string; loadPlatformObjects?: PlatformObjectLoader; onChange: (value: StableReference[]) => void }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [preview, setPreview] = useState<ApiAssetVersionPointer>()
+  const [preview, setPreview] = useState<{ url: string; mediaKind: 'image' | 'video'; label: string }>()
+  const [remoteObjects, setRemoteObjects] = useState<ApiConnectorPlatformObject[]>(platformObjects)
+  const [knownPlatformObjects, setKnownPlatformObjects] = useState<ApiConnectorPlatformObject[]>(platformObjects)
+  const [nextCursor, setNextCursor] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const [sortBy, setSortBy] = useState<PlatformObjectSort>('created_at')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const searchGenerationRef = useRef(0)
   const selectionID = (reference: StableReference) => reference.audit_attributes?.connector_platform_object_id ? `connector:${reference.audit_attributes.connector_platform_object_id}` : reference.id ?? ''
   const [draftIds, setDraftIds] = useState<string[]>(value.map(selectionID))
-  const draftSelected = new Set(draftIds)
-  const filteredAssets = assets.filter(asset => `${asset.assetId} ${asset.oceanEngineMaterialId ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()))
-  const filteredPlatformObjects = platformObjects.filter(item => `${item.display_name} ${item.platform_object_id}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const draftSelected = useMemo(() => new Set(draftIds), [draftIds])
+  const normalizedQuery = query.trim().toLowerCase()
+  const filteredAssets = useMemo(() => assets.filter(asset => `${asset.assetId} ${asset.oceanEngineMaterialId ?? ''}`.toLowerCase().includes(normalizedQuery)), [assets, normalizedQuery])
+  const filteredPlatformObjects = useMemo(() => loadPlatformObjects ? remoteObjects : platformObjects.filter(item => `${item.display_name} ${item.platform_object_id}`.toLowerCase().includes(normalizedQuery)), [loadPlatformObjects, normalizedQuery, platformObjects, remoteObjects])
+
+  useEffect(() => {
+    setKnownPlatformObjects(current => mergePlatformObjects(current, platformObjects))
+  }, [platformObjects])
+
+  useEffect(() => {
+    if (!open || !loadPlatformObjects) return
+    const generation = ++searchGenerationRef.current
+    const timer = window.setTimeout(() => {
+      setLoading(true)
+      setLoadError('')
+      void loadPlatformObjects(query.trim(), undefined, sortBy, sortOrder).then(page => {
+        if (generation !== searchGenerationRef.current) return
+        setRemoteObjects(page.items)
+        setKnownPlatformObjects(current => mergePlatformObjects(current, page.items))
+        setNextCursor(page.next_cursor)
+      }).catch(error => {
+        if (generation !== searchGenerationRef.current) return
+        setRemoteObjects([])
+        setNextCursor('')
+        setLoadError(errorMessage(error, '读取 Connector 素材失败。'))
+      }).finally(() => {
+        if (generation === searchGenerationRef.current) setLoading(false)
+      })
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [loadPlatformObjects, open, query, sortBy, sortOrder])
+
+  const loadMore = async () => {
+    if (!loadPlatformObjects || !nextCursor || loading) return
+    setLoading(true)
+    setLoadError('')
+    try {
+      const page = await loadPlatformObjects(query.trim(), nextCursor, sortBy, sortOrder)
+      setRemoteObjects(current => mergePlatformObjects(current, page.items))
+      setKnownPlatformObjects(current => mergePlatformObjects(current, page.items))
+      setNextCursor(page.next_cursor)
+    } catch (error) {
+      setLoadError(errorMessage(error, '读取更多 Connector 素材失败。'))
+    } finally {
+      setLoading(false)
+    }
+  }
   const toggle = (asset: ApiAssetVersionPointer) => setDraftIds(current => current.includes(asset.assetId) ? current.filter(id => id !== asset.assetId) : [...current, asset.assetId])
   const togglePlatformObject = (item: ApiConnectorPlatformObject) => {
     const id = `connector:${item.id}`
@@ -139,7 +217,7 @@ function MaterialObjectPicker({ label, assets, platformObjects = [], value, obje
   }
   const confirm = () => {
     onChange(draftIds.map((id): StableReference => {
-      const platformObject = platformObjects.find(item => `connector:${item.id}` === id)
+      const platformObject = knownPlatformObjects.find(item => `connector:${item.id}` === id)
       if (platformObject) return { namespace: 'oceanengine', object_kind: platformObject.object_kind, scope: `account:${platformObject.account_id}`, id: platformObject.platform_object_id, version: String(platformObject.version), state: 'resolved' as const, display_name_snapshot: platformObject.display_name || platformObject.platform_object_id, audit_attributes: { connector_platform_object_id: platformObject.id, ocean_engine_material_id: platformObject.platform_object_id } } satisfies StableReference
       const asset = assets.find(item => item.assetId === id)
       const existing = value.find(reference => selectionID(reference) === id)
@@ -148,16 +226,86 @@ function MaterialObjectPicker({ label, assets, platformObjects = [], value, obje
     }))
     setOpen(false)
   }
-  return <fieldset className="delivery-config-object-picker"><legend>{label}</legend><div className="delivery-config-object-summary"><span>{value.length ? `${value.length} 个素材已选` : '尚未选择素材'}</span><button className="secondary-button" type="button" onClick={() => { setDraftIds(value.map(selectionID)); setOpen(true) }}>选择素材</button></div>{value.length ? <div className="delivery-config-selected-chips">{value.map(reference => <span key={`${reference.namespace}-${reference.id}`}>{reference.display_name_snapshot ?? reference.id}</span>)}</div> : null}{!assets.length && !platformObjects.length ? <p>当前 Project 没有可选择素材。</p> : null}
-    {open ? <div className="delivery-material-modal-backdrop" role="presentation" onClick={() => setOpen(false)}><section className="delivery-material-modal" style={{ position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }} role="dialog" aria-modal="true" aria-label={`${label}选择器`} onClick={event => event.stopPropagation()}><header><div><span className="section-label">MATERIAL PICKER</span><h3>{label}</h3><p>选择 Cookies 素材，或 Connector 已导入素材。</p></div><button className="text-button" type="button" onClick={() => setOpen(false)}>关闭</button></header><div className="delivery-material-modal-toolbar"><input autoFocus placeholder="搜索素材名称或巨量素材 ID" value={query} onChange={event => setQuery(event.target.value)}/><span>已选 {draftIds.length} 个</span><button className="text-button" type="button" onClick={() => setDraftIds([])}>清空</button></div><div className="delivery-material-modal-grid">{filteredPlatformObjects.map(item => { const selection = `connector:${item.id}`; return <label key={item.id} className={draftSelected.has(selection) ? 'selected' : ''}><input type="checkbox" checked={draftSelected.has(selection)} onChange={() => togglePlatformObject(item)}/><span className="delivery-material-platform-object">Connector</span><b>{item.display_name || item.platform_object_id}</b><small>{item.object_kind === 'video_material' ? '已有巨量视频' : '已有巨量图片'}</small></label> })}{filteredAssets.map(asset => <label key={asset.id} className={draftSelected.has(asset.assetId) ? 'selected' : ''}><input type="checkbox" checked={draftSelected.has(asset.assetId)} onChange={() => toggle(asset)}/><button type="button" className="delivery-material-preview-button" onClick={() => setPreview(asset)}>{asset.contentUrl ? asset.mediaKind === 'video' ? <video src={asset.contentUrl} preload="metadata"/> : <img src={asset.contentUrl} alt=""/> : <span>无预览</span>}</button><b>{asset.assetId}</b><small>{asset.oceanEngineMaterialId ? '已录入巨量' : '待 RPA 录入'}</small></label>)}{!filteredAssets.length && !filteredPlatformObjects.length ? <div className="delivery-material-empty">没有匹配的素材。</div> : null}</div><footer><button className="secondary-button" type="button" onClick={() => setOpen(false)}>取消</button><button className="primary-button" type="button" onClick={confirm}>确认选择</button></footer>{preview ? <div className="delivery-material-preview-overlay" role="dialog" aria-label="素材预览" onClick={() => setPreview(undefined)}>{preview.contentUrl ? preview.mediaKind === 'video' ? <video src={preview.contentUrl} controls autoPlay onClick={event => event.stopPropagation()}/> : <img src={preview.contentUrl} alt={preview.assetId} onClick={event => event.stopPropagation()}/> : <span>无预览</span>}</div> : null}</section></div> : null}
+  return <fieldset className="delivery-config-object-picker">
+    <legend>{label}</legend>
+    <div className="delivery-config-object-summary"><span>{value.length ? `${value.length} 个素材已选` : '尚未选择素材'}</span><button className="secondary-button" type="button" onClick={() => { setDraftIds(value.map(selectionID)); setOpen(true) }}>选择素材</button></div>
+    {value.length ? <div className="delivery-config-selected-chips">{value.map(reference => <span key={`${reference.namespace}-${reference.id}`}>{reference.display_name_snapshot ?? reference.id}</span>)}</div> : null}
+    {!assets.length && !platformObjects.length && !loadPlatformObjects ? <p>当前 Project 没有可选择素材。</p> : null}
+    {open ? <div className="delivery-material-modal-backdrop" role="presentation" onClick={() => setOpen(false)}>
+      <section className="delivery-material-modal" role="dialog" aria-modal="true" aria-label={`${label}选择器`} onClick={event => event.stopPropagation()}>
+        <header><div><span className="section-label">MATERIAL PICKER</span><h3>{label}</h3><p>选择 Cookies 素材，或 Connector 已导入素材。</p></div><button className="text-button" type="button" onClick={() => setOpen(false)}>关闭</button></header>
+        <div className="delivery-material-modal-toolbar">
+          <input autoFocus placeholder="搜索素材名称或巨量素材 ID" value={query} onChange={event => setQuery(event.target.value)}/>
+          {loadPlatformObjects ? <div className="delivery-material-sort"><label><span>排序</span><select value={sortBy} onChange={event => setSortBy(event.target.value as PlatformObjectSort)}><option value="created_at">创建时间</option><option value="ctr">点击率</option><option value="conversions">转化</option></select></label><button type="button" className="text-button" onClick={() => setSortOrder(current => current === 'desc' ? 'asc' : 'desc')}>{sortOrder === 'desc' ? '降序' : '升序'}</button></div> : null}
+          <span>已选 {draftIds.length} 个</span><button className="text-button" type="button" onClick={() => setDraftIds([])}>清空</button>
+        </div>
+        {loadError ? <div className="delivery-material-error" role="alert">{loadError}</div> : null}
+        <div className="delivery-material-modal-grid">
+          {filteredPlatformObjects.map(item => {
+            const selection = `connector:${item.id}`
+            const displayName = item.display_name || item.platform_object_id
+            const materialKind = item.object_kind === 'video_material' ? '视频' : '图片'
+            return <label key={item.id} className={`delivery-material-card delivery-material-card--oceanengine${draftSelected.has(selection) ? ' selected' : ''}`}>
+              <input type="checkbox" checked={draftSelected.has(selection)} onChange={() => togglePlatformObject(item)}/>
+              {item.preview_url ? <button type="button" className="delivery-material-preview-button delivery-material-preview-button--portrait" onClick={event => { event.preventDefault(); event.stopPropagation(); setPreview({ url: item.preview_url!, mediaKind: 'image', label: displayName }) }}><img src={item.preview_url} alt="" loading="lazy" /><span className="delivery-material-preview-type">{materialKind}</span>{item.object_kind === 'video_material' ? <span className="delivery-material-preview-play" aria-hidden="true"/> : null}</button> : <span className="delivery-material-platform-object"><span>{materialKind}</span><small>Connector</small></span>}
+              <b title={displayName}>{displayName}</b>
+              <small title={`${materialKind}素材 · ${platformObjectCreatedAt(item)}`}>Connector · {materialKind}素材<br/>{platformObjectCreatedAt(item)}</small>
+              <span className="delivery-material-card-metrics"><span><small>消耗</small><strong>{formatConnectorSpend(item.performance)}</strong></span><span><small>点击率</small><strong>{formatConnectorCTR(item.performance)}</strong></span><span><small>转化</small><strong>{item.performance?.available ? item.performance.conversions : '--'}</strong></span></span>
+            </label>
+          })}
+          {filteredAssets.map(asset => <label key={asset.id} className={`delivery-material-card delivery-material-card--cookies${draftSelected.has(asset.assetId) ? ' selected' : ''}`}><input type="checkbox" checked={draftSelected.has(asset.assetId)} onChange={() => toggle(asset)}/><button type="button" className="delivery-material-preview-button delivery-material-preview-button--landscape" onClick={() => asset.contentUrl && setPreview({ url: asset.contentUrl, mediaKind: asset.mediaKind === 'video' ? 'video' : 'image', label: asset.assetId })}>{asset.contentUrl ? asset.mediaKind === 'video' ? <video src={asset.contentUrl} preload="metadata"/> : <img src={asset.contentUrl} alt=""/> : <span>无预览</span>}<span className="delivery-material-preview-type">{asset.mediaKind === 'video' ? '视频' : '图片'}</span></button><b title={asset.assetId}>{asset.assetId}</b><small>{asset.oceanEngineMaterialId ? 'Cookies · 已录入巨量' : 'Cookies · 待 RPA 录入'}</small></label>)}
+          {loading && !filteredPlatformObjects.length ? <div className="delivery-material-empty">正在读取 Connector 素材…</div> : null}
+          {!loading && !filteredAssets.length && !filteredPlatformObjects.length ? <div className="delivery-material-empty">没有匹配的素材。</div> : null}
+        </div>
+        {nextCursor ? <button className="secondary-button delivery-material-load-more" type="button" disabled={loading} onClick={() => void loadMore()}>{loading ? '读取中…' : '加载更多'}</button> : null}
+        <footer><button className="secondary-button" type="button" onClick={() => setOpen(false)}>取消</button><button className="primary-button" type="button" onClick={confirm}>确认选择</button></footer>
+        {preview ? <div className="delivery-material-preview-overlay" role="dialog" aria-label="素材预览" onClick={() => setPreview(undefined)}>{preview.mediaKind === 'video' ? <video src={preview.url} controls autoPlay onClick={event => event.stopPropagation()}/> : <img src={preview.url} alt={preview.label} onClick={event => event.stopPropagation()}/>}</div> : null}
+      </section>
+    </div> : null}
   </fieldset>
+}
+
+type MaterialEditorTab = 'video' | 'image' | 'graphic'
+
+function materialReferenceKind(reference: StableReference, assets: ApiAssetVersionPointer[]): 'video' | 'image' | undefined {
+  if (reference.object_kind === 'video_material') return 'video'
+  if (reference.object_kind === 'image_material') return 'image'
+  const asset = assets.find(item => item.assetId === reference.id)
+  if (!asset) return undefined
+  return asset.mediaKind === 'video' ? 'video' : 'image'
+}
+
+function MaterialAndCopyEditor({ promotion, assets, platformObjects, loadVideos, loadImages, onChange }: { promotion: OceanPromotion; assets: ApiAssetVersionPointer[]; platformObjects: ApiConnectorPlatformObject[]; loadVideos: PlatformObjectLoader; loadImages: PlatformObjectLoader; onChange: (patch: Partial<OceanPromotion>) => void }) {
+  const [tab, setTab] = useState<MaterialEditorTab>('video')
+  const referencesFor = (kind: 'video' | 'image') => promotion.base_material_references.filter(reference => materialReferenceKind(reference, assets) === kind)
+  const updateReferences = (kind: 'video' | 'image', next: StableReference[]) => onChange({ base_material_references: [...promotion.base_material_references.filter(reference => materialReferenceKind(reference, assets) !== kind), ...next] })
+  const tabCounts = {
+    video: referencesFor('video').length,
+    image: referencesFor('image').length,
+    graphic: (promotion.product_image_references?.length ?? 0) + promotion.copy_items.length,
+  }
+  return <section className="delivery-config-material-editor">
+    <h5>04 素材与文案</h5>
+    <div className="delivery-config-material-tabs" role="tablist" aria-label="素材类型">
+      {(['video', 'image', 'graphic'] as const).map(value => <button key={value} type="button" role="tab" aria-selected={tab === value} className={tab === value ? 'active' : ''} onClick={() => setTab(value)}>{value === 'video' ? '视频' : value === 'image' ? '图片' : '图文'} <span>{tabCounts[value]}</span></button>)}
+    </div>
+    <div className="delivery-config-material-tab-panel" role="tabpanel">
+      {tab === 'video' ? <MaterialObjectPicker label="视频素材" assets={assets.filter(asset => asset.mediaKind === 'video')} platformObjects={platformObjects.filter(item => item.object_kind === 'video_material')} loadPlatformObjects={loadVideos} value={referencesFor('video')} objectKind="material" onChange={value => updateReferences('video', value)}/> : null}
+      {tab === 'image' ? <MaterialObjectPicker label="图片素材" assets={assets.filter(asset => asset.mediaKind !== 'video')} platformObjects={platformObjects.filter(item => item.object_kind === 'image_material')} loadPlatformObjects={loadImages} value={referencesFor('image')} objectKind="material" onChange={value => updateReferences('image', value)}/> : null}
+      {tab === 'graphic' ? <div className="delivery-config-unit-fields delivery-config-unit-fields--wide">
+        <MaterialObjectPicker label="产品主图" assets={assets.filter(asset => asset.mediaKind === 'image')} platformObjects={platformObjects.filter(item => item.object_kind === 'image_material')} loadPlatformObjects={loadImages} value={promotion.product_image_references ?? []} objectKind="product_image" onChange={product_image_references => onChange({ product_image_references })}/>
+        <label><span>广告文案</span><textarea rows={2} value={promotion.copy_items.map(item => item.text).join('\n')} placeholder="每行一条文案" onChange={event => onChange({ copy_items: event.target.value.split('\n').map(text => text.trim()).filter(Boolean).map(text => ({ text })) })}/></label>
+        <label><span>产品卖点</span><textarea rows={2} value={promotion.product_selling_points?.join('\n') ?? ''} placeholder="每行一个卖点" onChange={event => onChange({ product_selling_points: event.target.value.split('\n').map(text => text.trim()).filter(Boolean) })}/></label>
+      </div> : null}
+    </div>
+  </section>
 }
 
 function ToggleField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return <label className="delivery-config-toggle-field"><span>{label}</span><span className="delivery-config-toggle-control"><span>{checked ? '已开启' : '未开启'}</span><input type="checkbox" role="switch" checked={checked} onChange={event => onChange(event.target.checked)}/></span></label>
 }
 
-function PlatformConfigurationEditor({ value, onChange, products, assets, platformObjects }: { value: PlatformConfiguration; onChange: (value: PlatformConfiguration) => void; products: Array<{ id: string; name: string; oceanEngineProductId?: string }>; assets: ApiAssetVersionPointer[]; platformObjects: ApiConnectorPlatformObject[] }) {
+function PlatformConfigurationEditor({ value, onChange, products, assets, platformObjects, connectorAccounts, platformObjectError, loadVideos, loadImages }: { value: PlatformConfiguration; onChange: (value: PlatformConfiguration) => void; products: Array<{ id: string; name: string; oceanEngineProductId?: string }>; assets: ApiAssetVersionPointer[]; platformObjects: ApiConnectorPlatformObject[]; connectorAccounts: ApiConnectorAccount[]; platformObjectError: string; loadVideos: PlatformObjectLoader; loadImages: PlatformObjectLoader }) {
   const ocean = value.payload.ocean_engine
   if (!ocean?.project) return null
   const updateOcean = (next: OceanConfiguration) => onChange({ ...value, payload: { ...value.payload, ocean_engine: next } })
@@ -174,11 +322,38 @@ function PlatformConfigurationEditor({ value, onChange, products, assets, platfo
     if (!window.confirm(`删除“${promotionName}”？此操作只修改当前本地草稿。`)) return
     updateOcean({ ...ocean, promotions: ocean.promotions.filter((_, itemIndex) => itemIndex !== index) })
   }
+  const accountID = ocean.project.account_reference.id
+  const accountAvailable = connectorAccounts.some(account => account.id === accountID)
+  const updateAccount = (nextAccountID: string) => {
+    const account = connectorAccounts.find(item => item.id === nextAccountID)
+    if (!account || account.id === accountID) return
+    const keepCurrentAccountReference = (reference: StableReference) => reference.namespace !== 'oceanengine'
+    updateOcean({
+      ...ocean,
+      project: {
+        ...ocean.project,
+        account_reference: {
+          ...ocean.project.account_reference,
+          namespace: 'oceanengine', object_kind: 'advertiser_account', id: account.id,
+          state: 'resolved', display_name_snapshot: account.display_label || account.id,
+        },
+      },
+      promotions: ocean.promotions.map(promotion => ({
+        ...promotion,
+        landing_page_reference: promotion.landing_page_reference?.namespace === 'oceanengine' ? undefined : promotion.landing_page_reference,
+        base_material_references: promotion.base_material_references.filter(keepCurrentAccountReference),
+        product_image_references: promotion.product_image_references?.filter(keepCurrentAccountReference),
+      })),
+    })
+  }
   return <section className="delivery-config-editor" aria-labelledby="platform-config-editor-title">
     <header className="delivery-config-editor-intro"><div><span className="section-label">本地配置</span><h3 id="platform-config-editor-title">编辑投放项目和推广单元</h3><p>保存后生成 cookies 计划版本。Playwright RPA 在执行阶段读取该版本。</p></div><span className="delivery-config-local-badge">不会写入巨量</span></header>
     <div className="delivery-config-project-editor">
       <div className="delivery-config-subheading"><div><span>01</span><div><h4>投放项目</h4><p>设置营销路径、预算、竞价、排期和定向。</p></div></div></div>
       <div className="delivery-config-editor-fields delivery-config-editor-fields--wide">
+        <label><span>巨量账户</span><select value={accountAvailable ? accountID : ''} onChange={event => updateAccount(event.target.value)}><option value="">请选择当前 Project 已验证账户</option>{connectorAccounts.map(account => <option key={account.id} value={account.id}>{account.display_label || account.id}</option>)}</select><small>切换账户会清除旧账户的巨量对象引用。Cookies 素材引用保持不变。</small></label>
+        {!accountAvailable ? <div className="delivery-config-account-error" role="alert"><CircleAlert size={16}/><span>计划账户 <code>{accountID || '未设置'}</code> 未绑定当前 Project。请选择已验证账户。</span></div> : null}
+        {platformObjectError && !platformObjectError.startsWith('计划账户 ') ? <div className="delivery-config-account-error" role="alert"><CircleAlert size={16}/><span>{platformObjectError}</span></div> : null}
         <label><span>项目名称</span><input name="oceanengine_project_name" autoComplete="off" value={ocean.project.project_name} onChange={event => updateProject({ project_name: event.target.value })}/></label>
         <label><span>营销目的</span><select value={ocean.project.marketing_purpose} onChange={event => updateProject({ marketing_purpose: event.target.value })}><option value="ecommerce">电商</option><option value="lead_generation">销售线索</option><option value="application">应用</option><option value="product_catalog">商品</option><option value="content_marketing">内容营销</option></select></label>
         {ocean.project.marketing_purpose !== 'product_catalog' ? <label><span>营销场景</span><select value={ocean.project.marketing_scenario} onChange={event => updateProject({ marketing_scenario: event.target.value })}><option value="manual_delivery">短视频与图文</option><option value="live_stream" disabled>直播（平台暂不可用）</option></select></label> : null}
@@ -232,7 +407,7 @@ function PlatformConfigurationEditor({ value, onChange, products, assets, platfo
           {promotion.delivery_identity.mode === 'authorized_identity' ? <label><span>授权身份 ID</span><input value={promotion.delivery_identity.authorized_identity?.id ?? ''} onChange={event => updatePromotion(index, { delivery_identity: { ...promotion.delivery_identity, authorized_identity: updateReference(promotion.delivery_identity.authorized_identity, event.target.value, 'delivery_identity') } })}/></label> : null}
           <label><span>单元日预算</span><div className="delivery-config-money-input"><input name={`promotion_${index}_daily_budget`} autoComplete="off" type="number" inputMode="decimal" min="0" value={(promotion.budget_and_bidding?.daily_budget_minor ?? 0) / 100} onChange={event => updatePromotion(index, { budget_and_bidding: { currency: 'CNY', bidding_strategy: promotion.budget_and_bidding?.bidding_strategy ?? 'stable_cost', charging_mode: promotion.budget_and_bidding?.charging_mode ?? 'CPC', ...promotion.budget_and_bidding, daily_budget_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元 / 天</small></div></label>
           <label><span>单元出价</span><div className="delivery-config-money-input"><input name={`promotion_${index}_bid`} autoComplete="off" type="number" inputMode="decimal" min="0" step="0.01" value={(promotion.budget_and_bidding?.bid_minor ?? 0) / 100} onChange={event => updatePromotion(index, { budget_and_bidding: { currency: 'CNY', daily_budget_minor: promotion.budget_and_bidding?.daily_budget_minor ?? 0, bidding_strategy: promotion.budget_and_bidding?.bidding_strategy ?? 'stable_cost', charging_mode: promotion.budget_and_bidding?.charging_mode ?? 'CPC', ...promotion.budget_and_bidding, bid_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元</small></div></label>
-          <label><span>橙子落地页</span><select value={promotion.landing_page_reference?.id ?? ''} onChange={event => { const item = platformObjects.find(value => value.object_kind === 'orange_landing_page' && value.platform_object_id === event.target.value); updatePromotion(index, { landing_page_reference: item ? { namespace: 'oceanengine', object_kind: 'orange_landing_page', scope: `account:${item.account_id}`, id: item.platform_object_id, version: String(item.version), state: 'resolved', display_name_snapshot: item.display_name || item.platform_object_id, audit_attributes: { connector_platform_object_id: item.id } } : undefined }) }}><option value="">请选择已导入落地页</option>{platformObjects.filter(item => item.object_kind === 'orange_landing_page').map(item => <option key={item.id} value={item.platform_object_id}>{item.display_name || item.platform_object_id}</option>)}</select></label>
+          <label><span>橙子落地页</span><select value={promotion.landing_page_reference?.id ?? ''} onChange={event => { const item = platformObjects.find(value => value.object_kind === 'orange_landing_page' && value.platform_object_id === event.target.value); updatePromotion(index, { landing_page_reference: item ? { namespace: 'oceanengine', object_kind: 'orange_landing_page', scope: `account:${item.account_id}`, id: item.platform_object_id, version: String(item.version), state: 'resolved', display_name_snapshot: item.display_name || item.platform_object_id, audit_attributes: { connector_platform_object_id: item.id } } : undefined }) }}><option value="">请选择已导入落地页</option>{platformObjects.filter(item => item.object_kind === 'orange_landing_page').map(item => <option key={item.id} value={item.platform_object_id}>{item.display_name || item.platform_object_id}</option>)}</select>{platformObjects.find(item => item.object_kind === 'orange_landing_page' && item.platform_object_id === promotion.landing_page_reference?.id)?.preview_url ? <a className="delivery-config-preview-link" href={platformObjects.find(item => item.object_kind === 'orange_landing_page' && item.platform_object_id === promotion.landing_page_reference?.id)?.preview_url} target="_blank" rel="noreferrer">预览当前落地页</a> : null}</label>
           <label><span>直达链接引用</span><input value={promotion.direct_link_reference?.id ?? ''} onChange={event => updatePromotion(index, { direct_link_reference: updateReference(promotion.direct_link_reference, event.target.value, 'direct_link') })}/></label>
           <label><span>产品引用</span><input value={promotion.product_reference?.id ?? ''} onChange={event => updatePromotion(index, { product_reference: updateReference(promotion.product_reference, event.target.value, 'product') })}/></label>
           <label><span>原生锚点 ID</span><input value={promotion.native_anchor_reference?.id ?? ''} onChange={event => updatePromotion(index, { native_anchor_reference: updateReference(promotion.native_anchor_reference, event.target.value, 'native_anchor') })}/></label>
@@ -245,12 +420,7 @@ function PlatformConfigurationEditor({ value, onChange, products, assets, platfo
           <ToggleField label="智能生成" checked={promotion.settings.smart_generation_enabled ?? false} onChange={smart_generation_enabled => updatePromotion(index, { settings: { ...promotion.settings, smart_generation_enabled } })}/>
           <ToggleField label="允许客户端下载" checked={promotion.settings.client_download_enabled ?? false} onChange={client_download_enabled => updatePromotion(index, { settings: { ...promotion.settings, client_download_enabled } })}/>
         </div>
-        <section className="delivery-config-material-editor"><h5>04 素材与文案</h5><div className="delivery-config-unit-fields delivery-config-unit-fields--wide">
-          <MaterialObjectPicker label="基础素材" assets={assets} platformObjects={platformObjects.filter(item => item.object_kind === 'image_material' || item.object_kind === 'video_material')} value={promotion.base_material_references} objectKind="material" onChange={base_material_references => updatePromotion(index, { base_material_references })}/>
-          <MaterialObjectPicker label="产品主图" assets={assets.filter(asset => asset.mediaKind === 'image')} value={promotion.product_image_references ?? []} objectKind="product_image" onChange={product_image_references => updatePromotion(index, { product_image_references })}/>
-          <label><span>广告文案</span><textarea rows={2} value={promotion.copy_items.map(item => item.text).join('\n')} placeholder="每行一条文案" onChange={event => updatePromotion(index, { copy_items: event.target.value.split('\n').map(text => text.trim()).filter(Boolean).map(text => ({ text })) })}/></label>
-          <label><span>产品卖点</span><textarea rows={2} value={promotion.product_selling_points?.join('\n') ?? ''} placeholder="每行一个卖点" onChange={event => updatePromotion(index, { product_selling_points: event.target.value.split('\n').map(text => text.trim()).filter(Boolean) })}/></label>
-        </div></section>
+        <MaterialAndCopyEditor promotion={promotion} assets={assets} platformObjects={platformObjects} loadVideos={loadVideos} loadImages={loadImages} onChange={patch => updatePromotion(index, patch)}/>
         <footer><span>{promotion.base_material_references.length} 个素材</span><small>{promotion.base_material_references.length ? '素材已关联' : '尚未关联素材'}</small></footer>
       </article>)}</div>
       {!ocean.promotions.length ? <div className="delivery-config-empty-units"><b>还没有推广单元</b><p>增加一个推广单元，然后设置预算、出价和素材。</p><button className="secondary-button" type="button" onClick={addPromotion}><Plus size={15} aria-hidden="true"/>增加推广单元</button></div> : null}
@@ -269,6 +439,9 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const [busy, setBusy] = useState(false)
   const [editableConfiguration, setEditableConfiguration] = useState<PlatformConfiguration>()
   const [platformObjects, setPlatformObjects] = useState<ApiConnectorPlatformObject[]>([])
+  const [connectorAccounts, setConnectorAccounts] = useState<ApiConnectorAccount[]>([])
+  const [accountsLoaded, setAccountsLoaded] = useState(false)
+  const [platformObjectError, setPlatformObjectError] = useState('')
   const refreshGenerationRef = useRef(0)
 
   const selectedPlan = useMemo(() => plans.find(plan => plan.id === selectedId), [plans, selectedId])
@@ -309,17 +482,53 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   useEffect(() => { if (selectedId) void restoreWorkflow(selectedId) }, [projectId, selectedId])
   useEffect(() => { setEditableConfiguration(platformConfiguration ? structuredClone(platformConfiguration) : undefined) }, [selectedId, selectedPlan?.currentVersionNumber])
   useEffect(() => {
+    let active = true
+    setAccountsLoaded(false)
+    void api.listProjectConnectorAccounts(projectId).then(response => {
+      if (!active) return
+      setConnectorAccounts(response.items.filter(account => account.status === 'verified'))
+      setPlatformObjectError('')
+    }).catch(error => {
+      if (!active) return
+      setConnectorAccounts([])
+      setPlatformObjectError(errorMessage(error, '读取当前 Project 的巨量账户失败。'))
+    }).finally(() => {
+      if (active) setAccountsLoaded(true)
+    })
+    return () => { active = false }
+  }, [projectId])
+  useEffect(() => {
     const accountID = editableConfiguration?.payload.ocean_engine?.project?.account_reference?.id
     if (!accountID) {
       setPlatformObjects([])
       return
     }
+    if (!accountsLoaded) return
+    if (!connectorAccounts.some(account => account.id === accountID)) {
+      setPlatformObjects([])
+      setPlatformObjectError(`计划账户 ${accountID} 未绑定当前 Project。请选择已验证账户。`)
+      return
+    }
     let active = true
-    void Promise.all((['image_material', 'video_material', 'orange_landing_page'] as const).map(objectKind => api.listProjectConnectorPlatformObjects(projectId, accountID, { objectKind, status: 'active', limit: 100 })))
-      .then(values => { if (active) setPlatformObjects(values.flatMap(value => value.items)) })
-      .catch(() => { if (active) setPlatformObjects([]) })
+    setPlatformObjectError('')
+    void api.listProjectConnectorPlatformObjects(projectId, accountID, { objectKind: 'orange_landing_page', status: 'active', limit: 100 })
+      .then(value => { if (active) setPlatformObjects(value.items) })
+      .catch(error => {
+        if (!active) return
+        setPlatformObjects([])
+        setPlatformObjectError(errorMessage(error, '读取 Connector 对象失败。'))
+      })
     return () => { active = false }
-  }, [editableConfiguration?.payload.ocean_engine?.project?.account_reference?.id, projectId])
+  }, [accountsLoaded, connectorAccounts, editableConfiguration?.payload.ocean_engine?.project?.account_reference?.id, projectId])
+
+  const loadPlatformObjectPage = useCallback(async (objectKind: ApiConnectorPlatformObjectKind, query: string, cursor: string | undefined, sortBy: PlatformObjectSort, sortOrder: 'asc' | 'desc') => {
+    const accountID = editableConfiguration?.payload.ocean_engine?.project?.account_reference?.id
+    if (!accountID || !connectorAccounts.some(account => account.id === accountID)) throw new Error('计划没有绑定当前 Project 的已验证巨量账户。')
+    return api.listProjectConnectorPlatformObjects(projectId, accountID, { objectKind, status: 'active', q: query || undefined, cursor, limit: 60, sortBy, sortOrder })
+  }, [connectorAccounts, editableConfiguration?.payload.ocean_engine?.project?.account_reference?.id, projectId])
+
+  const loadVideos = useCallback<PlatformObjectLoader>((query, cursor, sortBy, sortOrder) => loadPlatformObjectPage('video_material', query, cursor, sortBy, sortOrder), [loadPlatformObjectPage])
+  const loadImages = useCallback<PlatformObjectLoader>((query, cursor, sortBy, sortOrder) => loadPlatformObjectPage('image_material', query, cursor, sortBy, sortOrder), [loadPlatformObjectPage])
   useEffect(() => {
     if (!selectedId) return
     const url = new URL(window.location.href)
@@ -365,7 +574,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
       {!selectedPlan ? <div className="panel-empty">当前 Project 暂无投放计划。<a href={planEditorURL}>前往创建</a></div> : legacyReadOnly ? <section className="delivery-config-config-card">
         <div className="delivery-config-empty-inline"><CircleAlert size={20}/><div><b>历史配置，仅供查看</b><p>这份计划不能继续修改、检查或提交。若要继续投放，请新建计划并选择目标广告平台。</p></div></div>
       </section> : <>
-        {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration} products={currentProject.products ?? []} assets={confirmedAssets} platformObjects={platformObjects}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
+        {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration} products={currentProject.products ?? []} assets={confirmedAssets} platformObjects={platformObjects} connectorAccounts={connectorAccounts} platformObjectError={platformObjectError} loadVideos={loadVideos} loadImages={loadImages}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
         {showCalibration && platformConfiguration ? <CalibrationDispositionView value={platformConfiguration}/> : null}
         {showPreflight ? <section className="delivery-config-flow-grid delivery-config-flow-grid--preflight"><article className="delivery-config-preflight-card">
           <header><div><span className="section-label">确认投放</span><h3>检查并确认投放</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `最近执行 ${changeSet.status}` : '尚未投放'}</strong></header>

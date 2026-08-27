@@ -60,6 +60,31 @@ func TestAssetLibraryReadersUseApprovedReadOnlyEndpoints(t *testing.T) {
 	}
 }
 
+func TestSignPictureURIsUsesReadOnlySigner(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/superior/api/v2/creative/material/picture/sign" || r.URL.Query().Get("aadvid") != "123" {
+			t.Fatalf("request=%s %s", r.Method, r.URL.RequestURI())
+		}
+		var body struct {
+			URIs []string `json:"uris"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.URIs) != 1 || body.URIs[0] != "tos-cn/image" {
+			t.Fatalf("body=%#v err=%v", body, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"data":{"list":{"tos-cn/image":{"main_url":"https://example.invalid/signed"}}}}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "123", Session{Cookies: "session=x"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	if _, err := client.SignPictureURIs(context.Background(), []string{"tos-cn/image"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGlobalInfoUsesEnterpriseReadOnlyEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/ebp/ebp_info/get_global_info" || r.URL.RawQuery != "" {
