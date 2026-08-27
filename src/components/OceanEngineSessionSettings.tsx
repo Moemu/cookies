@@ -37,7 +37,8 @@ function syncWindow(days: number) {
 
 const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds))
 const objectKindCopy: Record<ApiConnectorPlatformObjectKind, string> = {
-  image_material: '图片素材', video_material: '视频素材', orange_landing_page: '橙子落地页',
+  image_material: '图片素材', video_material: '视频素材', aweme_photo_material: '抖音图文',
+  marketing_product: '营销产品', orange_landing_page: '橙子落地页',
 }
 function objectSyncSummary(value: Awaited<ReturnType<typeof api.syncProjectConnectorAccount>>['platform_objects']) {
   const stats = Object.values(value ?? {}).reduce((total, item) => ({
@@ -290,7 +291,7 @@ export function OceanEngineSessionSettings({ projectId }: { projectId: string })
         </section>
 
         <section className={`oe-sync-card ${session?.status === 'ready' ? 'ready' : ''}`} aria-labelledby="oe-sync-section-title">
-          <div className="oe-sync-icon"><Database size={20} aria-hidden="true" /></div><div className="oe-sync-copy"><span>03 · 数据读取</span><h3 id="oe-sync-section-title">历史同步与每日巡检</h3><p>{session?.status === 'ready' ? '对象目录读取图片、视频和橙子落地页。日级补数只读取指标。' : '完成只读验证后，系统才允许读取数据。'}</p><div className="oe-sync-facts"><span>只读请求</span><span>服务端分页</span><span>转换修订</span></div></div><div className="oe-sync-actions"><button className="secondary-button" type="button" onClick={() => void runSync(180, 'inventory_only')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步巨量对象目录</button><button className="secondary-button" type="button" onClick={() => void runSync(14, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><RefreshCw size={15} aria-hidden="true" />巡检最近 14 天</button><button className="secondary-button" type="button" onClick={() => void runSync(180, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />补齐近 180 天日级指标</button><button className="primary-button" type="button" onClick={() => void runSync(180, 'full')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步最近 180 天</button></div>
+          <div className="oe-sync-icon"><Database size={20} aria-hidden="true" /></div><div className="oe-sync-copy"><span>03 · 数据读取</span><h3 id="oe-sync-section-title">历史同步与每日巡检</h3><p>{session?.status === 'ready' ? '对象目录读取图片、视频、抖音图文、营销产品和橙子落地页。日级补数只读取指标。' : '完成只读验证后，系统才允许读取数据。'}</p><div className="oe-sync-facts"><span>只读请求</span><span>服务端分页</span><span>转换修订</span></div></div><div className="oe-sync-actions"><button className="secondary-button" type="button" onClick={() => void runSync(180, 'inventory_only')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步巨量对象目录</button><button className="secondary-button" type="button" onClick={() => void runSync(14, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><RefreshCw size={15} aria-hidden="true" />巡检最近 14 天</button><button className="secondary-button" type="button" onClick={() => void runSync(180, 'metrics_only')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />补齐近 180 天日级指标</button><button className="primary-button" type="button" onClick={() => void runSync(180, 'full')} disabled={busy || session?.status !== 'ready'}><Database size={15} aria-hidden="true" />同步最近 180 天</button></div>
         </section>
 
         <section className="oe-settings-card oe-object-catalog" aria-labelledby="oe-object-catalog-title">

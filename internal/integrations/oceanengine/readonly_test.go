@@ -15,6 +15,8 @@ func TestAssetLibraryReadersUseApprovedReadOnlyEndpoints(t *testing.T) {
 	}{
 		{http.MethodPost, "/superior/api/v2/ad/getImageList"},
 		{http.MethodGet, "/superior/api/v2/video/list"},
+		{http.MethodGet, "/superior/api/v2/creative/material/aweme_photo_list"},
+		{http.MethodPost, "/superior/api/v2/ad/product/clue_product_list"},
 		{http.MethodGet, "/platform/api/v1/orange/third_part_list"},
 	}
 	index := 0
@@ -27,9 +29,14 @@ func TestAssetLibraryReadersUseApprovedReadOnlyEndpoints(t *testing.T) {
 		if r.Method != want.method || r.URL.Path != want.path || r.URL.Query().Get("aadvid") != "123" {
 			t.Fatalf("request=%s %s", r.Method, r.URL.RequestURI())
 		}
-		if r.Method == http.MethodPost {
+		if r.Method == http.MethodPost && r.URL.Path == "/superior/api/v2/ad/getImageList" {
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["page"] != float64(2) || body["limit"] != float64(20) {
+				t.Fatalf("body=%#v err=%v", body, err)
+			}
+		} else if r.Method == http.MethodPost {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["page"] != float64(2) || body["ebp_asset_scope"] != float64(3) {
 				t.Fatalf("body=%#v err=%v", body, err)
 			}
 		} else if r.URL.Query().Get("page") != "2" {
@@ -50,6 +57,12 @@ func TestAssetLibraryReadersUseApprovedReadOnlyEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err = client.VideoMaterialsPage(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.AwemePhotoMaterialsPage(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.MarketingProductsPage(ctx, request); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = client.OrangeLandingPagesPage(ctx, request); err != nil {

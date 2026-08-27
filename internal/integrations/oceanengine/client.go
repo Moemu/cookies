@@ -55,21 +55,23 @@ type Endpoint struct {
 }
 
 var readOnlyEndpoints = map[Endpoint]struct{}{
-	{http.MethodPost, "/ad/api/promotion/ads/list"}:                        {},
-	{http.MethodGet, "/superior/api/ad/promotion/detail"}:                  {},
-	{http.MethodGet, "/ad/api/promotion/ads/get_promotion_detail"}:         {},
-	{http.MethodGet, "/ad/api/promotion/ads/detail"}:                       {},
-	{http.MethodPost, "/ad/api/promotion/ads/attribute/list"}:              {},
-	{http.MethodPost, "/report/api/tool/agw/statistics_sophonx/statQuery"}: {},
-	{http.MethodPost, "/ad/api/agw/statistics_sophonx/statQuery"}:          {},
-	{http.MethodGet, "/ad/api/account/info"}:                               {},
-	{http.MethodGet, "/superior/api/v2/account/info"}:                      {},
-	{http.MethodGet, "/ad/api/account/conf"}:                               {},
-	{http.MethodGet, "/api/ebp/ebp_info/get_global_info"}:                  {},
-	{http.MethodPost, "/superior/api/v2/ad/getImageList"}:                  {},
-	{http.MethodPost, "/superior/api/v2/creative/material/picture/sign"}:   {},
-	{http.MethodGet, "/superior/api/v2/video/list"}:                        {},
-	{http.MethodGet, "/platform/api/v1/orange/third_part_list"}:            {},
+	{http.MethodPost, "/ad/api/promotion/ads/list"}:                         {},
+	{http.MethodGet, "/superior/api/ad/promotion/detail"}:                   {},
+	{http.MethodGet, "/ad/api/promotion/ads/get_promotion_detail"}:          {},
+	{http.MethodGet, "/ad/api/promotion/ads/detail"}:                        {},
+	{http.MethodPost, "/ad/api/promotion/ads/attribute/list"}:               {},
+	{http.MethodPost, "/report/api/tool/agw/statistics_sophonx/statQuery"}:  {},
+	{http.MethodPost, "/ad/api/agw/statistics_sophonx/statQuery"}:           {},
+	{http.MethodGet, "/ad/api/account/info"}:                                {},
+	{http.MethodGet, "/superior/api/v2/account/info"}:                       {},
+	{http.MethodGet, "/ad/api/account/conf"}:                                {},
+	{http.MethodGet, "/api/ebp/ebp_info/get_global_info"}:                   {},
+	{http.MethodPost, "/superior/api/v2/ad/getImageList"}:                   {},
+	{http.MethodPost, "/superior/api/v2/creative/material/picture/sign"}:    {},
+	{http.MethodGet, "/superior/api/v2/video/list"}:                         {},
+	{http.MethodGet, "/superior/api/v2/creative/material/aweme_photo_list"}: {},
+	{http.MethodPost, "/superior/api/v2/ad/product/clue_product_list"}:      {},
+	{http.MethodGet, "/platform/api/v1/orange/third_part_list"}:             {},
 }
 
 type Session struct {

@@ -125,6 +125,23 @@ func (c *Client) VideoMaterialsPage(ctx context.Context, request AssetPageReques
 	return c.getJSON(ctx, "/superior/api/v2/video/list?"+query.Encode())
 }
 
+// AwemePhotoMaterialsPage reads one Douyin image-text material page.
+func (c *Client) AwemePhotoMaterialsPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, limit := normalizeAssetPage(request)
+	query := url.Values{
+		"sort_by": {"1"}, "sort_type": {"desc"}, "tab": {"myAwemePhoto"},
+		"fields[]": {"stat_cost", "ctr"}, "page": {strconv.Itoa(page)}, "limit": {strconv.Itoa(limit)},
+	}
+	return c.getJSON(ctx, "/superior/api/v2/creative/material/aweme_photo_list?"+query.Encode())
+}
+
+// MarketingProductsPage reads one account product-library page.
+func (c *Client) MarketingProductsPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, _ := normalizeAssetPage(request)
+	body := map[string]any{"keywords": "", "category_id": "", "page": page, "ebp_asset_scope": 3}
+	return c.postJSON(ctx, "/superior/api/v2/ad/product/clue_product_list", body)
+}
+
 // OrangeLandingPagesPage reads one Orange third-party landing-page page.
 func (c *Client) OrangeLandingPagesPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
 	page, limit := normalizeAssetPage(request)

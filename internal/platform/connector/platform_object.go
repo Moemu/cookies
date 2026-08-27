@@ -15,13 +15,15 @@ import (
 type PlatformObjectKind string
 
 const (
-	PlatformObjectImageMaterial     PlatformObjectKind = "image_material"
-	PlatformObjectVideoMaterial     PlatformObjectKind = "video_material"
-	PlatformObjectOrangeLandingPage PlatformObjectKind = "orange_landing_page"
+	PlatformObjectImageMaterial      PlatformObjectKind = "image_material"
+	PlatformObjectVideoMaterial      PlatformObjectKind = "video_material"
+	PlatformObjectAwemePhotoMaterial PlatformObjectKind = "aweme_photo_material"
+	PlatformObjectMarketingProduct   PlatformObjectKind = "marketing_product"
+	PlatformObjectOrangeLandingPage  PlatformObjectKind = "orange_landing_page"
 )
 
 func (k PlatformObjectKind) Valid() bool {
-	return k == PlatformObjectImageMaterial || k == PlatformObjectVideoMaterial || k == PlatformObjectOrangeLandingPage
+	return k == PlatformObjectImageMaterial || k == PlatformObjectVideoMaterial || k == PlatformObjectAwemePhotoMaterial || k == PlatformObjectMarketingProduct || k == PlatformObjectOrangeLandingPage
 }
 
 type PlatformObjectCandidate struct {
@@ -236,7 +238,7 @@ func (r MySQLRepository) ListPlatformObjects(ctx context.Context, query Platform
 		args = append(args, query.Status)
 	}
 	if search := strings.TrimSpace(query.Search); search != "" {
-		statement += ` AND (o.display_name LIKE ? OR o.platform_object_id LIKE ?)`
+		statement += ` AND (o.display_name LIKE ? OR CONVERT(o.platform_object_id USING utf8mb4) LIKE ?)`
 		args = append(args, "%"+search+"%", "%"+search+"%")
 	}
 	if cursor := strings.TrimSpace(query.Cursor); cursor != "" && query.SortBy == "" {
@@ -288,7 +290,7 @@ func (r MySQLRepository) ListPlatformObjects(ctx context.Context, query Platform
 		if dataThrough.Valid {
 			performance.DataThrough = &dataThrough.Time
 		}
-		if value.Kind == PlatformObjectImageMaterial || value.Kind == PlatformObjectVideoMaterial {
+		if value.Kind == PlatformObjectImageMaterial || value.Kind == PlatformObjectVideoMaterial || value.Kind == PlatformObjectAwemePhotoMaterial {
 			value.Performance = &performance
 		}
 		values = append(values, value)

@@ -16,6 +16,8 @@ import (
 type platformObjectReader interface {
 	ImageMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error)
 	VideoMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error)
+	AwemePhotoMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error)
+	MarketingProductsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error)
 	OrangeLandingPagesPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error)
 }
 
@@ -46,6 +48,8 @@ func (s Synchronizer) syncPlatformObjectCatalog(ctx context.Context, request Syn
 	sources := []source{
 		{PlatformObjectImageMaterial, "image_material_list", objectReader.ImageMaterialsPage, imageMaterialPage, imageMaterialCandidate},
 		{PlatformObjectVideoMaterial, "video_material_list", objectReader.VideoMaterialsPage, videoMaterialPage, videoMaterialCandidate},
+		{PlatformObjectAwemePhotoMaterial, "aweme_photo_material_list", objectReader.AwemePhotoMaterialsPage, awemePhotoMaterialPage, awemePhotoMaterialCandidate},
+		{PlatformObjectMarketingProduct, "marketing_product_list", objectReader.MarketingProductsPage, marketingProductPage, marketingProductCandidate},
 		{PlatformObjectOrangeLandingPage, "orange_landing_page_list", objectReader.OrangeLandingPagesPage, orangeLandingPage, orangeLandingCandidate},
 	}
 	result := make(map[PlatformObjectKind]PlatformObjectSyncStats, len(sources))
@@ -105,6 +109,16 @@ func videoMaterialPage(payload map[string]any) platformObjectPage {
 	return platformObjectPage{Items: mapItems(data["videos"]), TotalPages: totalPages(data, 0)}
 }
 
+func awemePhotoMaterialPage(payload map[string]any) platformObjectPage {
+	data, _ := payload["data"].(map[string]any)
+	return platformObjectPage{Items: mapItems(data["list"]), TotalPages: totalPages(data, 0)}
+}
+
+func marketingProductPage(payload map[string]any) platformObjectPage {
+	data, _ := payload["data"].(map[string]any)
+	return platformObjectPage{Items: mapItems(data["list"]), TotalPages: totalPages(data, 32)}
+}
+
 func orangeLandingPage(payload map[string]any) platformObjectPage {
 	data, _ := payload["data"].(map[string]any)
 	return platformObjectPage{Items: mapItems(data["data"]), TotalPages: totalPages(data, 30)}
@@ -116,7 +130,13 @@ func totalPages(data map[string]any, fallbackPageSize int) int {
 		return pages
 	}
 	total := int(numberValue(pagination["total"]))
+	if total < 1 {
+		total = int(numberValue(pagination["total_count"]))
+	}
 	pageSize := int(numberValue(pagination["size"]))
+	if pageSize < 1 {
+		pageSize = int(numberValue(pagination["limit"]))
+	}
 	if pageSize < 1 {
 		pageSize = fallbackPageSize
 	}
@@ -165,6 +185,38 @@ func videoMaterialCandidate(item map[string]any) (PlatformObjectCandidate, bool)
 	}, true
 }
 
+func awemePhotoMaterialCandidate(item map[string]any) (PlatformObjectCandidate, bool) {
+	id := firstString(item, "material_id")
+	if !numericPlatformObjectID(id) {
+		return PlatformObjectCandidate{}, false
+	}
+	previewURL, expiresAt := nestedPlatformPreview(item, "image_info", "sign_url")
+	metadata := scalarMetadata(item, "carousel_type", "origin_source", "source", "image_mode", "music_id", "create_time", "update_time")
+	metadata["image_count"] = float64(len(mapItems(item["image_info"])))
+	return PlatformObjectCandidate{
+		Kind: PlatformObjectAwemePhotoMaterial, PlatformObjectID: id,
+		DisplayName: firstString(item, "file_name"), Metadata: metadata,
+		PreviewURL: previewURL, PreviewKind: previewKind(previewURL, "image"), PreviewExpiresAt: expiresAt,
+	}, true
+}
+
+func marketingProductCandidate(item map[string]any) (PlatformObjectCandidate, bool) {
+	id := firstString(item, "product_id")
+	if !numericPlatformObjectID(id) {
+		return PlatformObjectCandidate{}, false
+	}
+	metadata := scalarMetadata(item, "unique_product_id", "platform_product_id", "category_id", "brand_name", "audit_status", "online_status", "status", "type", "create_time", "modify_time", "online_time")
+	if category, ok := item["clue_product_category"].(map[string]any); ok {
+		if name := firstString(category, "category_name"); name != "" {
+			metadata["category_name"] = name
+		}
+	}
+	return PlatformObjectCandidate{
+		Kind: PlatformObjectMarketingProduct, PlatformObjectID: id,
+		DisplayName: firstString(item, "name", "title"), Metadata: metadata,
+	}, true
+}
+
 func orangeLandingCandidate(item map[string]any) (PlatformObjectCandidate, bool) {
 	id := firstString(item, "site_id")
 	if !numericPlatformObjectID(id) {
@@ -185,6 +237,15 @@ func firstPlatformPreview(item map[string]any, keys ...string) (string, *time.Ti
 			if value, expiresAt := platformPreview(raw); value != "" {
 				return value, expiresAt
 			}
+		}
+	}
+	return "", nil
+}
+
+func nestedPlatformPreview(item map[string]any, listKey, urlKey string) (string, *time.Time) {
+	for _, nested := range mapItems(item[listKey]) {
+		if value, expiresAt := platformPreview(firstString(nested, urlKey)); value != "" {
+			return value, expiresAt
 		}
 	}
 	return "", nil

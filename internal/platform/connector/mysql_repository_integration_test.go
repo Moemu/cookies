@@ -122,3 +122,60 @@ func TestMySQLRepositoryAppendAndPointInTimeRead(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMySQLRepositoryListPlatformObjectsSupportsUnicodeSearch(t *testing.T) {
+	dsn := os.Getenv("COOKIES_CONNECTOR_MYSQL_TEST_DSN")
+	if dsn == "" {
+		t.Skip("COOKIES_CONNECTOR_MYSQL_TEST_DSN is not set")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	repository := MySQLRepository{DB: db}
+	suffix := time.Now().UTC().Format("150405.000000000")
+	organizationID := "org_unicode_search_" + suffix
+	projectID := "project_unicode_search_" + suffix
+	defer func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM connector_platform_object_project_grants WHERE organization_id=?`, organizationID)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM connector_platform_objects WHERE organization_id=?`, organizationID)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM platform_account_connections WHERE organization_id=?`, organizationID)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM platform_accounts WHERE organization_id=?`, organizationID)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM projects WHERE organization_id=?`, organizationID)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM organizations WHERE id=?`, organizationID)
+	}()
+
+	observedAt := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err = db.ExecContext(ctx, `INSERT INTO organizations (id,name,status) VALUES (?,?,'active')`, organizationID, "Unicode search test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO projects (id,organization_id,name,status) VALUES (?,?,?,'draft')`, projectID, organizationID, "Unicode search test"); err != nil {
+		t.Fatal(err)
+	}
+	registered, err := repository.RegisterAccount(ctx, RegisterAccountRequest{OrganizationID: organizationID, ProjectID: projectID, ExternalID: "unicode-search-account", CredentialRef: "insights-session://unicode-search"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accountID := registered.ID
+	_, err = repository.ReconcilePlatformObjects(ctx, organizationID, projectID, accountID, "sync_unicode_search_"+suffix, PlatformObjectMarketingProduct, observedAt, []PlatformObjectCandidate{{
+		Kind: PlatformObjectMarketingProduct, PlatformObjectID: "123456789", DisplayName: "菜鸟物流产品", Metadata: map[string]any{"create_time": "2026-08-27 12:00:00"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	values, err := repository.ListPlatformObjects(ctx, PlatformObjectQuery{
+		OrganizationID: organizationID, ProjectID: projectID, AccountID: accountID,
+		Kind: PlatformObjectMarketingProduct, Status: "active", Search: "菜鸟",
+		SortBy: "created_at", SortOrder: "desc", Limit: 60,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].DisplayName != "菜鸟物流产品" {
+		t.Fatalf("values=%#v", values)
+	}
+}

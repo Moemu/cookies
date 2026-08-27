@@ -80,6 +80,12 @@ func (testReader) ImageMaterialsPage(context.Context, oceanengine.AssetPageReque
 func (testReader) VideoMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
 	return map[string]any{"data": map[string]any{"videos": []any{map[string]any{"material_id": "2001", "video_name": "video"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
 }
+func (testReader) AwemePhotoMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"list": []any{map[string]any{"material_id": "2501", "file_name": "photo"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+}
+func (testReader) MarketingProductsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"list": []any{map[string]any{"product_id": "2601", "name": "product"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+}
 func (testReader) OrangeLandingPagesPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
 	return map[string]any{"data": map[string]any{"data": []any{map[string]any{"site_id": "3001", "name": "landing"}}, "pagination": map[string]any{"page": 1.0, "size": 30.0, "total": 1.0}}}, nil
 }
@@ -214,10 +220,10 @@ func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	if result.ObjectCount != 5 || result.MetricCount != 2 || writer.completed != "completed" {
 		t.Fatalf("result=%#v completed=%s", result, writer.completed)
 	}
-	if len(writer.raw) != 10 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
+	if len(writer.raw) != 12 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
 		t.Fatalf("raw=%d config=%d binding=%d diagnosis=%d status=%d", len(writer.raw), len(writer.configs), len(writer.bindings), len(writer.diagnoses), len(writer.statuses))
 	}
-	if len(writer.platformObjects) != 3 || result.PlatformObjects[PlatformObjectVideoMaterial].Created != 1 {
+	if len(writer.platformObjects) != 5 || result.PlatformObjects[PlatformObjectVideoMaterial].Created != 1 || result.PlatformObjects[PlatformObjectAwemePhotoMaterial].Created != 1 || result.PlatformObjects[PlatformObjectMarketingProduct].Created != 1 {
 		t.Fatalf("platform objects=%#v result=%#v", writer.platformObjects, result.PlatformObjects)
 	}
 	if writer.objects[0].ObjectRef == "raw-account-1" || writer.objects[1].ObjectRef == "raw-promotion-1" || writer.bindings[0].MaterialRef == "raw-material-1" {
