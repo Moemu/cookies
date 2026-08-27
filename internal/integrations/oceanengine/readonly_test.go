@@ -98,6 +98,79 @@ func TestSignPictureURIsUsesReadOnlySigner(t *testing.T) {
 	}
 }
 
+func TestReferenceObjectReadersUseObservedReadOnlyRequests(t *testing.T) {
+	requestIndex := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestIndex++
+		if requestIndex != 3 && r.URL.Query().Get("aadvid") != "123" {
+			t.Fatalf("missing advertiser context: %s", r.URL.RequestURI())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch requestIndex {
+		case 1, 2:
+			if r.Method != http.MethodPost || r.URL.Path != "/superior/api/v2/project/get_optimization_goal_v2" {
+				t.Fatalf("request=%s %s", r.Method, r.URL.RequestURI())
+			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["asset_type"] != float64(requestIndex+1) || body["need_assets"] != (requestIndex == 2) || body["landing_type"] != float64(17) {
+				t.Fatalf("optimization body=%#v err=%v", body, err)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":{"goals":[]}}`))
+		case 3:
+			if r.Method != http.MethodGet || r.URL.Path != "/api/ebp/ebp_info/get_global_info" || r.URL.Query().Get("aadvid") != "" {
+				t.Fatalf("request=%s %s", r.Method, r.URL.RequestURI())
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":{"advertiser":{"customer_id":"456"}}}`))
+		case 4:
+			if r.Method != http.MethodGet || r.URL.Path != "/nbs/api/ads/brand/yuntu/query_brand_industry" || r.URL.Query().Get("customer_id") != "456" {
+				t.Fatalf("request=%s %s", r.Method, r.URL.RequestURI())
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":[]}`))
+		case 5:
+			if r.Method != http.MethodGet || r.URL.Path != "/superior/api/v2/agw/ad/brand" {
+				t.Fatalf("request=%s %s", r.Method, r.URL.RequestURI())
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":{"data":[]}}`))
+		case 6:
+			if r.Method != http.MethodPost || r.URL.Path != "/superior/api/v2/ad/authorize/list" {
+				t.Fatalf("request=%s %s", r.Method, r.URL.RequestURI())
+			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["page_index"] != float64(2) || body["page_size"] != float64(10) || body["need_auth_extra_info"] != true {
+				t.Fatalf("identity body=%#v err=%v", body, err)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":[],"extra":{"hasMore":false}}`))
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.RequestURI())
+		}
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "123", Session{Cookies: "session=x"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	ctx := context.Background()
+	if _, err = client.OptimizationTargets(ctx, 2, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.OptimizationTargets(ctx, 3, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.BrandIndustries(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.Brands(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.AuthorizedIdentitiesPage(ctx, AssetPageRequest{Page: 2, Limit: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if requestIndex != 6 {
+		t.Fatalf("requests=%d", requestIndex)
+	}
+}
+
 func TestGlobalInfoUsesEnterpriseReadOnlyEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/ebp/ebp_info/get_global_info" || r.URL.RawQuery != "" {

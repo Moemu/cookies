@@ -20,10 +20,22 @@ const (
 	PlatformObjectAwemePhotoMaterial PlatformObjectKind = "aweme_photo_material"
 	PlatformObjectMarketingProduct   PlatformObjectKind = "marketing_product"
 	PlatformObjectOrangeLandingPage  PlatformObjectKind = "orange_landing_page"
+	PlatformObjectOptimizationTarget PlatformObjectKind = "optimization_target"
+	PlatformObjectConversionAsset    PlatformObjectKind = "conversion_event_asset"
+	PlatformObjectIndustryCategory   PlatformObjectKind = "industry_category"
+	PlatformObjectBrand              PlatformObjectKind = "brand"
+	PlatformObjectAuthorizedIdentity PlatformObjectKind = "authorized_identity"
 )
 
 func (k PlatformObjectKind) Valid() bool {
-	return k == PlatformObjectImageMaterial || k == PlatformObjectVideoMaterial || k == PlatformObjectAwemePhotoMaterial || k == PlatformObjectMarketingProduct || k == PlatformObjectOrangeLandingPage
+	switch k {
+	case PlatformObjectImageMaterial, PlatformObjectVideoMaterial, PlatformObjectAwemePhotoMaterial,
+		PlatformObjectMarketingProduct, PlatformObjectOrangeLandingPage, PlatformObjectOptimizationTarget,
+		PlatformObjectConversionAsset, PlatformObjectIndustryCategory, PlatformObjectBrand, PlatformObjectAuthorizedIdentity:
+		return true
+	default:
+		return false
+	}
 }
 
 type PlatformObjectCandidate struct {
@@ -151,7 +163,7 @@ func (r MySQLRepository) ReconcilePlatformObjects(ctx context.Context, organizat
 	for _, candidate := range candidates {
 		candidate.PlatformObjectID = strings.TrimSpace(candidate.PlatformObjectID)
 		candidate.DisplayName = strings.TrimSpace(candidate.DisplayName)
-		if candidate.Kind != kind || !numericPlatformObjectID(candidate.PlatformObjectID) || len(candidate.DisplayName) > 512 {
+		if candidate.Kind != kind || !validPlatformObjectID(kind, candidate.PlatformObjectID) || len(candidate.DisplayName) > 512 {
 			return stats, ErrInvalidFact
 		}
 		objectID := PlatformObjectID(organizationID, accountID, kind, candidate.PlatformObjectID)
@@ -399,7 +411,7 @@ func (r MySQLRepository) ReadPlatformObjectPreview(ctx context.Context, query Pl
 
 func previewMediaHostAllowed(host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	for _, suffix := range []string{".oceanengine.com", ".byteadimg.com", ".byteimg.com"} {
+	for _, suffix := range []string{".oceanengine.com", ".byteadimg.com", ".byteimg.com", ".douyinpic.com"} {
 		if strings.HasSuffix(host, suffix) && len(host) > len(suffix) {
 			return true
 		}
@@ -435,4 +447,17 @@ func numericPlatformObjectID(value string) bool {
 		}
 	}
 	return true
+}
+
+func validPlatformObjectID(kind PlatformObjectKind, value string) bool {
+	if numericPlatformObjectID(value) {
+		return true
+	}
+	if kind != PlatformObjectOptimizationTarget && kind != PlatformObjectIndustryCategory && kind != PlatformObjectBrand {
+		return false
+	}
+	if len(value) < 2 || value[0] != '-' {
+		return false
+	}
+	return numericPlatformObjectID(value[1:])
 }

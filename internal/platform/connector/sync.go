@@ -112,6 +112,14 @@ func SyncErrorCategory(err error) string {
 	}
 }
 
+func SyncErrorStage(err error) string {
+	var staged interface{ SyncStage() string }
+	if errors.As(err, &staged) {
+		return staged.SyncStage()
+	}
+	return "sync"
+}
+
 func (s Synchronizer) Sync(ctx context.Context, request SyncRequest) (result SyncResult, resultErr error) {
 	if s.Writer == nil || s.Readers == nil || s.Cipher == nil || request.OrganizationID == "" || request.AccountRef == "" || request.IdempotencyKey == "" || !request.WindowEnd.After(request.WindowStart) {
 		return result, ErrInvalidFact

@@ -621,7 +621,7 @@ func (s *Server) syncWithScope(w http.ResponseWriter, r *http.Request, organizat
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 		defer cancel()
 		if _, err := s.syncer.Sync(ctx, request); err != nil {
-			log.Printf("Connector background sync failed: run_id=%s category=%s", runID, connector.SyncErrorCategory(err))
+			log.Printf("Connector background sync failed: run_id=%s stage=%s category=%s", runID, connector.SyncErrorStage(err), connector.SyncErrorCategory(err))
 		}
 	}()
 	writeJSON(w, http.StatusAccepted, connector.SyncResult{RunID: runID})

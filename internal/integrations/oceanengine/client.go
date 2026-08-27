@@ -72,6 +72,10 @@ var readOnlyEndpoints = map[Endpoint]struct{}{
 	{http.MethodGet, "/superior/api/v2/creative/material/aweme_photo_list"}: {},
 	{http.MethodPost, "/superior/api/v2/ad/product/clue_product_list"}:      {},
 	{http.MethodGet, "/platform/api/v1/orange/third_part_list"}:             {},
+	{http.MethodPost, "/superior/api/v2/project/get_optimization_goal_v2"}:  {},
+	{http.MethodGet, "/nbs/api/ads/brand/yuntu/query_brand_industry"}:       {},
+	{http.MethodGet, "/superior/api/v2/agw/ad/brand"}:                       {},
+	{http.MethodPost, "/superior/api/v2/ad/authorize/list"}:                 {},
 }
 
 type Session struct {

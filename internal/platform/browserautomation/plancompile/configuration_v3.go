@@ -301,7 +301,11 @@ func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *deliver
 		values["project.marketing_product_reference"] = spec
 	}
 	optimization := referenceKey(project.OptimizationTargetReference)
-	values["project.optimization_target_reference"] = optimizationLabel(optimization)
+	optimizationName := optimizationLabel(optimization)
+	if optimizationName == "" && project.OptimizationTargetReference != nil {
+		optimizationName = project.OptimizationTargetReference.DisplayNameSnapshot
+	}
+	values["project.optimization_target_reference"] = optimizationName
 	if project.DeepOptimizationMode != "" {
 		values["project.deep_optimization_mode"] = deepOptimizationLabel(project.DeepOptimizationMode)
 	}

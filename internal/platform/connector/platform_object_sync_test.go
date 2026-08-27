@@ -115,6 +115,12 @@ func TestStablePictureURIRemovesPublicObjectPrefix(t *testing.T) {
 	}
 }
 
+func TestAuthorizedIdentityAvatarHostIsAllowed(t *testing.T) {
+	if !previewMediaHostAllowed("p26.douyinpic.com") || previewMediaHostAllowed("douyinpic.example.com") {
+		t.Fatal("authorized identity avatar host allowlist is incorrect")
+	}
+}
+
 var _ oceanengine.Reader = previewSignerReader{}
 
 func candidate(value PlatformObjectCandidate, valid bool) PlatformObjectCandidate {
@@ -137,5 +143,39 @@ func TestPlatformObjectPaginationShapes(t *testing.T) {
 	}
 	if len(photo.Items) != 1 || photo.TotalPages != 2 || len(product.Items) != 1 || product.TotalPages != 3 {
 		t.Fatalf("photo=%#v product=%#v", photo, product)
+	}
+}
+
+func TestReferenceObjectCandidatesPreserveStableRelationships(t *testing.T) {
+	targets := map[string]*PlatformObjectCandidate{}
+	assets := map[string]*PlatformObjectCandidate{}
+	mergeOptimizationPayload(map[string]any{"data": map[string]any{"goals": []any{
+		map[string]any{"optimization_name": "other", "external_action": -1.0},
+		map[string]any{"optimization_name": "conversion", "external_action": 20.0, "track_type": []any{"7"}, "limit": map[string]any{"delivery_mode": []any{1.0, 3.0}}, "asset_info": map[string]any{"asset_id": 801.0, "asset_name": "form", "role": 1.0}},
+	}}}, "owned_landing_page", targets, assets)
+	if targets["-1"] == nil || targets["20"] == nil || assets["801"] == nil {
+		t.Fatalf("targets=%#v assets=%#v", targets, assets)
+	}
+	if contexts, ok := targets["20"].Metadata["contexts"].([]string); !ok || len(contexts) != 1 || contexts[0] != "owned_landing_page" {
+		t.Fatalf("contexts=%#v", targets["20"].Metadata["contexts"])
+	}
+	if ids, ok := assets["801"].Metadata["optimization_target_ids"].([]string); !ok || len(ids) != 1 || ids[0] != "20" {
+		t.Fatalf("target ids=%#v", assets["801"].Metadata["optimization_target_ids"])
+	}
+	if ids, ok := targets["20"].Metadata["conversion_event_asset_ids"].([]string); !ok || len(ids) != 1 || ids[0] != "801" {
+		t.Fatalf("asset ids=%#v", targets["20"].Metadata["conversion_event_asset_ids"])
+	}
+
+	category := industryCategoryPage(map[string]any{"data": []any{map[string]any{"id": -1.0, "label": "all", "children": []any{map[string]any{"id": 91.0, "label": "child"}}}}})
+	if len(category.Items) != 2 {
+		t.Fatalf("category=%#v", category)
+	}
+	child, valid := industryCategoryCandidate(category.Items[1])
+	if !valid || child.PlatformObjectID != "91" || len(child.Metadata["category_path"].([]string)) != 2 {
+		t.Fatalf("child=%#v valid=%v", child, valid)
+	}
+	brand, valid := brandCandidate(map[string]any{"cdp_brand_id": -1.0, "brand_name": "no brand"})
+	if !valid || brand.PlatformObjectID != "-1" {
+		t.Fatalf("brand=%#v valid=%v", brand, valid)
 	}
 }
