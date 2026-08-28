@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { CircleAlert, CircleCheck, Clock3, FileCheck2, Hand, ListChecks, MonitorCheck, Pause, Play, RefreshCw, Send, ShieldAlert, XCircle } from 'lucide-react'
 import { controlledExecutionApi, ControlledExecutionApiError } from './api'
 import type { BrowserRpaEvidence, BrowserRpaRun, BrowserRpaRunEvent, ControlledExecutionTransportState, ControlledExecutionWorkspace, EdgeSessionProbe, RunnerV3Plan } from './model'
+import { presentObjectAvailability, presentPlanBlockedReason } from './objectAvailabilityPresentation'
 import { isTerminalControlledExecutionState, presentControlledExecution, shortHash } from './presentation'
 import './browser-rpa-execution.css'
 
@@ -318,18 +319,28 @@ function SessionAndTargetPanel({ workspace, sessionProbe }: { workspace: Control
 function PlanPanel({ plan }: { plan: RunnerV3Plan }) {
   const fields = plan.steps.filter(step => step.kind === 'field_action')
   const objectAvailability = plan.object_availability ?? []
+  const objectPresentations = objectAvailability.map(presentObjectAvailability)
+  const unavailableCount = objectPresentations.filter(item => !item.available).length
   const blocked = plan.blocked_reasons.length > 0
   const boundary = plan.steps.find(step => step.remote_write) ?? plan.steps.at(-1)
   return <section className="controlled-execution-plan" aria-label="Runner v3 执行计划">
     <header><div><span className="section-label">Runner v3 plan</span><h3>{plan.plan_kind}</h3></div><span className={plan.blocked_reasons.length ? 'blocked' : 'ready'}>{plan.blocked_reasons.length ? '计划被阻止' : '计划可执行'}</span></header>
     <div className="controlled-execution-plan-summary"><span>账户 <b>{plan.account_reference}</b></span><span>当前阶段 <b>{plan.internal_object_kind === 'project' ? '创建项目' : plan.internal_object_kind === 'promotion' ? '创建单元' : plan.plan_kind}</b></span><span>Cookies 对象 <b>{plan.internal_object_id || '未提供'}</b></span><span>父项目 <b>{plan.parent_project_reference || '等待项目回写'}</b></span><span>字段 <b>{fields.length}</b></span></div>
-    {plan.blocked_reasons.length ? <p className="danger-copy">{plan.blocked_reasons.join('；')}</p> : null}
+    {plan.blocked_reasons.length ? <p className="danger-copy">{plan.blocked_reasons.map(presentPlanBlockedReason).join('；')}</p> : null}
     {objectAvailability.length ? <section className="controlled-execution-object-availability" aria-label="巨量对象可用性">
-      <h4>巨量对象可用性</h4>
-      {objectAvailability.map(item => <div key={`${item.field_key}-${item.internal_object_id}`} className={item.available ? 'ready' : 'blocked'}>
-        <span><b>{item.display_name || item.internal_object_id}</b><small>{item.field_key} · {item.object_kind}</small></span>
-        <span>{item.available ? <>可用 · <code>{item.platform_object_id}</code></> : item.reason || '不可用'}</span>
-      </div>)}
+      <header><div><h4>巨量对象检查</h4><small>已检查 {objectAvailability.length} 项。{objectAvailability.length - unavailableCount} 项可用，{unavailableCount} 项需处理。</small></div><span className={unavailableCount ? 'blocked' : 'ready'}>{unavailableCount ? `${unavailableCount} 项需处理` : '全部可用'}</span></header>
+      {objectPresentations.map((item, index) => <article key={`${objectAvailability[index].field_key}-${objectAvailability[index].internal_object_id}`} className={item.available ? 'ready' : 'blocked'}>
+        <div className="controlled-execution-object-identity">
+          <small>{item.scopeLabel} · {item.kindLabel}</small>
+          <b>{item.name}</b>
+        </div>
+        <div className="controlled-execution-object-status">
+          <strong>{item.statusLabel}</strong>
+          <small>{item.statusDetail}</small>
+          {item.platformId ? <span>平台 ID：<code>{item.platformId}</code></span> : null}
+          <details><summary>技术信息</summary><code>{objectAvailability[index].field_key}</code><span>对象类型：{item.technicalType}</span></details>
+        </div>
+      </article>)}
     </section> : null}
     <details><summary>查看字段计划和目标值</summary><div className="controlled-execution-plan-fields">{fields.map(step => <div key={step.id}><b>{step.field_key}</b><span>{step.operation}</span><code>{formatPlanValue(step.value)}</code></div>)}</div></details>
     <div className="controlled-execution-boundary"><ShieldAlert size={18} /><div><b>远程写入边界</b><span>{blocked ? '未开放' : boundary?.scope || boundary?.target || boundary?.id || '未定义'}</span><small>{blocked ? '对象可用性校验未通过。系统不会打开平台页面。' : `Prepare：禁止远端写入。Submit：最多 ${Math.max(1, plan.maximum_final_clicks || 1)} 次最终点击。`}</small></div></div>
