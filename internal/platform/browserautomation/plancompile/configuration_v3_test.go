@@ -39,6 +39,68 @@ func TestCompileConfigurationV3CreatesAndEditsBoundObjects(t *testing.T) {
 	}
 }
 
+func TestCompileConfigurationV3FillsOwnedLandingPageLink(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	configuration.Payload.OceanEngine.Project.Carrier = "owned_landing_page"
+	configuration.Payload.OceanEngine.Promotions[0].LandingPageReference = &delivery.StableReference{
+		Namespace: "cookies", ObjectKind: "owned_landing_page", Scope: "current_project",
+		ID: "https://example.test/landing", State: delivery.ReferenceResolved,
+	}
+
+	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var promotionPlan v3Plan
+	if err := json.Unmarshal(compiled.Forms[1].Plan, &promotionPlan); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range promotionPlan.Steps {
+		if step.FieldKey == "promotion.landing_page_reference" {
+			if step.Operation != "fill_text" || step.Target != "请选择或填写自研落地页链接" || step.Value != "https://example.test/landing" {
+				t.Fatalf("owned landing-page step = %#v", step)
+			}
+			availability := configurationObjectAvailability(*configuration.Payload.OceanEngine)
+			ownedAvailable := false
+			for _, item := range availability {
+				if item.FieldKey == "promotions.0.landing_page_reference" && item.Available {
+					ownedAvailable = true
+				}
+			}
+			if !ownedAvailable {
+				t.Fatalf("owned landing-page availability = %#v", availability)
+			}
+			return
+		}
+	}
+	t.Fatal("owned landing-page step is missing")
+}
+
+func TestCompileConfigurationV3AcceptsOtherBrandSentinel(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	configuration.Payload.OceanEngine.Promotions[0].Settings.BrandReference = &delivery.StableReference{
+		Namespace: "oceanengine", ObjectKind: "brand", Scope: "account:oeacct_safe",
+		ID: "-1", State: delivery.ReferenceResolved, DisplayNameSnapshot: "其他",
+		AuditAttributes: map[string]string{"platform_object_id": "-1"},
+	}
+
+	availability := configurationObjectAvailability(*configuration.Payload.OceanEngine)
+	for _, item := range availability {
+		if item.FieldKey == "promotions.0.settings.brand_reference" {
+			if !item.Available || item.PlatformObjectID != "-1" {
+				t.Fatalf("other brand availability = %#v", item)
+			}
+			if _, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now); err != nil {
+				t.Fatalf("compile other brand: %v", err)
+			}
+			return
+		}
+	}
+	t.Fatalf("other brand availability is missing: %#v", availability)
+}
+
 func TestV3BindingsFromMappingsUsesConfirmedObjectsAndSkipsPendingStages(t *testing.T) {
 	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
 	configuration, _ := executableConfigurationFixture(now)
@@ -86,6 +148,10 @@ func TestCompileConfigurationV3RejectsLimitsReferencesAndAccountPaths(t *testing
 		{"landing intent", func(c *delivery.PlatformConfiguration, i *delivery.DeliveryIntent) {
 			i.Payload.LandingPageReferences = nil
 		}, "1855554434276391", "outside the delivery intent"},
+		{"owned carrier with Orange landing page", func(c *delivery.PlatformConfiguration, _ *delivery.DeliveryIntent) {
+			c.Payload.OceanEngine.Project.Carrier = "owned_landing_page"
+			c.Payload.OceanEngine.Promotions[0].LandingPageReference.ObjectKind = "orange_landing_page"
+		}, "1855554434276391", "cannot use an Orange landing page"},
 		{"brand", func(c *delivery.PlatformConfiguration, _ *delivery.DeliveryIntent) {
 			c.Payload.OceanEngine.Promotions[0].Settings.BrandReference.State = delivery.ReferenceUnresolved
 		}, "1855554434276391", "not resolved"},

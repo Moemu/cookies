@@ -181,7 +181,7 @@ func CompileConfigurationV3(configuration delivery.PlatformConfiguration, intent
 			}
 			kind = "promotion_edit"
 		}
-		plan := formPlan(kind, account, objectID, parentID, parent, orderedPromotionFields(project), values)
+		plan := formPlan(kind, account, objectID, parentID, parent, orderedPromotionFields(project, promotion), values)
 		raw, _ := json.Marshal(plan)
 		depends := ""
 		if bindings.ProjectPlatformID == "" {
@@ -235,6 +235,9 @@ func validateConfigurationLimits(project delivery.OceanEngineProjectDraft, promo
 		}
 	}
 	for _, promotion := range promotions {
+		if err := validatePromotionLandingPageCarrier(project.Carrier, promotion.LandingPageReference); err != nil {
+			return fmt.Errorf("promotion %s: %w", promotion.PromotionDraftID, err)
+		}
 		if len(promotion.CopyItems) == 0 || strings.TrimSpace(promotion.PromotionName) == "" || strings.TrimSpace(promotion.Settings.SourceLabel) == "" {
 			return fmt.Errorf("promotion %s requires copy, source, and name", promotion.PromotionDraftID)
 		}
@@ -251,6 +254,25 @@ func validateConfigurationLimits(project delivery.OceanEngineProjectDraft, promo
 		if err := validateBid(value); err != nil {
 			return fmt.Errorf("promotion %s: %w", promotion.PromotionDraftID, err)
 		}
+	}
+	return nil
+}
+
+func validatePromotionLandingPageCarrier(carrier string, reference *delivery.StableReference) error {
+	if reference == nil {
+		return nil
+	}
+	switch carrier {
+	case "orange_landing_page", "orange_landing_page_and_im":
+		if reference.ObjectKind == "owned_landing_page" {
+			return fmt.Errorf("Orange landing-page carrier cannot use an owned landing page")
+		}
+	case "owned_landing_page":
+		if reference.ObjectKind == "orange_landing_page" {
+			return fmt.Errorf("owned landing-page carrier cannot use an Orange landing page")
+		}
+	default:
+		return fmt.Errorf("carrier %s does not use a promotion landing page", carrier)
 	}
 	return nil
 }
@@ -379,11 +401,18 @@ func promotionPlanValues(p delivery.OceanEnginePromotionDraft, project delivery.
 		values["promotion.product_image_references"] = spec
 	}
 	if p.LandingPageReference != nil {
-		spec, err := stableReferenceSpec(*p.LandingPageReference, intentRefs(intent, "landing_page"))
-		if err != nil {
-			return nil, fmt.Errorf("landing page: %w", err)
+		if project.Carrier == "owned_landing_page" && p.LandingPageReference.ObjectKind == "owned_landing_page" {
+			if p.LandingPageReference.State != delivery.ReferenceResolved || strings.TrimSpace(p.LandingPageReference.ID) == "" {
+				return nil, fmt.Errorf("landing page: owned landing-page reference is not resolved")
+			}
+			values["promotion.landing_page_reference"] = strings.TrimSpace(p.LandingPageReference.ID)
+		} else {
+			spec, err := stableReferenceSpec(*p.LandingPageReference, intentRefs(intent, "landing_page"))
+			if err != nil {
+				return nil, fmt.Errorf("landing page: %w", err)
+			}
+			values["promotion.landing_page_reference"] = spec
 		}
-		values["promotion.landing_page_reference"] = spec
 	}
 	if p.Settings.CategoryReference != nil {
 		label, err := resolvedLabel(*p.Settings.CategoryReference)
@@ -553,9 +582,12 @@ func orderedProjectFields(project delivery.OceanEngineProjectDraft, parent v3Par
 	}
 	return specs(keys, projectSpecs)
 }
-func orderedPromotionFields(project delivery.OceanEngineProjectDraft) []fieldSpec {
+func orderedPromotionFields(project delivery.OceanEngineProjectDraft, promotion delivery.OceanEnginePromotionDraft) []fieldSpec {
 	parent, _ := parentContext(project)
 	keys := []string{"promotion.delivery_identity", "promotion.base_materials", "promotion.copy_materials", "promotion.product_image_references", "promotion.product_selling_points", "promotion.landing_page_reference", "promotion.call_to_action", "promotion.source_label", "promotion.comments_enabled", "promotion.smart_generation_enabled", "promotion.category", "promotion.brand_reference", "promotion.promotion_name"}
+	if !slices.Contains([]string{"orange_landing_page", "orange_landing_page_and_im", "owned_landing_page"}, project.Carrier) {
+		keys = removeKey(keys, "promotion.landing_page_reference")
+	}
 	if parent.DeliveryMode == "manual" {
 		keys = append(keys, "promotion.daily_budget", "promotion.bid")
 	}
@@ -566,7 +598,19 @@ func orderedPromotionFields(project delivery.OceanEngineProjectDraft) []fieldSpe
 	if parent.PlacementMode == "preferred_media" {
 		keys = append(keys, "promotion.pangle_bid_coefficient")
 	}
-	return specs(keys, promotionSpecs)
+	fields := specs(keys, promotionSpecs)
+	if project.Carrier == "owned_landing_page" {
+		for index := range fields {
+			if fields[index].Key != "promotion.landing_page_reference" {
+				continue
+			}
+			fields[index].Target = "请选择或填写自研落地页链接"
+			if promotion.LandingPageReference != nil && promotion.LandingPageReference.ObjectKind == "owned_landing_page" {
+				fields[index].Operation = "fill_text"
+			}
+		}
+	}
+	return fields
 }
 func specs(keys []string, source map[string]fieldSpec) []fieldSpec {
 	out := make([]fieldSpec, 0, len(keys))

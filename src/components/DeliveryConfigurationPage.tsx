@@ -4,7 +4,6 @@ import {
   DeliveryApiError,
   deliveryPlanApi,
   deliveryExecutionApi,
-  type DeliveryControlChangeSet,
   type DeliveryPlan,
   type PlatformConfiguration,
   type StableReference,
@@ -13,6 +12,7 @@ import { useProject } from '../context/ProjectContext'
 import { ApiRequestError, api, type ApiAssetVersionPointer, type ApiConnectorAccount, type ApiConnectorPlatformObject, type ApiConnectorPlatformObjectKind } from '../data/api'
 import { oceanEngineCalibrationDispositions, visibleOceanEngineManifestFields, type CalibrationDisposition, type VisibleManifestField } from '../lib/oceanengineCalibrationManifest'
 import { fromShanghaiEndDate, fromShanghaiStartDate, toShanghaiDateInput } from '../lib/deliverySchedule'
+import { carrierUsesOrangeLandingPage, changeOceanEngineCarrier, normalizeOceanEngineLandingPages } from '../lib/deliveryCarrier'
 import { projectPath } from '../lib/router'
 import type { DataState } from '../types'
 import { StateBoundary } from './StateBoundary'
@@ -117,7 +117,7 @@ type OceanPromotion = OceanConfiguration['promotions'][number]
 function updateReference(current: StableReference | undefined, id: string, objectKind: string): StableReference | undefined {
   const value = id.trim()
   if (!value) return undefined
-  return { namespace: 'cookies', object_kind: objectKind, scope: current?.scope ?? 'current_project', state: 'resolved', ...current, id: value }
+  return { ...current, namespace: 'cookies', object_kind: objectKind, scope: current?.scope ?? 'current_project', state: 'resolved', id: value }
 }
 
 type PlatformObjectPage = { items: ApiConnectorPlatformObject[]; next_cursor: string }
@@ -521,6 +521,18 @@ function PlatformConfigurationEditor({ value, onChange, products, assets, platfo
   const updateOcean = (next: OceanConfiguration) => onChange({ ...value, payload: { ...value.payload, ocean_engine: next } })
   const updateProject = (patch: Partial<OceanConfiguration['project']>) => updateOcean({ ...ocean, project: { ...ocean.project, ...patch } })
   const updatePromotion = (index: number, patch: Partial<OceanPromotion>) => updateOcean({ ...ocean, promotions: ocean.promotions.map((promotion, itemIndex) => itemIndex === index ? { ...promotion, ...patch } : promotion) })
+  const updateCarrier = (carrier: string) => {
+    if (carrier === ocean.project.carrier) return
+    updateOcean(changeOceanEngineCarrier(ocean, carrier))
+  }
+  const updateLeadCaptureMode = (leadCaptureMode: string) => {
+    const carrier = leadCaptureMode === 'smart_lead' && ocean.project.carrier === 'owned_landing_page' ? 'orange_landing_page' : ocean.project.carrier
+    updateOcean({
+      ...ocean,
+      project: { ...ocean.project, lead_capture_mode: leadCaptureMode, carrier },
+      promotions: carrier === ocean.project.carrier ? ocean.promotions : ocean.promotions.map(promotion => ({ ...promotion, landing_page_reference: undefined })),
+    })
+  }
   const addPromotion = () => updateOcean({ ...ocean, promotions: [...ocean.promotions, {
     draft_schema_version: 'oceanengine-configuration/v1',
     promotion_draft_id: `promotion-local-${Date.now()}`,
@@ -575,7 +587,7 @@ function PlatformConfigurationEditor({ value, onChange, products, assets, platfo
           <label><span>下载方式</span><select value={ocean.project.application_download_mode ?? ''} onChange={event => updateProject({ application_download_mode: event.target.value })}><option value="">请选择</option><option value="direct_download">直接下载</option><option value="reservation_download">预约下载</option></select></label>
           <label><span>调起方式</span><input value={ocean.project.application_launch_mode ?? ''} onChange={event => updateProject({ application_launch_mode: event.target.value })}/></label>
         </> : null}
-        {ocean.project.marketing_purpose === 'lead_generation' ? <label><span>获取线索方式</span><select value={ocean.project.lead_capture_mode ?? 'smart_lead'} onChange={event => updateProject({ lead_capture_mode: event.target.value, carrier: event.target.value === 'smart_lead' && ocean.project.carrier === 'owned_landing_page' ? 'orange_landing_page' : ocean.project.carrier })}><option value="smart_lead">智能优选</option><option value="custom_lead">自定义</option></select></label> : null}
+        {ocean.project.marketing_purpose === 'lead_generation' ? <label><span>获取线索方式</span><select value={ocean.project.lead_capture_mode ?? 'smart_lead'} onChange={event => updateLeadCaptureMode(event.target.value)}><option value="smart_lead">智能优选</option><option value="custom_lead">自定义</option></select></label> : null}
         <label><span>投放模式</span><select value={ocean.project.delivery_mode} onChange={event => updateProject({ delivery_mode: event.target.value })}><option value="manual">手动投放</option><option value="ubmax">UBMax</option></select></label>
         <label><span>深度优化方式</span><select value={ocean.project.deep_optimization_mode ?? 'disabled'} onChange={event => updateProject({ deep_optimization_mode: event.target.value })}><option value="disabled">不启用</option><option value="conversion_roi">成交 ROI</option><option value="net_conversion_order">净成交下单</option><option value="net_conversion_roi">净成交 ROI</option></select><small>平台会按当前场景限制可用选项。</small></label>
         {['lead_generation', 'ecommerce'].includes(ocean.project.marketing_purpose) ? <ToggleField label="AIGC 动态创意" checked={ocean.project.aigc_dynamic_creative ?? false} onChange={aigc_dynamic_creative => updateProject({ aigc_dynamic_creative })}/> : null}
@@ -596,7 +608,7 @@ function PlatformConfigurationEditor({ value, onChange, products, assets, platfo
     <div className="delivery-config-project-editor">
       <div className="delivery-config-subheading"><div><span>02</span><div><h4>投放载体和监测</h4><p>设置落地页、优化目标、搜索快投和第三方监测。</p></div></div></div>
       <div className="delivery-config-editor-fields delivery-config-editor-fields--wide">
-        <label><span>投放载体</span><select value={ocean.project.carrier} onChange={event => updateProject({ carrier: event.target.value })}><option value="orange_landing_page">橙子落地页</option>{ocean.project.marketing_purpose === 'lead_generation' && ocean.project.lead_capture_mode === 'smart_lead' ? <option value="orange_landing_page_and_im">橙子落地页 + 抖音私信页</option> : null}{ocean.project.marketing_purpose !== 'lead_generation' || ocean.project.lead_capture_mode === 'custom_lead' ? <><option value="owned_landing_page">自研落地页</option><option value="im">抖音私信页（原抖音主页）</option></> : null}<option value="byte_miniapp" disabled>字节小程序（暂不支持）</option><option value="wechat_miniapp" disabled>微信小程序（暂不支持）</option></select></label>
+        <label><span>投放载体</span><select value={ocean.project.carrier} onChange={event => updateCarrier(event.target.value)}><option value="orange_landing_page">橙子落地页</option>{ocean.project.marketing_purpose === 'lead_generation' && ocean.project.lead_capture_mode === 'smart_lead' ? <option value="orange_landing_page_and_im">橙子落地页 + 抖音私信页</option> : null}{ocean.project.marketing_purpose !== 'lead_generation' || ocean.project.lead_capture_mode === 'custom_lead' ? <><option value="owned_landing_page">自研落地页</option><option value="im">抖音私信页（原抖音主页）</option></> : null}<option value="byte_miniapp" disabled>字节小程序（暂不支持）</option><option value="wechat_miniapp" disabled>微信小程序（暂不支持）</option></select></label>
         <ReferenceObjectPicker label="优化目标" pickerTitle="选择优化目标" value={ocean.project.optimization_target_reference} objectKind="optimization_target" loadPlatformObjects={loadOptimizationTargets} requiredContext={ocean.project.carrier === 'owned_landing_page' ? 'owned_landing_page' : 'orange_landing_page'} onChange={optimization_target_reference => updateProject({ optimization_target_reference })}/>
 
         <ToggleField label="商品定向 · RTA 跳转" checked={ocean.project.product_targeting?.rta_redirect ?? false} onChange={rta_redirect => updateProject({ product_targeting: { ...ocean.project.product_targeting, rta_redirect } })}/>
@@ -617,7 +629,8 @@ function PlatformConfigurationEditor({ value, onChange, products, assets, platfo
           {promotion.delivery_identity.mode === 'authorized_identity' ? <ReferenceObjectPicker label="授权身份" pickerTitle="选择授权身份" value={promotion.delivery_identity.authorized_identity} objectKind="authorized_identity" loadPlatformObjects={loadAuthorizedIdentities} onChange={authorized_identity => updatePromotion(index, { delivery_identity: { ...promotion.delivery_identity, authorized_identity } })}/> : null}
           <label><span>单元日预算</span><div className="delivery-config-money-input"><input name={`promotion_${index}_daily_budget`} autoComplete="off" type="number" inputMode="decimal" min="0" value={(promotion.budget_and_bidding?.daily_budget_minor ?? 0) / 100} onChange={event => updatePromotion(index, { budget_and_bidding: { currency: 'CNY', bidding_strategy: promotion.budget_and_bidding?.bidding_strategy ?? 'stable_cost', charging_mode: promotion.budget_and_bidding?.charging_mode ?? 'CPC', ...promotion.budget_and_bidding, daily_budget_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元 / 天</small></div></label>
           <label><span>单元出价</span><div className="delivery-config-money-input"><input name={`promotion_${index}_bid`} autoComplete="off" type="number" inputMode="decimal" min="0" step="0.01" value={(promotion.budget_and_bidding?.bid_minor ?? 0) / 100} onChange={event => updatePromotion(index, { budget_and_bidding: { currency: 'CNY', daily_budget_minor: promotion.budget_and_bidding?.daily_budget_minor ?? 0, bidding_strategy: promotion.budget_and_bidding?.bidding_strategy ?? 'stable_cost', charging_mode: promotion.budget_and_bidding?.charging_mode ?? 'CPC', ...promotion.budget_and_bidding, bid_minor: Math.round(Number(event.target.value) * 100) } })}/><small>元</small></div></label>
-          <label><span>橙子落地页</span><select value={promotion.landing_page_reference?.id ?? ''} onChange={event => { const item = platformObjects.find(value => value.object_kind === 'orange_landing_page' && value.platform_object_id === event.target.value); updatePromotion(index, { landing_page_reference: item ? { namespace: 'oceanengine', object_kind: 'orange_landing_page', scope: `account:${item.account_id}`, id: item.platform_object_id, version: String(item.version), state: 'resolved', display_name_snapshot: item.display_name || item.platform_object_id, audit_attributes: { connector_platform_object_id: item.id } } : undefined }) }}><option value="">请选择已导入落地页</option>{platformObjects.filter(item => item.object_kind === 'orange_landing_page').map(item => <option key={item.id} value={item.platform_object_id}>{item.display_name || item.platform_object_id}</option>)}</select>{platformObjects.find(item => item.object_kind === 'orange_landing_page' && item.platform_object_id === promotion.landing_page_reference?.id)?.preview_url ? <a className="delivery-config-preview-link" href={platformObjects.find(item => item.object_kind === 'orange_landing_page' && item.platform_object_id === promotion.landing_page_reference?.id)?.preview_url} target="_blank" rel="noreferrer">预览当前落地页</a> : null}</label>
+          {carrierUsesOrangeLandingPage(ocean.project.carrier) ? <label><span>橙子落地页</span><select value={promotion.landing_page_reference?.id ?? ''} onChange={event => { const item = platformObjects.find(value => value.object_kind === 'orange_landing_page' && value.platform_object_id === event.target.value); updatePromotion(index, { landing_page_reference: item ? { namespace: 'oceanengine', object_kind: 'orange_landing_page', scope: `account:${item.account_id}`, id: item.platform_object_id, version: String(item.version), state: 'resolved', display_name_snapshot: item.display_name || item.platform_object_id, audit_attributes: { connector_platform_object_id: item.id, platform_object_id: item.platform_object_id } } : undefined }) }}><option value="">请选择已导入落地页</option>{platformObjects.filter(item => item.object_kind === 'orange_landing_page').map(item => <option key={item.id} value={item.platform_object_id}>{item.display_name || item.platform_object_id}</option>)}</select>{platformObjects.find(item => item.object_kind === 'orange_landing_page' && item.platform_object_id === promotion.landing_page_reference?.id)?.preview_url ? <a className="delivery-config-preview-link" href={platformObjects.find(item => item.object_kind === 'orange_landing_page' && item.platform_object_id === promotion.landing_page_reference?.id)?.preview_url} target="_blank" rel="noreferrer">预览当前落地页</a> : null}</label> : null}
+          {ocean.project.carrier === 'owned_landing_page' ? <label><span>自研落地页链接</span><input type="url" placeholder="请输入 HTTPS 落地页链接" value={promotion.landing_page_reference?.object_kind === 'owned_landing_page' ? promotion.landing_page_reference.id ?? '' : ''} onChange={event => updatePromotion(index, { landing_page_reference: updateReference(promotion.landing_page_reference, event.target.value, 'owned_landing_page') })}/><small>Runner 将把该链接填写到自研落地页字段。</small></label> : null}
           <label><span>直达链接引用</span><input value={promotion.direct_link_reference?.id ?? ''} onChange={event => updatePromotion(index, { direct_link_reference: updateReference(promotion.direct_link_reference, event.target.value, 'direct_link') })}/></label>
           <label><span>产品引用</span><input value={promotion.product_reference?.id ?? ''} onChange={event => updatePromotion(index, { product_reference: updateReference(promotion.product_reference, event.target.value, 'product') })}/></label>
           <label><span>原生锚点 ID</span><input value={promotion.native_anchor_reference?.id ?? ''} onChange={event => updatePromotion(index, { native_anchor_reference: updateReference(promotion.native_anchor_reference, event.target.value, 'native_anchor') })}/></label>
@@ -644,7 +657,6 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const confirmedAssets = useMemo(() => (agencyWorkbench?.assetVersionPointers ?? []).filter(asset => asset.projectId === projectId && asset.humanConfirmedVersion), [agencyWorkbench, projectId])
   const [plans, setPlans] = useState<DeliveryPlan[]>([])
   const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get('plan_id') ?? '')
-  const [changeSet, setChangeSet] = useState<DeliveryControlChangeSet>()
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [editableConfiguration, setEditableConfiguration] = useState<PlatformConfiguration>()
@@ -653,6 +665,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const [accountsLoaded, setAccountsLoaded] = useState(false)
   const [platformObjectError, setPlatformObjectError] = useState('')
   const refreshGenerationRef = useRef(0)
+  const executionStartKeyRef = useRef('')
 
   const selectedPlan = useMemo(() => plans.find(plan => plan.id === selectedId), [plans, selectedId])
   const platformConfiguration = selectedPlan?.currentVersion.platformConfiguration
@@ -661,16 +674,6 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const showCalibration = activeView === '字段校准与处置'
   const showPreflight = activeView === '检查与提交'
   const planEditorURL = projectPath(projectId, 'delivery', 'plans', undefined, '计划列表', undefined, tourRunId, tourCase)
-
-  const restoreWorkflow = async (planId: string) => {
-    if (!planId) return
-    try {
-      const changeSets = await deliveryPlanApi.listChangeSets(projectId)
-      setChangeSet(changeSets.filter(item => item.planId === planId).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0])
-    } catch (error) {
-      setNotice(errorMessage(error, '恢复计划的变更申请失败。'))
-    }
-  }
 
   const refresh = async () => {
     const generation = ++refreshGenerationRef.current
@@ -689,8 +692,16 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   }
 
   useEffect(() => { void refresh() }, [projectId])
-  useEffect(() => { if (selectedId) void restoreWorkflow(selectedId) }, [projectId, selectedId])
-  useEffect(() => { setEditableConfiguration(platformConfiguration ? structuredClone(platformConfiguration) : undefined) }, [selectedId, selectedPlan?.currentVersionNumber])
+  useEffect(() => {
+    if (!platformConfiguration) {
+      setEditableConfiguration(undefined)
+      return
+    }
+    const next = structuredClone(platformConfiguration)
+    if (next.payload.ocean_engine) next.payload.ocean_engine = normalizeOceanEngineLandingPages(next.payload.ocean_engine)
+    setEditableConfiguration(next)
+  }, [selectedId, selectedPlan?.currentVersionNumber])
+  useEffect(() => { executionStartKeyRef.current = '' }, [selectedId, selectedPlan?.currentVersionNumber])
   useEffect(() => {
     let active = true
     setAccountsLoaded(false)
@@ -756,29 +767,28 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
     if (!selectedPlan || !editableConfiguration) return
     setBusy(true)
     try {
-      const updated = await deliveryPlanApi.updatePlatformConfiguration(projectId, selectedPlan, editableConfiguration)
+      const normalized = structuredClone(editableConfiguration)
+      if (normalized.payload.ocean_engine) normalized.payload.ocean_engine = normalizeOceanEngineLandingPages(normalized.payload.ocean_engine)
+      setEditableConfiguration(normalized)
+      const updated = await deliveryPlanApi.updatePlatformConfiguration(projectId, selectedPlan, normalized)
       setPlans(current => current.map(plan => plan.id === updated.id ? updated : plan))
       setNotice(`平台配置已保存为 V${updated.currentVersionNumber}。未执行巨量远端操作。`)
     } catch (error) { setNotice(errorMessage(error, '保存平台配置失败。')) } finally { setBusy(false) }
   }
 
-  const confirmLaunch = async () => {
+  const startRealExecution = async () => {
     if (!selectedPlan) return
     setBusy(true)
     try {
-      const idempotencyKey = `launch-${selectedPlan.id}-${selectedPlan.currentVersionNumber}-${Date.now()}`
-      const result = await deliveryExecutionApi.executePlan(projectId, selectedPlan.id, selectedPlan.currentVersionNumber, idempotencyKey)
-      setNotice(
-        result.execution.status === 'succeeded'
-          ? '已确认投放并完成平台写入（本地模拟）。'
-          : `投放执行结果为 ${result.execution.status}：${result.execution.recoveryReason || '详见执行记录'}。`,
-      )
-      setChangeSet(result.changeSet)
+      if (!executionStartKeyRef.current) executionStartKeyRef.current = `browser-rpa-${selectedPlan.id}-v${selectedPlan.currentVersionNumber}`
+      const idempotencyKey = executionStartKeyRef.current
+      const result = await deliveryExecutionApi.startBrowserRpaExecution(projectId, selectedPlan.id, selectedPlan.currentVersionNumber, idempotencyKey)
+      window.location.assign(projectPath(projectId, 'delivery', 'execution', result.browser_rpa_run.run_id))
     } catch (error) {
       if (error instanceof DeliveryApiError && error.code === 'VALIDATION_FAILED' && error.violations.length) {
         setNotice(`当前配置无法投放：${error.violations.map(item => item.reason).join('；')}`)
       } else {
-        setNotice(errorMessage(error, '确认投放失败。'))
+        setNotice(errorMessage(error, '创建真实受控执行失败。'))
       }
     } finally { setBusy(false) }
   }
@@ -793,10 +803,10 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
         {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration} products={currentProject.products ?? []} assets={confirmedAssets} platformObjects={platformObjects} connectorAccounts={connectorAccounts} platformObjectError={platformObjectError} loadVideos={loadVideos} loadImages={loadImages} loadPhotos={loadPhotos} loadProducts={loadProducts} loadOptimizationTargets={loadOptimizationTargets} loadAuthorizedIdentities={loadAuthorizedIdentities} loadCategories={loadCategories} loadBrands={loadBrands}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
         {showCalibration && platformConfiguration ? <CalibrationDispositionView value={platformConfiguration}/> : null}
         {showPreflight ? <section className="delivery-config-flow-grid delivery-config-flow-grid--preflight"><article className="delivery-config-preflight-card">
-          <header><div><span className="section-label">确认投放</span><h3>检查并确认投放</h3></div><strong className="delivery-config-preflight-state">{changeSet ? `最近执行 ${changeSet.status}` : '尚未投放'}</strong></header>
-          <div className="delivery-config-preflight-summary"><b>服务端校验</b><p>保存时会校验结构；确认投放时要求执行所需引用与平台证据均已解析。</p></div>
+          <header><div><span className="section-label">真实受控执行</span><h3>检查配置并进入 Runner v3</h3></div><strong className="delivery-config-preflight-state">尚未创建执行</strong></header>
+          <div className="delivery-config-preflight-summary"><b>执行前置检查</b><p>服务端先检查结构、预算、日期、引用和平台对象。通过后创建真实 Browser RPA Run。Runner 会在最终提交前停止并等待确认。</p></div>
           <div className="delivery-config-actions delivery-config-preflight-actions">
-            <button className="primary-button" onClick={() => void confirmLaunch()} disabled={busy || legacyReadOnly}><Check size={14}/>确认投放</button>
+            <button className="primary-button" onClick={() => void startRealExecution()} disabled={busy || legacyReadOnly}><Check size={14}/>{busy ? '正在创建…' : '进入真实受控执行'}</button>
           </div>
         </article></section> : null}
       </>}

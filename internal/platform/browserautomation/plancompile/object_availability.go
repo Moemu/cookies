@@ -28,6 +28,9 @@ func configurationObjectAvailability(configuration delivery.OceanEngineConfigura
 			return
 		}
 		platformID := platformReferenceID(*ref)
+		if ref.ObjectKind == "owned_landing_page" && ref.State == delivery.ReferenceResolved {
+			platformID = strings.TrimSpace(ref.ID)
+		}
 		item := V3ObjectAvailability{
 			FieldKey: field, ObjectKind: ref.ObjectKind, InternalObjectID: ref.ID,
 			DisplayName: ref.DisplayNameSnapshot, PlatformObjectID: platformID,
@@ -98,12 +101,18 @@ func platformReferenceID(ref delivery.StableReference) string {
 		keys = append(keys, "ocean_engine_brand_id")
 	}
 	for _, key := range keys {
-		if value := strings.TrimSpace(ref.AuditAttributes[key]); numericReference(value) {
+		if value := strings.TrimSpace(ref.AuditAttributes[key]); validPlatformReferenceID(ref.ObjectKind, value) {
 			return value
 		}
 	}
-	if numericReference(strings.TrimSpace(ref.ID)) {
+	if validPlatformReferenceID(ref.ObjectKind, strings.TrimSpace(ref.ID)) {
 		return strings.TrimSpace(ref.ID)
 	}
 	return ""
+}
+
+func validPlatformReferenceID(objectKind, value string) bool {
+	// OceanEngine uses -1 as the real platform ID for the built-in "其他"
+	// brand option. No other object kind can use a negative sentinel here.
+	return numericReference(value) || objectKind == "brand" && value == "-1"
 }

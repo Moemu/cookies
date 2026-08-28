@@ -117,7 +117,7 @@ function validateSubmitPlan(plan: OceanEngineFormPlan, confirmToken: string | un
 }
 
 function stableReferenceID(value: unknown) {
-  if (typeof value === "string" && /^\d+$/.test(value)) return value;
+  if (typeof value === "string" && value.trim()) return value.trim();
   if (!value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
   for (const key of ["object_id", "objectId", "id"]) {
@@ -391,6 +391,7 @@ export class PlaywrightPageOperations implements PageOperations {
     if (step.field_key === "promotion.landing_page_reference") {
       const landingInput = this.page.getByPlaceholder(step.target, { exact: true });
       if ((await landingInput.count()) === 1) {
+        if (step.operation === "fill_text" && await landingInput.isVisible()) return landingInput;
         const pickerControl = landingInput.locator("xpath=following-sibling::*[contains(@class,'input__suffix')][1]");
         if ((await pickerControl.count()) === 1 && await pickerControl.isVisible()) return pickerControl;
       }
@@ -1004,7 +1005,9 @@ export class PlaywrightPageOperations implements PageOperations {
         landingInput = editPage.getByPlaceholder(/落地页链接/);
       }
       const landingObserved = (await landingInput.count()) > 0
-        ? await landingInput.first().evaluate((element) => {
+        ? landingExpected?.startsWith("http")
+          ? (await landingInput.first().inputValue()).trim()
+          : await landingInput.first().evaluate((element) => {
             let current: Element | null = element;
             for (let depth = 0; current && depth < 10; depth += 1, current = current.parentElement) {
               const match = current.textContent?.match(/ID[:：]\s*(\d+)/);

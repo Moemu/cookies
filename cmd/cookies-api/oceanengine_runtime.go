@@ -54,7 +54,7 @@ func (f oceanEngineConnectorReaderFactory) Open(ctx context.Context, request con
 	}
 	var ciphertext []byte
 	var keyVersion string
-	if request.ProjectID == "" {
+	if strings.HasPrefix(strings.TrimSpace(request.AccountRef), "oeacct_") {
 		if f.accountSessions == nil {
 			return nil, nil, fmt.Errorf("Ocean Engine account session access is not configured")
 		}
