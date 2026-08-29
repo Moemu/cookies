@@ -98,6 +98,29 @@ func TestSignPictureURIsUsesReadOnlySigner(t *testing.T) {
 	}
 }
 
+func TestProductImagesPageUsesMyImagesMode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/superior/api/v2/ad/getImageList" || r.URL.Query().Get("aadvid") != "123" {
+			t.Fatalf("request=%s %s", r.Method, r.URL.RequestURI())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["page"] != float64(1) || body["limit"] != float64(30) || body["image_mode"] != float64(649502) {
+			t.Fatalf("body=%#v err=%v", body, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":0,"data":{"images":[]}}`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "123", Session{Cookies: "session=x"}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Delay = 0
+	if _, err := client.ProductImagesPage(context.Background(), AssetPageRequest{Page: 1, Limit: 50}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReferenceObjectReadersUseObservedReadOnlyRequests(t *testing.T) {
 	requestIndex := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

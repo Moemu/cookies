@@ -73,6 +73,13 @@ func TestRunEndpointsRequireScopeAndProjectIsolation(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
+	request = httptest.NewRequest(http.MethodGet, "/api/platform/v1/browser-rpa/projects/project_1/runs", nil)
+	request = request.WithContext(contract.WithRequestContext(request.Context(), contract.RequestContext{RequestID: "req", TraceID: "trace", Actor: contract.ActorContext{OrganizationID: "org_1", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user"}, Scopes: []contract.Scope{"delivery.read"}}}))
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"run_1"`) {
+		t.Fatalf("list status=%d body=%s", response.Code, response.Body.String())
+	}
 	request = httptest.NewRequest(http.MethodGet, "/api/platform/v1/browser-rpa/projects/project_1/runs/run_1", nil)
 	request = request.WithContext(contract.WithRequestContext(request.Context(), contract.RequestContext{RequestID: "req", TraceID: "trace", Actor: contract.ActorContext{OrganizationID: "org_2", Principal: contract.Principal{Kind: contract.PrincipalUser, ID: "user"}, Scopes: []contract.Scope{"delivery.read"}}}))
 	response = httptest.NewRecorder()

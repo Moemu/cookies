@@ -61,6 +61,7 @@ func (s *Server) registerRoutes(prefix string) {
 	s.mux.HandleFunc("GET "+prefix+"/projects/{project_id}/site-policies/{policy_id}", s.getSitePolicy)
 	s.mux.HandleFunc("GET "+prefix+"/projects/{project_id}/kill-switches/active", s.getActiveKillSwitch)
 	s.mux.HandleFunc("POST "+prefix+"/projects/{project_id}/runs", s.createRun)
+	s.mux.HandleFunc("GET "+prefix+"/projects/{project_id}/runs", s.listRuns)
 	s.mux.HandleFunc("GET "+prefix+"/projects/{project_id}/runs/{run_id}", s.getRun)
 	s.mux.HandleFunc("GET "+prefix+"/projects/{project_id}/runs/{run_id}/events", s.listEvents)
 	s.mux.HandleFunc("GET "+prefix+"/projects/{project_id}/runs/{run_id}/evidence", s.listEvidence)
@@ -121,6 +122,15 @@ func (s *Server) checkSession(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := s.worker.CheckSession(r.Context(), actor.OrganizationID, project, r.PathValue("run_id"))
 	writeResult(w, value, err)
+}
+
+func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.read")
+	if !ok {
+		return
+	}
+	values, err := s.service.ListRuns(r.Context(), actor.OrganizationID, project)
+	writeResult(w, map[string]any{"items": values}, err)
 }
 
 func (s *Server) plan(w http.ResponseWriter, r *http.Request) {

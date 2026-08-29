@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	v3ParentManifestID = "oceanengine-ecommerce-parent-condition-2026-08-24"
-	v3PromotionEdit    = "promotion_edit"
+	v3ParentManifestID                 = "oceanengine-ecommerce-parent-condition-2026-08-24"
+	v3PromotionEdit                    = "promotion_edit"
+	invalidDeliveryConfigurationReason = "DELIVERY_CONFIGURATION_INVALID"
 )
 
 type V3ConfigurationSource interface {
@@ -30,12 +31,17 @@ type V3MappingSource interface {
 	ListPlatformEntityMappings(context.Context, contract.OrganizationID, contract.ProjectID, string) ([]delivery.PlatformEntityMapping, error)
 }
 
+type V3AccountResolver interface {
+	ResolveExternalAccountID(context.Context, string, string, string) (string, error)
+}
+
 // V3Compiler converts one immutable Cookies run into one Runner v3 form plan.
 // The first controlled path is promotion budget edit. Other actions fail
 // closed until Runner v3 has an equivalent one-form contract.
 type V3Compiler struct {
-	Source V3ConfigurationSource
-	Now    func() time.Time
+	Source          V3ConfigurationSource
+	AccountResolver V3AccountResolver
+	Now             func() time.Time
 }
 
 var _ rparunner.V3PlanCompiler = V3Compiler{}
@@ -94,6 +100,7 @@ type v3Plan struct {
 	ParentConditionManifestID string                 `json:"parent_condition_manifest_id"`
 	ParentContext             v3ParentContext        `json:"parent_context"`
 	BlockedReasons            []string               `json:"blocked_reasons"`
+	ConfigurationIssues       []string               `json:"configuration_issues,omitempty"`
 	ObjectAvailability        []V3ObjectAvailability `json:"object_availability,omitempty"`
 	ExecutionAuthority        *v3ExecutionAuthority  `json:"execution_authority,omitempty"`
 	Steps                     []v3Step               `json:"steps"`
@@ -173,8 +180,24 @@ func (c V3Compiler) preparePlan(ctx context.Context, run browserautomation.Brows
 	if configuration == nil || configuration.Project == nil {
 		return v3Plan{}, fmt.Errorf("bound delivery configuration has no OceanEngine project")
 	}
-	if configuration.Project.AccountReference.State != delivery.ReferenceResolved || configuration.Project.AccountReference.ID != run.AccountID {
+	if configuration.Project.AccountReference.State != delivery.ReferenceResolved {
 		return v3Plan{}, fmt.Errorf("configuration account path does not match the authorized account")
+	}
+	compiledConfiguration := *version.PlatformConfiguration
+	if configuration.Project.AccountReference.ID != run.AccountID {
+		if c.AccountResolver == nil {
+			return v3Plan{}, fmt.Errorf("configuration account path does not match the authorized account")
+		}
+		resolved, resolveErr := c.AccountResolver.ResolveExternalAccountID(ctx, string(run.OrganizationID), string(run.ProjectID), configuration.Project.AccountReference.ID)
+		if resolveErr != nil || resolved != run.AccountID {
+			return v3Plan{}, fmt.Errorf("configuration account path does not match the authorized account")
+		}
+		oceanCopy := *configuration
+		projectCopy := *configuration.Project
+		projectCopy.AccountReference.ID = run.AccountID
+		oceanCopy.Project = &projectCopy
+		compiledConfiguration.Payload.OceanEngine = &oceanCopy
+		configuration = &oceanCopy
 	}
 	if len(policy.AllowedHosts) == 0 || len(policy.AllowedProtocols) == 0 {
 		return v3Plan{}, fmt.Errorf("site policy has no allowed OceanEngine origin")
@@ -184,14 +207,14 @@ func (c V3Compiler) preparePlan(ctx context.Context, run browserautomation.Brows
 		if !numericReference(run.AccountID) || !numericReference(run.Authority.ParentPlatformProjectID) || !slices.Contains(policy.AllowedPageKinds, "promotion_create") || !slices.Contains(policy.AllowedPlatformProjects, run.Authority.ParentPlatformProjectID) {
 			return v3Plan{}, fmt.Errorf("site policy does not allow the bound promotion create form")
 		}
-		bindings, bindingErr := c.stagedBindings(ctx, run, *version.PlatformConfiguration)
+		bindings, bindingErr := c.stagedBindings(ctx, run, compiledConfiguration)
 		if bindingErr != nil {
 			return v3Plan{}, bindingErr
 		}
 		bindings.ProjectPlatformID = run.Authority.ParentPlatformProjectID
-		set, compileErr := CompileConfigurationV3(*version.PlatformConfiguration, version.DeliveryIntent, run.AccountID, bindings, c.now())
+		set, compileErr := CompileConfigurationV3(compiledConfiguration, version.DeliveryIntent, run.AccountID, bindings, c.now())
 		if compileErr != nil {
-			return v3Plan{}, compileErr
+			return blockedConfigurationPlan(run, "promotion_create", run.Authority.ParentPlatformProjectID, nil, compileErr), nil
 		}
 		form, formErr := nextUnboundPromotionForm(set.Forms)
 		if formErr != nil {
@@ -210,13 +233,13 @@ func (c V3Compiler) preparePlan(ctx context.Context, run browserautomation.Brows
 				AllowRemoteWrite: false, MaximumFinalClicks: 0,
 			}, nil
 		}
-		bindings, bindingErr := c.stagedBindings(ctx, run, *version.PlatformConfiguration)
+		bindings, bindingErr := c.stagedBindings(ctx, run, compiledConfiguration)
 		if bindingErr != nil {
 			return v3Plan{}, bindingErr
 		}
-		set, compileErr := CompileConfigurationV3(*version.PlatformConfiguration, version.DeliveryIntent, run.AccountID, bindings, c.now())
+		set, compileErr := CompileConfigurationV3(compiledConfiguration, version.DeliveryIntent, run.AccountID, bindings, c.now())
 		if compileErr != nil {
-			return v3Plan{}, compileErr
+			return blockedConfigurationPlan(run, "project_create", "", availability, compileErr), nil
 		}
 		form, formErr := nextStagedCreateForm(set.Forms)
 		if formErr != nil {
@@ -266,6 +289,17 @@ func (c V3Compiler) preparePlan(ctx context.Context, run browserautomation.Brows
 		},
 		AllowRemoteWrite: false, MaximumFinalClicks: 0,
 	}, nil
+}
+
+func blockedConfigurationPlan(run browserautomation.BrowserRpaRun, planKind, parentProjectReference string, availability []V3ObjectAvailability, issue error) v3Plan {
+	required := true
+	return v3Plan{
+		SchemaVersion: rparunner.PlanSchemaV3, PlanKind: planKind, Browser: "msedge", Mode: "prepare", Status: "blocked",
+		AccountReference: run.AccountID, ParentProjectReference: parentProjectReference, ParentConditionManifestID: v3ParentManifestID,
+		BlockedReasons: []string{invalidDeliveryConfigurationReason}, ConfigurationIssues: []string{issue.Error()}, ObjectAvailability: availability,
+		Steps:            []v3Step{{ID: "001-configuration-validation", Kind: "preflight", PageKind: planKind, Required: &required, Blocked: true, BlockReason: invalidDeliveryConfigurationReason}},
+		AllowRemoteWrite: false, MaximumFinalClicks: 0,
+	}
 }
 
 func decodePlannedForm(form V3PlannedForm) (v3Plan, error) {

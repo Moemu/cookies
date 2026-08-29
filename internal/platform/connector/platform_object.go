@@ -16,6 +16,7 @@ type PlatformObjectKind string
 
 const (
 	PlatformObjectImageMaterial      PlatformObjectKind = "image_material"
+	PlatformObjectProductImage       PlatformObjectKind = "product_image"
 	PlatformObjectVideoMaterial      PlatformObjectKind = "video_material"
 	PlatformObjectAwemePhotoMaterial PlatformObjectKind = "aweme_photo_material"
 	PlatformObjectMarketingProduct   PlatformObjectKind = "marketing_product"
@@ -29,7 +30,7 @@ const (
 
 func (k PlatformObjectKind) Valid() bool {
 	switch k {
-	case PlatformObjectImageMaterial, PlatformObjectVideoMaterial, PlatformObjectAwemePhotoMaterial,
+	case PlatformObjectImageMaterial, PlatformObjectProductImage, PlatformObjectVideoMaterial, PlatformObjectAwemePhotoMaterial,
 		PlatformObjectMarketingProduct, PlatformObjectOrangeLandingPage, PlatformObjectOptimizationTarget,
 		PlatformObjectConversionAsset, PlatformObjectIndustryCategory, PlatformObjectBrand, PlatformObjectAuthorizedIdentity:
 		return true

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { presentObjectAvailability, presentPlanBlockedReason } from '../src/features/browser-rpa-execution/objectAvailabilityPresentation'
+import { presentConfigurationIssue, presentObjectAvailability, presentPlanBlockedReason } from '../src/features/browser-rpa-execution/objectAvailabilityPresentation'
 
 test('shows a friendly action for an unbound brand', () => {
   const result = presentObjectAvailability({
@@ -55,5 +55,51 @@ test('replaces the internal block code with a clear message', () => {
   assert.equal(
     presentPlanBlockedReason('PLATFORM_OBJECTS_UNAVAILABLE'),
     '有巨量对象尚未绑定。请处理下方标记为“需处理”的对象。',
+  )
+})
+
+test('explains incomplete promotion fields without exposing its internal draft ID', () => {
+  const issue = presentConfigurationIssue('promotion promotion-deliveryplan_123-1 requires copy, source, and name')
+
+  assert.equal(issue, '投放单元缺少必要字段。请补充单元文案、素材来源和单元名称。')
+  assert.doesNotMatch(issue, /deliveryplan_123/)
+  assert.equal(
+    presentPlanBlockedReason('DELIVERY_CONFIGURATION_INVALID'),
+    '投放配置不完整。请补充下方字段，然后重新生成计划。',
+  )
+})
+
+test('explains other configuration requirements with direct repair instructions', () => {
+  assert.equal(
+    presentConfigurationIssue('marketing product: reference 1786513565497554221 is outside the delivery intent'),
+    '营销商品未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。',
+  )
+  assert.equal(
+    presentConfigurationIssue('promotion unit-1: base material: reference 7649703629105889290 is outside the delivery intent'),
+    '基础素材未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。',
+  )
+  assert.equal(
+    presentConfigurationIssue('promotion unit-1: product image: reference 7673690181130207278 is outside the delivery intent'),
+    '产品主图未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。',
+  )
+  assert.equal(
+    presentConfigurationIssue('promotion unit-1: product image picker requires an observed expected_total of 1'),
+    '产品主图缺少选择器观察证据。请返回平台配置页并保存。系统会核对当前图片目录，并写入选择器证据。',
+  )
+  assert.equal(
+    presentConfigurationIssue('promotion unit-1 call to action needs 1 to 10 unique values'),
+    '投放单元缺少行动号召。请填写 1 至 10 个不重复的行动号召。',
+  )
+  assert.equal(
+    presentConfigurationIssue('promotion unit-1: Runner v3 supports exactly one bound base material per form'),
+    '投放单元的基础素材数量不正确。请选择一个可用素材。',
+  )
+  assert.equal(
+    presentConfigurationIssue('project start date 2026-08-29 must be no earlier than 2026-08-30'),
+    '此执行记录的项目开始日期是 2026-08-29。最早允许日期是 2026-08-30。',
+  )
+  assert.equal(
+    presentConfigurationIssue('unknown configuration failure'),
+    '投放配置未通过执行前检查。请返回平台配置页并检查标记为“必填”的字段。',
   )
 })

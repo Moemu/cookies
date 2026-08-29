@@ -362,7 +362,7 @@ func (w Worker) appendEvidence(ctx context.Context, run BrowserRpaRun, step RunS
 
 func (w Worker) appendEvidenceWithID(ctx context.Context, run BrowserRpaRun, step RunStep, page PreparedPage) (string, error) {
 	now := w.Service.now()
-	id, err := w.Service.newID("brpa_evidence")
+	id, err := w.Service.newID(browserRpaEvidenceIDPrefix)
 	if err != nil {
 		return "", err
 	}

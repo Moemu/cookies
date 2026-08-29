@@ -252,6 +252,8 @@ func validPromotionMaterials(values []PromotionMaterialReference) bool {
 
 type AuthorityBinding struct {
 	SchemaVersion                   string                    `json:"schema_version"`
+	AuthorityOrigin                 string                    `json:"authority_origin,omitempty"`
+	PreflightCanonicalHash          string                    `json:"preflight_canonical_hash,omitempty"`
 	OrganizationID                  contract.OrganizationID   `json:"organization_id"`
 	ProjectID                       contract.ProjectID        `json:"project_id"`
 	BusinessExecutionID             string                    `json:"business_execution_id"`
@@ -297,6 +299,12 @@ func (b AuthorityBinding) Validate() error {
 		b.WorkflowID == "" || b.WorkflowStepID == "" || (b.SkillID == "") != (b.SkillVersion == "") {
 		return ErrInvalidContract
 	}
+	if b.AuthorityOrigin != "" && b.AuthorityOrigin != "plan_execution" {
+		return ErrInvalidContract
+	}
+	if b.AuthorityOrigin == "plan_execution" && !isSHA256(b.PreflightCanonicalHash) {
+		return ErrInvalidContract
+	}
 	if b.Action == "create_promotions_in_existing_project" && (strings.TrimSpace(b.ParentPlatformProjectID) == "" || b.PromotionBudgetLimitMinor < 1 || b.BudgetLimitMinor != b.PromotionBudgetLimitMinor) {
 		return ErrInvalidContract
 	}
@@ -318,7 +326,11 @@ func (b AuthorityBinding) Validate() error {
 	if b.SupersedesControlledChangeSetID != "" && strings.TrimSpace(b.SupersedesControlledChangeSetID) != b.SupersedesControlledChangeSetID {
 		return ErrInvalidContract
 	}
-	for _, hash := range []string{b.ApprovalActionHash, b.PlanCanonicalHash, b.IntentCanonicalHash, b.FeedbackCanonicalHash, b.DecisionCanonicalHash, b.ConfigurationCanonicalHash, b.WorkflowCanonicalHash} {
+	hashes := []string{b.ApprovalActionHash, b.PlanCanonicalHash, b.IntentCanonicalHash, b.ConfigurationCanonicalHash, b.WorkflowCanonicalHash}
+	if b.AuthorityOrigin != "plan_execution" {
+		hashes = append(hashes, b.FeedbackCanonicalHash, b.DecisionCanonicalHash)
+	}
+	for _, hash := range hashes {
 		if !isSHA256(hash) {
 			return ErrInvalidContract
 		}

@@ -101,6 +101,37 @@ func TestCompileConfigurationV3AcceptsOtherBrandSentinel(t *testing.T) {
 	t.Fatalf("other brand availability is missing: %#v", availability)
 }
 
+func TestCompileConfigurationV3KeepsPromotionMaterialFieldStructure(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	configuration.Payload.OceanEngine.Promotions[0].NativeAnchorReference = &delivery.StableReference{
+		Namespace: "oceanengine", ObjectKind: "native_anchor", Scope: "account:1855554434276391",
+		ID: "6001", State: delivery.ReferenceResolved, DisplayNameSnapshot: "测试原生锚点",
+	}
+
+	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan v3Plan
+	if err := json.Unmarshal(compiled.Forms[1].Plan, &plan); err != nil {
+		t.Fatal(err)
+	}
+	positions := map[string]int{}
+	for index, step := range plan.Steps {
+		positions[step.FieldKey] = index
+		if step.FieldKey == "promotion.product_name" && step.Value != "测试商品" {
+			t.Fatalf("inherited product name = %#v", step.Value)
+		}
+	}
+	ordered := []string{"promotion.base_materials", "promotion.copy_materials", "promotion.native_anchor_reference", "promotion.landing_page_reference", "promotion.product_name", "promotion.product_image_references", "promotion.product_selling_points", "promotion.call_to_action", "promotion.source_label", "promotion.comments_enabled", "promotion.category", "promotion.brand_reference"}
+	for index := 1; index < len(ordered); index++ {
+		if positions[ordered[index-1]] >= positions[ordered[index]] {
+			t.Fatalf("promotion field order = %#v", positions)
+		}
+	}
+}
+
 func TestV3BindingsFromMappingsUsesConfirmedObjectsAndSkipsPendingStages(t *testing.T) {
 	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
 	configuration, _ := executableConfigurationFixture(now)
@@ -141,7 +172,7 @@ func TestCompileConfigurationV3RejectsLimitsReferencesAndAccountPaths(t *testing
 		}, "1855554434276391", "bid is outside"},
 		{"date", func(c *delivery.PlatformConfiguration, _ *delivery.DeliveryIntent) {
 			c.Payload.OceanEngine.Project.Schedule.StartAt = now
-		}, "1855554434276391", "next day"},
+		}, "1855554434276391", "must be no earlier than"},
 		{"material", func(c *delivery.PlatformConfiguration, _ *delivery.DeliveryIntent) {
 			c.Payload.OceanEngine.Promotions[0].BaseMaterialReferences[0].State = delivery.ReferenceBlocked
 		}, "1855554434276391", "not resolved"},
@@ -171,13 +202,42 @@ func TestCompileConfigurationV3RejectsLimitsReferencesAndAccountPaths(t *testing
 	}
 }
 
+func TestCompileConfigurationV3AcceptsNextShanghaiDayBoundary(t *testing.T) {
+	now := time.Date(2026, 8, 29, 13, 58, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	shanghai := time.FixedZone("Asia/Shanghai", 8*60*60)
+	configuration.Payload.OceanEngine.Project.Schedule.StartAt = time.Date(2026, 8, 30, 0, 0, 0, 0, shanghai)
+	configuration.Payload.OceanEngine.Project.Schedule.EndAt = time.Date(2026, 8, 31, 23, 59, 59, 0, shanghai)
+	intent.Payload.ScheduleBoundary.EarliestStart = configuration.Payload.OceanEngine.Project.Schedule.StartAt
+	intent.Payload.ScheduleBoundary.LatestEnd = configuration.Payload.OceanEngine.Project.Schedule.EndAt
+
+	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projectPlan v3Plan
+	if err := json.Unmarshal(compiled.Forms[0].Plan, &projectPlan); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range projectPlan.Steps {
+		if step.FieldKey == "project.schedule" {
+			value, ok := step.Value.(map[string]any)
+			if !ok || value["start"] != "2026-08-30" || value["end"] != "2026-08-31" {
+				t.Fatalf("project schedule = %#v", step.Value)
+			}
+			return
+		}
+	}
+	t.Fatal("project schedule step is missing")
+}
+
 func executableConfigurationFixture(now time.Time) (delivery.PlatformConfiguration, delivery.DeliveryIntent) {
 	ref := func(kind, id, label string) delivery.StableReference {
 		return delivery.StableReference{Namespace: "oceanengine", ObjectKind: kind, Scope: "account:1855554434276391", ID: id, State: delivery.ReferenceResolved, DisplayNameSnapshot: label}
 	}
 	product := ref("product", "1001", "测试商品")
 	material := ref("material", "2001", "测试视频")
-	image := ref("material", "2002", "测试图片")
+	image := ref("product_image", "2002", "测试图片")
 	image.AuditAttributes = map[string]string{"selection_kind": "image_card", "expected_total": "1", "index": "0", "minimum_visible": "1"}
 	landing := ref("landing_page", "3001", "我的落地页")
 	brand := ref("brand", "4001", "测试品牌")

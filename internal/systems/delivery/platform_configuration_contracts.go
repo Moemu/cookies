@@ -602,6 +602,7 @@ type OceanEnginePromotionDraft struct {
 	DeliveryIdentity            OceanEngineDeliveryIdentity  `json:"delivery_identity"`
 	BaseMaterialReferences      []StableReference            `json:"base_material_references"`
 	CopyItems                   []OceanEngineCopyItem        `json:"copy_items"`
+	ProductName                 string                       `json:"product_name,omitempty"`
 	ProductImageReferences      []StableReference            `json:"product_image_references,omitempty"`
 	ProductSellingPoints        []string                     `json:"product_selling_points,omitempty"`
 	NativeAnchorReference       *StableReference             `json:"native_anchor_reference,omitempty"`
@@ -705,6 +706,7 @@ type canonicalOceanEnginePromotion struct {
 	DeliveryIdentity            canonicalOceanEngineDeliveryIdentity  `json:"delivery_identity"`
 	BaseMaterialReferences      []canonicalStableReference            `json:"base_material_references"`
 	CopyItems                   []OceanEngineCopyItem                 `json:"copy_items"`
+	ProductName                 string                                `json:"product_name,omitempty"`
 	ProductImageReferences      []canonicalStableReference            `json:"product_image_references,omitempty"`
 	ProductSellingPoints        []string                              `json:"product_selling_points,omitempty"`
 	NativeAnchorReference       *canonicalStableReference             `json:"native_anchor_reference,omitempty"`
@@ -778,6 +780,7 @@ func canonicalOceanConfiguration(value *OceanEngineConfiguration) *canonicalOcea
 			DraftSchemaVersion: strings.TrimSpace(promotion.DraftSchemaVersion), PromotionDraftID: strings.TrimSpace(promotion.PromotionDraftID),
 			DeliveryIdentity:       canonicalOceanEngineDeliveryIdentity{Mode: strings.TrimSpace(promotion.DeliveryIdentity.Mode), AuthorizedIdentity: canonicalReferencePointer(promotion.DeliveryIdentity.AuthorizedIdentity)},
 			BaseMaterialReferences: canonicalReferences(promotion.BaseMaterialReferences), CopyItems: append([]OceanEngineCopyItem(nil), promotion.CopyItems...),
+			ProductName:            strings.TrimSpace(promotion.ProductName),
 			ProductImageReferences: canonicalReferences(promotion.ProductImageReferences), ProductSellingPoints: append([]string(nil), promotion.ProductSellingPoints...),
 			NativeAnchorReference: canonicalReferencePointer(promotion.NativeAnchorReference), LandingPageReference: canonicalReferencePointer(promotion.LandingPageReference),
 			DirectLinkReference: canonicalReferencePointer(promotion.DirectLinkReference), ProductReference: canonicalReferencePointer(promotion.ProductReference),

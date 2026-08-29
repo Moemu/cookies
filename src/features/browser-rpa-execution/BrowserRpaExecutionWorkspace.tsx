@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { CircleAlert, CircleCheck, Clock3, FileCheck2, Hand, ListChecks, MonitorCheck, Pause, Play, RefreshCw, Send, ShieldAlert, XCircle } from 'lucide-react'
 import { controlledExecutionApi, ControlledExecutionApiError } from './api'
 import type { BrowserRpaEvidence, BrowserRpaRun, BrowserRpaRunEvent, ControlledExecutionTransportState, ControlledExecutionWorkspace, EdgeSessionProbe, RunnerV3Plan } from './model'
-import { presentObjectAvailability, presentPlanBlockedReason } from './objectAvailabilityPresentation'
+import { presentConfigurationIssue, presentObjectAvailability, presentPlanBlockedReason } from './objectAvailabilityPresentation'
 import { isTerminalControlledExecutionState, presentControlledExecution, shortHash } from './presentation'
 import './browser-rpa-execution.css'
 
@@ -13,6 +13,43 @@ type Props = {
 }
 
 export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
+  return runId ? <BrowserRpaExecutionDetail projectId={projectId} runId={runId}/> : <BrowserRpaRunList projectId={projectId}/>
+}
+
+function BrowserRpaRunList({ projectId }: { projectId: string }) {
+  const [state, setState] = useState<{ kind: 'loading' } | { kind: 'ready'; runs: BrowserRpaRun[] } | { kind: 'error'; message: string }>({ kind: 'loading' })
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    setState({ kind: 'loading' })
+    try {
+      const runs = await controlledExecutionApi.listRuns(projectId, signal)
+      if (!signal?.aborted) setState({ kind: 'ready', runs })
+    } catch (error) {
+      if (!signal?.aborted) setState({ kind: 'error', message: error instanceof Error ? error.message : '读取执行记录失败。' })
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void load(controller.signal)
+    return () => controller.abort()
+  }, [load])
+
+  if (state.kind === 'loading') return <WorkspaceState kind="loading" />
+  if (state.kind === 'error') return <WorkspaceState kind="error" message={state.message} onRetry={() => void load()} />
+  return <section className="controlled-execution-run-list" aria-label="Browser RPA 执行记录">
+    <header className="controlled-execution-header"><div><span className="section-label">Controlled Browser RPA</span><h2>执行中心</h2><p>查看当前 Project 的真实 Browser RPA Run。选择一条记录可继续检查、Prepare 或 Submit。</p></div><button className="secondary-button" onClick={() => void load()}><RefreshCw size={14}/>刷新</button></header>
+    {state.runs.length ? <div className="controlled-execution-run-list-grid">{state.runs.map(run => {
+      const presentation = presentControlledExecution(run)
+      return <a key={run.id} href={`/projects/${encodeURIComponent(projectId)}/delivery/execution/${encodeURIComponent(run.id)}`} className={`controlled-execution-run-card ${presentation.tone}`}>
+        <div><span>{runActionLabel(run.authority.action)}</span><b>{presentation.title}</b><small>{presentation.detail}</small></div>
+        <dl><div><dt>广告账户</dt><dd>{run.account_id}</dd></div><div><dt>Run</dt><dd>{shortHash(run.id)}</dd></div><div><dt>更新时间</dt><dd>{formatTime(run.updated_at)}</dd></div></dl>
+      </a>
+    })}</div> : <div className="controlled-execution-run-empty"><Clock3 size={24}/><h3>暂无执行记录</h3><p>请先在平台配置页检查计划，然后进入真实受控执行。</p></div>}
+  </section>
+}
+
+function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; runId: string }) {
   const [transport, setTransport] = useState<ControlledExecutionTransportState>(() => runId ? { kind: 'loading' } : { kind: 'empty' })
   const [notice, setNotice] = useState('')
   const [actionPending, setActionPending] = useState(false)
@@ -125,6 +162,7 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
         await load()
       }
     } catch (error) {
+      if (action === 'plan') setPlan(undefined)
       setNotice(error instanceof Error ? error.message : '执行请求失败。')
       await load()
     } finally {
@@ -171,6 +209,13 @@ export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
   />
 }
 
+function runActionLabel(action: string): string {
+  if (action === 'create_project_and_promotions') return '新建项目和单元'
+  if (action === 'create_promotions_in_existing_project') return '在已有项目中新建单元'
+  if (action === 'update_promotion_budget') return '修改单元预算'
+  return '受控平台操作'
+}
+
 function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed, onReviewed, onWorkflow, onRefresh, onControl }: {
   workspace: Extract<ControlledExecutionTransportState, { kind: 'ready' }>['workspace']
   busy: boolean
@@ -212,7 +257,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed,
       onWorkflow={onWorkflow}
     />
     <SessionAndTargetPanel workspace={workspace} sessionProbe={sessionProbe} />
-    {plan ? <PlanPanel plan={plan} /> : null}
+    {plan ? <PlanPanel plan={plan} run={run} /> : null}
     {evidence.length ? <ReadbackPanel evidence={evidence} /> : null}
     {evidence.length ? <CreatedObjectsPanel evidence={evidence} /> : null}
     {run.authority.promotion_mutation || run.authority.promotion_control || run.authority.promotion_restart ? <PromotionChangeDiff run={run} /> : null}
@@ -316,17 +361,24 @@ function SessionAndTargetPanel({ workspace, sessionProbe }: { workspace: Control
   </section>
 }
 
-function PlanPanel({ plan }: { plan: RunnerV3Plan }) {
+function PlanPanel({ plan, run }: { plan: RunnerV3Plan; run: BrowserRpaRun }) {
   const fields = plan.steps.filter(step => step.kind === 'field_action')
   const objectAvailability = plan.object_availability ?? []
   const objectPresentations = objectAvailability.map(presentObjectAvailability)
   const unavailableCount = objectPresentations.filter(item => !item.available).length
+  const configurationIssues = plan.configuration_issues ?? []
   const blocked = plan.blocked_reasons.length > 0
   const boundary = plan.steps.find(step => step.remote_write) ?? plan.steps.at(-1)
   return <section className="controlled-execution-plan" aria-label="Runner v3 执行计划">
     <header><div><span className="section-label">Runner v3 plan</span><h3>{plan.plan_kind}</h3></div><span className={plan.blocked_reasons.length ? 'blocked' : 'ready'}>{plan.blocked_reasons.length ? '计划被阻止' : '计划可执行'}</span></header>
     <div className="controlled-execution-plan-summary"><span>账户 <b>{plan.account_reference}</b></span><span>当前阶段 <b>{plan.internal_object_kind === 'project' ? '创建项目' : plan.internal_object_kind === 'promotion' ? '创建单元' : plan.plan_kind}</b></span><span>Cookies 对象 <b>{plan.internal_object_id || '未提供'}</b></span><span>父项目 <b>{plan.parent_project_reference || '等待项目回写'}</b></span><span>字段 <b>{fields.length}</b></span></div>
     {plan.blocked_reasons.length ? <p className="danger-copy">{plan.blocked_reasons.map(presentPlanBlockedReason).join('；')}</p> : null}
+    {configurationIssues.length ? <section className="controlled-execution-configuration-issues" aria-label="投放配置需补充">
+      <h4>投放配置需补充</h4>
+      {run.authority.plan_version ? <p>此执行记录固定使用投放计划 v{run.authority.plan_version}。当前计划的后续修改不会更新此记录。</p> : null}
+      <ul>{configurationIssues.map((issue, index) => <li key={`${index}-${issue}`}>{presentConfigurationIssue(issue)}</li>)}</ul>
+      <p>如果当前计划已修正，请返回投放配置页并创建新执行。</p>
+    </section> : null}
     {objectAvailability.length ? <section className="controlled-execution-object-availability" aria-label="巨量对象可用性">
       <header><div><h4>巨量对象检查</h4><small>已检查 {objectAvailability.length} 项。{objectAvailability.length - unavailableCount} 项可用，{unavailableCount} 项需处理。</small></div><span className={unavailableCount ? 'blocked' : 'ready'}>{unavailableCount ? `${unavailableCount} 项需处理` : '全部可用'}</span></header>
       {objectPresentations.map((item, index) => <article key={`${objectAvailability[index].field_key}-${objectAvailability[index].internal_object_id}`} className={item.available ? 'ready' : 'blocked'}>
@@ -343,7 +395,7 @@ function PlanPanel({ plan }: { plan: RunnerV3Plan }) {
       </article>)}
     </section> : null}
     <details><summary>查看字段计划和目标值</summary><div className="controlled-execution-plan-fields">{fields.map(step => <div key={step.id}><b>{step.field_key}</b><span>{step.operation}</span><code>{formatPlanValue(step.value)}</code></div>)}</div></details>
-    <div className="controlled-execution-boundary"><ShieldAlert size={18} /><div><b>远程写入边界</b><span>{blocked ? '未开放' : boundary?.scope || boundary?.target || boundary?.id || '未定义'}</span><small>{blocked ? '对象可用性校验未通过。系统不会打开平台页面。' : `Prepare：禁止远端写入。Submit：最多 ${Math.max(1, plan.maximum_final_clicks || 1)} 次最终点击。`}</small></div></div>
+    <div className="controlled-execution-boundary"><ShieldAlert size={18} /><div><b>远程写入边界</b><span>{blocked ? '未开放' : boundary?.scope || boundary?.target || boundary?.id || '未定义'}</span><small>{blocked ? '执行前检查未通过。系统不会打开平台页面。' : `Prepare：禁止远端写入。Submit：最多 ${Math.max(1, plan.maximum_final_clicks || 1)} 次最终点击。`}</small></div></div>
   </section>
 }
 

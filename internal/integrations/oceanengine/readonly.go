@@ -124,6 +124,17 @@ func (c *Client) ImageMaterialsPage(ctx context.Context, request AssetPageReques
 	return c.postJSON(ctx, "/superior/api/v2/ad/getImageList", body)
 }
 
+// ProductImagesPage reads one page from the product-image "My Images" picker.
+// Ocean Engine separates this catalog with image_mode 649502.
+func (c *Client) ProductImagesPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, limit := normalizeAssetPage(request)
+	if limit > 30 {
+		limit = 30
+	}
+	body := map[string]any{"page": page, "limit": limit, "image_mode": 649502}
+	return c.postJSON(ctx, "/superior/api/v2/ad/getImageList", body)
+}
+
 // VideoMaterialsPage reads one video-library page.
 func (c *Client) VideoMaterialsPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
 	page, limit := normalizeAssetPage(request)

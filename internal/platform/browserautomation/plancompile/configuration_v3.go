@@ -115,8 +115,10 @@ var promotionSpecs = map[string]fieldSpec{
 	"promotion.delivery_identity":        {"promotion.delivery_identity", "open_reference_picker", "投放身份", "请选择投放抖音号", true},
 	"promotion.base_materials":           {"promotion.base_materials", "open_reference_picker", "基础素材", "添加素材", true},
 	"promotion.copy_materials":           {"promotion.copy_materials", "configure_object", "文案素材", "请输入5-55个字的标题或输入关键词后选择推荐标题", true},
+	"promotion.product_name":             {"promotion.product_name", "fill_text", "产品信息", "请输入", false},
 	"promotion.product_image_references": {"promotion.product_image_references", "open_reference_picker", "产品主图", "产品主图", true},
 	"promotion.product_selling_points":   {"promotion.product_selling_points", "configure_object", "产品卖点", "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交", true},
+	"promotion.native_anchor_reference":  {"promotion.native_anchor_reference", "open_reference_picker", "原生锚点", "原生锚点", false},
 	"promotion.landing_page_reference":   {"promotion.landing_page_reference", "open_reference_picker", "落地页", "请选择橙子落地页链接", true},
 	"promotion.call_to_action":           {"promotion.call_to_action", "configure_object", "行动号召", "行动号召", true},
 	"promotion.source_label":             {"promotion.source_label", "fill_text", "来源", "请输入来源", true},
@@ -215,8 +217,9 @@ func validateConfigurationLimits(project delivery.OceanEngineProjectDraft, promo
 	}
 	shanghai := time.FixedZone("Asia/Shanghai", 8*60*60)
 	tomorrow := time.Date(now.In(shanghai).Year(), now.In(shanghai).Month(), now.In(shanghai).Day()+1, 0, 0, 0, 0, shanghai)
-	if project.Schedule.StartAt.In(shanghai).Before(tomorrow) {
-		return fmt.Errorf("project start date must be no earlier than the next day")
+	projectStart := project.Schedule.StartAt.In(shanghai)
+	if projectStart.Before(tomorrow) {
+		return fmt.Errorf("project start date %s must be no earlier than %s", projectStart.Format(time.DateOnly), tomorrow.Format(time.DateOnly))
 	}
 	if intent != nil {
 		boundary := intent.Payload.BudgetBoundary
@@ -309,10 +312,11 @@ func validateBid(value delivery.OceanEngineBudgetAndBidding) error {
 }
 
 func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *delivery.DeliveryIntent) (map[string]any, error) {
+	shanghai := time.FixedZone("Asia/Shanghai", 8*60*60)
 	values := map[string]any{
 		"project.marketing_purpose": "电商", "project.marketing_scenario": "短视频+图文",
 		"project.carrier": carrierLabel(project.Carrier), "project.delivery_mode": deliveryModeLabel(project.DeliveryMode),
-		"project.schedule":     map[string]string{"start": project.Schedule.StartAt.Format(time.DateOnly), "end": project.Schedule.EndAt.Format(time.DateOnly)},
+		"project.schedule":     map[string]string{"start": project.Schedule.StartAt.In(shanghai).Format(time.DateOnly), "end": project.Schedule.EndAt.In(shanghai).Format(time.DateOnly)},
 		"project.daily_budget": money(project.BudgetAndBidding.DailyBudgetMinor), "project.project_name": project.ProjectName,
 	}
 	if project.MarketingProductReference != nil {
@@ -363,6 +367,13 @@ func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *deliver
 
 func promotionPlanValues(p delivery.OceanEnginePromotionDraft, project delivery.OceanEngineProjectDraft, intent *delivery.DeliveryIntent) (map[string]any, error) {
 	values := map[string]any{"promotion.copy_materials": copyTexts(p.CopyItems), "promotion.product_selling_points": p.ProductSellingPoints, "promotion.call_to_action": p.Settings.CallToAction, "promotion.source_label": p.Settings.SourceLabel, "promotion.promotion_name": p.PromotionName}
+	productName := strings.TrimSpace(p.ProductName)
+	if productName == "" && project.MarketingProductReference != nil {
+		productName = strings.TrimSpace(project.MarketingProductReference.DisplayNameSnapshot)
+	}
+	if productName != "" {
+		values["promotion.product_name"] = productName
+	}
 	if p.DeliveryIdentity.Mode == "account_info" {
 		values["promotion.delivery_identity"] = "账号信息"
 	} else if p.DeliveryIdentity.AuthorizedIdentity != nil {
@@ -386,6 +397,13 @@ func promotionPlanValues(p delivery.OceanEnginePromotionDraft, project delivery.
 		return nil, fmt.Errorf("Runner v3 supports exactly one bound base material per form")
 	}
 	values["promotion.base_materials"] = materials[0]
+	if p.NativeAnchorReference != nil {
+		spec, err := stableReferenceSpec(*p.NativeAnchorReference, nil)
+		if err != nil {
+			return nil, fmt.Errorf("native anchor: %w", err)
+		}
+		values["promotion.native_anchor_reference"] = spec
+	}
 	if len(p.ProductImageReferences) > 0 {
 		if len(p.ProductImageReferences) != 1 {
 			return nil, fmt.Errorf("Runner v3 supports exactly one product image")
@@ -584,7 +602,10 @@ func orderedProjectFields(project delivery.OceanEngineProjectDraft, parent v3Par
 }
 func orderedPromotionFields(project delivery.OceanEngineProjectDraft, promotion delivery.OceanEnginePromotionDraft) []fieldSpec {
 	parent, _ := parentContext(project)
-	keys := []string{"promotion.delivery_identity", "promotion.base_materials", "promotion.copy_materials", "promotion.product_image_references", "promotion.product_selling_points", "promotion.landing_page_reference", "promotion.call_to_action", "promotion.source_label", "promotion.comments_enabled", "promotion.smart_generation_enabled", "promotion.category", "promotion.brand_reference", "promotion.promotion_name"}
+	keys := []string{"promotion.delivery_identity", "promotion.base_materials", "promotion.copy_materials", "promotion.native_anchor_reference", "promotion.landing_page_reference", "promotion.product_name", "promotion.product_image_references", "promotion.product_selling_points", "promotion.call_to_action", "promotion.smart_generation_enabled", "promotion.source_label", "promotion.comments_enabled", "promotion.category", "promotion.brand_reference", "promotion.promotion_name"}
+	if slices.Contains([]string{"click", "impression"}, parent.OptimizationTarget) {
+		keys = removeKey(keys, "promotion.native_anchor_reference")
+	}
 	if !slices.Contains([]string{"orange_landing_page", "orange_landing_page_and_im", "owned_landing_page"}, project.Carrier) {
 		keys = removeKey(keys, "promotion.landing_page_reference")
 	}

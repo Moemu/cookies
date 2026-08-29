@@ -21,7 +21,6 @@ func TestBrowserRpaAuthorityIsServerResolvedBoundAndRevalidated(t *testing.T) {
 	repo.changes[repositoryKey(change.OrganizationID, change.ProjectID, change.ID)] = change
 	repo.approvals[repositoryKey(change.OrganizationID, change.ProjectID, change.ID)] = approval
 	repo.executions[repositoryKey(change.OrganizationID, change.ProjectID, execution.ID)] = execution
-
 	provider := BrowserRpaAuthorityProvider{Repository: repo}
 	resolved, err := provider.ResolveAuthority(context.Background(), change.OrganizationID, change.ProjectID, execution.ID, now)
 	if err != nil {
@@ -68,6 +67,14 @@ func TestBrowserRpaAuthorityCreatesAndConfirmsAllStagedMappings(t *testing.T) {
 	repo.changes[repositoryKey(change.OrganizationID, change.ProjectID, change.ID)] = change
 	repo.approvals[repositoryKey(change.OrganizationID, change.ProjectID, change.ID)] = approval
 	repo.executions[repositoryKey(change.OrganizationID, change.ProjectID, execution.ID)] = execution
+	staleProjectMapping := PlatformEntityMapping{
+		SchemaVersion: PlatformEntityMappingV1, ID: "mapping_stale_project", OrganizationID: change.OrganizationID, ProjectID: change.ProjectID,
+		AccountReferenceID: binding.AccountReferenceID, PlanID: binding.PlanID, ConfigurationID: "configuration_previous",
+		BusinessExecutionID: "execution_previous", BrowserRpaRunID: "run_previous",
+		InternalObjectKind: "project", InternalObjectID: "project-draft-1", PlatformObjectKind: "project",
+		Status: PlatformEntityMappingPending, Version: 1, CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	}
+	repo.mappings[repositoryKey(change.OrganizationID, change.ProjectID, staleProjectMapping.ID)] = staleProjectMapping
 
 	provider := BrowserRpaAuthorityProvider{Repository: repo}
 	resolved, err := provider.ResolveAuthority(context.Background(), change.OrganizationID, change.ProjectID, execution.ID, now)
@@ -79,6 +86,10 @@ func TestBrowserRpaAuthorityCreatesAndConfirmsAllStagedMappings(t *testing.T) {
 	}
 	if len(repo.mappings) != 3 {
 		t.Fatalf("staged mappings=%d want=3", len(repo.mappings))
+	}
+	recoveredProject, err := repo.GetPlatformEntityMappingByInternalObject(context.Background(), change.OrganizationID, change.ProjectID, binding.AccountReferenceID, "project", "project-draft-1")
+	if err != nil || recoveredProject.BusinessExecutionID != execution.ID || recoveredProject.BrowserRpaRunID != "run_staged" || recoveredProject.ConfigurationID != binding.ConfigurationID {
+		t.Fatalf("recovered project mapping=%#v err=%v", recoveredProject, err)
 	}
 	if _, err := provider.RecordCreatedObject(context.Background(), resolved.Binding, "run_staged", browserautomation.PreparedPage{
 		InternalObjectKind: "project", InternalObjectID: "project-draft-1",

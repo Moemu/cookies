@@ -17,6 +17,7 @@ import (
 
 type platformObjectReader interface {
 	ImageMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error)
+	ProductImagesPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error)
 	VideoMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error)
 	AwemePhotoMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error)
 	MarketingProductsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error)
@@ -69,6 +70,7 @@ func (s Synchronizer) syncPlatformObjectCatalog(ctx context.Context, request Syn
 		}, brandPage, brandCandidate},
 		{PlatformObjectAuthorizedIdentity, "authorized_identity_list", objectReader.AuthorizedIdentitiesPage, authorizedIdentityPage, authorizedIdentityCandidate},
 		{PlatformObjectImageMaterial, "image_material_list", objectReader.ImageMaterialsPage, imageMaterialPage, imageMaterialCandidate},
+		{PlatformObjectProductImage, "product_image_list", objectReader.ProductImagesPage, imageMaterialPage, productImageCandidate},
 		{PlatformObjectVideoMaterial, "video_material_list", objectReader.VideoMaterialsPage, videoMaterialPage, videoMaterialCandidate},
 		{PlatformObjectAwemePhotoMaterial, "aweme_photo_material_list", objectReader.AwemePhotoMaterialsPage, awemePhotoMaterialPage, awemePhotoMaterialCandidate},
 		{PlatformObjectMarketingProduct, "marketing_product_list", objectReader.MarketingProductsPage, marketingProductPage, marketingProductCandidate},
@@ -354,6 +356,14 @@ func imageMaterialCandidate(item map[string]any) (PlatformObjectCandidate, bool)
 		Metadata:    scalarMetadata(item, "width", "height", "size", "image_mode", "ratio", "create_time"),
 		PreviewURL:  previewURL, PreviewKind: previewKind(previewURL, "image"), PreviewExpiresAt: expiresAt,
 	}, true
+}
+
+func productImageCandidate(item map[string]any) (PlatformObjectCandidate, bool) {
+	candidate, valid := imageMaterialCandidate(item)
+	if valid {
+		candidate.Kind = PlatformObjectProductImage
+	}
+	return candidate, valid
 }
 
 func videoMaterialCandidate(item map[string]any) (PlatformObjectCandidate, bool) {

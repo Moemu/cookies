@@ -28,6 +28,8 @@ export type BrowserRpaBlockingReason =
 
 export type BrowserRpaAuthorityBinding = {
   schema_version: 'browser-rpa-authority/v1' | 'computer-use-authority/v1'
+  authority_origin?: 'plan_execution'
+  preflight_canonical_hash?: string
   business_execution_id: string
   change_set_id: string
   approval_id: string
@@ -67,6 +69,8 @@ export type BrowserRpaAuthorityBinding = {
   }
   object_fingerprint: string
   action: string
+  plan_id?: string
+  plan_version?: number
   project_budget_mode?: 'daily' | 'unlimited'
   project_budget_limit_minor?: number
   promotion_budget_limit_minor?: number
@@ -212,6 +216,7 @@ export type RunnerV3Plan = {
   internal_object_kind?: 'project' | 'promotion'
   internal_object_id?: string
   blocked_reasons: string[]
+  configuration_issues?: string[]
   object_availability?: Array<{
     field_key: string
     object_kind: string

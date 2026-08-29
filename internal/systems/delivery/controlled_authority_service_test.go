@@ -136,6 +136,23 @@ func (r *controlledMemoryRepository) GetPlatformEntityMappingByInternalObject(_ 
 	}
 	return PlatformEntityMapping{}, ErrNotFound
 }
+func (r *controlledMemoryRepository) RebindSafePendingPlatformEntityMapping(_ context.Context, request rebindPendingPlatformEntityMappingRequest) (PlatformEntityMapping, error) {
+	key := repositoryKey(request.OrganizationID, request.ProjectID, request.MappingID)
+	value, ok := r.mappings[key]
+	if !ok {
+		return PlatformEntityMapping{}, ErrNotFound
+	}
+	if value.Status != PlatformEntityMappingPending || value.Version != request.ExpectedVersion || value.PlatformObjectID != "" || value.ResultEvidenceID != "" || value.ListEvidenceID != "" {
+		return PlatformEntityMapping{}, ErrInvalidState
+	}
+	value.ConfigurationID = request.ConfigurationID
+	value.BusinessExecutionID = request.BusinessExecutionID
+	value.BrowserRpaRunID = request.BrowserRpaRunID
+	value.Version++
+	value.UpdatedAt = request.Now
+	r.mappings[key] = value
+	return value, nil
+}
 func (r *controlledMemoryRepository) ValidateControlledMaterialReferences(_ context.Context, org contract.OrganizationID, project contract.ProjectID, _ string, references []ControlledMaterialReference) error {
 	for _, reference := range references {
 		evidence, ok := r.evidence[reference.AuthorizationEvidenceID]

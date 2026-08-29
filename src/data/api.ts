@@ -5722,7 +5722,7 @@ export type ApiConnectorSyncStatus = {
   status: 'queued' | 'running' | 'completed' | 'failed'; cursor?: string
   attempt: number; started_at: string; completed_at?: string
 }
-export type ApiConnectorPlatformObjectKind = 'image_material' | 'video_material' | 'aweme_photo_material' | 'marketing_product' | 'orange_landing_page' | 'optimization_target' | 'conversion_event_asset' | 'industry_category' | 'brand' | 'authorized_identity'
+export type ApiConnectorPlatformObjectKind = 'image_material' | 'product_image' | 'video_material' | 'aweme_photo_material' | 'marketing_product' | 'orange_landing_page' | 'optimization_target' | 'conversion_event_asset' | 'industry_category' | 'brand' | 'authorized_identity'
 export type ApiConnectorPlatformObject = {
   id: string; organization_id: string; account_id: string
   object_kind: ApiConnectorPlatformObjectKind; platform_object_id: string

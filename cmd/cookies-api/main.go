@@ -469,6 +469,7 @@ func main() {
 		Projects:                projectService,
 		ConnectorSnapshots:      connectorRepository,
 		ConnectorAccounts:       connectorRepository,
+		ExternalAccountIDs:      connectorRepository,
 		LaunchBatchCalibrations: connectorRepository,
 		// The Connector is not configured in this environment. Normalize the
 		// deterministic OutcomeSimulation records through the Delivery consumer
@@ -485,6 +486,7 @@ func main() {
 		},
 		NewID: func(prefix string) (string, error) { return ids.New(prefix) },
 	}
+	deliveryService.BrowserRpaLauncher = deliveryBrowserRpaLauncher{service: browserRpaService}
 	browserRpaServer := browserautomationhttp.NewTakeoverOnly(browserRpaService, projectStore)
 	if cfg.BrowserRPA.Enabled {
 		manifest, err := calibrationmanifest.Current()
@@ -500,7 +502,7 @@ func main() {
 			EdgeSessionFile:     cfg.BrowserRPA.EdgeSessionFile,
 			SessionProbeScript:  cfg.BrowserRPA.SessionProbeScript,
 			AuthorityStateRoot:  cfg.BrowserRPA.AuthorityStateRoot,
-			V3Compiler:          plancompile.V3Compiler{Source: delivery.MySQLRepository{DB: db}},
+			V3Compiler:          plancompile.V3Compiler{Source: delivery.MySQLRepository{DB: db}, AccountResolver: connectorRepository},
 			PrepareTimeout:      time.Duration(cfg.BrowserRPA.PrepareTimeoutSeconds) * time.Second,
 			SubmitTimeout:       time.Duration(cfg.BrowserRPA.SubmitTimeoutSeconds) * time.Second,
 			FallbackCDPEndpoint: cfg.BrowserRPA.CDPEndpointFallback,

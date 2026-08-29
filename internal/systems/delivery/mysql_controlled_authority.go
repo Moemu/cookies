@@ -31,6 +31,15 @@ func (r MySQLRepository) CreateControlledChangeSet(ctx context.Context, value Co
 func (r MySQLRepository) GetControlledChangeSet(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (ControlledChangeSet, error) {
 	return scanControlledChangeSet(r.DB.QueryRowContext(ctx, controlledChangeSetSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
 }
+
+func (r MySQLRepository) GetControlledChangeSetByObjectFingerprint(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, fingerprint string) (ControlledChangeSet, error) {
+	value, err := scanControlledChangeSet(r.DB.QueryRowContext(ctx, controlledChangeSetSelect+` WHERE organization_id=? AND project_id=? AND object_fingerprint=?`, org, project, fingerprint))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ControlledChangeSet{}, ErrNotFound
+	}
+	return value, err
+}
+
 func (r MySQLRepository) getControlledChangeSetByHash(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, hash string) (ControlledChangeSet, error) {
 	return scanControlledChangeSet(r.DB.QueryRowContext(ctx, controlledChangeSetSelect+` WHERE organization_id=? AND project_id=? AND canonical_hash=?`, org, project, hash))
 }
@@ -151,6 +160,15 @@ func (r MySQLRepository) GetControlledExecution(ctx context.Context, org contrac
 	return v, err
 }
 
+func (r MySQLRepository) GetControlledExecutionByChangeSet(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, changeSetID string) (ControlledExecution, error) {
+	var value ControlledExecution
+	err := r.DB.QueryRowContext(ctx, `SELECT id,organization_id,project_id,controlled_change_set_id,remote_write_approval_id,COALESCE(browser_rpa_run_id,''),status,version,created_by,created_at,updated_at FROM delivery_controlled_executions WHERE organization_id=? AND project_id=? AND controlled_change_set_id=?`, org, project, changeSetID).Scan(&value.ID, &value.OrganizationID, &value.ProjectID, &value.ControlledChangeSetID, &value.RemoteWriteApprovalID, &value.BrowserRpaRunID, &value.Status, &value.Version, &value.CreatedBy, &value.CreatedAt, &value.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ControlledExecution{}, ErrNotFound
+	}
+	return value, err
+}
+
 func (r MySQLRepository) AttachBrowserRpaRun(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion int64, runID string, now time.Time) (ControlledExecution, error) {
 	result, err := r.DB.ExecContext(ctx, `UPDATE delivery_controlled_executions SET browser_rpa_run_id=?,status='running',version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND version=? AND browser_rpa_run_id IS NULL AND status='pending'`, runID, now, org, project, id, expectedVersion)
 	if err != nil {
@@ -254,6 +272,121 @@ func (r MySQLRepository) GetPlatformEntityMapping(ctx context.Context, org contr
 
 func (r MySQLRepository) GetPlatformEntityMappingByInternalObject(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, account, kind, internalID string) (PlatformEntityMapping, error) {
 	return scanPlatformEntityMapping(r.DB.QueryRowContext(ctx, platformEntityMappingSelect+` WHERE organization_id=? AND project_id=? AND account_reference_id=? AND internal_object_kind=? AND internal_object_id=?`, org, project, account, kind, internalID))
+}
+
+func (r MySQLRepository) RebindSafePendingPlatformEntityMapping(ctx context.Context, request rebindPendingPlatformEntityMappingRequest) (PlatformEntityMapping, error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	defer tx.Rollback()
+
+	mapping, err := scanPlatformEntityMapping(tx.QueryRowContext(ctx, platformEntityMappingSelect+` WHERE organization_id=? AND project_id=? AND id=? FOR UPDATE`, request.OrganizationID, request.ProjectID, request.MappingID))
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	if mapping.Version != request.ExpectedVersion || mapping.Status != PlatformEntityMappingPending || mapping.PlatformObjectID != "" || mapping.PlatformStatus != "" || mapping.ResultEvidenceID != "" || mapping.ListEvidenceID != "" {
+		return PlatformEntityMapping{}, ErrInvalidState
+	}
+	if mapping.BusinessExecutionID == request.BusinessExecutionID && mapping.BrowserRpaRunID == request.BrowserRpaRunID {
+		return mapping, nil
+	}
+
+	var oldExecutionStatus, oldChangeSetID, oldChangeStatus, oldRunState, oldLeaseID string
+	var oldTakeoverActive bool
+	err = tx.QueryRowContext(ctx, `SELECT e.status,e.controlled_change_set_id,c.status,r.state,COALESCE(r.lease_id,''),r.takeover_active
+		FROM delivery_controlled_executions e
+		JOIN delivery_controlled_change_sets c ON c.organization_id=e.organization_id AND c.project_id=e.project_id AND c.id=e.controlled_change_set_id
+		JOIN browser_rpa_runs r ON r.organization_id=e.organization_id AND r.project_id=e.project_id AND r.id=?
+		WHERE e.organization_id=? AND e.project_id=? AND e.id=? FOR UPDATE`, mapping.BrowserRpaRunID, request.OrganizationID, request.ProjectID, mapping.BusinessExecutionID).
+		Scan(&oldExecutionStatus, &oldChangeSetID, &oldChangeStatus, &oldRunState, &oldLeaseID, &oldTakeoverActive)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PlatformEntityMapping{}, ErrNotFound
+	}
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+
+	var newExecutionStatus, newRunState string
+	err = tx.QueryRowContext(ctx, `SELECT e.status,r.state FROM delivery_controlled_executions e
+		JOIN browser_rpa_runs r ON r.organization_id=e.organization_id AND r.project_id=e.project_id AND r.id=?
+		WHERE e.organization_id=? AND e.project_id=? AND e.id=? FOR UPDATE`, request.BrowserRpaRunID, request.OrganizationID, request.ProjectID, request.BusinessExecutionID).
+		Scan(&newExecutionStatus, &newRunState)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PlatformEntityMapping{}, ErrNotFound
+	}
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	if newExecutionStatus != "running" || newRunState != "queued" {
+		return PlatformEntityMapping{}, ErrInvalidState
+	}
+
+	var stepCount, evidenceCount, attemptCount, confirmationCount int
+	err = tx.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM browser_rpa_run_steps WHERE organization_id=? AND project_id=? AND run_id=?),
+		(SELECT COUNT(*) FROM browser_rpa_evidence WHERE organization_id=? AND project_id=? AND run_id=?),
+		(SELECT COUNT(*) FROM browser_rpa_controlled_action_attempts WHERE organization_id=? AND project_id=? AND run_id=?),
+		(SELECT COUNT(*) FROM browser_rpa_final_confirmations WHERE organization_id=? AND project_id=? AND run_id=?)`,
+		request.OrganizationID, request.ProjectID, mapping.BrowserRpaRunID,
+		request.OrganizationID, request.ProjectID, mapping.BrowserRpaRunID,
+		request.OrganizationID, request.ProjectID, mapping.BrowserRpaRunID,
+		request.OrganizationID, request.ProjectID, mapping.BrowserRpaRunID).
+		Scan(&stepCount, &evidenceCount, &attemptCount, &confirmationCount)
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	if oldLeaseID != "" || oldTakeoverActive || stepCount != 0 || evidenceCount != 0 || attemptCount != 0 || confirmationCount != 0 {
+		return PlatformEntityMapping{}, ErrInvalidState
+	}
+
+	activeOldRun := oldExecutionStatus == "running" && oldChangeStatus == string(ControlledChangeSetExecuting) && oldRunState == "queued"
+	cancelledOldRun := oldExecutionStatus == "cancelled" && oldChangeStatus == string(ControlledChangeSetInvalidated) && oldRunState == "cancelled"
+	if !activeOldRun && !cancelledOldRun {
+		return PlatformEntityMapping{}, ErrInvalidState
+	}
+	if activeOldRun {
+		updates := []struct {
+			query string
+			args  []any
+		}{
+			{`UPDATE browser_rpa_runs SET state='cancelled',version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND state='queued' AND lease_id IS NULL AND takeover_active=FALSE`, []any{request.Now, request.OrganizationID, request.ProjectID, mapping.BrowserRpaRunID}},
+			{`UPDATE delivery_controlled_executions SET status='cancelled',version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND status='running'`, []any{request.Now, request.OrganizationID, request.ProjectID, mapping.BusinessExecutionID}},
+			{`UPDATE delivery_controlled_change_sets SET status='invalidated',version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND status='executing'`, []any{request.Now, request.OrganizationID, request.ProjectID, oldChangeSetID}},
+		}
+		for _, update := range updates {
+			result, updateErr := tx.ExecContext(ctx, update.query, update.args...)
+			if updateErr != nil {
+				return PlatformEntityMapping{}, updateErr
+			}
+			if affected, affectedErr := result.RowsAffected(); affectedErr != nil || affected != 1 {
+				if affectedErr != nil {
+					return PlatformEntityMapping{}, affectedErr
+				}
+				return PlatformEntityMapping{}, ErrVersionConflict
+			}
+		}
+	}
+
+	result, err := tx.ExecContext(ctx, `UPDATE delivery_platform_entity_mappings
+		SET configuration_id=?,business_execution_id=?,browser_rpa_run_id=?,version=version+1,updated_at=?
+		WHERE organization_id=? AND project_id=? AND id=? AND version=? AND status='pending_verification'
+		AND platform_object_id IS NULL AND platform_status IS NULL AND result_evidence_id IS NULL AND list_evidence_id IS NULL`,
+		request.ConfigurationID, request.BusinessExecutionID, request.BrowserRpaRunID, request.Now,
+		request.OrganizationID, request.ProjectID, request.MappingID, request.ExpectedVersion)
+	if err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr != nil || affected != 1 {
+		if affectedErr != nil {
+			return PlatformEntityMapping{}, affectedErr
+		}
+		return PlatformEntityMapping{}, ErrVersionConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return PlatformEntityMapping{}, err
+	}
+	return r.GetPlatformEntityMapping(ctx, request.OrganizationID, request.ProjectID, request.MappingID)
 }
 
 func (r MySQLRepository) ListPlatformEntityMappings(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, account string) ([]PlatformEntityMapping, error) {

@@ -18,6 +18,14 @@ type v3SourceStub struct {
 	mappings []delivery.PlatformEntityMapping
 }
 
+type v3AccountResolverStub struct {
+	externalID string
+}
+
+func (s v3AccountResolverStub) ResolveExternalAccountID(context.Context, string, string, string) (string, error) {
+	return s.externalID, nil
+}
+
 func (s v3SourceStub) GetPlanVersion(context.Context, contract.OrganizationID, contract.ProjectID, string, int) (delivery.DeliveryPlanVersion, error) {
 	return s.version, nil
 }
@@ -146,6 +154,28 @@ func TestV3CompilerSelectsProjectAsFirstStagedCreateForm(t *testing.T) {
 	}
 }
 
+func TestV3CompilerResolvesConnectorAccountBeforeBuildingRunnerPlan(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	configuration.Payload.OceanEngine.Project.AccountReference.ID = "oeacct_stable"
+	planHash := strings.Repeat("a", 64)
+	externalID := "1855554434276391"
+	compiler := V3Compiler{
+		Source:          v3SourceStub{version: delivery.DeliveryPlanVersion{CanonicalHash: planHash, DeliveryIntent: &intent, PlatformConfiguration: &configuration}},
+		AccountResolver: v3AccountResolverStub{externalID: externalID},
+		Now:             func() time.Time { return now },
+	}
+	run := browserautomation.BrowserRpaRun{OrganizationID: "org_1", ProjectID: "project_1", AccountID: externalID, Authority: browserautomation.AuthorityBinding{Action: "create_project_and_promotions", PlanID: "plan_1", PlanVersion: 1, PlanCanonicalHash: planHash, ConfigurationCanonicalHash: configuration.CanonicalHash}}
+	raw, err := compiler.CompilePrepareV3(context.Background(), run, browserautomation.SitePolicy{AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan v3Plan
+	if err := json.Unmarshal(raw, &plan); err != nil || plan.AccountReference != externalID {
+		t.Fatalf("resolved account plan = %#v err=%v", plan, err)
+	}
+}
+
 func TestV3CompilerAdvancesThroughMappedProjectAndPromotions(t *testing.T) {
 	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
 	configuration, intent := executableConfigurationFixture(now)
@@ -215,5 +245,30 @@ func TestV3CompilerReportsUnavailableObjectsBeforeProjectCreate(t *testing.T) {
 	attempt := browserautomation.ControlledActionAttempt{ID: "attempt_1", Status: browserautomation.ControlledActionAuthorized, CreatedAt: now}
 	if _, err := compiler.CompileSubmitV3(context.Background(), run, attempt, policy, "token"); err == nil || !strings.Contains(err.Error(), unavailablePlatformObjectsReason) {
 		t.Fatalf("submit error = %v", err)
+	}
+}
+
+func TestV3CompilerReturnsBlockedPlanForIncompletePromotionConfiguration(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	configuration.Payload.OceanEngine.Promotions[0].PromotionName = ""
+	planHash := strings.Repeat("a", 64)
+	compiler := V3Compiler{Source: v3SourceStub{version: delivery.DeliveryPlanVersion{CanonicalHash: planHash, DeliveryIntent: &intent, PlatformConfiguration: &configuration}}, Now: func() time.Time { return now }}
+	run := browserautomation.BrowserRpaRun{OrganizationID: "org_1", ProjectID: "project_1", AccountID: "1855554434276391", Authority: browserautomation.AuthorityBinding{Action: "create_project_and_promotions", PlanID: "plan_1", PlanVersion: 1, PlanCanonicalHash: planHash, ConfigurationCanonicalHash: configuration.CanonicalHash}}
+	policy := browserautomation.SitePolicy{AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create"}}
+
+	raw, err := compiler.CompilePrepareV3(context.Background(), run, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan v3Plan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		t.Fatal(err)
+	}
+	if plan.Status != "blocked" || !slices.Contains(plan.BlockedReasons, invalidDeliveryConfigurationReason) || len(plan.ConfigurationIssues) != 1 {
+		t.Fatalf("blocked plan = %#v", plan)
+	}
+	if !strings.Contains(plan.ConfigurationIssues[0], "requires copy, source, and name") || plan.AllowRemoteWrite || plan.MaximumFinalClicks != 0 {
+		t.Fatalf("configuration issues = %#v", plan.ConfigurationIssues)
 	}
 }

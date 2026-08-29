@@ -46,6 +46,23 @@ func (r MySQLRepository) GetRun(ctx context.Context, org contract.OrganizationID
 	return scanRun(r.DB.QueryRowContext(ctx, runSelect+` WHERE organization_id=? AND project_id=? AND id=?`, org, project, id))
 }
 
+func (r MySQLRepository) ListRuns(ctx context.Context, org contract.OrganizationID, project contract.ProjectID) ([]BrowserRpaRun, error) {
+	rows, err := r.DB.QueryContext(ctx, runSelect+` WHERE organization_id=? AND project_id=? ORDER BY updated_at DESC LIMIT 100`, org, project)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]BrowserRpaRun, 0)
+	for rows.Next() {
+		value, scanErr := scanRun(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 func (r MySQLRepository) CreateEnvironment(ctx context.Context, value ExecutionEnvironment) (ExecutionEnvironment, error) {
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO browser_rpa_environments (id,organization_id,project_id,platform,account_id,mode,browser_version,region,healthy,cdp_endpoint,version) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, value.ID, value.OrganizationID, value.ProjectID, value.Platform, value.AccountID, value.Mode, value.BrowserVersion, value.Region, value.Healthy, value.CDPEndpoint, value.Version)
 	if err == nil {

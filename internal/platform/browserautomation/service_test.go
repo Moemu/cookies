@@ -4,7 +4,24 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	platformids "github.com/shikanon/cookies/internal/platform/ids"
 )
+
+func TestBrowserRpaIDPrefixesUseProductionGeneratorSyntax(t *testing.T) {
+	prefixes := []string{
+		browserRpaLeaseIDPrefix,
+		browserRpaEvidenceIDPrefix,
+		browserRpaEventIDPrefix,
+		browserRpaConfirmationIDPrefix,
+		browserRpaAttemptIDPrefix,
+	}
+	for _, prefix := range prefixes {
+		if _, err := platformids.New(prefix); err != nil {
+			t.Fatalf("production ID prefix %q: %v", prefix, err)
+		}
+	}
+}
 
 func TestAuthorizeActionConsumesConfirmationExactlyOnce(t *testing.T) {
 	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)

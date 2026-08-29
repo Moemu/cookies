@@ -379,6 +379,18 @@ func TestObservatoryHTTPExposesReplayAndAuditableFeedback(t *testing.T) {
 	}
 }
 
+func TestStartBrowserRpaExecutionHTTPReturnsRealRunID(t *testing.T) {
+	app := &applicationStub{browserRpaExecution: delivery.StartBrowserRpaExecutionResult{BrowserRpaRun: delivery.BrowserRpaLaunchResult{RunID: "curun_real_1"}}}
+	server := New(app)
+	request := authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/plans/plan_1/browser-rpa-runs", `{"expected_version":3}`)
+	request.Header.Set("Idempotency-Key", "start-real-run-1")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"run_id":"curun_real_1"`) || app.startedPlanID != "plan_1" || app.startedBrowserRpa.ExpectedVersion != 3 || app.startedBrowserRpa.IdempotencyKey != "start-real-run-1" {
+		t.Fatalf("start Browser RPA status=%d body=%s request=%#v", response.Code, response.Body.String(), app.startedBrowserRpa)
+	}
+}
+
 func authenticatedRequest(method, target, body string) *http.Request {
 	request := httptest.NewRequest(method, target, bytes.NewBufferString(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -403,6 +415,15 @@ type applicationStub struct {
 	selection           delivery.DecisionSelection
 	observatoryRun      delivery.DeliveryObservatoryRun
 	observatoryFeedback delivery.DeliveryObservatoryFeedback
+	browserRpaExecution delivery.StartBrowserRpaExecutionResult
+	startedPlanID       string
+	startedBrowserRpa   delivery.StartBrowserRpaExecutionRequest
+}
+
+func (s *applicationStub) StartBrowserRpaExecution(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, planID string, request delivery.StartBrowserRpaExecutionRequest) (delivery.StartBrowserRpaExecutionResult, error) {
+	s.startedPlanID = planID
+	s.startedBrowserRpa = request
+	return s.browserRpaExecution, nil
 }
 
 type mappingApplicationStub struct {

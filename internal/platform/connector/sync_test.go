@@ -49,6 +49,12 @@ type metricsOnlyReader struct{ testReader }
 
 type inventoryOnlyReader struct{ testReader }
 
+type productImageFailureReader struct{ testReader }
+
+func (productImageFailureReader) ProductImagesPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return nil, fmt.Errorf("product image upstream failed")
+}
+
 func (inventoryOnlyReader) PromotionConfiguration(context.Context, string) (map[string]any, error) {
 	return nil, fmt.Errorf("configuration read is not permitted")
 }
@@ -83,6 +89,9 @@ func (testReader) AccountInfo(context.Context) (map[string]any, error) {
 }
 func (testReader) ImageMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
 	return map[string]any{"data": map[string]any{"images": []any{map[string]any{"material_id": "1001", "file_name": "image"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+}
+func (testReader) ProductImagesPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"images": []any{map[string]any{"material_id": "1501", "file_name": "product-image", "image_mode": 649502.0}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
 }
 func (testReader) VideoMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
 	return map[string]any{"data": map[string]any{"videos": []any{map[string]any{"material_id": "2001", "video_name": "video"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
@@ -149,6 +158,7 @@ func TestMetricTotalCountAcceptsPlatformStringValue(t *testing.T) {
 type testWriter struct {
 	started         bool
 	completed       string
+	completedCursor string
 	raw             []RawSnapshot
 	objects         []ObjectSnapshot
 	configs         []ConfigurationSnapshot
@@ -182,7 +192,8 @@ func (w *testWriter) UpdateSyncCursor(_ context.Context, _, cursor string) error
 	w.completed = cursor
 	return nil
 }
-func (w *testWriter) CompleteSync(_ context.Context, _, _, status string, _ time.Time) error {
+func (w *testWriter) CompleteSync(_ context.Context, _, cursor, status string, _ time.Time) error {
+	w.completedCursor = cursor
 	w.completed = status
 	return nil
 }
@@ -243,10 +254,10 @@ func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	if result.ObjectCount != 5 || result.MetricCount != 2 || writer.completed != "completed" {
 		t.Fatalf("result=%#v completed=%s", result, writer.completed)
 	}
-	if len(writer.raw) != 17 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
+	if len(writer.raw) != 18 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
 		t.Fatalf("raw=%d config=%d binding=%d diagnosis=%d status=%d", len(writer.raw), len(writer.configs), len(writer.bindings), len(writer.diagnoses), len(writer.statuses))
 	}
-	if len(writer.platformObjects) != 10 || result.PlatformObjects[PlatformObjectVideoMaterial].Created != 1 || result.PlatformObjects[PlatformObjectAwemePhotoMaterial].Created != 1 || result.PlatformObjects[PlatformObjectMarketingProduct].Created != 1 || result.PlatformObjects[PlatformObjectConversionAsset].Created != 1 || result.PlatformObjects[PlatformObjectAuthorizedIdentity].Created != 1 {
+	if len(writer.platformObjects) != 11 || result.PlatformObjects[PlatformObjectProductImage].Created != 1 || result.PlatformObjects[PlatformObjectVideoMaterial].Created != 1 || result.PlatformObjects[PlatformObjectAwemePhotoMaterial].Created != 1 || result.PlatformObjects[PlatformObjectMarketingProduct].Created != 1 || result.PlatformObjects[PlatformObjectConversionAsset].Created != 1 || result.PlatformObjects[PlatformObjectAuthorizedIdentity].Created != 1 {
 		t.Fatalf("platform objects=%#v result=%#v", writer.platformObjects, result.PlatformObjects)
 	}
 	if writer.objects[0].ObjectRef == "raw-account-1" || writer.objects[1].ObjectRef == "raw-promotion-1" || writer.bindings[0].MaterialRef == "raw-material-1" {
@@ -291,6 +302,22 @@ func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	}
 	if string(writer.raw[0].EncryptedEvidence) == "" || writer.raw[0].KeyVersion != "test-v1" {
 		t.Fatal("raw evidence was not encrypted")
+	}
+}
+
+func TestSynchronizerPersistsPlatformObjectFailureStage(t *testing.T) {
+	writer := &testWriter{}
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	syncer := Synchronizer{Writer: writer, Readers: testFactory{reader: productImageFailureReader{}}, Cipher: testCipher{}, Now: func() time.Time { return now }}
+	_, err := syncer.Sync(context.Background(), SyncRequest{
+		OrganizationID: "org_1", ProjectID: "project_1", AccountRef: "account_1", IdempotencyKey: "product-image-failure",
+		WindowStart: now.AddDate(0, 0, -1), WindowEnd: now, TimeZone: "Asia/Shanghai", Currency: "CNY", Mode: SyncModeInventoryOnly,
+	})
+	if err == nil {
+		t.Fatal("expected product-image read failure")
+	}
+	if writer.completed != "failed" || writer.completedCursor != string(PlatformObjectProductImage) {
+		t.Fatalf("status=%q cursor=%q", writer.completed, writer.completedCursor)
 	}
 }
 

@@ -32,3 +32,21 @@ func TestPlatformReferenceIDRejectsUnboundCookiesObject(t *testing.T) {
 		t.Fatal("expected unbound reference to fail")
 	}
 }
+
+func TestConfigurationObjectAvailabilityRejectsImageMaterialAsProductImage(t *testing.T) {
+	configuration := delivery.OceanEngineConfiguration{
+		Project: &delivery.OceanEngineProjectDraft{AccountReference: delivery.StableReference{ID: "account"}},
+		Promotions: []delivery.OceanEnginePromotionDraft{{
+			ProductImageReferences: []delivery.StableReference{{
+				Namespace: "oceanengine", ObjectKind: "image_material", ID: "7649703629105889290", State: delivery.ReferenceResolved,
+			}},
+		}},
+	}
+	items := configurationObjectAvailability(configuration)
+	if len(items) != 1 {
+		t.Fatalf("availability count = %d", len(items))
+	}
+	if items[0].Available || items[0].Reason != "产品主图必须来自巨量“我的图片”，不能使用图片素材" {
+		t.Fatalf("availability = %#v", items[0])
+	}
+}

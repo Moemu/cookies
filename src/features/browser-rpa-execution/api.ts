@@ -27,6 +27,10 @@ const apiPrefix = '/api/platform/v1/browser-rpa/projects'
  * one-time confirmation and a fenced session lease.
  */
 export const controlledExecutionApi = {
+  async listRuns(projectId: string, signal?: AbortSignal): Promise<BrowserRpaRun[]> {
+    const response = await request<{ items?: BrowserRpaRun[] }>(`${apiPrefix}/${encodeURIComponent(projectId)}/runs`, { signal })
+    return response.items ?? []
+  },
   async getWorkspace(projectId: string, runId: string, signal?: AbortSignal): Promise<ControlledExecutionWorkspace> {
     const path = `${apiPrefix}/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`
     const runPromise = request<BrowserRpaRun>(path, { signal })
@@ -118,11 +122,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body !== undefined) headers.set('Content-Type', 'application/json')
   const response = await fetch(path, { credentials: 'include', ...init, headers })
-  const payload = await response.json().catch(() => undefined) as T | { error?: string; message?: string } | undefined
+  const payload = await response.json().catch(() => undefined) as T | { error?: string | { message?: string }; message?: string } | undefined
   if (!response.ok) {
-    const message = payload && typeof payload === 'object' && ('error' in payload || 'message' in payload)
-      ? payload.error ?? payload.message ?? '受控执行控制面请求失败'
-      : '受控执行控制面请求失败'
+    const errorValue = payload && typeof payload === 'object' && 'error' in payload ? payload.error : undefined
+    const message = typeof errorValue === 'string'
+      ? errorValue
+      : errorValue && typeof errorValue === 'object' && typeof errorValue.message === 'string'
+        ? errorValue.message
+        : payload && typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
+          ? payload.message
+          : '受控执行控制面请求失败'
     throw new ControlledExecutionApiError(response.status, message)
   }
   return payload as T

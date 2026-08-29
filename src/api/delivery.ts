@@ -62,6 +62,17 @@ export type StableReference = {
   evidence_version?: string
 }
 
+function stableReferenceKey(reference: StableReference): string {
+  return [reference.namespace, reference.object_kind, reference.id ?? '', reference.version ?? '', reference.content_hash ?? '', reference.semantic_key ?? ''].join('\u0000')
+}
+
+function mergeStableReferences(current: StableReference[] | undefined, selected: StableReference[]): StableReference[] {
+  const references = new Map<string, StableReference>()
+  for (const reference of current ?? []) references.set(stableReferenceKey(reference), structuredClone(reference))
+  for (const reference of selected) references.set(stableReferenceKey(reference), structuredClone(reference))
+  return [...references.values()]
+}
+
 export type OceanEngineCalibrationManifestBinding = {
   schema_version: 'oceanengine-calibration-manifest/v1'
   manifest_id: string
@@ -140,6 +151,7 @@ export type PlatformConfiguration = {
         delivery_identity: { mode: string; authorized_identity?: StableReference }
         base_material_references: StableReference[]
         copy_items: Array<{ text: string }>
+        product_name?: string
         product_image_references?: StableReference[]
         product_selling_points?: string[]
         native_anchor_reference?: StableReference
@@ -895,13 +907,31 @@ export const deliveryPlanApi = {
     const intent = plan.currentVersion.deliveryIntent
     if (!intent) throw new DeliveryApiError('LEGACY_CONFIGURATION_UNSUPPORTED', 409, '当前计划没有可编辑的业务意图。')
     const nextVersion = plan.currentVersionNumber + 1
-    const nextIntent = { ...intent, intent_id: planRevisionIdentity('intent', plan.id, nextVersion), version_number: nextVersion, canonical_hash: undefined }
     const nextConfiguration = {
       ...configuration,
       configuration_id: planRevisionIdentity('configuration', plan.id, nextVersion),
       version_number: nextVersion,
       canonical_hash: undefined,
-      intent: { schema_version: 'delivery-intent/v1' as const, intent_id: nextIntent.intent_id, version_number: nextVersion },
+      intent: { schema_version: 'delivery-intent/v1' as const, intent_id: planRevisionIdentity('intent', plan.id, nextVersion), version_number: nextVersion },
+    }
+    const marketingProduct = nextConfiguration.payload.ocean_engine?.project.marketing_product_reference
+    const promotions = nextConfiguration.payload.ocean_engine?.promotions ?? []
+    const configuredMaterials = promotions.flatMap(promotion => [
+      ...promotion.base_material_references,
+      ...(promotion.product_image_references ?? []),
+    ])
+    const configuredLandingPages = promotions.flatMap(promotion => promotion.landing_page_reference ? [promotion.landing_page_reference] : [])
+    const nextIntent = {
+      ...intent,
+      intent_id: nextConfiguration.intent.intent_id,
+      version_number: nextVersion,
+      canonical_hash: undefined,
+      payload: {
+        ...intent.payload,
+        product_references: marketingProduct ? [structuredClone(marketingProduct)] : intent.payload.product_references,
+        material_references: mergeStableReferences(intent.payload.material_references, configuredMaterials),
+        landing_page_references: mergeStableReferences(intent.payload.landing_page_references, configuredLandingPages),
+      },
     }
     return toDeliveryPlan(await deliveryPlanRequest<WireDeliveryPlan>(projectId, `/plans/${encodeURIComponent(plan.id)}`, {
       method: 'PATCH',
@@ -1012,21 +1042,21 @@ export const deliveryOptimizationApi = {
 }
 
 export const deliveryExecutionApi = {
-  async executePlan(
+  async startBrowserRpaExecution(
     projectId: string,
     planId: string,
     expectedVersion: number,
     idempotencyKey: string,
-  ): Promise<DeliveryExecutionRecord> {
-    return toDeliveryExecutionRecord(await deliveryPlanRequest<WireDeliveryExecutionRecord>(
+  ): Promise<{ controlled_change_set: { id: string }; controlled_execution: { id: string }; browser_rpa_run: { run_id: string } }> {
+    return deliveryPlanRequest<{ controlled_change_set: { id: string }; controlled_execution: { id: string }; browser_rpa_run: { run_id: string } }>(
       projectId,
-      `/plans/${encodeURIComponent(planId)}/execute`,
+      `/plans/${encodeURIComponent(planId)}/browser-rpa-runs`,
       {
         method: 'POST',
         headers: { 'Idempotency-Key': idempotencyKey },
         body: JSON.stringify({ expected_version: expectedVersion }),
       },
-    ))
+    )
   },
   async execute(
     projectId: string,
@@ -1616,6 +1646,7 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
         promotions: materialReferences.map((reference, index) => ({
           draft_schema_version: 'oceanengine-configuration/v1', promotion_draft_id: `promotion-${identity}-${index + 1}`,
           delivery_identity: { mode: 'account_info' }, base_material_references: [reference], copy_items: [],
+          product_name: draft.marketingProduct.name,
           landing_page_reference: landingPageReference,
           settings: {}, promotion_name: `${draft.name}-${index + 1}`,
         })),

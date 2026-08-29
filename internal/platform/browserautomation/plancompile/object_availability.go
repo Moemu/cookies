@@ -36,8 +36,15 @@ func configurationObjectAvailability(configuration delivery.OceanEngineConfigura
 			DisplayName: ref.DisplayNameSnapshot, PlatformObjectID: platformID,
 			Available: platformID != "",
 		}
+		if strings.Contains(field, ".product_image_references.") && ref.ObjectKind != "product_image" {
+			item.PlatformObjectID = ""
+			item.Available = false
+			item.Reason = "产品主图必须来自巨量“我的图片”，不能使用图片素材"
+		}
 		if !item.Available {
-			item.Reason = "未绑定巨量平台 ID"
+			if item.Reason == "" {
+				item.Reason = "未绑定巨量平台 ID"
+			}
 		}
 		values = append(values, item)
 	}

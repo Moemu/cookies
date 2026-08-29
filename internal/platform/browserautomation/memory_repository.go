@@ -3,6 +3,7 @@ package browserautomation
 import (
 	"context"
 	"reflect"
+	"sort"
 	"sync"
 	"time"
 
@@ -66,6 +67,19 @@ func (r *MemoryRepository) GetRun(_ context.Context, org contract.OrganizationID
 		return BrowserRpaRun{}, ErrNotFound
 	}
 	return value, nil
+}
+
+func (r *MemoryRepository) ListRuns(_ context.Context, org contract.OrganizationID, project contract.ProjectID) ([]BrowserRpaRun, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	values := make([]BrowserRpaRun, 0)
+	for _, value := range r.runs {
+		if value.OrganizationID == org && value.ProjectID == project {
+			values = append(values, value)
+		}
+	}
+	sort.Slice(values, func(i, j int) bool { return values[i].UpdatedAt.After(values[j].UpdatedAt) })
+	return values, nil
 }
 
 func (r *MemoryRepository) TransitionRun(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expected int64, state RunState, reason BlockingReason, now time.Time) (BrowserRpaRun, error) {

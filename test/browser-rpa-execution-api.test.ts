@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
-import { controlledExecutionApi } from '../src/features/browser-rpa-execution/api.ts'
+import { ControlledExecutionApiError, controlledExecutionApi } from '../src/features/browser-rpa-execution/api.ts'
 
 test('controlled execution API supports the complete Runner v3 browser flow', async () => {
   const calls: Array<{ url: string; method: string; body?: string }> = []
@@ -17,6 +17,7 @@ test('controlled execution API supports the complete Runner v3 browser flow', as
     const method = init?.method ?? 'GET'
     calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined })
     let value: unknown = run
+    if (url.endsWith('/runs')) value = { items: [run] }
     if (url.endsWith('/events') || url.endsWith('/evidence')) value = { items: [] }
     if (url.includes('/environments/')) value = { id: 'env_1', account_id: run.account_id, mode: 'local_visible', browser_version: 'Edge', region: 'local', healthy: true, version: 1 }
     if (url.includes('/browser-profiles/')) value = { id: 'profile_1', environment_id: 'env_1', account_id: run.account_id, state: 'ready', version: 1 }
@@ -29,7 +30,9 @@ test('controlled execution API supports the complete Runner v3 browser flow', as
   }
 
   try {
+    const runs = await controlledExecutionApi.listRuns('project_1')
     const workspace = await controlledExecutionApi.getWorkspace('project_1', 'run_1')
+    assert.equal(runs[0]?.id, 'run_1')
     assert.equal(workspace.environment.healthy, true)
     assert.equal(workspace.profile.state, 'ready')
     assert.equal(workspace.lease?.fencing_token, 3)
@@ -61,4 +64,24 @@ test('controlled execution UI reports the real Edge probe and keeps unsupported 
   assert.match(source, /DevTools WebSocket/)
   assert.match(source, /当前动作没有 Runner v3 单表单协议/)
   assert.doesNotMatch(source, /尚未连接；Prepare 时检查/)
+  assert.match(source, /Browser RPA 执行记录/)
+  assert.match(source, /controlledExecutionApi\.listRuns/)
+  assert.match(source, /此执行记录固定使用投放计划 v/)
+  assert.match(source, /当前计划的后续修改不会更新此记录/)
+})
+
+test('controlled execution API shows a structured platform error', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'Runner 读取失败' } }), {
+    status: 500,
+    headers: { 'Content-Type': 'application/json' },
+  })
+  try {
+    await assert.rejects(
+      controlledExecutionApi.generatePlan('project_1', 'run_1'),
+      (error: unknown) => error instanceof ControlledExecutionApiError && error.message === 'Runner 读取失败',
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

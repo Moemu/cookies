@@ -272,6 +272,8 @@ func (r ControlledPromotionRestart) ValidateAt(action ControlledAction, now time
 }
 
 type ControlledAuthorityBinding struct {
+	AuthorityOrigin                 string                         `json:"authority_origin,omitempty"`
+	PreflightCanonicalHash          string                         `json:"preflight_canonical_hash,omitempty"`
 	SelectionID                     string                         `json:"selection_id"`
 	ObservatoryRunID                string                         `json:"observatory_run_id"`
 	ObservatoryRunCanonicalHash     string                         `json:"observatory_run_canonical_hash"`
@@ -311,16 +313,29 @@ type ControlledAuthorityBinding struct {
 }
 
 func (b ControlledAuthorityBinding) Validate() error {
-	if b.SelectionID == "" || b.ObservatoryRunID == "" || b.OperatorFeedbackID == "" || b.PlanID == "" || b.PlanVersion < 1 || b.IntentID == "" || b.IntentVersion < 1 || b.DecisionID == "" || b.ConfigurationID == "" || b.ConfigurationVersion < 1 || b.WorkflowID == "" || b.AccountReferenceID == "" || b.ObjectFingerprint == "" || b.ProjectBudgetLimitMinor < 0 || b.PromotionBudgetLimitMinor < 0 || (b.SkillID == "") != (b.SkillVersion == "") {
+	if b.PlanID == "" || b.PlanVersion < 1 || b.IntentID == "" || b.IntentVersion < 1 || b.ConfigurationID == "" || b.ConfigurationVersion < 1 || b.WorkflowID == "" || b.AccountReferenceID == "" || b.ObjectFingerprint == "" || b.ProjectBudgetLimitMinor < 0 || b.PromotionBudgetLimitMinor < 0 || (b.SkillID == "") != (b.SkillVersion == "") {
+		return ErrInvalidRequest
+	}
+	if b.AuthorityOrigin == "plan_execution" {
+		if !isLowercaseSHA256(b.PreflightCanonicalHash) || b.SelectionID != "" || b.ObservatoryRunID != "" || b.OperatorFeedbackID != "" || b.DecisionID != "" {
+			return ErrInvalidRequest
+		}
+	} else if b.AuthorityOrigin != "" {
+		return ErrInvalidRequest
+	} else if b.SelectionID == "" || b.ObservatoryRunID == "" || b.OperatorFeedbackID == "" || b.DecisionID == "" {
 		return ErrInvalidRequest
 	}
 	if b.ProjectBudgetMode != "" && b.ProjectBudgetMode != OceanEngineBudgetModeDaily && b.ProjectBudgetMode != OceanEngineBudgetModeUnlimited {
 		return ErrInvalidRequest
 	}
-	if b.OperatorFeedbackDisposition != ObservatoryFeedbackAccepted && b.OperatorFeedbackDisposition != ObservatoryFeedbackModified {
+	if b.AuthorityOrigin != "plan_execution" && b.OperatorFeedbackDisposition != ObservatoryFeedbackAccepted && b.OperatorFeedbackDisposition != ObservatoryFeedbackModified {
 		return ErrInvalidState
 	}
-	for _, hash := range []string{b.ObservatoryRunCanonicalHash, b.OperatorFeedbackCanonicalHash, b.PlanCanonicalHash, b.IntentCanonicalHash, b.DecisionCanonicalHash, b.ConfigurationCanonicalHash, b.WorkflowCanonicalHash} {
+	hashes := []string{b.PlanCanonicalHash, b.IntentCanonicalHash, b.ConfigurationCanonicalHash, b.WorkflowCanonicalHash}
+	if b.AuthorityOrigin != "plan_execution" {
+		hashes = append(hashes, b.ObservatoryRunCanonicalHash, b.OperatorFeedbackCanonicalHash, b.DecisionCanonicalHash)
+	}
+	for _, hash := range hashes {
 		if !isLowercaseSHA256(hash) {
 			return ErrApprovalContentMismatch
 		}

@@ -16,6 +16,7 @@ func TestPlatformObjectCandidatesKeepSafeMetadata(t *testing.T) {
 		valid     bool
 	}{
 		{"image", candidate(imageMaterialCandidate(map[string]any{"material_id": "101", "file_name": "image-a", "width": float64(1080), "sign_url": "https://example.invalid/image?x-orig-expires=1787760000"})), true},
+		{"product-image", candidate(productImageCandidate(map[string]any{"material_id": "151", "file_name": "product-image-a", "image_mode": float64(649502), "sign_url": "https://example.invalid/product-image?x-orig-expires=1787760000"})), true},
 		{"video", candidate(videoMaterialCandidate(map[string]any{"material_id": "202", "video_name": "video-a", "video_filmLength": float64(15), "video_url": "refid:unsafe", "video_poster": "https://example.invalid/video-poster", "sign_url": "https://example.invalid/video-sign?x-orig-expires=1787760000"})), true},
 		{"photo", candidate(awemePhotoMaterialCandidate(map[string]any{"material_id": "252", "file_name": "photo-a", "image_info": []any{map[string]any{"sign_url": "https://example.invalid/photo?x-orig-expires=1787760000"}}})), true},
 		{"product", candidate(marketingProductCandidate(map[string]any{"product_id": "262", "name": "product-a", "brand_name": "brand-a", "clue_product_category": map[string]any{"category_name": "category-a"}})), true},

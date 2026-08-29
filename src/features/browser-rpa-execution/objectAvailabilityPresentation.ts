@@ -104,5 +104,46 @@ export function presentPlanBlockedReason(reason: string): string {
   if (reason === 'PLATFORM_OBJECTS_UNAVAILABLE') {
     return '有巨量对象尚未绑定。请处理下方标记为“需处理”的对象。'
   }
+  if (reason === 'DELIVERY_CONFIGURATION_INVALID') {
+    return '投放配置不完整。请补充下方字段，然后重新生成计划。'
+  }
   return reason
+}
+
+export function presentConfigurationIssue(issue: string): string {
+  if (/marketing product: reference .* is outside the delivery intent/i.test(issue)) {
+    return '营销商品未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。'
+  }
+  if (/base material: reference .* is outside the delivery intent/i.test(issue)) {
+    return '基础素材未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。'
+  }
+  if (/product image: reference .* is outside the delivery intent/i.test(issue)) {
+    return '产品主图未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。'
+  }
+  if (/product image picker requires an observed expected_total of 1/i.test(issue)) {
+    return '产品主图缺少选择器观察证据。请返回平台配置页并保存。系统会核对当前图片目录，并写入选择器证据。'
+  }
+  if (/landing page: reference .* is outside the delivery intent/i.test(issue)) {
+    return '落地页未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。'
+  }
+  if (/requires copy, source, and name/i.test(issue)) {
+    return '投放单元缺少必要字段。请补充单元文案、素材来源和单元名称。'
+  }
+  if (/call to action needs 1 to 10 unique values/i.test(issue)) {
+    return '投放单元缺少行动号召。请填写 1 至 10 个不重复的行动号召。'
+  }
+  if (/exactly one bound base material/i.test(issue)) {
+    return '投放单元的基础素材数量不正确。请选择一个可用素材。'
+  }
+  if (/daily budget must be at least CNY 300/i.test(issue)) {
+    return '日预算过低。请将对应项目或单元的日预算设为至少 300 元。'
+  }
+  const dateBoundary = issue.match(/project start date (\d{4}-\d{2}-\d{2}) must be no earlier than (\d{4}-\d{2}-\d{2})/i)
+  if (dateBoundary) {
+    return `此执行记录的项目开始日期是 ${dateBoundary[1]}。最早允许日期是 ${dateBoundary[2]}。`
+  }
+  if (/project start date must be no earlier than the next day/i.test(issue)) {
+    return '项目开始日期过早。请将开始日期设为次日或更晚。'
+  }
+  return '投放配置未通过执行前检查。请返回平台配置页并检查标记为“必填”的字段。'
 }
