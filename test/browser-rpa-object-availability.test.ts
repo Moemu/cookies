@@ -87,8 +87,8 @@ test('explains incomplete promotion fields without exposing its internal draft I
 
 test('explains other configuration requirements with direct repair instructions', () => {
   assert.equal(
-    presentConfigurationIssue('unsupported account path: only calibrated ecommerce short-video and image-text forms are allowed'),
-    '当前 Runner 只支持“电商 + 短视频与图文”路径。此计划选择了其他营销目的。请返回平台配置页并改为电商。',
+    presentConfigurationIssue('unsupported account path: marketing purpose unknown is not calibrated'),
+    '当前营销目的不在校准清单中。请返回平台配置页并选择已校准的营销目的。',
   )
   assert.equal(
     presentConfigurationIssue('project: bid is outside the calibrated limit'),

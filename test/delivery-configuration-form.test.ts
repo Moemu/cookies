@@ -29,9 +29,12 @@ test('manual direct links do not require an OceanEngine object binding', () => {
   assert.match(component, /missingRequiredFields\.has\('direct_link'\)/)
 })
 
-test('unsupported Runner paths and CPM bid limits are visible before execution', () => {
+test('enumerated Runner paths and CPM bid limits are visible before execution', () => {
   assert.match(component, /当前项目路径不能生成 Runner 计划/)
-  assert.match(component, /销售线索（Runner 暂不支持）/)
+  assert.match(component, /<option value="lead_generation">销售线索<\/option>/)
+  assert.match(component, /<option value="application">应用<\/option>/)
+  assert.match(component, /<option value="product_catalog">商品<\/option>/)
+  assert.match(component, /<option value="content_marketing">内容营销<\/option>/)
   assert.match(component, /value="short_video_image_text"/)
   assert.match(component, /CPM 项目出价必须是 4 至 100 元/)
 })

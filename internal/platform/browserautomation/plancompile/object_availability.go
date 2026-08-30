@@ -69,9 +69,14 @@ func configurationObjectAvailability(configuration delivery.OceanEngineConfigura
 	if project == nil {
 		return values
 	}
-	appendReference("project.marketing_product_reference", project.MarketingProductReference)
-	appendReference("project.application_reference", project.ApplicationReference)
-	appendReference("project.product_catalog_reference", project.ProductCatalogReference)
+	switch project.MarketingPurpose {
+	case "ecommerce":
+		appendReference("project.marketing_product_reference", project.MarketingProductReference)
+	case "application":
+		appendReference("project.application_reference", project.ApplicationReference)
+	case "product_catalog":
+		appendReference("project.product_catalog_reference", project.ProductCatalogReference)
+	}
 	for promotionIndex := range configuration.Promotions {
 		promotion := &configuration.Promotions[promotionIndex]
 		prefix := fmt.Sprintf("promotions.%d", promotionIndex)

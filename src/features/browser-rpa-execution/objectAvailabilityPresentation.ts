@@ -112,8 +112,8 @@ export function presentPlanBlockedReason(reason: string): string {
 }
 
 export function presentConfigurationIssue(issue: string): string {
-  if (/unsupported account path: only calibrated ecommerce short-video and image-text forms are allowed/i.test(issue)) {
-    return '当前 Runner 只支持“电商 + 短视频与图文”路径。此计划选择了其他营销目的。请返回平台配置页并改为电商。'
+  if (/unsupported account path: marketing purpose .* is not calibrated/i.test(issue)) {
+    return '当前营销目的不在校准清单中。请返回平台配置页并选择已校准的营销目的。'
   }
   if (/project: bid is outside the calibrated limit/i.test(issue)) {
     return '项目出价超出当前 Runner 的校准范围。CPM 出价必须是 4 至 100 元。'

@@ -90,6 +90,50 @@ func TestCompileConfigurationV3NormalizesButtonRedirectOptimizationTarget(t *tes
 	}
 }
 
+func TestCompileConfigurationV3UsesEnumeratedLeadGenerationPath(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	project := configuration.Payload.OceanEngine.Project
+	project.MarketingPurpose = "lead_generation"
+	project.MarketingScenario = "short_video_image_text"
+	project.LeadCaptureMode = "custom_lead"
+	project.OptimizationTargetReference.SemanticKey = "button_redirect"
+	project.BudgetAndBidding.BudgetMode = delivery.OceanEngineBudgetModeUnlimited
+	project.BudgetAndBidding.DailyBudgetMinor = 0
+	project.BudgetAndBidding.BiddingStrategy = "cost_cap"
+	largeBid := int64(999999900)
+	project.BudgetAndBidding.BidMinor = &largeBid
+
+	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projectPlan v3Plan
+	if err := json.Unmarshal(compiled.Forms[0].Plan, &projectPlan); err != nil {
+		t.Fatal(err)
+	}
+	provided := map[string]any{}
+	for _, step := range projectPlan.Steps {
+		if step.ValueState == "provided" {
+			provided[step.FieldKey] = step.Value
+		}
+	}
+	if provided["project.marketing_purpose"] != "销售线索" || provided["project.lead_capture_mode"] != "自定义" {
+		t.Fatalf("lead-generation values = %#v", provided)
+	}
+	for _, excluded := range []string{"project.marketing_product_reference", "project.placement_strategy", "project.search_bid_coefficient", "project.daily_budget", "project.bid"} {
+		if _, ok := provided[excluded]; ok {
+			t.Fatalf("lead-generation plan contains %s: %#v", excluded, provided)
+		}
+	}
+	availability := configurationObjectAvailability(*configuration.Payload.OceanEngine)
+	for _, item := range availability {
+		if item.FieldKey == "project.marketing_product_reference" {
+			t.Fatalf("lead-generation availability contains an ecommerce product: %#v", availability)
+		}
+	}
+}
+
 func TestCompileConfigurationV3FillsOwnedLandingPageLink(t *testing.T) {
 	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
 	configuration, intent := executableConfigurationFixture(now)

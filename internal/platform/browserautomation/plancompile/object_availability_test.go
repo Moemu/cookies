@@ -31,7 +31,7 @@ func TestPlatformReferenceIDRequiresUniqueProductIDForConnectorProduct(t *testin
 	if got := platformReferenceID(legacy); got != "" {
 		t.Fatalf("legacy product_id must not be executable: %q", got)
 	}
-	configuration := delivery.OceanEngineConfiguration{Project: &delivery.OceanEngineProjectDraft{MarketingProductReference: &legacy}}
+	configuration := delivery.OceanEngineConfiguration{Project: &delivery.OceanEngineProjectDraft{MarketingPurpose: "ecommerce", MarketingProductReference: &legacy}}
 	availability := configurationObjectAvailability(configuration)
 	if len(availability) != 1 || availability[0].Available || availability[0].Reason != "当前商品绑定的是 product_id。请同步巨量对象目录后重新选择商品" {
 		t.Fatalf("legacy availability = %#v", availability)

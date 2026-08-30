@@ -95,6 +95,14 @@ var projectSpecs = map[string]fieldSpec{
 	"project.marketing_purpose":             {"project.marketing_purpose", "choose_exact_visible_option", "营销目的", "电商", true},
 	"project.marketing_scenario":            {"project.marketing_scenario", "choose_exact_visible_option", "营销场景", "短视频+图文", true},
 	"project.marketing_product_reference":   {"project.marketing_product_reference", "open_reference_picker", "营销产品", "更换", true},
+	"project.lead_capture_mode":             {"project.lead_capture_mode", "choose_exact_visible_option", "获取线索方式", "智能优选", true},
+	"project.application_reference":         {"project.application_reference", "open_reference_picker", "应用", "请输入应用下载链接或选择已有应用", true},
+	"project.application_scenario":          {"project.application_scenario", "choose_exact_visible_option", "营销目的", "应用下载", true},
+	"project.operating_system":              {"project.operating_system", "choose_exact_visible_option", "操作系统", "安卓", true},
+	"project.application_download_mode":     {"project.application_download_mode", "choose_exact_visible_option", "下载方式", "直接下载", true},
+	"project.application_launch_mode":       {"project.application_launch_mode", "choose_exact_visible_option", "调起方式", "直接调起", true},
+	"project.product_catalog_reference":     {"project.product_catalog_reference", "open_reference_picker", "商品目录", "请选择或输入搜索商品目录", true},
+	"project.product_targeting":             {"project.product_targeting", "configure_object", "商品投放条件", "RTA重定向", false},
 	"project.carrier":                       {"project.carrier", "choose_exact_visible_option", "投放载体", "橙子落地页", true},
 	"project.optimization_target_reference": {"project.optimization_target_reference", "choose_exact_visible_option", "优化目标", "请选择", true},
 	"project.deep_optimization_mode":        {"project.deep_optimization_mode", "choose_exact_visible_option", "深度优化方式", "不启用", true},
@@ -200,8 +208,11 @@ func validateAccountPath(project delivery.OceanEngineProjectDraft, account strin
 	if !numericReference(account) || project.AccountReference.State != delivery.ReferenceResolved || project.AccountReference.ID != account {
 		return fmt.Errorf("unsupported account path: exact numeric OceanEngine account binding is required")
 	}
-	if project.MarketingPurpose != "ecommerce" || project.MarketingScenario != "short_video_image_text" {
-		return fmt.Errorf("unsupported account path: only calibrated ecommerce short-video and image-text forms are allowed")
+	if !slices.Contains([]string{"ecommerce", "lead_generation", "application", "product_catalog", "content_marketing"}, project.MarketingPurpose) {
+		return fmt.Errorf("unsupported account path: marketing purpose %s is not calibrated", project.MarketingPurpose)
+	}
+	if project.MarketingPurpose != "product_catalog" && !slices.Contains([]string{"short_video_image_text", "manual_delivery"}, project.MarketingScenario) {
+		return fmt.Errorf("unsupported account path: marketing scenario %s is not calibrated", project.MarketingScenario)
 	}
 	return nil
 }
@@ -211,7 +222,11 @@ func validateConfigurationLimits(project delivery.OceanEngineProjectDraft, promo
 	if budget.Currency != "CNY" || (budget.BudgetMode != delivery.OceanEngineBudgetModeUnlimited && budget.DailyBudgetMinor < 30000) {
 		return fmt.Errorf("project daily budget must be unlimited or at least CNY 300")
 	}
-	if err := validateBid(budget); err != nil {
+	projectBudget := budget
+	if !projectBidRequired(project) {
+		projectBudget.BidMinor = nil
+	}
+	if err := validateBid(projectBudget); err != nil {
 		return fmt.Errorf("project: %w", err)
 	}
 	if project.Schedule.Timezone != "Asia/Shanghai" || !project.Schedule.EndAt.After(project.Schedule.StartAt) {
@@ -228,11 +243,13 @@ func validateConfigurationLimits(project delivery.OceanEngineProjectDraft, promo
 		if boundary.Currency != "CNY" {
 			return fmt.Errorf("intent budget currency is not CNY")
 		}
-		if boundary.MinimumDailyMinor != nil && budget.DailyBudgetMinor < *boundary.MinimumDailyMinor {
-			return fmt.Errorf("project daily budget is below intent limit")
-		}
-		if boundary.MaximumDailyMinor != nil && budget.DailyBudgetMinor > *boundary.MaximumDailyMinor {
-			return fmt.Errorf("project daily budget exceeds intent limit")
+		if budget.BudgetMode != delivery.OceanEngineBudgetModeUnlimited {
+			if boundary.MinimumDailyMinor != nil && budget.DailyBudgetMinor < *boundary.MinimumDailyMinor {
+				return fmt.Errorf("project daily budget is below intent limit")
+			}
+			if boundary.MaximumDailyMinor != nil && budget.DailyBudgetMinor > *boundary.MaximumDailyMinor {
+				return fmt.Errorf("project daily budget exceeds intent limit")
+			}
 		}
 		schedule := intent.Payload.ScheduleBoundary
 		if project.Schedule.StartAt.Before(schedule.EarliestStart) || project.Schedule.EndAt.After(schedule.LatestEnd) {
@@ -316,17 +333,57 @@ func validateBid(value delivery.OceanEngineBudgetAndBidding) error {
 func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *delivery.DeliveryIntent) (map[string]any, error) {
 	shanghai := time.FixedZone("Asia/Shanghai", 8*60*60)
 	values := map[string]any{
-		"project.marketing_purpose": "电商", "project.marketing_scenario": "短视频+图文",
-		"project.carrier": carrierLabel(project.Carrier), "project.delivery_mode": deliveryModeLabel(project.DeliveryMode),
+		"project.marketing_purpose": marketingPurposeLabel(project.MarketingPurpose),
+		"project.carrier":           carrierLabel(project.Carrier), "project.delivery_mode": deliveryModeLabel(project.DeliveryMode),
 		"project.schedule":     map[string]string{"start": project.Schedule.StartAt.In(shanghai).Format(time.DateOnly), "end": project.Schedule.EndAt.In(shanghai).Format(time.DateOnly)},
-		"project.daily_budget": money(project.BudgetAndBidding.DailyBudgetMinor), "project.project_name": project.ProjectName,
+		"project.project_name": project.ProjectName,
 	}
-	if project.MarketingProductReference != nil {
+	if project.MarketingPurpose != "product_catalog" {
+		values["project.marketing_scenario"] = marketingScenarioLabel(project.MarketingScenario)
+	}
+	if project.BudgetAndBidding.BudgetMode != delivery.OceanEngineBudgetModeUnlimited {
+		values["project.daily_budget"] = money(project.BudgetAndBidding.DailyBudgetMinor)
+	}
+	if project.MarketingPurpose == "ecommerce" && project.MarketingProductReference != nil {
 		spec, err := stableReferenceSpec(*project.MarketingProductReference, intentRefs(intent, "product"))
 		if err != nil {
 			return nil, fmt.Errorf("marketing product: %w", err)
 		}
 		values["project.marketing_product_reference"] = spec
+	}
+	if project.MarketingPurpose == "lead_generation" {
+		values["project.lead_capture_mode"] = leadCaptureModeLabel(project.LeadCaptureMode)
+	}
+	if project.MarketingPurpose == "application" {
+		if project.ApplicationReference == nil {
+			return nil, fmt.Errorf("application marketing requires an application reference")
+		}
+		spec, err := stableReferenceSpec(*project.ApplicationReference, nil)
+		if err != nil {
+			return nil, fmt.Errorf("application: %w", err)
+		}
+		values["project.application_reference"] = spec
+		values["project.application_scenario"] = applicationScenarioLabel(project.ApplicationScenario)
+		values["project.operating_system"] = operatingSystemLabel(project.OperatingSystem)
+		if project.ApplicationScenario == "app_download" {
+			values["project.application_download_mode"] = applicationDownloadModeLabel(project.ApplicationDownloadMode)
+		}
+		if project.ApplicationScenario == "app_launch" {
+			values["project.application_launch_mode"] = applicationLaunchModeLabel(project.ApplicationLaunchMode)
+		}
+	}
+	if project.MarketingPurpose == "product_catalog" {
+		if project.ProductCatalogReference == nil {
+			return nil, fmt.Errorf("product-catalog marketing requires a product catalog reference")
+		}
+		spec, err := stableReferenceSpec(*project.ProductCatalogReference, nil)
+		if err != nil {
+			return nil, fmt.Errorf("product catalog: %w", err)
+		}
+		values["project.product_catalog_reference"] = spec
+		if project.ProductTargeting != nil {
+			values["project.product_targeting"] = project.ProductTargeting
+		}
 	}
 	optimization := referenceKey(project.OptimizationTargetReference)
 	optimizationName := optimizationLabel(optimization)
@@ -350,7 +407,7 @@ func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *deliver
 	if len(project.PlacementMedia) > 0 {
 		values["project.placement_media"] = project.PlacementMedia
 	}
-	if project.BudgetAndBidding.BidMinor != nil {
+	if projectBidRequired(project) && project.BudgetAndBidding.BidMinor != nil {
 		values["project.bid"] = money(*project.BudgetAndBidding.BidMinor)
 	}
 	if project.BudgetAndBidding.ROICoefficient != nil {
@@ -593,6 +650,30 @@ func decimal(value float64) string { return strconv.FormatFloat(value, 'f', -1, 
 func carrierLabel(value string) string {
 	return map[string]string{"orange_landing_page": "橙子落地页", "owned_landing_page": "自研落地页", "byte_miniapp": "字节小程序", "wechat_miniapp": "微信小程序"}[value]
 }
+func marketingPurposeLabel(value string) string {
+	return map[string]string{"ecommerce": "电商", "lead_generation": "销售线索", "application": "应用", "product_catalog": "商品", "content_marketing": "内容营销"}[value]
+}
+func marketingScenarioLabel(value string) string {
+	return map[string]string{"short_video_image_text": "短视频+图文", "manual_delivery": "短视频+图文"}[value]
+}
+func leadCaptureModeLabel(value string) string {
+	return map[string]string{"smart_lead": "智能优选", "custom_lead": "自定义"}[value]
+}
+func applicationScenarioLabel(value string) string {
+	return map[string]string{"app_download": "应用下载", "app_launch": "应用调起", "app_appointment_download": "预约下载"}[value]
+}
+func operatingSystemLabel(value string) string {
+	return map[string]string{"android": "安卓", "ios": "iOS", "harmony": "鸿蒙", "harmonyos": "鸿蒙"}[value]
+}
+func applicationDownloadModeLabel(value string) string {
+	return map[string]string{"direct_download": "直接下载", "landing_page_download": "落地页下载"}[value]
+}
+func applicationLaunchModeLabel(value string) string {
+	return map[string]string{"direct_launch": "直接调起", "landing_page_launch": "落地页调起"}[value]
+}
+func projectBidRequired(project delivery.OceanEngineProjectDraft) bool {
+	return project.BudgetAndBidding.BiddingStrategy == "stable_cost" && !slices.Contains([]string{"conversion_roi", "net_roi"}, project.DeepOptimizationMode)
+}
 func optimizationLabel(value string) string {
 	value = normalizedOptimizationTarget(value)
 	return map[string]string{"button_jump": "按钮跳转", "in_app_order": "app内下单", "click": "点击", "impression": "展示", "store_call": "门店电话拨打", "store_stay": "门店停留"}[value]
@@ -614,15 +695,47 @@ func placementLabel(value string) string {
 }
 
 func orderedProjectFields(project delivery.OceanEngineProjectDraft, parent v3ParentContext) []fieldSpec {
-	keys := []string{"project.marketing_purpose", "project.marketing_scenario", "project.marketing_product_reference", "project.carrier", "project.optimization_target_reference", "project.deep_optimization_mode", "project.delivery_mode", "project.schedule", "project.daily_budget", "project.project_name"}
-	if parent.DeliveryMode == "ubmax" {
-		keys = append(keys[:7], append([]string{"project.aigc_dynamic_creative"}, keys[7:]...)...)
-		keys = append(keys, "project.bid")
-	} else {
-		keys = append(keys[:7], append([]string{"project.placement_strategy", "project.search_bid_coefficient", "project.search_targeting_expansion"}, keys[7:]...)...)
+	keys := []string{"project.marketing_purpose"}
+	if project.MarketingPurpose != "product_catalog" {
+		keys = append(keys, "project.marketing_scenario")
 	}
-	if parent.PlacementMode == "preferred_media" {
+	switch project.MarketingPurpose {
+	case "ecommerce":
+		keys = append(keys, "project.marketing_product_reference")
+	case "lead_generation":
+		keys = append(keys, "project.lead_capture_mode")
+	case "application":
+		keys = append(keys, "project.application_reference", "project.application_scenario", "project.operating_system")
+		if project.ApplicationScenario == "app_download" {
+			keys = append(keys, "project.application_download_mode")
+		}
+		if project.ApplicationScenario == "app_launch" {
+			keys = append(keys, "project.application_launch_mode")
+		}
+	case "product_catalog":
+		keys = append(keys, "project.product_catalog_reference", "project.product_targeting")
+	}
+	if slices.Contains([]string{"ecommerce", "lead_generation", "content_marketing"}, project.MarketingPurpose) {
+		keys = append(keys, "project.carrier")
+	}
+	keys = append(keys, "project.optimization_target_reference", "project.deep_optimization_mode", "project.delivery_mode", "project.schedule", "project.daily_budget", "project.project_name")
+	if parent.DeliveryMode == "ubmax" {
+		if slices.Contains([]string{"ecommerce", "lead_generation"}, project.MarketingPurpose) {
+			keys = append(keys, "project.aigc_dynamic_creative")
+		}
+	} else if project.MarketingPurpose == "ecommerce" {
+		keys = append(keys, "project.placement_strategy", "project.search_bid_coefficient", "project.search_targeting_expansion")
+	} else if project.MarketingPurpose == "product_catalog" {
+		keys = append(keys, "project.placement_strategy")
+	}
+	if slices.Contains([]string{"ecommerce", "product_catalog"}, project.MarketingPurpose) && parent.PlacementMode == "preferred_media" {
 		keys = append(keys, "project.placement_media")
+	}
+	if project.BudgetAndBidding.BudgetMode == delivery.OceanEngineBudgetModeUnlimited {
+		keys = removeKey(keys, "project.daily_budget")
+	}
+	if projectBidRequired(project) {
+		keys = append(keys, "project.bid")
 	}
 	if parent.DeepOptimization == "conversion_roi" {
 		keys = removeKey(keys, "project.bid")
