@@ -621,6 +621,7 @@ func main() {
 		httpserver.DomainMount{Pattern: "/api/insights/v1/", Handler: insightshttp.New(insightsService)})
 	var connectorPatrol *connector.PatrolRunner
 	if cfg.OceanEngine.Enabled && sessionCipher != nil {
+		connectorRepository.Cipher = sessionCipher
 		connectorSync := connector.Synchronizer{
 			Writer: connectorRepository,
 			Readers: oceanEngineConnectorReaderFactory{

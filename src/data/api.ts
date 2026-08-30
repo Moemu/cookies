@@ -5715,11 +5715,25 @@ export type ApiConnectorAccountSession = {
 }
 export type ApiConnectorSyncResult = {
   run_id: string; replayed: boolean; object_count: number; metric_count: number
+  platform_objects?: Partial<Record<ApiConnectorPlatformObjectKind, { created: number; updated: number; unchanged: number; unavailable: number }>>
 }
 export type ApiConnectorSyncStatus = {
   id: string; organization_id: string; project_id?: string; account_ref: string
   status: 'queued' | 'running' | 'completed' | 'failed'; cursor?: string
   attempt: number; started_at: string; completed_at?: string
+}
+export type ApiConnectorPlatformObjectKind = 'image_material' | 'video_material' | 'aweme_photo_material' | 'marketing_product' | 'orange_landing_page' | 'optimization_target' | 'conversion_event_asset' | 'industry_category' | 'brand' | 'authorized_identity'
+export type ApiConnectorPlatformObject = {
+  id: string; organization_id: string; account_id: string
+  object_kind: ApiConnectorPlatformObjectKind; platform_object_id: string
+  display_name: string; status: 'active' | 'unavailable'; metadata: Record<string, unknown>
+  observed_at: string; version: number; project_granted: true
+  preview_available: boolean; preview_kind?: 'image' | 'video_poster' | 'landing_page'
+  preview_expires_at?: string; preview_url?: string
+  performance?: {
+    available: boolean; spend_minor: number; impressions: number; clicks: number
+    conversions: number; ctr: number; data_through?: string
+  }
 }
 export type ApiLaunchBatchMetricDistribution = { metric: string; p10: number; p50: number; p90: number }
 export type ApiLaunchBatchCalibration = {
@@ -6611,6 +6625,16 @@ export const api = {
   verifyProjectConnectorAccount: (projectId: string, accountId: string) => request<ApiConnectorAccount>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/verify`, 'POST'),
   syncProjectConnectorAccount: (projectId: string, accountId: string, body: { start: string; end: string; time_zone: string; currency: string; sync_mode?: 'full' | 'metrics_only' | 'inventory_only' }, idempotencyKey: string) => request<ApiConnectorSyncResult>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/syncs`, 'POST', body, { 'Idempotency-Key': idempotencyKey }),
   getProjectConnectorSync: (projectId: string, accountId: string, syncId: string) => request<ApiConnectorSyncStatus>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/syncs/${encodeURIComponent(syncId)}`),
+  listProjectConnectorPlatformObjects: (projectId: string, accountId: string, filter: { objectKind?: ApiConnectorPlatformObjectKind; status?: 'active' | 'unavailable'; q?: string; cursor?: string; limit?: number; sortBy?: 'created_at' | 'ctr' | 'conversions'; sortOrder?: 'asc' | 'desc' } = {}) => {
+    const search = new URLSearchParams({ limit: String(filter.limit ?? 100) })
+    if (filter.objectKind) search.set('object_kind', filter.objectKind)
+    if (filter.status) search.set('status', filter.status)
+    if (filter.q) search.set('q', filter.q)
+    if (filter.cursor) search.set('cursor', filter.cursor)
+    if (filter.sortBy) search.set('sort_by', filter.sortBy)
+    if (filter.sortOrder) search.set('sort_order', filter.sortOrder)
+    return request<{ items: ApiConnectorPlatformObject[]; next_cursor: string }>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/platform-objects?${search.toString()}`)
+  },
   getProjectConnectorLaunchBatchCalibration: (projectId: string, accountId: string) => request<ApiLaunchBatchCalibration>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/launch-batch-calibration`),
   getMiyunConnection: (projectId: string) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`),
   updateMiyunConnection: (projectId: string, body: { session: string; session_expires_at?: string; expected_version?: number }) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`, 'PUT', body),

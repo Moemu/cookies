@@ -18,6 +18,13 @@ func TestSyncErrorCategoryDoesNotExposeResponseData(t *testing.T) {
 	}
 }
 
+func TestSyncErrorStageOnlyExposesCatalogKind(t *testing.T) {
+	err := platformObjectReadError{stage: "industry_category:customer_context_read", err: fmt.Errorf("private upstream detail")}
+	if got := SyncErrorStage(err); got != "industry_category:customer_context_read" {
+		t.Fatalf("stage=%q", got)
+	}
+}
+
 type testCipher struct{}
 
 func (testCipher) Encrypt(value []byte) ([]byte, string, error) {
@@ -74,6 +81,37 @@ func (metricsOnlyReader) Attributes(context.Context, []string, string) (map[stri
 func (testReader) AccountInfo(context.Context) (map[string]any, error) {
 	return map[string]any{"advertiser_id": "raw-account-1", "name": "demo"}, nil
 }
+func (testReader) ImageMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"images": []any{map[string]any{"material_id": "1001", "file_name": "image"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+}
+func (testReader) VideoMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"videos": []any{map[string]any{"material_id": "2001", "video_name": "video"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+}
+func (testReader) AwemePhotoMaterialsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"list": []any{map[string]any{"material_id": "2501", "file_name": "photo"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+}
+func (testReader) MarketingProductsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"list": []any{map[string]any{"product_id": "2601", "name": "product"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+}
+func (testReader) OrangeLandingPagesPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"data": []any{map[string]any{"site_id": "3001", "name": "landing"}}, "pagination": map[string]any{"page": 1.0, "size": 30.0, "total": 1.0}}}, nil
+}
+func (testReader) OptimizationTargets(_ context.Context, assetType int, _ bool) (map[string]any, error) {
+	goal := map[string]any{"optimization_name": "conversion", "external_action": 20.0}
+	if assetType == 3 {
+		goal["asset_info"] = []any{map[string]any{"asset_id": 3101.0, "asset_name": "event"}}
+	}
+	return map[string]any{"data": map[string]any{"goals": []any{goal}}}, nil
+}
+func (testReader) BrandIndustries(context.Context) (map[string]any, error) {
+	return map[string]any{"data": []any{map[string]any{"id": 3201.0, "label": "category"}}}, nil
+}
+func (testReader) Brands(context.Context) (map[string]any, error) {
+	return map[string]any{"data": map[string]any{"data": []any{map[string]any{"cdp_brand_id": 3301.0, "brand_name": "brand"}}}}, nil
+}
+func (testReader) AuthorizedIdentitiesPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
+	return map[string]any{"data": []any{map[string]any{"ies_core_id": 3401.0, "ies_user_name": "identity"}}, "extra": map[string]any{"hasMore": false}}, nil
+}
 func (testReader) ListPage(_ context.Context, r oceanengine.ListRequest) (map[string]any, error) {
 	if r.Page > 1 {
 		return map[string]any{"data": map[string]any{"ads": []any{}, "pagination": map[string]any{"total_page": 1.0}}}, nil
@@ -119,6 +157,18 @@ type testWriter struct {
 	bindings        []MaterialBinding
 	statuses        []PlatformStatusEvent
 	diagnoses       []PlatformDiagnosisSnapshot
+	platformObjects map[PlatformObjectKind][]PlatformObjectCandidate
+}
+
+func (w *testWriter) ReconcilePlatformObjects(_ context.Context, _, _, _, _ string, kind PlatformObjectKind, _ time.Time, candidates []PlatformObjectCandidate) (PlatformObjectSyncStats, error) {
+	if w.platformObjects == nil {
+		w.platformObjects = map[PlatformObjectKind][]PlatformObjectCandidate{}
+	}
+	w.platformObjects[kind] = append([]PlatformObjectCandidate(nil), candidates...)
+	return PlatformObjectSyncStats{Created: len(candidates)}, nil
+}
+func (w *testWriter) ListPlatformObjects(context.Context, PlatformObjectQuery) ([]PlatformObject, error) {
+	return nil, nil
 }
 
 func (w *testWriter) StartSync(context.Context, SyncRun) (bool, error) {
@@ -193,8 +243,11 @@ func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	if result.ObjectCount != 5 || result.MetricCount != 2 || writer.completed != "completed" {
 		t.Fatalf("result=%#v completed=%s", result, writer.completed)
 	}
-	if len(writer.raw) != 7 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
+	if len(writer.raw) != 17 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
 		t.Fatalf("raw=%d config=%d binding=%d diagnosis=%d status=%d", len(writer.raw), len(writer.configs), len(writer.bindings), len(writer.diagnoses), len(writer.statuses))
+	}
+	if len(writer.platformObjects) != 10 || result.PlatformObjects[PlatformObjectVideoMaterial].Created != 1 || result.PlatformObjects[PlatformObjectAwemePhotoMaterial].Created != 1 || result.PlatformObjects[PlatformObjectMarketingProduct].Created != 1 || result.PlatformObjects[PlatformObjectConversionAsset].Created != 1 || result.PlatformObjects[PlatformObjectAuthorizedIdentity].Created != 1 {
+		t.Fatalf("platform objects=%#v result=%#v", writer.platformObjects, result.PlatformObjects)
 	}
 	if writer.objects[0].ObjectRef == "raw-account-1" || writer.objects[1].ObjectRef == "raw-promotion-1" || writer.bindings[0].MaterialRef == "raw-material-1" {
 		t.Fatal("raw platform identity leaked")

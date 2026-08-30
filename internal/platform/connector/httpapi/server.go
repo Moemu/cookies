@@ -6,12 +6,14 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/connector"
 	"github.com/shikanon/cookies/internal/platform/contract"
+	"golang.org/x/sync/singleflight"
 )
 
 type Reader interface {
@@ -41,12 +43,13 @@ type AccountSessionManager interface {
 	Update(context.Context, string, string, []byte, int64) (connector.OceanEngineAccountSession, error)
 }
 type Server struct {
-	reader     Reader
-	syncer     Syncer
-	authorizer ProjectAuthorizer
-	accounts   AccountManager
-	sessions   AccountSessionManager
-	mux        *http.ServeMux
+	reader         Reader
+	syncer         Syncer
+	authorizer     ProjectAuthorizer
+	accounts       AccountManager
+	sessions       AccountSessionManager
+	mux            *http.ServeMux
+	previewRefresh singleflight.Group
 }
 
 func New(reader Reader, syncer Syncer, authorizer ProjectAuthorizer, accounts AccountManager, sessionManagers ...AccountSessionManager) *Server {
@@ -75,7 +78,163 @@ func New(reader Reader, syncer Syncer, authorizer ProjectAuthorizer, accounts Ac
 	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/verify", server.verifyAccount)
 	server.mux.HandleFunc("POST /api/connector/v1/projects/{project_id}/accounts/{account_ref}/revoke", server.revokeAccount)
 	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/launch-batch-calibration", server.projectLaunchBatchCalibration)
+	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/platform-objects", server.listPlatformObjects)
+	server.mux.HandleFunc("GET /api/connector/v1/projects/{project_id}/accounts/{account_ref}/platform-objects/{object_ref}/preview", server.platformObjectPreview)
 	return server
+}
+
+func (s *Server) listPlatformObjects(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeRead)
+	if !ok || !s.authorize(r, actor) || !s.projectAccountExists(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref")) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	catalog, ok := s.reader.(connector.PlatformObjectCatalog)
+	if !ok {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	kind := connector.PlatformObjectKind(strings.TrimSpace(r.URL.Query().Get("object_kind")))
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	search := strings.TrimSpace(r.URL.Query().Get("q"))
+	sortBy := strings.TrimSpace(r.URL.Query().Get("sort_by"))
+	sortOrder := strings.TrimSpace(r.URL.Query().Get("sort_order"))
+	limit := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 200 {
+			writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
+			return
+		}
+		limit = parsed
+	}
+	if (kind != "" && !kind.Valid()) || (status != "" && status != "active" && status != "unavailable") || (sortBy != "" && sortBy != "created_at" && sortBy != "ctr" && sortBy != "conversions") || (sortOrder != "" && sortOrder != "asc" && sortOrder != "desc") || len(search) > 255 {
+		writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
+		return
+	}
+	offset := 0
+	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	if sortBy != "" && cursor != "" {
+		if !strings.HasPrefix(cursor, "offset:") {
+			writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
+			return
+		}
+		parsed, err := strconv.Atoi(strings.TrimPrefix(cursor, "offset:"))
+		if err != nil || parsed < 0 {
+			writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
+			return
+		}
+		offset = parsed
+	}
+	values, err := catalog.ListPlatformObjects(r.Context(), connector.PlatformObjectQuery{
+		OrganizationID: string(actor.OrganizationID), ProjectID: r.PathValue("project_id"),
+		AccountID: r.PathValue("account_ref"), Kind: kind, Status: status,
+		Search: search, Cursor: cursor, Limit: limit, SortBy: sortBy, SortOrder: sortOrder, Offset: offset,
+	})
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "CONNECTOR_READ_FAILED")
+		return
+	}
+	for index := range values {
+		if values[index].PreviewAvailable {
+			values[index].PreviewURL = "/api/connector/v1/projects/" + url.PathEscape(r.PathValue("project_id")) + "/accounts/" + url.PathEscape(r.PathValue("account_ref")) + "/platform-objects/" + url.PathEscape(values[index].ID) + "/preview"
+		}
+	}
+	nextCursor := ""
+	if len(values) == limit {
+		if sortBy != "" {
+			nextCursor = "offset:" + strconv.Itoa(offset+len(values))
+		} else {
+			nextCursor = values[len(values)-1].ID
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": values, "next_cursor": nextCursor})
+}
+
+func (s *Server) platformObjectPreview(w http.ResponseWriter, r *http.Request) {
+	actor, ok := actorFor(r, connector.ScopeRead)
+	if !ok || !s.authorize(r, actor) || !s.projectAccountExists(r.Context(), string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref")) {
+		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
+		return
+	}
+	reader, ok := s.reader.(connector.PlatformObjectPreviewReader)
+	if !ok {
+		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+		return
+	}
+	preview, err := reader.GetPlatformObjectPreview(r.Context(), connector.PlatformObjectPreviewQuery{
+		OrganizationID: string(actor.OrganizationID), ProjectID: r.PathValue("project_id"),
+		AccountID: r.PathValue("account_ref"), ObjectID: r.PathValue("object_ref"),
+	})
+	if err != nil {
+		writeProblem(w, http.StatusNotFound, "PLATFORM_OBJECT_PREVIEW_NOT_FOUND")
+		return
+	}
+	if preview.ExpiresAt != nil && !time.Now().Before(*preview.ExpiresAt) {
+		preview, err = s.refreshPlatformObjectPreview(string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref"), r.PathValue("object_ref"))
+		if err != nil {
+			writeProblem(w, http.StatusBadGateway, "PLATFORM_OBJECT_PREVIEW_REFRESH_FAILED")
+			return
+		}
+	}
+	target, err := url.Parse(preview.URL)
+	if err != nil || target.Scheme != "https" || target.Host == "" || target.User != nil {
+		writeProblem(w, http.StatusNotFound, "PLATFORM_OBJECT_PREVIEW_NOT_FOUND")
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	if preview.Kind == "image" || preview.Kind == "video_poster" {
+		contentReader, ok := s.reader.(connector.PlatformObjectPreviewContentReader)
+		if !ok {
+			writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
+			return
+		}
+		query := connector.PlatformObjectPreviewQuery{
+			OrganizationID: string(actor.OrganizationID), ProjectID: r.PathValue("project_id"),
+			AccountID: r.PathValue("account_ref"), ObjectID: r.PathValue("object_ref"),
+		}
+		content, err := contentReader.ReadPlatformObjectPreview(r.Context(), query)
+		if err != nil {
+			_, refreshErr := s.refreshPlatformObjectPreview(string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref"), r.PathValue("object_ref"))
+			if refreshErr == nil {
+				content, err = contentReader.ReadPlatformObjectPreview(r.Context(), query)
+			}
+			if err != nil || refreshErr != nil {
+				writeProblem(w, http.StatusBadGateway, "PLATFORM_OBJECT_PREVIEW_READ_FAILED")
+				return
+			}
+		}
+		w.Header().Set("Content-Type", content.ContentType)
+		w.Header().Set("Content-Length", strconv.Itoa(len(content.Data)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(content.Data)
+		return
+	}
+	w.Header().Set("Location", target.String())
+	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+func (s *Server) refreshPlatformObjectPreview(organizationID, projectID, accountID, objectID string) (connector.PlatformObjectPreview, error) {
+	refresher, ok := s.syncer.(connector.PlatformObjectPreviewRefresher)
+	if !ok {
+		return connector.PlatformObjectPreview{}, errors.New("platform object preview refresh is unavailable")
+	}
+	query := connector.PlatformObjectPreviewQuery{OrganizationID: organizationID, ProjectID: projectID, AccountID: accountID, ObjectID: objectID}
+	key := strings.Join([]string{organizationID, projectID, accountID, objectID}, ":")
+	value, err, _ := s.previewRefresh.Do(key, func() (any, error) {
+		refreshCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return refresher.RefreshPlatformObjectPreview(refreshCtx, query)
+	})
+	if err != nil {
+		return connector.PlatformObjectPreview{}, err
+	}
+	preview, ok := value.(connector.PlatformObjectPreview)
+	if !ok || (preview.ExpiresAt != nil && !time.Now().Before(*preview.ExpiresAt)) {
+		return connector.PlatformObjectPreview{}, errors.New("platform object preview refresh returned an expired URL")
+	}
+	return preview, nil
 }
 
 func (s *Server) getProjectAccountSession(w http.ResponseWriter, r *http.Request) {
@@ -462,7 +621,7 @@ func (s *Server) syncWithScope(w http.ResponseWriter, r *http.Request, organizat
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 		defer cancel()
 		if _, err := s.syncer.Sync(ctx, request); err != nil {
-			log.Printf("Connector background sync failed: run_id=%s category=%s", runID, connector.SyncErrorCategory(err))
+			log.Printf("Connector background sync failed: run_id=%s stage=%s category=%s", runID, connector.SyncErrorStage(err), connector.SyncErrorCategory(err))
 		}
 	}()
 	writeJSON(w, http.StatusAccepted, connector.SyncResult{RunID: runID})
@@ -639,40 +798,7 @@ func (s *Server) sync(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusForbidden, "PROJECT_FORBIDDEN")
 		return
 	}
-	if s.syncer == nil {
-		writeProblem(w, http.StatusServiceUnavailable, "CONNECTOR_UNAVAILABLE")
-		return
-	}
-	var body struct {
-		Start    time.Time          `json:"start"`
-		End      time.Time          `json:"end"`
-		TimeZone string             `json:"time_zone"`
-		Currency string             `json:"currency"`
-		SyncMode connector.SyncMode `json:"sync_mode"`
-	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&body); err != nil || !body.End.After(body.Start) {
-		writeProblem(w, http.StatusBadRequest, "INVALID_REQUEST")
-		return
-	}
-	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if key == "" || len(key) > 191 {
-		writeProblem(w, http.StatusBadRequest, "IDEMPOTENCY_KEY_REQUIRED")
-		return
-	}
-	value, err := s.syncer.Sync(r.Context(), connector.SyncRequest{OrganizationID: string(actor.OrganizationID), ProjectID: r.PathValue("project_id"), AccountRef: r.PathValue("account_ref"), IdempotencyKey: key, WindowStart: body.Start, WindowEnd: body.End, TimeZone: body.TimeZone, Currency: body.Currency, Mode: body.SyncMode})
-	if err != nil {
-		status := http.StatusInternalServerError
-		code := "CONNECTOR_SYNC_FAILED"
-		if errors.Is(err, connector.ErrInvalidFact) {
-			status = http.StatusBadRequest
-			code = "INVALID_REQUEST"
-		}
-		writeProblem(w, status, code)
-		return
-	}
-	writeJSON(w, http.StatusOK, value)
+	s.syncWithScope(w, r, string(actor.OrganizationID), r.PathValue("project_id"))
 }
 
 func (s *Server) authorize(r *http.Request, actor contract.ActorContext) bool {

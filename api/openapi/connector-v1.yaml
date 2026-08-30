@@ -308,6 +308,36 @@ paths:
             application/json:
               schema: {type: object}
         '404': {$ref: '#/components/responses/NotFound'}
+  /api/connector/v1/projects/{project_id}/accounts/{account_ref}/platform-objects:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - $ref: '#/components/parameters/AccountRef'
+    get:
+      operationId: listProjectConnectorPlatformObjects
+      summary: List imported Ocean Engine objects granted to the Project
+      parameters:
+        - name: object_kind
+          in: query
+          schema: {$ref: '#/components/schemas/PlatformObjectKind'}
+        - name: status
+          in: query
+          schema: {type: string, enum: [active, unavailable]}
+        - name: q
+          in: query
+          schema: {type: string, maxLength: 255}
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Project-authorized object page.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/PlatformObject'}}
+                  next_cursor: {type: string}
   /api/connector/v1/projects/{project_id}/accounts/{account_ref}/verify:
     parameters:
       - $ref: '#/components/parameters/ProjectID'
@@ -402,6 +432,24 @@ components:
       in: query
       schema: {type: integer, minimum: 1, maximum: 500}
   schemas:
+    PlatformObjectKind:
+      type: string
+      enum: [image_material, video_material, orange_landing_page]
+    PlatformObject:
+      type: object
+      required: [id, organization_id, account_id, object_kind, platform_object_id, display_name, status, metadata, observed_at, version, project_granted]
+      properties:
+        id: {type: string}
+        organization_id: {type: string}
+        account_id: {type: string}
+        object_kind: {$ref: '#/components/schemas/PlatformObjectKind'}
+        platform_object_id: {type: string, pattern: '^[0-9]+$'}
+        display_name: {type: string}
+        status: {type: string, enum: [active, unavailable]}
+        metadata: {type: object, additionalProperties: true}
+        observed_at: {type: string, format: date-time}
+        version: {type: integer, minimum: 1}
+        project_granted: {type: boolean, const: true}
     ObjectKind:
       type: string
       enum: [account, campaign, project, product, promotion, material]

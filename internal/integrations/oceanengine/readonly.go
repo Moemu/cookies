@@ -6,7 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 )
 
 type ListRequest struct {
@@ -27,6 +31,20 @@ type StatQueryRequest struct {
 	Host       string
 	Extra      map[string]any
 }
+
+type AssetPageRequest struct {
+	Page  int
+	Limit int
+}
+
+type ReferenceReadError struct {
+	Stage string
+	Err   error
+}
+
+func (e ReferenceReadError) Error() string     { return "Ocean Engine reference read failed" }
+func (e ReferenceReadError) Unwrap() error     { return e.Err }
+func (e ReferenceReadError) ReadStage() string { return e.Stage }
 
 type Reader interface {
 	ListPage(context.Context, ListRequest) (map[string]any, error)
@@ -93,6 +111,151 @@ func (c *Client) AccountInfo(ctx context.Context) (map[string]any, error) {
 	return value, err
 }
 
+// ImageMaterialsPage reads one image-library page. The endpoint is read-only
+// and was verified by the Connector prototype against the live asset picker.
+func (c *Client) ImageMaterialsPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, limit := normalizeAssetPage(request)
+	body := map[string]any{
+		"sort_by": "create_time", "sort_type": "desc",
+		"metric_names": []string{"stat_cost", "ctr"},
+		"image_modes":  []int{3, 16, 2}, "use_pre_audit_result": true,
+		"is_need_stats_cost": true, "limit": limit, "page": page,
+	}
+	return c.postJSON(ctx, "/superior/api/v2/ad/getImageList", body)
+}
+
+// VideoMaterialsPage reads one video-library page.
+func (c *Client) VideoMaterialsPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, limit := normalizeAssetPage(request)
+	query := url.Values{
+		"image_mode": {"5,15"}, "ad_id": {"0"}, "sort_type": {"desc"},
+		"metric_names": {"create_time,stat_cost,ctr"}, "landing_type": {"17"},
+		"external_action": {"20"}, "page": {strconv.Itoa(page)},
+		"limit": {strconv.Itoa(limit)}, "version": {"v2"}, "operation_platform": {"1"},
+	}
+	return c.getJSON(ctx, "/superior/api/v2/video/list?"+query.Encode())
+}
+
+// AwemePhotoMaterialsPage reads one Douyin image-text material page.
+func (c *Client) AwemePhotoMaterialsPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, limit := normalizeAssetPage(request)
+	query := url.Values{
+		"sort_by": {"1"}, "sort_type": {"desc"}, "tab": {"myAwemePhoto"},
+		"fields[]": {"stat_cost", "ctr"}, "page": {strconv.Itoa(page)}, "limit": {strconv.Itoa(limit)},
+	}
+	return c.getJSON(ctx, "/superior/api/v2/creative/material/aweme_photo_list?"+query.Encode())
+}
+
+// MarketingProductsPage reads one account product-library page.
+func (c *Client) MarketingProductsPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, _ := normalizeAssetPage(request)
+	body := map[string]any{"keywords": "", "category_id": "", "page": page, "ebp_asset_scope": 3}
+	return c.postJSON(ctx, "/superior/api/v2/ad/product/clue_product_list", body)
+}
+
+// OrangeLandingPagesPage reads one Orange third-party landing-page page.
+func (c *Client) OrangeLandingPagesPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, limit := normalizeAssetPage(request)
+	query := url.Values{
+		"page": {strconv.Itoa(page)}, "size": {strconv.Itoa(limit)},
+		"order_mode": {"1"}, "search_mode": {"3"}, "need_uba": {"false"},
+		"audit_status_list": {"0, 9, 1, 10"},
+	}
+	return c.getJSON(ctx, "/platform/api/v1/orange/third_part_list?"+query.Encode())
+}
+
+// OptimizationTargets reads the project optimization targets for one landing-page carrier.
+// assetType 2 is Orange and assetType 3 is an advertiser-owned landing page.
+func (c *Client) OptimizationTargets(ctx context.Context, assetType int, needAssets bool) (map[string]any, error) {
+	if (assetType != 2 && assetType != 3) || needAssets != (assetType == 3) {
+		return nil, fmt.Errorf("invalid optimization target context")
+	}
+	body := map[string]any{
+		"campaign_type": 1, "landing_type": 17, "asset_type": assetType,
+		"micro_app_id": "", "cdp_marketing_goal": 1, "dpa_ad_type": 0,
+		"micro_promotion_type": 2, "micro_app_instance_id": "", "need_assets": needAssets,
+	}
+	return c.adSurface().postJSON(ctx, "/superior/api/v2/project/get_optimization_goal_v2", body)
+}
+
+// BrandIndustries reads the account product-category tree.
+func (c *Client) BrandIndustries(ctx context.Context) (map[string]any, error) {
+	organizationClient := *c
+	organizationClient.AdvertiserID = ""
+	global, err := organizationClient.GlobalInfo(ctx)
+	customerID := ""
+	if err == nil {
+		data, _ := global["data"].(map[string]any)
+		advertiser, _ := data["advertiser"].(map[string]any)
+		customerID = firstScalarString(advertiser["customer_id"])
+		if customerID == "" {
+			customerID = findScalarByKey(global, "customer_id", 0)
+		}
+	}
+	if customerID == "" {
+		account, accountErr := c.AccountInfo(ctx)
+		if accountErr == nil {
+			customerID = findScalarByKey(account, "customer_id", 0)
+		} else if err != nil {
+			return nil, ReferenceReadError{Stage: "customer_context_read", Err: err}
+		}
+	}
+	if customerID == "" {
+		return nil, ReferenceReadError{Stage: "customer_context_missing", Err: fmt.Errorf("Ocean Engine global info has no customer context")}
+	}
+	query := url.Values{"customer_id": {customerID}}
+	value, err := c.adSurface().getJSON(ctx, "/nbs/api/ads/brand/yuntu/query_brand_industry?"+query.Encode())
+	if err != nil {
+		return nil, ReferenceReadError{Stage: "category_request", Err: err}
+	}
+	return value, nil
+}
+
+// Brands reads the account brand list.
+func (c *Client) Brands(ctx context.Context) (map[string]any, error) {
+	return c.adSurface().getJSON(ctx, "/superior/api/v2/agw/ad/brand")
+}
+
+// AuthorizedIdentitiesPage reads one authorized delivery-identity page.
+func (c *Client) AuthorizedIdentitiesPage(ctx context.Context, request AssetPageRequest) (map[string]any, error) {
+	page, limit := normalizeAssetPage(request)
+	body := map[string]any{
+		"page_index": page, "page_size": limit, "need_limits_info": true,
+		"need_limit_scenes": []int{4}, "level": []int{1, 4, 5, 7},
+		"need_auth_extra_info": true, "dpa_id": "", "order_by": 1,
+	}
+	return c.adSurface().postJSON(ctx, "/superior/api/v2/ad/authorize/list", body)
+}
+
+func (c *Client) adSurface() *Client {
+	if c.BaseURL == nil || !strings.HasSuffix(strings.ToLower(c.BaseURL.Hostname()), ".oceanengine.com") {
+		return c
+	}
+	clone := *c
+	base := *c.BaseURL
+	base.Scheme = "https"
+	base.Host = "ad.oceanengine.com"
+	clone.BaseURL = &base
+	return &clone
+}
+
+// SignPictureURIs gets new short-lived preview URLs for existing image URIs.
+// The operation does not upload or change platform material.
+func (c *Client) SignPictureURIs(ctx context.Context, uris []string) (map[string]any, error) {
+	return c.postJSON(ctx, "/superior/api/v2/creative/material/picture/sign", map[string]any{"uris": uris})
+}
+
+func normalizeAssetPage(request AssetPageRequest) (int, int) {
+	page, limit := request.Page, request.Limit
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 32
+	}
+	return page, limit
+}
+
 func accountInfoFallbackAllowed(err error) bool {
 	var statusErr HTTPStatusError
 	if errors.As(err, &statusErr) {
@@ -115,6 +278,44 @@ func (c *Client) postJSON(ctx context.Context, path string, value any) (map[stri
 		return nil, err
 	}
 	return c.do(ctx, http.MethodPost, path, bytes.NewReader(encoded), "application/json;charset=UTF-8")
+}
+
+func firstScalarString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		if typed >= 0 && typed == math.Trunc(typed) {
+			return strconv.FormatInt(int64(typed), 10)
+		}
+	case json.Number:
+		return string(typed)
+	}
+	return ""
+}
+
+func findScalarByKey(value any, key string, depth int) string {
+	if depth > 8 {
+		return ""
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		if found := firstScalarString(typed[key]); found != "" {
+			return found
+		}
+		for _, nested := range typed {
+			if found := findScalarByKey(nested, key, depth+1); found != "" {
+				return found
+			}
+		}
+	case []any:
+		for _, nested := range typed {
+			if found := findScalarByKey(nested, key, depth+1); found != "" {
+				return found
+			}
+		}
+	}
+	return ""
 }
 
 func FlattenRows(rows any) []map[string]any {
