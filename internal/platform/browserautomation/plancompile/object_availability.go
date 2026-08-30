@@ -2,6 +2,7 @@ package plancompile
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/shikanon/cookies/internal/systems/delivery"
@@ -31,15 +32,25 @@ func configurationObjectAvailability(configuration delivery.OceanEngineConfigura
 		if ref.ObjectKind == "owned_landing_page" && ref.State == delivery.ReferenceResolved {
 			platformID = strings.TrimSpace(ref.ID)
 		}
+		manualDirectLink := ref.ObjectKind == "direct_link" && ref.State == delivery.ReferenceResolved && validManualDirectLink(ref.ID)
 		item := V3ObjectAvailability{
 			FieldKey: field, ObjectKind: ref.ObjectKind, InternalObjectID: ref.ID,
 			DisplayName: ref.DisplayNameSnapshot, PlatformObjectID: platformID,
-			Available: platformID != "",
+			Available: platformID != "" || manualDirectLink,
+		}
+		if manualDirectLink {
+			item.PlatformObjectID = ""
+			item.Reason = "手动填写链接，无需绑定平台 ID"
 		}
 		if strings.Contains(field, ".product_image_references.") && ref.ObjectKind != "product_image" {
 			item.PlatformObjectID = ""
 			item.Available = false
 			item.Reason = "产品主图必须来自巨量“我的图片”，不能使用图片素材"
+		}
+		if field == "project.marketing_product_reference" && ref.Namespace == "oceanengine" && strings.TrimSpace(ref.AuditAttributes["unique_product_id"]) == "" {
+			item.PlatformObjectID = ""
+			item.Available = false
+			item.Reason = "当前商品绑定的是 product_id。请同步巨量对象目录后重新选择商品"
 		}
 		if !item.Available {
 			if item.Reason == "" {
@@ -80,13 +91,41 @@ func configurationObjectAvailability(configuration delivery.OceanEngineConfigura
 	return values
 }
 
+func validManualDirectLink(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsAny(value, " \t\r\n") {
+		return false
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "tbopen":
+		return true
+	default:
+		return false
+	}
+}
+
 func platformReferenceID(ref delivery.StableReference) string {
 	if ref.State != delivery.ReferenceResolved {
 		return ""
 	}
 	keys := []string{"platform_object_id"}
 	switch ref.ObjectKind {
-	case "product", "product_catalog":
+	case "product":
+		if ref.Namespace == "oceanengine" {
+			// The project picker searches unique_product_id. product_id is a
+			// source identity and cannot select a product in this form.
+			value := strings.TrimSpace(ref.AuditAttributes["unique_product_id"])
+			if validPlatformReferenceID(ref.ObjectKind, value) {
+				return value
+			}
+			return ""
+		}
+		keys = []string{"unique_product_id", "platform_object_id", "ocean_engine_product_id"}
+	case "product_catalog":
 		keys = append(keys, "ocean_engine_product_id")
 	case "material", "product_image":
 		keys = append(keys, "ocean_engine_material_id")

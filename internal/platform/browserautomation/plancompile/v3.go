@@ -353,6 +353,7 @@ func parentContext(project delivery.OceanEngineProjectDraft) (v3ParentContext, e
 			optimization = strings.TrimSpace(project.OptimizationTargetReference.ID)
 		}
 	}
+	optimization = normalizedOptimizationTarget(optimization)
 	if !slices.Contains([]string{"button_jump", "in_app_order", "click", "impression", "store_call", "store_stay"}, optimization) {
 		return v3ParentContext{}, fmt.Errorf("configuration has no calibrated optimization target key")
 	}
@@ -381,6 +382,16 @@ func parentContext(project delivery.OceanEngineProjectDraft) (v3ParentContext, e
 		DeliveryMode: deliveryMode, PlacementMode: placementMode,
 		SearchTargetingExpansion: searchExpansion, ParentReferences: parentReferences,
 	}, nil
+}
+
+func normalizedOptimizationTarget(value string) string {
+	value = strings.TrimSpace(value)
+	switch value {
+	case "button_redirect", "builtin:button_redirect":
+		return "button_jump"
+	default:
+		return value
+	}
 }
 
 func numericReference(value string) bool {

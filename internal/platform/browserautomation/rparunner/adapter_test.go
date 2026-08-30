@@ -237,3 +237,17 @@ func TestV3DriftReadbackKeepsObjectAndStructuredFields(t *testing.T) {
 		t.Fatalf("drift readback = %#v", page)
 	}
 }
+
+func TestClassifyAuthorityFailureAsFinalConfirmationInvalid(t *testing.T) {
+	err := classifyResult(RpaResult{ErrorCode: "authority_schedule_mismatch", ErrorMessage: "start date mismatch"})
+	if !errors.Is(err, browserautomation.ErrFinalConfirmationInvalid) {
+		t.Fatalf("expected final confirmation invalid, got %v", err)
+	}
+}
+
+func TestPreparedPageRecordsFinalClickBoundary(t *testing.T) {
+	page := preparedPageFromResult(RpaResult{FinalClickPerformed: true})
+	if page.Readback["final_click_performed"] != "true" {
+		t.Fatalf("final click readback = %#v", page.Readback)
+	}
+}

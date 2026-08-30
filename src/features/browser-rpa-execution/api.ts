@@ -4,6 +4,7 @@ import type {
   BrowserRpaLease,
   BrowserRpaProfile,
   BrowserRpaRun,
+  BrowserRpaRunStep,
   BrowserRpaRunEvent,
   BrowserRpaSitePolicy,
   ControlledExecutionWorkspace,
@@ -34,8 +35,9 @@ export const controlledExecutionApi = {
   async getWorkspace(projectId: string, runId: string, signal?: AbortSignal): Promise<ControlledExecutionWorkspace> {
     const path = `${apiPrefix}/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`
     const runPromise = request<BrowserRpaRun>(path, { signal })
-    const [run, events, evidence, session] = await Promise.all([
+    const [run, steps, events, evidence, session] = await Promise.all([
       runPromise,
+      request<{ items?: BrowserRpaRunStep[] }>(`${path}/steps`, { signal }),
       request<{ items?: BrowserRpaRunEvent[] }>(`${path}/events`, { signal }),
       request<{ items?: BrowserRpaEvidence[] }>(`${path}/evidence`, { signal }),
       runPromise.then(run => Promise.all([
@@ -51,7 +53,7 @@ export const controlledExecutionApi = {
       ])),
     ])
     const [environment, profile, policy, lease] = session
-    return { run, events: events.items ?? [], evidence: evidence.items ?? [], environment, profile, policy, lease }
+    return { run, steps: steps.items ?? [], events: events.items ?? [], evidence: evidence.items ?? [], environment, profile, policy, lease }
   },
 
   generatePlan(projectId: string, runId: string) {

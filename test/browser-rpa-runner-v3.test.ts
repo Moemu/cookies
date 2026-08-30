@@ -8,6 +8,7 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 
 import {
+  canonicalImageSourceIdentity,
   executePlan,
   executePreparePlan,
   type PageOperations,
@@ -141,21 +142,69 @@ test("runner v3 keeps complex field values in readback", async () => {
 });
 
 test("runner v3 retains the live promotion adapters", () => {
+	assert.match(runnerSource, /createad_nativetype_0/);
+	assert.match(runnerSource, /label === "账户信息"/);
   assert.match(runnerSource, /promotion\.product_image_references/);
+	assert.match(runnerSource, /promotion\.direct_link_reference/);
+	assert.match(runnerSource, /createad_openUrl_input_input_component/);
+	assert.match(runnerSource, /createad_productName/);
+	assert.match(runnerSource, /waitForStableMaterialCard/);
+	assert.match(runnerSource, /createad_videoLib_close/);
+	assert.match(runnerSource, /createad_productImg__createProductImg__createMaterialLib/);
+	assert.match(runnerSource, /可搜索视频名称或ID/);
+	assert.match(runnerSource, /searched_material_card_and_object_id/);
   assert.match(runnerSource, /\.oc-create-product-img-add-button/);
   assert.match(runnerSource, /root\.locator\("img:visible"\)/);
-  assert.match(runnerSource, /String\(step\.value\)\.split\("\/"\)/);
+  assert.match(runnerSource, /waitForStableProductImage/);
+  assert.match(runnerSource, /stable_absolute_img_src_and_selected_count/);
+  assert.doesNotMatch(runnerSource, /product image index is out of range/);
+  assert.match(runnerSource, /createad_yuntuCategory_popover_content/);
+  assert.match(runnerSource, /ovui-cascader-search-option/);
   assert.match(runnerSource, /自定义品牌名称/);
   assert.match(runnerSource, /await target\.press\("Enter"\)/);
   assert.match(runnerSource, /step\.operation === "toggle"/);
   assert.match(runnerSource, /\.isChecked\(\)/);
 });
 
+test("product image matching ignores signed URL hosts, queries, and transform suffixes", () => {
+  const webURI = "tos-cn-i-sd07hgqsbj/26d59f497e2540a3a377554cd94e4706";
+  const signed = "https://p0-adplatform-private.oceanengine.com/tos-cn-i-sd07hgqsbj/26d59f497e2540a3a377554cd94e4706~tplv-iq460dd072-origin.image?sign_for=ad_platform&x-orig-sign=changed";
+  assert.equal(canonicalImageSourceIdentity(webURI), webURI);
+  assert.equal(canonicalImageSourceIdentity(signed), webURI);
+});
+
+test("runner v3 enters the project form from the management page", () => {
+	assert.match(runnerSource, /resolvePlanPage/);
+	assert.match(runnerSource, /plan\.plan_kind === "promotion_create"/);
+	assert.match(runnerSource, /searchParams\.set\("project_id", plan\.parent_project_reference/);
+  assert.match(runnerSource, /getByText\("新建项目", \{ exact: true \}\)/);
+  assert.match(runnerSource, /the project creation form did not load/);
+  assert.match(runnerSource, /runner_step_start/);
+});
+
+test("runner v3 uses the unique empty product control", () => {
+  assert.match(runnerSource, /locator\("\.create-product-add-empty"\)/);
+  assert.match(runnerSource, /getByPlaceholder\("请输入商品名称或ID", \{ exact: true \}\)/);
+  assert.match(runnerSource, /spec\.expected_total !== undefined && !projectProduct/);
+  assert.match(runnerSource, /searched_product_card_and_unique_product_id/);
+  assert.match(runnerSource, /waitForProductListRequest/);
+  assert.match(runnerSource, /finishProductListRequest/);
+  assert.match(runnerSource, /waitForStableProductCard/);
+  assert.match(runnerSource, /createproject_productselectdrawer_close/);
+  assert.match(runnerSource, /createproject_audienceextend_/);
+  assert.match(runnerSource, /process\.stdout\.write\(JSON\.stringify\(result\)/);
+  assert.match(runnerSource, /commandOption\("--result-file"\)/);
+  assert.match(runnerSource, /writeFileSync\(resultFile, JSON\.stringify\(result\)\)/);
+  assert.match(runnerSource, /writeResultAndExit\(result, 0\)/);
+});
+
 test("promotion reconciliation reads the full call-to-action multi-select", () => {
   assert.match(runnerSource, /promotion\.landing_page_reference/);
   assert.match(runnerSource, /promotion\.call_to_action/);
   assert.match(runnerSource, /selectedCallToActions/);
-  assert.match(runnerSource, /call-to-action multi-select mutation is not calibrated/);
+  assert.match(runnerSource, /call-to-action set does not match the plan/);
+  assert.match(runnerSource, /\.ovui-tag__close/);
+  assert.match(runnerSource, /locator\("tr\.ovui-tr"\)/);
   assert.doesNotMatch(runnerSource, /const previewTitle = editPage\.getByText\("单元素材预览"/);
 });
 

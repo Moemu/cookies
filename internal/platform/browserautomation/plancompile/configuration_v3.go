@@ -115,6 +115,8 @@ var promotionSpecs = map[string]fieldSpec{
 	"promotion.delivery_identity":        {"promotion.delivery_identity", "open_reference_picker", "投放身份", "请选择投放抖音号", true},
 	"promotion.base_materials":           {"promotion.base_materials", "open_reference_picker", "基础素材", "添加素材", true},
 	"promotion.copy_materials":           {"promotion.copy_materials", "configure_object", "文案素材", "请输入5-55个字的标题或输入关键词后选择推荐标题", true},
+	"promotion.direct_link_mode":         {"promotion.direct_link_mode", "choose_exact_visible_option", "直达链接生成方式", "自动生成", false},
+	"promotion.direct_link_reference":    {"promotion.direct_link_reference", "open_reference_picker", "直达链接内容", "请填写Schema直达链接，保证可跳转并打开APP", false},
 	"promotion.product_name":             {"promotion.product_name", "fill_text", "产品信息", "请输入", false},
 	"promotion.product_image_references": {"promotion.product_image_references", "open_reference_picker", "产品主图", "产品主图", true},
 	"promotion.product_selling_points":   {"promotion.product_selling_points", "configure_object", "产品卖点", "最多10个产品卖点，每个6-9个字，可空格分隔，回车(Enter)提交", true},
@@ -332,15 +334,19 @@ func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *deliver
 		optimizationName = project.OptimizationTargetReference.DisplayNameSnapshot
 	}
 	values["project.optimization_target_reference"] = optimizationName
-	if project.DeepOptimizationMode != "" {
-		values["project.deep_optimization_mode"] = deepOptimizationLabel(project.DeepOptimizationMode)
+	deepOptimizationMode := strings.TrimSpace(project.DeepOptimizationMode)
+	if deepOptimizationMode == "" {
+		deepOptimizationMode = "disabled"
 	}
+	values["project.deep_optimization_mode"] = deepOptimizationLabel(deepOptimizationMode)
 	if project.AIGCDynamicCreative != nil {
 		values["project.aigc_dynamic_creative"] = *project.AIGCDynamicCreative
 	}
-	if project.PlacementStrategy != "" {
-		values["project.placement_strategy"] = placementLabel(project.PlacementStrategy)
+	placementStrategy := strings.TrimSpace(project.PlacementStrategy)
+	if placementStrategy == "" {
+		placementStrategy = "automatic"
 	}
+	values["project.placement_strategy"] = placementLabel(placementStrategy)
 	if len(project.PlacementMedia) > 0 {
 		values["project.placement_media"] = project.PlacementMedia
 	}
@@ -367,6 +373,30 @@ func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *deliver
 
 func promotionPlanValues(p delivery.OceanEnginePromotionDraft, project delivery.OceanEngineProjectDraft, intent *delivery.DeliveryIntent) (map[string]any, error) {
 	values := map[string]any{"promotion.copy_materials": copyTexts(p.CopyItems), "promotion.product_selling_points": p.ProductSellingPoints, "promotion.call_to_action": p.Settings.CallToAction, "promotion.source_label": p.Settings.SourceLabel, "promotion.promotion_name": p.PromotionName}
+	directLinkMode := strings.TrimSpace(p.Settings.DirectLinkMode)
+	if directLinkMode == "" {
+		directLinkMode = "automatic"
+	}
+	switch directLinkMode {
+	case "automatic":
+		values["promotion.direct_link_mode"] = "自动生成"
+	case "manual":
+		values["promotion.direct_link_mode"] = "手动填写"
+		if p.DirectLinkReference == nil {
+			return nil, fmt.Errorf("manual direct link requires a link or an OceanEngine object")
+		}
+		if validManualDirectLink(p.DirectLinkReference.ID) {
+			values["promotion.direct_link_reference"] = strings.TrimSpace(p.DirectLinkReference.ID)
+		} else {
+			spec, err := stableReferenceSpec(*p.DirectLinkReference, nil)
+			if err != nil {
+				return nil, fmt.Errorf("direct link: %w", err)
+			}
+			values["promotion.direct_link_reference"] = spec
+		}
+	default:
+		return nil, fmt.Errorf("direct link mode must be automatic or manual")
+	}
 	productName := strings.TrimSpace(p.ProductName)
 	if productName == "" && project.MarketingProductReference != nil {
 		productName = strings.TrimSpace(project.MarketingProductReference.DisplayNameSnapshot)
@@ -375,7 +405,7 @@ func promotionPlanValues(p delivery.OceanEnginePromotionDraft, project delivery.
 		values["promotion.product_name"] = productName
 	}
 	if p.DeliveryIdentity.Mode == "account_info" {
-		values["promotion.delivery_identity"] = "账号信息"
+		values["promotion.delivery_identity"] = "账户信息"
 	} else if p.DeliveryIdentity.AuthorizedIdentity != nil {
 		spec, err := stableReferenceSpec(*p.DeliveryIdentity.AuthorizedIdentity, nil)
 		if err != nil {
@@ -412,8 +442,8 @@ func promotionPlanValues(p delivery.OceanEnginePromotionDraft, project delivery.
 		if err != nil {
 			return nil, fmt.Errorf("product image: %w", err)
 		}
-		if p.ProductImageReferences[0].AuditAttributes["expected_total"] != "1" {
-			return nil, fmt.Errorf("product image picker requires an observed expected_total of 1")
+		if !validImageSourceIdentity(p.ProductImageReferences[0].AuditAttributes["image_src_identity"]) {
+			return nil, fmt.Errorf("product image requires a stable image_src_identity")
 		}
 		spec["selection_kind"] = "image_card"
 		values["promotion.product_image_references"] = spec
@@ -487,7 +517,7 @@ func stableReferenceSpec(ref delivery.StableReference, allowed []delivery.Stable
 	if ref.DisplayNameSnapshot != "" {
 		value["label"] = ref.DisplayNameSnapshot
 	}
-	for _, key := range []string{"selection_kind", "confirm_button"} {
+	for _, key := range []string{"selection_kind", "confirm_button", "image_src_identity"} {
 		if ref.AuditAttributes[key] != "" {
 			value[key] = ref.AuditAttributes[key]
 		}
@@ -502,6 +532,11 @@ func stableReferenceSpec(ref delivery.StableReference, allowed []delivery.Stable
 		}
 	}
 	return value, nil
+}
+
+func validImageSourceIdentity(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && strings.Contains(value, "/") && !strings.Contains(value, "://") && !strings.ContainsAny(value, "?#")
 }
 
 func resolvedLabel(ref delivery.StableReference) (string, error) {
@@ -559,6 +594,7 @@ func carrierLabel(value string) string {
 	return map[string]string{"orange_landing_page": "橙子落地页", "owned_landing_page": "自研落地页", "byte_miniapp": "字节小程序", "wechat_miniapp": "微信小程序"}[value]
 }
 func optimizationLabel(value string) string {
+	value = normalizedOptimizationTarget(value)
 	return map[string]string{"button_jump": "按钮跳转", "in_app_order": "app内下单", "click": "点击", "impression": "展示", "store_call": "门店电话拨打", "store_stay": "门店停留"}[value]
 }
 func deepOptimizationLabel(value string) string {
@@ -602,7 +638,7 @@ func orderedProjectFields(project delivery.OceanEngineProjectDraft, parent v3Par
 }
 func orderedPromotionFields(project delivery.OceanEngineProjectDraft, promotion delivery.OceanEnginePromotionDraft) []fieldSpec {
 	parent, _ := parentContext(project)
-	keys := []string{"promotion.delivery_identity", "promotion.base_materials", "promotion.copy_materials", "promotion.native_anchor_reference", "promotion.landing_page_reference", "promotion.product_name", "promotion.product_image_references", "promotion.product_selling_points", "promotion.call_to_action", "promotion.smart_generation_enabled", "promotion.source_label", "promotion.comments_enabled", "promotion.category", "promotion.brand_reference", "promotion.promotion_name"}
+	keys := []string{"promotion.delivery_identity", "promotion.base_materials", "promotion.copy_materials", "promotion.native_anchor_reference", "promotion.landing_page_reference", "promotion.direct_link_mode", "promotion.direct_link_reference", "promotion.product_name", "promotion.product_image_references", "promotion.product_selling_points", "promotion.call_to_action", "promotion.smart_generation_enabled", "promotion.source_label", "promotion.comments_enabled", "promotion.category", "promotion.brand_reference", "promotion.promotion_name"}
 	if slices.Contains([]string{"click", "impression"}, parent.OptimizationTarget) {
 		keys = removeKey(keys, "promotion.native_anchor_reference")
 	}
@@ -620,6 +656,15 @@ func orderedPromotionFields(project delivery.OceanEngineProjectDraft, promotion 
 		keys = append(keys, "promotion.pangle_bid_coefficient")
 	}
 	fields := specs(keys, promotionSpecs)
+	if promotion.Settings.DirectLinkMode != "manual" {
+		fields = slices.DeleteFunc(fields, func(field fieldSpec) bool { return field.Key == "promotion.direct_link_reference" })
+	} else if promotion.DirectLinkReference != nil && validManualDirectLink(promotion.DirectLinkReference.ID) {
+		for index := range fields {
+			if fields[index].Key == "promotion.direct_link_reference" {
+				fields[index].Operation = "fill_text"
+			}
+		}
+	}
 	if project.Carrier == "owned_landing_page" {
 		for index := range fields {
 			if fields[index].Key != "promotion.landing_page_reference" {

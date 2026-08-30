@@ -234,6 +234,10 @@ func (r MySQLRepository) AcquireRunLease(ctx context.Context, run BrowserRpaRun,
 		return BrowserRpaRun{}, SessionLease{}, err
 	}
 	lease.FencingToken = lastFencingToken + 1
+	_, err = tx.ExecContext(ctx, `UPDATE browser_rpa_session_leases SET active_lock_key=NULL,released_at=?,version=version+1 WHERE organization_id=? AND project_id=? AND active_lock_key=? AND released_at IS NULL AND (expires_at<=? OR heartbeat_deadline<=?)`, now, lease.OrganizationID, lease.ProjectID, activeKey, now, now)
+	if err != nil {
+		return BrowserRpaRun{}, SessionLease{}, err
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO browser_rpa_session_leases (id,organization_id,project_id,run_id,environment_id,profile_id,platform,account_id,holder,active_lock_key,fencing_token,version,expires_at,heartbeat_deadline,released_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, lease.ID, lease.OrganizationID, lease.ProjectID, lease.RunID, lease.EnvironmentID, lease.ProfileID, lease.Platform, lease.AccountID, lease.Holder, activeKey, lease.FencingToken, lease.Version, lease.ExpiresAt, lease.HeartbeatDeadline, lease.ReleasedAt)
 	if err != nil {
 		return BrowserRpaRun{}, SessionLease{}, ErrLeaseUnavailable

@@ -35,7 +35,7 @@ function isUrl(value: string | undefined): boolean {
   if (!value) return false
   try {
     const url = new URL(value)
-    return url.protocol === 'http:' || url.protocol === 'https:'
+    return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'tbopen:'
   } catch {
     return false
   }
@@ -77,13 +77,14 @@ export function presentObjectAvailability(item: ObjectAvailabilityItem): ObjectA
   const publicPlatformId = isUrl(item.platform_object_id) ? undefined : item.platform_object_id
 
   if (item.available) {
+    const isManualDirectLink = item.object_kind === 'direct_link' && item.reason === '手动填写链接，无需绑定平台 ID'
     return {
       available: true,
       kindLabel: label,
       name,
       scopeLabel: scopeLabel(item.field_key),
-      statusLabel: '已绑定',
-      statusDetail: publicPlatformId ? '平台对象可用。' : `${label}可用。`,
+      statusLabel: isManualDirectLink ? '可直接填写' : '已绑定',
+      statusDetail: isManualDirectLink ? '手动链接可用，无需绑定平台 ID。' : publicPlatformId ? '平台对象可用。' : `${label}可用。`,
       platformId: publicPlatformId,
       technicalType: item.object_kind,
     }
@@ -111,6 +112,15 @@ export function presentPlanBlockedReason(reason: string): string {
 }
 
 export function presentConfigurationIssue(issue: string): string {
+  if (/unsupported account path: only calibrated ecommerce short-video and image-text forms are allowed/i.test(issue)) {
+    return '当前 Runner 只支持“电商 + 短视频与图文”路径。此计划选择了其他营销目的。请返回平台配置页并改为电商。'
+  }
+  if (/project: bid is outside the calibrated limit/i.test(issue)) {
+    return '项目出价超出当前 Runner 的校准范围。CPM 出价必须是 4 至 100 元。'
+  }
+  if (/configuration has no calibrated optimization target key/i.test(issue)) {
+    return '优化目标不在当前 Runner 的校准范围内。请返回平台配置页并重新选择优化目标。'
+  }
   if (/marketing product: reference .* is outside the delivery intent/i.test(issue)) {
     return '营销商品未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。'
   }
@@ -120,8 +130,8 @@ export function presentConfigurationIssue(issue: string): string {
   if (/product image: reference .* is outside the delivery intent/i.test(issue)) {
     return '产品主图未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。'
   }
-  if (/product image picker requires an observed expected_total of 1/i.test(issue)) {
-    return '产品主图缺少选择器观察证据。请返回平台配置页并保存。系统会核对当前图片目录，并写入选择器证据。'
+  if (/product image requires a stable image_src_identity/i.test(issue)) {
+    return '产品主图缺少稳定图片路径。请重新同步巨量对象目录，然后重新选择产品主图。'
   }
   if (/landing page: reference .* is outside the delivery intent/i.test(issue)) {
     return '落地页未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。'

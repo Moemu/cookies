@@ -44,6 +44,14 @@ type controlledChangeSetByObjectFingerprintRepository interface {
 	GetControlledChangeSetByObjectFingerprint(context.Context, contract.OrganizationID, contract.ProjectID, string) (ControlledChangeSet, error)
 }
 
+type safeFailedBrowserRpaRetryRepository interface {
+	ResetSafeFailedBrowserRpaExecution(context.Context, contract.OrganizationID, contract.ProjectID, string, int64, string) (ControlledExecution, error)
+}
+
+type browserRpaRunReconciler interface {
+	ReconcileBrowserRpaRun(context.Context, BrowserRpaLaunchRequest, string) error
+}
+
 func (s Service) StartBrowserRpaExecution(ctx context.Context, actor contract.ActorContext, projectID contract.ProjectID, planID string, request StartBrowserRpaExecutionRequest) (StartBrowserRpaExecutionResult, error) {
 	if err := s.ready(actor, projectID, ScopeExecute); err != nil {
 		return StartBrowserRpaExecutionResult{}, err
@@ -169,8 +177,26 @@ func (s Service) StartBrowserRpaExecution(ctx context.Context, actor contract.Ac
 			return StartBrowserRpaExecutionResult{}, err
 		}
 		if err == nil && execution.ID != "" {
+			if execution.BrowserRpaRunID != "" {
+				if retryRepo, supported := s.Repository.(safeFailedBrowserRpaRetryRepository); supported {
+					retried, retryErr := retryRepo.ResetSafeFailedBrowserRpaExecution(ctx, actor.OrganizationID, projectID, execution.ID, execution.Version, execution.BrowserRpaRunID)
+					if retryErr == nil {
+						execution = retried
+					} else if !errors.Is(retryErr, ErrInvalidState) {
+						return StartBrowserRpaExecutionResult{}, retryErr
+					}
+				}
+			}
 			if result, replayed, replayErr := replayExistingBrowserRpaExecution(change, execution); replayErr != nil {
 				return StartBrowserRpaExecutionResult{}, replayErr
+			} else if replayed && execution.BrowserRpaRunID != "" {
+				if reconciler, supported := s.BrowserRpaLauncher.(browserRpaRunReconciler); supported {
+					reconcileRequest := BrowserRpaLaunchRequest{OrganizationID: actor.OrganizationID, ProjectID: projectID, AccountID: externalAccountID, BusinessExecutionID: execution.ID, Action: action, IdempotencyKey: request.IdempotencyKey, CreatedBy: actor.Principal.ID}
+					if reconcileErr := reconciler.ReconcileBrowserRpaRun(ctx, reconcileRequest, execution.BrowserRpaRunID); reconcileErr != nil {
+						return StartBrowserRpaExecutionResult{}, reconcileErr
+					}
+				}
+				return result, nil
 			} else if replayed && execution.BrowserRpaRunID == "" {
 				return result, nil
 			}
@@ -210,8 +236,6 @@ func samePlanExecutionTarget(change ControlledChangeSet, binding ControlledAutho
 		change.Status != ControlledChangeSetRejected &&
 		change.Status != ControlledChangeSetInvalidated &&
 		change.Binding.PlanID == binding.PlanID &&
-		change.Binding.PlanVersion == binding.PlanVersion &&
-		change.Binding.PlanCanonicalHash == binding.PlanCanonicalHash &&
 		change.Binding.ConfigurationCanonicalHash == binding.ConfigurationCanonicalHash &&
 		change.Binding.AccountReferenceID == binding.AccountReferenceID &&
 		change.Binding.ObjectFingerprint == binding.ObjectFingerprint

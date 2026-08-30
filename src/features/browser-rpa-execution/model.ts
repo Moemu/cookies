@@ -22,6 +22,7 @@ export type BrowserRpaBlockingReason =
   | 'PROJECT_NOT_ALLOWED'
   | 'SITE_NOT_ALLOWED'
   | 'PAGE_DRIFT'
+  | 'RUNNER_FAILURE'
   | 'WORKFLOW_DRIFT'
   | 'SKILL_DRIFT'
   | 'RESULT_RECONCILIATION_REQUIRED'
@@ -120,6 +121,18 @@ export type BrowserRpaRunEvent = {
   summary: string
   actor: string
   created_at: string
+}
+
+export type BrowserRpaRunStep = {
+  id: string
+  run_id: string
+  sequence: number
+  workflow_step_id: string
+  action: string
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'result_unknown' | 'skipped'
+  blocking_reason?: BrowserRpaBlockingReason
+  attempt: number
+  version: number
 }
 
 /** Evidence is redacted by the platform service before the UI receives it. */
@@ -244,6 +257,7 @@ export type IssuedFinalConfirmation = {
 
 export type ControlledExecutionWorkspace = {
   run: BrowserRpaRun
+  steps: BrowserRpaRunStep[]
   events: BrowserRpaRunEvent[]
   evidence: BrowserRpaEvidence[]
   environment: BrowserRpaEnvironment
@@ -276,6 +290,7 @@ export type ControlledExecutionPresentation = {
     | 'result_unknown'
     | 'cancelled'
     | 'kill_switch_active'
+    | 'runner_failure'
     | 'blocked'
   tone: 'neutral' | 'warning' | 'danger' | 'success'
   title: string

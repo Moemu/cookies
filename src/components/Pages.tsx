@@ -1626,7 +1626,7 @@ export function ModulePage({
     : system.key === 'delivery' && item.id === 'configuration' ? <DeliveryConfigurationPage state={dataState} activeView={activeView} tourRunId={tourRunId} tourCase={tourCase}/>
     : system.key === 'delivery' && item.id === 'approvals' ? <ApprovalCenterPage state={dataState} tourCase={tourCase} tourRunId={tourRunId} selectedChangeSetId={objectId}/>
     : system.key === 'delivery' && item.id === 'execution' ? <Suspense fallback={<div className="page-notice" role="status">正在加载受控执行中心…</div>}>
-      <ControlledExecutionWorkspace projectId={currentProject.id} runId={objectId}/>
+      <ControlledExecutionWorkspace projectId={currentProject.id} runId={objectId} activeView={activeView}/>
     </Suspense>
     : system.key === 'delivery' && item.id === 'monitoring' ? <DeliveryMonitoringPage tourCase={tourCase}/>
     : system.key === 'delivery' && item.id === 'optimization' ? <DeliveryOptimizationPage state={dataState} activeView={activeView} tourRunId={tourRunId} tourCase={tourCase}/>

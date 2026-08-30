@@ -1,4 +1,5 @@
-import { chromium, type Locator, type Page } from "@playwright/test";
+import { chromium, type BrowserContext, type Locator, type Page, type Request } from "@playwright/test";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -21,7 +22,19 @@ export type ReferenceSelectionSpec = {
   minimum_visible?: number;
   expected_total?: number;
   confirm_button?: string;
+  image_src_identity?: string;
 };
+
+export function canonicalImageSourceIdentity(value: string) {
+  if (!value.trim()) return "";
+  try {
+    const parsed = new URL(value.trim(), "https://cookies.invalid");
+    const path = decodeURIComponent(parsed.pathname).replace(/^\/+/, "");
+    return path.split("~", 1)[0];
+  } catch {
+    return "";
+  }
+}
 
 export type RunnerStepResult = {
   id: string;
@@ -130,6 +143,7 @@ export type ExecutePlanOptions = {
   confirmToken?: string;
   authorityStateDirectory?: string;
   now?: Date;
+  onStepStart?: (step: PlanStep) => void;
 };
 
 export async function executePlan(
@@ -158,6 +172,7 @@ export async function executePlan(
 
     const fieldSteps: PlanStep[] = [];
     for (const step of plan.steps) {
+      options.onStepStart?.(step);
       if (step.kind === "identify_page") {
         await page.identifyPage(plan);
         results.push({ id: step.id, status: "succeeded" });
@@ -285,6 +300,82 @@ export async function executePlan(
   }
 }
 
+async function waitForPlanPage(
+  context: BrowserContext,
+  plan: OceanEngineFormPlan,
+  timeoutMs: number,
+) {
+  const expectedPath = plan.plan_kind.startsWith("project_") ? "/superior/create-project" : "/superior/ads";
+  const objectParameter = plan.plan_kind.startsWith("project_") ? "project_id" : "promotion_id";
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const page = context.pages().find((candidate) => {
+      try {
+        const url = new URL(candidate.url());
+        if (url.hostname !== "ad.oceanengine.com" || !url.pathname.startsWith(expectedPath)) return false;
+        if (!plan.object_reference || plan.object_reference.startsWith("redacted:")) return true;
+        return url.searchParams.get(objectParameter) === plan.object_reference;
+      } catch {
+        return false;
+      }
+    });
+    if (page) return page;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+  } while (Date.now() < deadline);
+  return undefined;
+}
+
+async function resolvePlanPage(context: BrowserContext, plan: OceanEngineFormPlan) {
+  if (
+    plan.plan_kind === "promotion_create" &&
+    /^\d+$/.test(plan.account_reference) &&
+    /^\d+$/.test(plan.parent_project_reference ?? "")
+  ) {
+    const createPage = await waitForPlanPage(context, plan, 3_000) ?? await context.newPage();
+    const createURL = new URL("https://ad.oceanengine.com/superior/ads");
+    createURL.searchParams.set("aadvid", plan.account_reference);
+    createURL.searchParams.set("project_id", plan.parent_project_reference!);
+    await createPage.goto(createURL.toString(), { waitUntil: "domcontentloaded" });
+    const opened = await waitForPlanPage(context, plan, 15_000);
+    if (opened) return opened;
+    await createPage.close().catch(() => undefined);
+    throw new RunnerV3Error("async_load_timeout", "the promotion creation form did not load");
+  }
+
+  const existing = await waitForPlanPage(context, plan, 3_000);
+  if (existing) return existing;
+
+  const manageDeadline = Date.now() + 10_000;
+  let managePage: Page | undefined;
+  do {
+    managePage = context.pages().find((candidate) => {
+      try {
+        const url = new URL(candidate.url());
+        return url.hostname === "ad.oceanengine.com"
+          && url.pathname.startsWith("/promotion/promote-manage/project")
+          && (plan.account_reference.startsWith("redacted:") || url.searchParams.get("aadvid") === plan.account_reference);
+      } catch {
+        return false;
+      }
+    });
+    if (!managePage) await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
+  } while (!managePage && Date.now() < manageDeadline);
+
+  if (!managePage) throw new RunnerV3Error("page_drift", "the OceanEngine management page did not load");
+  if (plan.plan_kind !== "project_create") {
+    throw new RunnerV3Error("operator_required", `open the ${plan.plan_kind} form before Prepare`);
+  }
+
+  const createProject = managePage.getByText("新建项目", { exact: true });
+  if ((await createProject.count()) !== 1 || !(await createProject.isVisible())) {
+    throw new RunnerV3Error("locator_not_unique", "the New Project action is unavailable");
+  }
+  await createProject.click({ noWaitAfter: true });
+  const opened = await waitForPlanPage(context, plan, 15_000);
+  if (!opened) throw new RunnerV3Error("async_load_timeout", "the project creation form did not load");
+  return opened;
+}
+
 export async function executePreparePlan(
   plan: OceanEngineFormPlan,
   page: PageOperations,
@@ -319,6 +410,35 @@ export class PlaywrightPageOperations implements PageOperations {
     if (plan.object_reference && !plan.object_reference.startsWith("redacted:") && observedObject && observedObject !== plan.object_reference) {
       throw new RunnerV3Error("object_mismatch", "the active object does not match the plan");
     }
+    const staleProductDrawer = this.page.locator("[data-e2e='createproject_productselectdrawer']:visible");
+    for (let attempt = 0; attempt < 3 && (await staleProductDrawer.count()) > 0; attempt += 1) {
+      const close = staleProductDrawer.last().locator("[data-e2e='createproject_productselectdrawer_close']");
+      if ((await close.count()) !== 1 || !(await close.isVisible())) break;
+      await close.click();
+      await this.page.waitForTimeout(300);
+    }
+    if ((await staleProductDrawer.count()) > 0) {
+      throw new RunnerV3Error("page_drift", "the stale product picker could not be closed");
+    }
+    const staleVideoClose = this.page.locator("[data-e2e='createad_videoLib_close']:visible");
+    for (let attempt = 0; attempt < 3 && (await staleVideoClose.count()) > 0; attempt += 1) {
+      if ((await staleVideoClose.count()) !== 1) break;
+      await staleVideoClose.click();
+      await this.page.waitForTimeout(300);
+    }
+    if ((await staleVideoClose.count()) > 0) {
+      throw new RunnerV3Error("page_drift", "the stale video picker could not be closed");
+    }
+    const staleProductImageDrawer = this.page.locator("[data-e2e='createad_productImg__createProductImg__createMaterialLib']:visible");
+    for (let attempt = 0; attempt < 3 && (await staleProductImageDrawer.count()) > 0; attempt += 1) {
+      const close = staleProductImageDrawer.locator("[data-auto-id='drawer-close-btn'],.oc-drawer-close").first();
+      if ((await close.count()) !== 1 || !(await close.isVisible())) break;
+      await close.click();
+      await this.page.waitForTimeout(300);
+    }
+    if ((await staleProductImageDrawer.count()) > 0) {
+      throw new RunnerV3Error("page_drift", "the stale product image picker could not be closed");
+    }
   }
 
   private scopeLocator(step: PlanStep) {
@@ -327,20 +447,16 @@ export class PlaywrightPageOperations implements PageOperations {
   }
 
   private async selectedCallToActions(page: Page = this.page) {
-    let scope = page.getByText("行动号召", { exact: true });
+    let scope = page.locator("[data-e2e='createad_actionText__createRecommendTag']:visible");
     for (let attempt = 0; attempt < 40 && (await scope.count()) === 0; attempt += 1) {
       await page.waitForTimeout(250);
-      scope = page.getByText("行动号召", { exact: true });
+      scope = page.locator("[data-e2e='createad_actionText__createRecommendTag']:visible");
     }
-    if ((await scope.count()) < 1) return [];
-    const row = scope.first().locator(
-      "xpath=ancestor::div[contains(concat(' ',normalize-space(@class),' '),' oc-row ')][1]",
-    );
-    const tags = row.locator(".oc-tag-text");
+    if ((await scope.count()) !== 1) return [];
+    const tags = scope.locator(".oc-tag-text");
     const values: string[] = [];
     for (let index = 0; index < await tags.count(); index += 1) {
       const tag = tags.nth(index);
-      if (!await tag.isVisible()) continue;
       const value = (await tag.innerText()).trim();
       if (value && !values.includes(value)) values.push(value);
     }
@@ -355,17 +471,28 @@ export class PlaywrightPageOperations implements PageOperations {
 
   private async targetLocator(step: PlanStep): Promise<Locator> {
     if (!step.target) throw new RunnerV3Error("invalid_plan", `${step.id}: target is required`);
+    if (step.field_key === "promotion.direct_link_reference" && step.operation === "fill_text") {
+      let directLinkInput = this.page.locator("[data-e2e='createad_openUrl_input_input_component'] input:visible");
+      for (let attempt = 0; attempt < 40 && (await directLinkInput.count()) === 0; attempt += 1) {
+        await this.page.waitForTimeout(250);
+        directLinkInput = this.page.locator("[data-e2e='createad_openUrl_input_input_component'] input:visible");
+      }
+      if ((await directLinkInput.count()) === 1) return directLinkInput;
+      throw new RunnerV3Error("locator_not_unique", `${step.id}: direct-link input is not unique`);
+    }
     const scope = this.scopeLocator(step);
     for (let attempt = 0; attempt < 40 && (await scope.count()) < 1; attempt += 1) {
       await this.page.waitForTimeout(250);
     }
     if ((await scope.count()) < 1) throw new RunnerV3Error("page_drift", `${step.id}: scope did not load`);
     if (step.field_key === "project.marketing_product_reference") {
-      const requested = this.page.getByText(step.target, { exact: true });
-      if ((await requested.count()) === 0) {
-        const replacement = this.page.getByRole("button", { name: "更换", exact: true });
-        if ((await replacement.count()) === 1 && await replacement.isVisible()) return replacement;
+      const emptyProduct = this.page.locator(".create-product-add-empty");
+      const visibleEmptyProducts: Locator[] = [];
+      for (let index = 0; index < await emptyProduct.count(); index += 1) {
+        if (await emptyProduct.nth(index).isVisible()) visibleEmptyProducts.push(emptyProduct.nth(index));
       }
+      if (visibleEmptyProducts.length === 1) return visibleEmptyProducts[0];
+      return this.uniqueVisibleText(step.target, step.id);
     }
     if (step.field_key === "promotion.base_materials") {
       const addVideo = this.page.getByRole("button", { name: "添加视频", exact: true });
@@ -378,6 +505,16 @@ export class PlaywrightPageOperations implements PageOperations {
       );
       const addProductImage = productImageRow.locator(".oc-create-product-img-add-button");
       if ((await addProductImage.count()) === 1 && await addProductImage.isVisible()) return addProductImage;
+    }
+    if (step.field_key === "promotion.product_name") {
+      const candidates = this.page.locator("[data-e2e='createad_productName'] input[placeholder='请输入']");
+      const editable: Locator[] = [];
+      for (let index = 0; index < await candidates.count(); index += 1) {
+        const candidate = candidates.nth(index);
+        if (await candidate.isVisible() && await candidate.isEnabled()) editable.push(candidate);
+      }
+      if (editable.length === 1) return editable[0];
+      throw new RunnerV3Error("locator_not_unique", `${step.id}: editable product name is not unique`);
     }
     if (step.field_key === "promotion.promotion_name") {
       const candidates = this.page.getByPlaceholder("请输入", { exact: true });
@@ -451,6 +588,8 @@ export class PlaywrightPageOperations implements PageOperations {
         const existingProduct = this.page.getByText(label, { exact: true });
         for (let index = 0; index < await existingProduct.count(); index += 1) {
           if (await existingProduct.nth(index).isVisible()) {
+            const selectedCard = existingProduct.nth(index).locator("xpath=ancestor::*[contains(concat(' ',normalize-space(@class),' '),' oc-create-product-card ')][1]");
+            if (step.value.object_id && ((await selectedCard.count()) !== 1 || !(await selectedCard.innerText()).includes(step.value.object_id))) continue;
             this.referenceReadbacks.set(step.id, {
               selection_kind: step.value.selection_kind,
               selected_count: 1,
@@ -466,6 +605,21 @@ export class PlaywrightPageOperations implements PageOperations {
     if (step.field_key === "promotion.delivery_identity") {
       const spec = this.isReferenceSelectionSpec(step.value) ? step.value : undefined;
       const label = spec?.label ?? (typeof step.value === "string" ? step.value : undefined);
+      if (!spec && (label === "账户信息" || label === "账号信息")) {
+        let accountInfo = this.page.locator("[data-e2e='createad_nativetype_0']:visible");
+        for (let attempt = 0; attempt < 60 && (await accountInfo.count()) === 0; attempt += 1) {
+          await this.page.waitForTimeout(250);
+          accountInfo = this.page.locator("[data-e2e='createad_nativetype_0']:visible");
+        }
+        if ((await accountInfo.count()) !== 1) {
+          throw new RunnerV3Error("locator_not_unique", `${step.id}: account identity option is not unique`);
+        }
+        if (!(await accountInfo.getAttribute("class"))?.includes("ovui-radio-item--checked")) {
+          await accountInfo.click();
+        }
+        this.referenceReadbacks.set(step.id, { selection_kind: "text_option", selected_count: 1, label: "账户信息" });
+        return;
+      }
       if (label) {
         const selected = this.page.getByText(label, { exact: true });
         for (let attempt = 0; attempt < 40 && (await selected.count()) === 0; attempt += 1) {
@@ -503,13 +657,20 @@ export class PlaywrightPageOperations implements PageOperations {
       }
     }
     if (step.field_key === "promotion.product_image_references") {
+      if (!this.isReferenceSelectionSpec(step.value) || !step.value.image_src_identity) {
+        throw new RunnerV3Error("invalid_plan", `${step.id}: product image source identity is required`);
+      }
       const productImageScope = this.page.getByText("产品主图", { exact: true }).first();
       const productImageRow = productImageScope.locator(
         "xpath=ancestor::div[contains(concat(' ',normalize-space(@class),' '),' oc-row ')][1]",
       );
       const selectedCount = productImageRow.getByText(/已添加：\s*[1-9]\d*\/\d+/);
       if ((await selectedCount.count()) === 1 && await selectedCount.isVisible()) {
-        this.referenceReadbacks.set(step.id, { selection_kind: "image_card", selected_count: 1, reused_existing_selection: true });
+        const matching = await this.imagesMatchingSourceIdentity(productImageRow.locator("img:visible"), step.value.image_src_identity);
+        if (matching.length !== 1) {
+          throw new RunnerV3Error(matching.length > 1 ? "locator_not_unique" : "object_mismatch", `${step.id}: selected product image does not uniquely match the plan`);
+        }
+        this.referenceReadbacks.set(step.id, { selection_kind: "image_card", selected_count: 1, image_src_identity: step.value.image_src_identity, reused_existing_selection: true });
         return;
       }
     }
@@ -518,21 +679,97 @@ export class PlaywrightPageOperations implements PageOperations {
       if (values.length < 1 || values.length > 10 || new Set(values).size !== values.length || values.some((value) => !value.trim())) {
         throw new RunnerV3Error("invalid_value", `${step.id}: call to action needs 1 to 10 unique values`);
       }
-      const selected = await this.selectedCallToActions();
+      let selected = await this.selectedCallToActions();
+      for (let attempt = 0; attempt < 20 && selected.length === 0; attempt += 1) {
+        await this.page.waitForTimeout(250);
+        selected = await this.selectedCallToActions();
+      }
       const matches = selected.length === values.length && values.every((value) => selected.includes(value));
       if (!matches) {
-        throw new RunnerV3Error("operator_required", `${step.id}: call-to-action multi-select mutation is not calibrated`);
+        const root = this.page.locator("[data-e2e='createad_actionText__createRecommendTag']:visible");
+        if ((await root.count()) !== 1) throw new RunnerV3Error("locator_not_unique", `${step.id}: call-to-action input is not unique`);
+        for (const value of selected.filter((item) => !values.includes(item))) {
+          const tags = root.locator(".oc-tag");
+          const matching: Locator[] = [];
+          for (let index = 0; index < await tags.count(); index += 1) {
+            const tag = tags.nth(index);
+            if ((await tag.locator(".oc-tag-text").innerText()).trim() === value) matching.push(tag);
+          }
+          if (matching.length !== 1) throw new RunnerV3Error("page_drift", `${step.id}: call-to-action tag is not unique`);
+          const close = matching[0].locator(".ovui-tag__close");
+          if ((await close.count()) !== 1) throw new RunnerV3Error("page_drift", `${step.id}: call-to-action tag cannot be removed`);
+          await close.evaluate((element) => (element as HTMLElement).click());
+          for (let attempt = 0; attempt < 20 && (await this.selectedCallToActions()).includes(value); attempt += 1) {
+            await this.page.waitForTimeout(100);
+          }
+          if ((await this.selectedCallToActions()).includes(value)) {
+            throw new RunnerV3Error("field_readback_mismatch", `${step.id}: call-to-action tag was not removed: ${value}`);
+          }
+        }
+        for (const value of values) {
+          if ((await this.selectedCallToActions()).includes(value)) continue;
+          const input = root.locator("input:visible");
+          if ((await input.count()) !== 1) throw new RunnerV3Error("locator_not_unique", `${step.id}: call-to-action input is not unique`);
+          for (let attempt = 0; attempt < 3 && !(await this.selectedCallToActions()).includes(value); attempt += 1) {
+            await input.fill(value);
+            await input.press("Enter");
+            for (let check = 0; check < 10 && !(await this.selectedCallToActions()).includes(value); check += 1) {
+              await this.page.waitForTimeout(200);
+            }
+          }
+        }
       }
-      this.referenceReadbacks.set(step.id, selected);
+      let observed: string[] = [];
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        observed = await this.selectedCallToActions();
+        if (observed.length === values.length && values.every((value) => observed.includes(value))) break;
+        await this.page.waitForTimeout(250);
+      }
+      if (observed.length !== values.length || !values.every((value) => observed.includes(value))) {
+        const root = this.page.locator("[data-e2e='createad_actionText__createRecommendTag']:visible");
+        const input = root.locator("input:visible");
+        const diagnostic = (await root.count()) === 1
+          ? {
+              text: (await root.innerText()).replace(/\s+/g, " ").trim(),
+              input_value: (await input.count()) === 1 ? await input.inputValue() : undefined,
+              input_disabled: (await input.count()) === 1 ? await input.isDisabled() : undefined,
+            }
+          : { root_count: await root.count() };
+        throw new RunnerV3Error(
+          "field_readback_mismatch",
+          `${step.id}: call-to-action set does not match the plan; initial=${JSON.stringify(selected)}; observed=${JSON.stringify(observed)}; control=${JSON.stringify(diagnostic)}`,
+        );
+      }
+      this.referenceReadbacks.set(step.id, observed);
       return;
     }
     if (step.field_key === "promotion.category") {
       const target = await this.targetLocator(step);
       await target.click();
-      for (const segment of String(step.value).split("/").filter(Boolean)) {
-        const option = await this.uniqueVisibleText(segment, step.id);
-        await option.click();
+      const popper = this.page.locator("[data-e2e='createad_yuntuCategory_popover_content']:visible");
+      for (let attempt = 0; attempt < 40 && (await popper.count()) === 0; attempt += 1) {
+        await this.page.waitForTimeout(250);
       }
+      if ((await popper.count()) !== 1) throw new RunnerV3Error("locator_not_unique", `${step.id}: category picker is not unique`);
+      const value = String(step.value);
+      const search = popper.locator("input[placeholder='请输入内容']");
+      if ((await search.count()) !== 1) throw new RunnerV3Error("locator_not_unique", `${step.id}: category search is not unique`);
+      await search.fill(value);
+      const result = popper.locator(".ovui-cascader-search-option").filter({ hasText: value });
+      for (let attempt = 0; attempt < 40 && (await result.count()) === 0; attempt += 1) {
+        await this.page.waitForTimeout(250);
+      }
+      if ((await result.count()) !== 1) throw new RunnerV3Error("async_load_timeout", `${step.id}: category search result did not load`);
+      await result.click();
+      return;
+    }
+    if (step.field_key === "project.search_targeting_expansion") {
+      const value = String(step.value);
+      const optionIndex = value === "启用" ? "1" : value === "不启用" ? "2" : undefined;
+      if (!optionIndex) throw new RunnerV3Error("invalid_value", `${step.id}: unsupported targeting expansion value`);
+      const option = this.page.locator(`[data-e2e='createproject_audienceextend_${optionIndex}']:visible`);
+      if ((await option.count()) !== 1) throw new RunnerV3Error("locator_not_unique", `${step.id}: targeting expansion option is not unique`);
+      if (!(await option.getAttribute("class"))?.includes("ovui-radio-item--checked")) await option.click();
       return;
     }
     if (step.field_key === "promotion.brand_reference" && this.isReferenceSelectionSpec(step.value)) {
@@ -602,7 +839,15 @@ export class PlaywrightPageOperations implements PageOperations {
       if (typeof step.value !== "boolean") throw new RunnerV3Error("invalid_value", `${step.id}: toggle needs a boolean`);
       await this.setCheckbox(target, step.value, step.id);
     } else if (step.operation === "open_reference_picker") {
+      const initialProductRequest = step.field_key === "project.marketing_product_reference"
+        ? this.waitForProductListRequest(undefined, 2_000)
+        : undefined;
       await target.click();
+      if (initialProductRequest) {
+        const request = await initialProductRequest;
+        if (request) await this.finishProductListRequest(request, step.id);
+        else await this.waitForStableInitialProductList(step.id);
+      }
       if (this.isReferenceSelectionSpec(step.value)) {
         this.referenceReadbacks.set(step.id, await this.selectReference(step, step.value));
       } else {
@@ -666,6 +911,91 @@ export class PlaywrightPageOperations implements PageOperations {
     return (await dialogs.count()) > 0 ? dialogs.last() : this.page.locator("body");
   }
 
+  private waitForProductListRequest(query: string | undefined, timeout: number) {
+    return this.page.waitForRequest((request) => {
+      if (!request.url().includes("/superior/api/agw/ad/recommend_product_list")) return false;
+      if (!query) return true;
+      return request.url().includes(encodeURIComponent(query)) || (request.postData() ?? "").includes(query);
+    }, { timeout }).catch(() => undefined);
+  }
+
+  private async finishProductListRequest(request: Request, stepId: string) {
+    const response = await request.response();
+    if (!response) throw new RunnerV3Error("async_load_timeout", `${stepId}: product list request has no response`);
+    await response.finished();
+    if (!response.ok()) throw new RunnerV3Error("async_load_timeout", `${stepId}: product list request failed`);
+  }
+
+  private async waitForStableInitialProductList(stepId: string) {
+    const cards = this.page.locator("[data-e2e='createproject_productselectdrawer']:visible [data-auto-id='create-product-card']:visible");
+    let prior = "";
+    let stable = 0;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const signature = await cards.allInnerTexts().then((values) => values.join("\u0000"));
+      stable = signature && signature === prior ? stable + 1 : 0;
+      if (stable >= 4) return;
+      prior = signature;
+      await this.page.waitForTimeout(250);
+    }
+    throw new RunnerV3Error("async_load_timeout", `${stepId}: initial product list did not become stable`);
+  }
+
+  private async waitForStableProductCard(root: Locator, label: string, objectId: string, stepId: string) {
+    let prior = "";
+    let stable = 0;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const labels = root.getByText(label, { exact: true });
+      const matchingCards: Locator[] = [];
+      for (let index = 0; index < await labels.count(); index += 1) {
+        const candidate = labels.nth(index);
+        if (!await candidate.isVisible()) continue;
+        const card = candidate.locator("xpath=ancestor::*[contains(concat(' ',normalize-space(@class),' '),' oc-create-product-card ')][1]");
+        if ((await card.count()) === 1 && (await card.innerText()).includes(objectId)) matchingCards.push(card);
+      }
+      if (matchingCards.length > 1) throw new RunnerV3Error("locator_not_unique", `${stepId}: searched product card is not unique`);
+      const signature = matchingCards.length === 1 ? await matchingCards[0].innerText() : "";
+      stable = signature && signature === prior ? stable + 1 : 0;
+      if (matchingCards.length === 1 && stable >= 4) return matchingCards[0];
+      prior = signature;
+      await this.page.waitForTimeout(250);
+    }
+    throw new RunnerV3Error("async_load_timeout", `${stepId}: searched product result did not become stable`);
+  }
+
+  private async waitForStableMaterialCard(root: Locator, label: string, query: string, stepId: string) {
+    const search = root.locator("input[placeholder='可搜索视频名称或ID']:visible");
+    if ((await search.count()) !== 1) {
+      throw new RunnerV3Error("locator_not_unique", `${stepId}: material search input is not unique`);
+    }
+    // Let the initial account-wide list finish before filtering. Otherwise a
+    // late initial response can overwrite the filtered result.
+    await this.stableVisibleCount(root.getByText(/共\s*\d+\s*个视频/), 1, stepId);
+    await search.fill(query);
+    await search.press("Enter");
+    let prior = "";
+    let stable = 0;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const labels = root.getByText(label, { exact: true });
+      const cards: Locator[] = [];
+      for (let index = 0; index < await labels.count(); index += 1) {
+        const candidate = labels.nth(index);
+        if (!await candidate.isVisible()) continue;
+        const card = candidate.locator("xpath=ancestor::*[contains(concat(' ',normalize-space(@class),' '),' create-material-list-card-item ')][1]");
+        if ((await card.count()) === 1) cards.push(card);
+      }
+      if (cards.length > 1) throw new RunnerV3Error("locator_not_unique", `${stepId}: searched material card is not unique`);
+      const total = await root.getByText(/共\s*1\s*个视频/).allInnerTexts();
+      const signature = cards.length === 1 && await search.inputValue() === query && total.length > 0
+        ? `${await cards[0].innerText()}\u0000${total.join("\u0000")}`
+        : "";
+      stable = signature && signature === prior ? stable + 1 : 0;
+      if (cards.length === 1 && stable >= 4) return cards[0];
+      prior = signature;
+      await this.page.waitForTimeout(250);
+    }
+    throw new RunnerV3Error("async_load_timeout", `${stepId}: searched material result did not become stable`);
+  }
+
   private async confirmPicker(root: Locator, spec: ReferenceSelectionSpec, stepId: string) {
     const buttonName = spec.confirm_button ?? "确定";
     const local = root.getByRole("button", { name: buttonName, exact: true });
@@ -695,9 +1025,96 @@ export class PlaywrightPageOperations implements PageOperations {
     }
   }
 
+  private async imageSourceIdentity(image: Locator) {
+    const source = await image.evaluate((element) => {
+      const imageElement = element as HTMLImageElement;
+      return imageElement.currentSrc || imageElement.src || imageElement.getAttribute("src") || "";
+    });
+    return canonicalImageSourceIdentity(source);
+  }
+
+  private async imagesMatchingSourceIdentity(images: Locator, expected: string) {
+    const identity = canonicalImageSourceIdentity(expected);
+    const matches: Locator[] = [];
+    for (let index = 0; index < await images.count(); index += 1) {
+      const image = images.nth(index);
+      if (await this.imageSourceIdentity(image) === identity) matches.push(image);
+    }
+    return matches;
+  }
+
+  private async waitForStableProductImage(root: Locator, expected: string, stepId: string) {
+    const expectedIdentity = canonicalImageSourceIdentity(expected);
+    if (!expectedIdentity) throw new RunnerV3Error("invalid_value", `${stepId}: product image source identity is invalid`);
+    let prior = "";
+    let stable = 0;
+    let visibleCount = 0;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const images = root.locator("img:visible");
+      const identities: string[] = [];
+      for (let index = 0; index < await images.count(); index += 1) {
+        identities.push(await this.imageSourceIdentity(images.nth(index)));
+      }
+      visibleCount = identities.length;
+      const signature = identities.join("\u0000");
+      stable = signature && signature === prior ? stable + 1 : 0;
+      if (stable >= 8) {
+        const matchedIndexes = identities.flatMap((identity, index) => identity === expectedIdentity ? [index] : []);
+        if (matchedIndexes.length > 1) throw new RunnerV3Error("locator_not_unique", `${stepId}: product image source matched multiple images`);
+        if (matchedIndexes.length === 1) return { image: images.nth(matchedIndexes[0]), visibleCount, identity: expectedIdentity };
+      }
+      prior = signature;
+      await this.page.waitForTimeout(250);
+    }
+    throw new RunnerV3Error("object_mismatch", `${stepId}: product image source was not found in the stable picker inventory`);
+  }
+
   private async selectReference(step: PlanStep, spec: ReferenceSelectionSpec) {
     const root = await this.pickerRoot();
-    if (spec.expected_total !== undefined) {
+    const projectProduct = step.field_key === "project.marketing_product_reference";
+    if (projectProduct && spec.object_id) {
+      const search = this.page.getByPlaceholder("请输入商品名称或ID", { exact: true });
+      if ((await search.count()) !== 1 || !(await search.isVisible())) {
+        throw new RunnerV3Error("page_drift", `${step.id}: product search input is unavailable`);
+      }
+      const filteredRequest = this.waitForProductListRequest(spec.object_id, 5_000);
+      await search.fill(spec.object_id);
+      await search.press("Enter");
+      const request = await filteredRequest;
+      if (request) await this.finishProductListRequest(request, step.id);
+      if (!spec.label) throw new RunnerV3Error("invalid_value", `${step.id}: product label is required`);
+      const productCard = await this.waitForStableProductCard(root, spec.label, spec.object_id, step.id);
+      const checkbox = productCard.locator("input[type='checkbox']");
+      if ((await checkbox.count()) !== 1) throw new RunnerV3Error("locator_not_unique", `${step.id}: product checkbox is not unique`);
+      if (!(await checkbox.isChecked())) await checkbox.click({ force: true });
+      await this.stableVisibleCount(root.getByText(/已选择\s*1\s*\/\s*1/), 1, step.id);
+      await this.confirmPicker(root, spec, step.id);
+      return {
+        selection_kind: spec.selection_kind,
+        selected_count: 1,
+        label: spec.label,
+        object_id: spec.object_id,
+        element_verified: "searched_product_card_and_unique_product_id",
+      };
+    }
+    if (step.field_key === "promotion.base_materials" && spec.object_id && spec.label) {
+      const card = await this.waitForStableMaterialCard(root, spec.label, spec.object_id, step.id);
+      const checkbox = card.locator("input[type='checkbox']");
+      if ((await checkbox.count()) !== 1) throw new RunnerV3Error("locator_not_unique", `${step.id}: material checkbox is not unique`);
+      await this.setCheckbox(checkbox, true, step.id);
+      await this.stableVisibleCount(root.getByText(/已选择\s*1\s*\/\s*10/), 1, step.id);
+      await this.confirmPicker(root, spec, step.id);
+      return {
+        selection_kind: spec.selection_kind,
+        selected_count: 1,
+        label: spec.label,
+        object_id: spec.object_id,
+        element_verified: "searched_material_card_and_object_id",
+      };
+    }
+    // Connector catalog totals describe the synchronized Cookies subset.
+    // The project picker can contain a larger account-wide product catalog.
+    if (spec.expected_total !== undefined && !projectProduct && step.field_key !== "promotion.product_image_references") {
       const total = this.page.getByText(new RegExp(`共\\s*${spec.expected_total}\\s*条`));
       await this.stableVisibleCount(total, 1, step.id);
     }
@@ -748,21 +1165,20 @@ export class PlaywrightPageOperations implements PageOperations {
     }
 
     if (step.field_key === "promotion.product_image_references" && spec.selection_kind === "image_card") {
-      const images = root.locator("img:visible");
-      const visibleCount = await this.stableVisibleCount(images, spec.minimum_visible ?? 1, step.id);
-      const index = spec.index ?? 0;
-      if (index < 0 || index >= visibleCount) {
-        throw new RunnerV3Error("invalid_value", `${step.id}: product image index is out of range`);
-      }
-      await images.nth(index).click();
+      if (!spec.image_src_identity) throw new RunnerV3Error("invalid_plan", `${step.id}: product image source identity is required`);
+      const matched = await this.waitForStableProductImage(root, spec.image_src_identity, step.id);
+      if (matched.visibleCount < (spec.minimum_visible ?? 1)) throw new RunnerV3Error("async_load_timeout", `${step.id}: product image inventory did not load`);
+      await matched.image.click();
       await this.stableVisibleCount(root.getByText(/已选择\s*1\s*\/\s*10/), 1, step.id);
+      const verified = await this.imagesMatchingSourceIdentity(root.locator("img:visible"), matched.identity);
+      if (verified.length !== 1) throw new RunnerV3Error("field_readback_mismatch", `${step.id}: selected product image identity changed after click`);
       await this.confirmPicker(root, spec, step.id);
       return {
         selection_kind: spec.selection_kind,
         selected_count: 1,
-        visible_count: visibleCount,
-        index,
-        element_verified: "img_and_selected_count",
+        visible_count: matched.visibleCount,
+        image_src_identity: matched.identity,
+        element_verified: "stable_absolute_img_src_and_selected_count",
       };
     }
 
@@ -951,7 +1367,10 @@ export class PlaywrightPageOperations implements PageOperations {
       await search.press("Enter");
     }
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const row = this.page.getByRole("row").filter({ hasText: expectedName });
+      let row = this.page.locator("tr.ovui-tr").filter({ hasText: expectedName });
+      if ((await row.count()) === 0) {
+        row = this.page.getByRole("row").filter({ hasText: expectedName });
+      }
       if ((await row.count()) === 1) {
         const match = (await row.innerText()).match(/ID[:：]\s*(\d+)/);
         if (match?.[1]) {
@@ -1082,33 +1501,41 @@ async function main() {
   const browser = await chromium.connectOverCDP(cdpURL);
   const context = browser.contexts()[0];
   if (!context) throw new Error("the Edge session has no browser context");
-  const expectedPath = plan.plan_kind.startsWith("project_") ? "/superior/create-project" : "/superior/ads";
-  const objectParameter = plan.plan_kind.startsWith("project_") ? "project_id" : "promotion_id";
-  const page = context.pages().find((candidate) => {
-    try {
-      const url = new URL(candidate.url());
-      if (url.hostname !== "ad.oceanengine.com" || !url.pathname.startsWith(expectedPath)) return false;
-      if (!plan.object_reference || plan.object_reference.startsWith("redacted:")) return true;
-      return url.searchParams.get(objectParameter) === plan.object_reference;
-    } catch {
-      return false;
-    }
-  }) ?? context.pages().find((candidate) => /oceanengine\.com/i.test(candidate.url())) ?? context.pages()[0];
-  if (!page) throw new Error("the Edge session has no page");
+  const page = await resolvePlanPage(context, plan);
+  // Keep one drifting selector from consuming the complete Prepare timeout.
+  page.setDefaultTimeout(15_000);
+  page.setDefaultNavigationTimeout(15_000);
   const result = await executePlan(plan, new PlaywrightPageOperations(page), {
     ...(confirmToken ? { confirmToken } : {}),
     authorityStateDirectory,
+    onStepStart: (step) => {
+      process.stderr.write(`${JSON.stringify({ event: "runner_step_start", step_id: step.id, kind: step.kind, field_key: step.field_key })}\n`);
+    },
   });
   const finalStep = result.steps.at(-1);
   if (finalStep) {
     const current = new URL(page.url());
     finalStep.page_reference = `${current.protocol}//${current.host}${current.pathname}`;
   }
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    process.stdout.write(JSON.stringify(result), (error) => error ? rejectPromise(error) : resolvePromise());
+  writeResultAndExit(result, 0);
+}
+
+function writeResultAndExit(result: RunnerV3Result, exitCode: number): void {
+  const resultFile = commandOption("--result-file");
+  if (resultFile) {
+    writeFileSync(resultFile, JSON.stringify(result));
+    process.exit(exitCode);
+  }
+  const fallback = setTimeout(() => process.exit(exitCode), 5_000);
+  process.stdout.write(JSON.stringify(result), () => {
+    clearTimeout(fallback);
+    process.exit(exitCode);
   });
-  // Exit releases only this CDP connection. It does not close the user's Edge browser.
-  process.exit(0);
+}
+
+function commandOption(name: string) {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
@@ -1121,7 +1548,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       final_click_performed: false,
       steps: [],
     };
-    process.stdout.write(JSON.stringify(result));
-    process.exitCode = 1;
+    writeResultAndExit(result, 1);
   });
 }

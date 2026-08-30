@@ -173,6 +173,7 @@ func (s *Server) platformObjectPreview(w http.ResponseWriter, r *http.Request) {
 	if preview.ExpiresAt != nil && !time.Now().Before(*preview.ExpiresAt) {
 		preview, err = s.refreshPlatformObjectPreview(string(actor.OrganizationID), r.PathValue("project_id"), r.PathValue("account_ref"), r.PathValue("object_ref"))
 		if err != nil {
+			log.Printf("platform object preview refresh failed: account=%s object=%s error=%v", r.PathValue("account_ref"), r.PathValue("object_ref"), err)
 			writeProblem(w, http.StatusBadGateway, "PLATFORM_OBJECT_PREVIEW_REFRESH_FAILED")
 			return
 		}
@@ -201,6 +202,7 @@ func (s *Server) platformObjectPreview(w http.ResponseWriter, r *http.Request) {
 				content, err = contentReader.ReadPlatformObjectPreview(r.Context(), query)
 			}
 			if err != nil || refreshErr != nil {
+				log.Printf("platform object preview read failed: account=%s object=%s read_error=%v refresh_error=%v", r.PathValue("account_ref"), r.PathValue("object_ref"), err, refreshErr)
 				writeProblem(w, http.StatusBadGateway, "PLATFORM_OBJECT_PREVIEW_READ_FAILED")
 				return
 			}

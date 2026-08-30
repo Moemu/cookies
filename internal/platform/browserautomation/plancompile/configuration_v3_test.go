@@ -39,6 +39,57 @@ func TestCompileConfigurationV3CreatesAndEditsBoundObjects(t *testing.T) {
 	}
 }
 
+func TestCompileConfigurationV3UsesCalibratedProjectDefaults(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	configuration.Payload.OceanEngine.Project.DeepOptimizationMode = ""
+	configuration.Payload.OceanEngine.Project.PlacementStrategy = ""
+
+	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan v3Plan
+	if err := json.Unmarshal(compiled.Forms[0].Plan, &plan); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"project.deep_optimization_mode": "不启用",
+		"project.placement_strategy":     "通投智选",
+	}
+	for _, step := range plan.Steps {
+		expected, ok := want[step.FieldKey]
+		if !ok {
+			continue
+		}
+		if step.ValueState != "provided" || step.Value != expected {
+			t.Fatalf("%s step = %#v", step.FieldKey, step)
+		}
+		delete(want, step.FieldKey)
+	}
+	if len(want) != 0 {
+		t.Fatalf("default project steps are missing: %#v", want)
+	}
+}
+
+func TestCompileConfigurationV3NormalizesButtonRedirectOptimizationTarget(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	configuration.Payload.OceanEngine.Project.OptimizationTargetReference.SemanticKey = "button_redirect"
+
+	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projectPlan v3Plan
+	if err := json.Unmarshal(compiled.Forms[0].Plan, &projectPlan); err != nil {
+		t.Fatal(err)
+	}
+	if projectPlan.ParentContext.OptimizationTarget != "button_jump" {
+		t.Fatalf("optimization target = %q", projectPlan.ParentContext.OptimizationTarget)
+	}
+}
+
 func TestCompileConfigurationV3FillsOwnedLandingPageLink(t *testing.T) {
 	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
 	configuration, intent := executableConfigurationFixture(now)
@@ -75,6 +126,47 @@ func TestCompileConfigurationV3FillsOwnedLandingPageLink(t *testing.T) {
 		}
 	}
 	t.Fatal("owned landing-page step is missing")
+}
+
+func TestCompileConfigurationV3FillsManualDirectLink(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	link := "tbopen://m.taobao.com/tbopen/index.html?action=ali.open.nav&module=h5"
+	promotion := &configuration.Payload.OceanEngine.Promotions[0]
+	promotion.Settings.DirectLinkMode = "manual"
+	promotion.DirectLinkReference = &delivery.StableReference{
+		Namespace: "cookies", ObjectKind: "direct_link", Scope: "current_project",
+		ID: link, State: delivery.ReferenceResolved,
+	}
+
+	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var promotionPlan v3Plan
+	if err := json.Unmarshal(compiled.Forms[1].Plan, &promotionPlan); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]struct {
+		operation string
+		value     string
+	}{
+		"promotion.direct_link_mode":      {operation: "choose_exact_visible_option", value: "手动填写"},
+		"promotion.direct_link_reference": {operation: "fill_text", value: link},
+	}
+	for _, step := range promotionPlan.Steps {
+		expected, ok := want[step.FieldKey]
+		if !ok {
+			continue
+		}
+		if step.Operation != expected.operation || step.Value != expected.value || step.ValueState != "provided" {
+			t.Fatalf("%s step = %#v", step.FieldKey, step)
+		}
+		delete(want, step.FieldKey)
+	}
+	if len(want) != 0 {
+		t.Fatalf("manual direct-link steps are missing: %#v", want)
+	}
 }
 
 func TestCompileConfigurationV3AcceptsOtherBrandSentinel(t *testing.T) {
@@ -122,6 +214,12 @@ func TestCompileConfigurationV3KeepsPromotionMaterialFieldStructure(t *testing.T
 		positions[step.FieldKey] = index
 		if step.FieldKey == "promotion.product_name" && step.Value != "测试商品" {
 			t.Fatalf("inherited product name = %#v", step.Value)
+		}
+		if step.FieldKey == "promotion.product_image_references" {
+			value, ok := step.Value.(map[string]any)
+			if !ok || value["image_src_identity"] != "tos-cn-i-example/stable-image" || value["index"] != nil {
+				t.Fatalf("product image identity = %#v", step.Value)
+			}
 		}
 	}
 	ordered := []string{"promotion.base_materials", "promotion.copy_materials", "promotion.native_anchor_reference", "promotion.landing_page_reference", "promotion.product_name", "promotion.product_image_references", "promotion.product_selling_points", "promotion.call_to_action", "promotion.source_label", "promotion.comments_enabled", "promotion.category", "promotion.brand_reference"}
@@ -176,9 +274,18 @@ func TestCompileConfigurationV3RejectsLimitsReferencesAndAccountPaths(t *testing
 		{"material", func(c *delivery.PlatformConfiguration, _ *delivery.DeliveryIntent) {
 			c.Payload.OceanEngine.Promotions[0].BaseMaterialReferences[0].State = delivery.ReferenceBlocked
 		}, "1855554434276391", "not resolved"},
+		{"product image identity", func(c *delivery.PlatformConfiguration, _ *delivery.DeliveryIntent) {
+			delete(c.Payload.OceanEngine.Promotions[0].ProductImageReferences[0].AuditAttributes, "image_src_identity")
+		}, "1855554434276391", "stable image_src_identity"},
 		{"landing intent", func(c *delivery.PlatformConfiguration, i *delivery.DeliveryIntent) {
 			i.Payload.LandingPageReferences = nil
 		}, "1855554434276391", "outside the delivery intent"},
+		{"manual direct link", func(c *delivery.PlatformConfiguration, _ *delivery.DeliveryIntent) {
+			c.Payload.OceanEngine.Promotions[0].Settings.DirectLinkMode = "manual"
+			c.Payload.OceanEngine.Promotions[0].DirectLinkReference = &delivery.StableReference{
+				Namespace: "cookies", ObjectKind: "direct_link", ID: "javascript:alert(1)", State: delivery.ReferenceResolved,
+			}
+		}, "1855554434276391", "has no OceanEngine platform ID"},
 		{"owned carrier with Orange landing page", func(c *delivery.PlatformConfiguration, _ *delivery.DeliveryIntent) {
 			c.Payload.OceanEngine.Project.Carrier = "owned_landing_page"
 			c.Payload.OceanEngine.Promotions[0].LandingPageReference.ObjectKind = "orange_landing_page"
@@ -236,9 +343,10 @@ func executableConfigurationFixture(now time.Time) (delivery.PlatformConfigurati
 		return delivery.StableReference{Namespace: "oceanengine", ObjectKind: kind, Scope: "account:1855554434276391", ID: id, State: delivery.ReferenceResolved, DisplayNameSnapshot: label}
 	}
 	product := ref("product", "1001", "测试商品")
+	product.AuditAttributes = map[string]string{"unique_product_id": "1001", "product_id": "9001"}
 	material := ref("material", "2001", "测试视频")
 	image := ref("product_image", "2002", "测试图片")
-	image.AuditAttributes = map[string]string{"selection_kind": "image_card", "expected_total": "1", "index": "0", "minimum_visible": "1"}
+	image.AuditAttributes = map[string]string{"selection_kind": "image_card", "image_src_identity": "tos-cn-i-example/stable-image", "minimum_visible": "1"}
 	landing := ref("landing_page", "3001", "我的落地页")
 	brand := ref("brand", "4001", "测试品牌")
 	category := ref("category", "5001", "零售/综合类2C电商")

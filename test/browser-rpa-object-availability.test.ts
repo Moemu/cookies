@@ -35,6 +35,22 @@ test('does not show a full landing-page URL as its name or platform ID', () => {
   assert.equal(result.platformId, undefined)
 })
 
+test('shows a manual direct link as ready without a platform binding', () => {
+  const directLink = 'tbopen://m.taobao.com/tbopen/index.html?action=ali.open.nav&module=h5'
+  const result = presentObjectAvailability({
+    field_key: 'promotions.0.direct_link_reference',
+    object_kind: 'direct_link',
+    internal_object_id: directLink,
+    available: true,
+    reason: '手动填写链接，无需绑定平台 ID',
+  })
+
+  assert.equal(result.name, 'm.taobao.com 直达链接')
+  assert.equal(result.statusLabel, '可直接填写')
+  assert.equal(result.statusDetail, '手动链接可用，无需绑定平台 ID。')
+  assert.equal(result.platformId, undefined)
+})
+
 test('keeps a normal platform ID and uses the business object name', () => {
   const result = presentObjectAvailability({
     field_key: 'project.marketing_product_reference',
@@ -71,6 +87,14 @@ test('explains incomplete promotion fields without exposing its internal draft I
 
 test('explains other configuration requirements with direct repair instructions', () => {
   assert.equal(
+    presentConfigurationIssue('unsupported account path: only calibrated ecommerce short-video and image-text forms are allowed'),
+    '当前 Runner 只支持“电商 + 短视频与图文”路径。此计划选择了其他营销目的。请返回平台配置页并改为电商。',
+  )
+  assert.equal(
+    presentConfigurationIssue('project: bid is outside the calibrated limit'),
+    '项目出价超出当前 Runner 的校准范围。CPM 出价必须是 4 至 100 元。',
+  )
+  assert.equal(
     presentConfigurationIssue('marketing product: reference 1786513565497554221 is outside the delivery intent'),
     '营销商品未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。',
   )
@@ -83,8 +107,8 @@ test('explains other configuration requirements with direct repair instructions'
     '产品主图未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。',
   )
   assert.equal(
-    presentConfigurationIssue('promotion unit-1: product image picker requires an observed expected_total of 1'),
-    '产品主图缺少选择器观察证据。请返回平台配置页并保存。系统会核对当前图片目录，并写入选择器证据。',
+    presentConfigurationIssue('promotion unit-1: product image requires a stable image_src_identity'),
+    '产品主图缺少稳定图片路径。请重新同步巨量对象目录，然后重新选择产品主图。',
   )
   assert.equal(
     presentConfigurationIssue('promotion unit-1 call to action needs 1 to 10 unique values'),

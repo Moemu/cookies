@@ -25,6 +25,9 @@ export function presentControlledExecution(run: BrowserRpaRun): ControlledExecut
   if (run.blocking_reason === 'FINAL_CONFIRMATION_INVALID') {
     return { kind: 'confirmation_expired', tone: 'danger', title: '一次性最终确认已失效', detail: '确认已过期、被消费、被拒绝或与当前绑定不一致。不得提交。', allowsNormalRetry: false }
   }
+  if (run.blocking_reason === 'RUNNER_FAILURE') {
+    return { kind: 'runner_failure', tone: 'danger', title: 'Runner 执行链路失败', detail: '页面字段不一定漂移。请检查 Runner 结果协议、进程状态和服务端日志。', allowsNormalRetry: false }
+  }
   const base = statePresentation[run.state]
   return {
     kind: run.state,
@@ -37,6 +40,20 @@ export function presentControlledExecution(run: BrowserRpaRun): ControlledExecut
 
 export function isTerminalControlledExecutionState(state: BrowserRpaRun['state']) {
   return state === 'succeeded' || state === 'failed' || state === 'partial' || state === 'result_unknown' || state === 'cancelled'
+}
+
+const executionViewStates: Record<string, ReadonlySet<BrowserRpaRun['state']>> = {
+  '待执行': new Set(['queued']),
+  '执行中': new Set(['environment_check', 'preparing', 'submitting', 'verifying']),
+  '等待用户': new Set(['awaiting_confirmation']),
+  '结果未知': new Set(['result_unknown']),
+  '失败': new Set(['failed', 'partial', 'cancelled']),
+  '接管': new Set(['awaiting_takeover']),
+  '完成': new Set(['succeeded']),
+}
+
+export function runMatchesExecutionView(run: BrowserRpaRun, view: string) {
+  return executionViewStates[view]?.has(run.state) ?? true
 }
 
 export function shortHash(value: string) {

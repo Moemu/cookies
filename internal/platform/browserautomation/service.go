@@ -215,6 +215,12 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 		return existing, true, nil
 	}
 	id := boundRunID(request.OrganizationID, request.ProjectID, request.ExecutionID)
+	if prior, priorErr := s.Repository.GetRun(ctx, request.OrganizationID, request.ProjectID, id); priorErr == nil && prior.State == RunFailed {
+		// Delivery releases the execution binding only after it proves that the
+		// failed run had no controlled action. Keep that run immutable and give
+		// the retry a distinct audit identity.
+		id = retryBoundRunID(request.OrganizationID, request.ProjectID, request.ExecutionID, request.IdempotencyKey)
+	}
 	run := BrowserRpaRun{SchemaVersion: RunSchemaV1, ID: id, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, Platform: request.Platform, AccountID: request.AccountID, Authority: authority, EnvironmentID: request.EnvironmentID, ProfileID: request.ProfileID, PolicyID: request.PolicyID, State: RunQueued, Version: 1, IdempotencyKey: request.IdempotencyKey, RequestHash: requestHash, CreatedBy: request.CreatedBy, CreatedAt: now, UpdatedAt: now}
 	created, existingErr := s.Repository.GetRun(ctx, request.OrganizationID, request.ProjectID, id)
 	replayed := existingErr == nil
@@ -244,6 +250,11 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 
 func boundRunID(organizationID contract.OrganizationID, projectID contract.ProjectID, executionID string) string {
 	digest := sha256.Sum256([]byte(string(organizationID) + "\x00" + string(projectID) + "\x00" + executionID))
+	return "curun_" + hex.EncodeToString(digest[:])
+}
+
+func retryBoundRunID(organizationID contract.OrganizationID, projectID contract.ProjectID, executionID, idempotencyKey string) string {
+	digest := sha256.Sum256([]byte(string(organizationID) + "\x00" + string(projectID) + "\x00" + executionID + "\x00retry\x00" + idempotencyKey))
 	return "curun_" + hex.EncodeToString(digest[:])
 }
 

@@ -14,6 +14,11 @@ func TestSamePlanExecutionTargetRecoversAfterClientReload(t *testing.T) {
 	if !samePlanExecutionTarget(change, retryBinding, ControlledActionCreateProjectAndPromotions) {
 		t.Fatal("a reload must recover the execution for the same immutable plan target")
 	}
+	retryBinding.PlanVersion = 13
+	retryBinding.PlanCanonicalHash = "same_configuration_new_plan_hash"
+	if !samePlanExecutionTarget(change, retryBinding, ControlledActionCreateProjectAndPromotions) {
+		t.Fatal("the same platform configuration must reuse its controlled target after a safe retry")
+	}
 	retryBinding.ConfigurationCanonicalHash = "different_configuration"
 	if samePlanExecutionTarget(change, retryBinding, ControlledActionCreateProjectAndPromotions) {
 		t.Fatal("a different configuration must not reuse the existing execution")

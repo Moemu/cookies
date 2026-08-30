@@ -3,20 +3,21 @@ import { CircleAlert, CircleCheck, Clock3, FileCheck2, Hand, ListChecks, Monitor
 import { controlledExecutionApi, ControlledExecutionApiError } from './api'
 import type { BrowserRpaEvidence, BrowserRpaRun, BrowserRpaRunEvent, ControlledExecutionTransportState, ControlledExecutionWorkspace, EdgeSessionProbe, RunnerV3Plan } from './model'
 import { presentConfigurationIssue, presentObjectAvailability, presentPlanBlockedReason } from './objectAvailabilityPresentation'
-import { isTerminalControlledExecutionState, presentControlledExecution, shortHash } from './presentation'
+import { isTerminalControlledExecutionState, presentControlledExecution, runMatchesExecutionView, shortHash } from './presentation'
 import './browser-rpa-execution.css'
 
 type Props = {
   projectId: string
   /** The route should supply a server-issued BrowserRpaRun id; an absent id is a real empty state, not a fixture. */
   runId?: string
+  activeView: string
 }
 
-export function BrowserRpaExecutionWorkspace({ projectId, runId }: Props) {
-  return runId ? <BrowserRpaExecutionDetail projectId={projectId} runId={runId}/> : <BrowserRpaRunList projectId={projectId}/>
+export function BrowserRpaExecutionWorkspace({ projectId, runId, activeView }: Props) {
+  return runId ? <BrowserRpaExecutionDetail projectId={projectId} runId={runId}/> : <BrowserRpaRunList projectId={projectId} activeView={activeView}/>
 }
 
-function BrowserRpaRunList({ projectId }: { projectId: string }) {
+function BrowserRpaRunList({ projectId, activeView }: { projectId: string; activeView: string }) {
   const [state, setState] = useState<{ kind: 'loading' } | { kind: 'ready'; runs: BrowserRpaRun[] } | { kind: 'error'; message: string }>({ kind: 'loading' })
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -37,15 +38,16 @@ function BrowserRpaRunList({ projectId }: { projectId: string }) {
 
   if (state.kind === 'loading') return <WorkspaceState kind="loading" />
   if (state.kind === 'error') return <WorkspaceState kind="error" message={state.message} onRetry={() => void load()} />
+  const visibleRuns = state.runs.filter(run => runMatchesExecutionView(run, activeView))
   return <section className="controlled-execution-run-list" aria-label="Browser RPA 执行记录">
     <header className="controlled-execution-header"><div><span className="section-label">Controlled Browser RPA</span><h2>执行中心</h2><p>查看当前 Project 的真实 Browser RPA Run。选择一条记录可继续检查、Prepare 或 Submit。</p></div><button className="secondary-button" onClick={() => void load()}><RefreshCw size={14}/>刷新</button></header>
-    {state.runs.length ? <div className="controlled-execution-run-list-grid">{state.runs.map(run => {
+    {visibleRuns.length ? <div className="controlled-execution-run-list-grid">{visibleRuns.map(run => {
       const presentation = presentControlledExecution(run)
-      return <a key={run.id} href={`/projects/${encodeURIComponent(projectId)}/delivery/execution/${encodeURIComponent(run.id)}`} className={`controlled-execution-run-card ${presentation.tone}`}>
+      return <a key={run.id} href={`/projects/${encodeURIComponent(projectId)}/delivery/execution/${encodeURIComponent(run.id)}?view=${encodeURIComponent(activeView)}`} className={`controlled-execution-run-card ${presentation.tone}`}>
         <div><span>{runActionLabel(run.authority.action)}</span><b>{presentation.title}</b><small>{presentation.detail}</small></div>
         <dl><div><dt>广告账户</dt><dd>{run.account_id}</dd></div><div><dt>Run</dt><dd>{shortHash(run.id)}</dd></div><div><dt>更新时间</dt><dd>{formatTime(run.updated_at)}</dd></div></dl>
       </a>
-    })}</div> : <div className="controlled-execution-run-empty"><Clock3 size={24}/><h3>暂无执行记录</h3><p>请先在平台配置页检查计划，然后进入真实受控执行。</p></div>}
+    })}</div> : <div className="controlled-execution-run-empty"><Clock3 size={24}/><h3>{state.runs.length ? `${activeView}视图暂无记录` : '暂无执行记录'}</h3><p>{state.runs.length ? '请选择其他状态视图，或刷新执行记录。' : '请先在平台配置页检查计划，然后进入真实受控执行。'}</p></div>}
   </section>
 }
 
@@ -89,6 +91,23 @@ function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; ru
       controller.abort()
     }
   }, [load])
+
+  const observedRunState = transport.kind === 'ready' ? transport.workspace.run.state : undefined
+  useEffect(() => {
+    const transient = observedRunState && ['environment_check', 'preparing', 'submitting', 'verifying'].includes(observedRunState)
+    if (!actionPending && !transient) return
+    let stopped = false
+    let timer: number | undefined
+    const poll = async () => {
+      await load()
+      if (!stopped) timer = window.setTimeout(poll, 2_000)
+    }
+    timer = window.setTimeout(poll, 800)
+    return () => {
+      stopped = true
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [actionPending, load, observedRunState])
 
   const refresh = useCallback(() => {
     setNotice('')
@@ -141,7 +160,14 @@ function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; ru
           const acquired = await controlledExecutionApi.acquireLease(projectId, currentRun.id, currentRun.version)
           currentRun = acquired.run
         }
-        await controlledExecutionApi.prepare(projectId, currentRun.id)
+        setNotice('Prepare 已启动。Runner v3 正在进入巨量表单并执行字段回读。该过程最长需要 3 分钟。')
+        const prepared = await controlledExecutionApi.prepare(projectId, currentRun.id)
+        if (prepared.state !== 'awaiting_confirmation') {
+          const result = presentControlledExecution(prepared)
+          setNotice(`Prepare 未完成：${result.title}。${result.detail}${prepared.blocking_reason ? ` 阻塞代码：${prepared.blocking_reason}` : ''}`)
+          await load()
+          return
+        }
         setReviewed(false)
         setNotice('Prepare 已完成。请检查字段回读和差异。')
         await load()
@@ -300,26 +326,33 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onR
   onReviewed: (value: boolean) => void
   onWorkflow: (action: 'check' | 'plan' | 'prepare' | 'submit') => void
 }) {
-  const { run, evidence, lease } = workspace
+  const { run, steps: runSteps, events, evidence, lease } = workspace
   const sessionReady = Boolean(sessionProbe?.status === 'ready' && sessionProbe.cdp_available && sessionProbe.logged_in && sessionProbe.account_matched)
-  const bindingReady = registeredBindingReady(workspace) && sessionReady
+  const prepareStarted = events.some(event => event.kind === 'state_transition' && event.summary.includes('-> preparing'))
+    || ['preparing', 'awaiting_confirmation', 'submitting', 'verifying', 'succeeded', 'partial', 'result_unknown'].includes(run.state)
+  const restoredSessionReady = prepareStarted && run.blocking_reason !== 'ACCOUNT_MISMATCH'
+  const bindingReady = registeredBindingReady(workspace) && (sessionReady || restoredSessionReady)
   const actionSupported = runnerV3ActionSupported(run.authority.action)
-  const planReady = Boolean(plan && plan.blocked_reasons.length === 0 && !plan.allow_remote_write)
+  const generatedPlanReady = Boolean(plan && plan.blocked_reasons.length === 0 && !plan.allow_remote_write)
+  const planReady = generatedPlanReady || prepareStarted
   const prepared = ['awaiting_confirmation', 'submitting', 'verifying', 'succeeded', 'failed', 'partial', 'result_unknown'].includes(run.state)
   const drift = fieldDrift(evidence)
   const leaseReady = Boolean(lease && !lease.released_at && new Date(lease.heartbeat_deadline).getTime() > Date.now())
-  const canPrepare = bindingReady && actionSupported && planReady && (run.state === 'queued' || run.state === 'environment_check')
+  const canPrepare = sessionReady && actionSupported && generatedPlanReady && (run.state === 'queued' || run.state === 'environment_check')
   const canSubmit = run.state === 'awaiting_confirmation' && prepared && reviewed && !drift && leaseReady
-  const steps = [
-    { label: '检查真实 Edge 会话', done: bindingReady },
-    { label: '生成 Runner v3 计划', done: planReady },
-    { label: '执行 Prepare', done: prepared },
-    { label: '复核回读与差异', done: prepared && reviewed },
-    { label: '一次性确认并 Submit', done: ['submitting', 'verifying', 'succeeded', 'failed', 'partial', 'result_unknown'].includes(run.state) },
+  const submitStarted = ['submitting', 'verifying', 'succeeded', 'partial', 'result_unknown'].includes(run.state)
+  const flowSteps = [
+    { label: '检查真实 Edge 会话', done: bindingReady, active: !bindingReady },
+    { label: '生成 Runner v3 计划', done: planReady, active: bindingReady && !planReady },
+    { label: '执行 Prepare', done: prepared, active: run.state === 'preparing' },
+    { label: '复核回读与差异', done: prepared && reviewed, active: run.state === 'awaiting_confirmation' && !reviewed },
+    { label: '一次性确认并 Submit', done: submitStarted, active: run.state === 'submitting' || run.state === 'verifying' },
   ]
+  const prepareStep = runSteps.find(step => step.action === 'prepare_and_readback')
   return <section className="controlled-execution-flow" aria-label="执行操作闭环">
     <header><div><span className="section-label">Operation flow</span><h3>执行操作闭环</h3></div><small>Submit 会跨越最终点击边界。确认令牌仅在当前请求内存中存在。</small></header>
-    <ol>{steps.map((step, index) => <li key={step.label} className={step.done ? 'complete' : ''}><span>{step.done ? <CircleCheck size={15} /> : index + 1}</span>{step.label}</li>)}</ol>
+    <ol>{flowSteps.map((step, index) => <li key={step.label} className={step.done ? 'complete' : step.active ? 'active' : ''}><span>{step.done ? <CircleCheck size={15} /> : index + 1}</span>{step.label}</li>)}</ol>
+    {prepareStep ? <p className={`controlled-execution-step-status ${prepareStep.status}`}><Clock3 size={14} />Prepare 服务端任务：{runStepStatusLabel(prepareStep.status)}{prepareStep.blocking_reason ? ` · ${prepareStep.blocking_reason}` : ''}</p> : null}
     <div className="controlled-execution-flow-actions">
       <button className="secondary-button" disabled={busy || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('check')}><MonitorCheck size={15} />检查 Edge 会话</button>
       <button className="secondary-button" disabled={busy || !bindingReady || !actionSupported || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('plan')}><ListChecks size={15} />生成计划</button>
@@ -359,6 +392,10 @@ function SessionAndTargetPanel({ workspace, sessionProbe }: { workspace: Control
       <div><dt>账号路径</dt><dd>{projectAllowed ? '策略允许' : '策略阻止'}</dd></div>
     </dl></article>
   </section>
+}
+
+function runStepStatusLabel(status: string) {
+  return ({ pending: '等待执行', running: '正在操作页面', succeeded: '已完成字段回读', failed: '执行失败', result_unknown: '结果未知', skipped: '已跳过' } as Record<string, string>)[status] ?? status
 }
 
 function PlanPanel({ plan, run }: { plan: RunnerV3Plan; run: BrowserRpaRun }) {

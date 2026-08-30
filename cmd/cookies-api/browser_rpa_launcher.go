@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/shikanon/cookies/internal/platform/browserautomation"
 	"github.com/shikanon/cookies/internal/systems/delivery"
@@ -12,6 +13,24 @@ import (
 
 type deliveryBrowserRpaLauncher struct {
 	service browserautomation.Service
+}
+
+func (l deliveryBrowserRpaLauncher) ReconcileBrowserRpaRun(ctx context.Context, request delivery.BrowserRpaLaunchRequest, runID string) error {
+	now := time.Now().UTC()
+	if l.service.Now != nil {
+		now = l.service.Now()
+	}
+	resolution, err := l.service.AuthorityProvider.ResolveAuthority(ctx, request.OrganizationID, request.ProjectID, request.BusinessExecutionID, now)
+	if err != nil {
+		return fmt.Errorf("resolve Browser RPA retry authority: %w", err)
+	}
+	if resolution.BoundRunID != runID {
+		return fmt.Errorf("resolve Browser RPA retry authority: bound run mismatch")
+	}
+	if err := l.service.AuthorityProvider.BindRun(ctx, resolution.Binding, runID, now); err != nil {
+		return fmt.Errorf("reconcile Browser RPA run: %w", err)
+	}
+	return nil
 }
 
 func (l deliveryBrowserRpaLauncher) LaunchBrowserRpaRun(ctx context.Context, request delivery.BrowserRpaLaunchRequest) (delivery.BrowserRpaLaunchResult, error) {

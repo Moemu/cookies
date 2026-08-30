@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { BrowserRpaRun } from '../src/features/browser-rpa-execution/model.ts'
-import { presentControlledExecution } from '../src/features/browser-rpa-execution/presentation.ts'
+import { presentControlledExecution, runMatchesExecutionView } from '../src/features/browser-rpa-execution/presentation.ts'
 
 const hash = 'a'.repeat(64)
 
@@ -13,6 +13,7 @@ test('controlled execution presentation keeps approval, confirmation, and result
     { name: 'unknown', run: { state: 'result_unknown' }, kind: 'result_unknown', retry: false },
     { name: 'cancelled', run: { state: 'cancelled' }, kind: 'cancelled', retry: false },
     { name: 'kill switch', run: { state: 'preparing', blocking_reason: 'KILL_SWITCH_ACTIVE' }, kind: 'kill_switch_active', retry: false },
+    { name: 'runner failure', run: { state: 'failed', blocking_reason: 'RUNNER_FAILURE' }, kind: 'runner_failure', retry: false },
     { name: 'takeover', run: { state: 'awaiting_takeover' }, kind: 'awaiting_takeover', retry: true },
   ]
 
@@ -20,6 +21,23 @@ test('controlled execution presentation keeps approval, confirmation, and result
     const presentation = presentControlledExecution(run(value.run))
     assert.equal(presentation.kind, value.kind, value.name)
     assert.equal(presentation.allowsNormalRetry, value.retry, value.name)
+  }
+})
+
+test('controlled execution tabs filter runs by workflow state', () => {
+  const cases: Array<{ view: string; states: BrowserRpaRun['state'][] }> = [
+    { view: '待执行', states: ['queued'] },
+    { view: '执行中', states: ['environment_check', 'preparing', 'submitting', 'verifying'] },
+    { view: '等待用户', states: ['awaiting_confirmation'] },
+    { view: '结果未知', states: ['result_unknown'] },
+    { view: '失败', states: ['failed', 'partial', 'cancelled'] },
+    { view: '接管', states: ['awaiting_takeover'] },
+    { view: '完成', states: ['succeeded'] },
+  ]
+  const allStates: BrowserRpaRun['state'][] = ['queued', 'environment_check', 'awaiting_takeover', 'preparing', 'awaiting_confirmation', 'submitting', 'verifying', 'succeeded', 'failed', 'partial', 'result_unknown', 'cancelled']
+
+  for (const value of cases) {
+    assert.deepEqual(allStates.filter(state => runMatchesExecutionView(run({ state }), value.view)), value.states, value.view)
   }
 })
 

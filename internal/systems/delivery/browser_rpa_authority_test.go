@@ -9,6 +9,27 @@ import (
 	"github.com/shikanon/cookies/internal/platform/browserautomation"
 )
 
+func TestControlledActionsBelongToOtherObjects(t *testing.T) {
+	tests := []struct {
+		name                                   string
+		attempts, confirmations, target, other int
+		want                                   bool
+	}{
+		{name: "project submit does not block untouched promotion", attempts: 1, confirmations: 1, target: 0, other: 1, want: true},
+		{name: "target submit blocks recovery", attempts: 1, confirmations: 1, target: 1, other: 0, want: false},
+		{name: "unaccounted attempt blocks recovery", attempts: 2, confirmations: 2, target: 0, other: 1, want: false},
+		{name: "unconsumed confirmation blocks recovery", attempts: 1, confirmations: 2, target: 0, other: 1, want: false},
+		{name: "no actions use the original safe path", attempts: 0, confirmations: 0, target: 0, other: 0, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := controlledActionsBelongToOtherObjects(test.attempts, test.confirmations, test.target, test.other); got != test.want {
+				t.Fatalf("got %t want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestBrowserRpaAuthorityIsServerResolvedBoundAndRevalidated(t *testing.T) {
 	now := time.Date(2026, 8, 13, 9, 0, 0, 0, time.UTC)
 	repo := newControlledMemoryRepository()

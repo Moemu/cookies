@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -97,11 +98,19 @@ func (r Runner) runPayload(ctx context.Context, payload []byte, mode string, ext
 		return RpaResult{}, fmt.Errorf("%w: runner command is not configured", ErrRunnerInfrastructure)
 	}
 	args := append(append([]string{}, r.Command[1:]...), r.ScriptPath)
+	resultFile, err := os.CreateTemp("", "cookies-browser-rpa-result-*.json")
+	if err != nil {
+		return RpaResult{}, fmt.Errorf("%w: create result file: %v", ErrRunnerInfrastructure, err)
+	}
+	resultPath := resultFile.Name()
+	_ = resultFile.Close()
+	defer os.Remove(resultPath)
 	if r.EdgeSessionFile != "" {
 		args = append(args, "--session-file", r.EdgeSessionFile)
 	} else {
 		args = append(args, r.CDPEndpoint)
 	}
+	args = append(args, "--result-file", resultPath)
 	args = append(args, extraArgs...)
 	cmd := exec.CommandContext(ctx, r.Command[0], args...)
 	cmd.Dir = r.WorkDir
@@ -111,14 +120,19 @@ func (r Runner) runPayload(ctx context.Context, payload []byte, mode string, ext
 	cmd.Stderr = limitedWriter{Buffer: &stderr, Cap: stderrCap}
 	runErr := cmd.Run()
 
-	result, parseErr := parseResult(stdout.Bytes())
+	resultPayload, readErr := os.ReadFile(resultPath)
+	resultFileBytes := len(resultPayload)
+	if readErr != nil || len(bytes.TrimSpace(resultPayload)) == 0 {
+		resultPayload = stdout.Bytes()
+	}
+	result, parseErr := parseResult(resultPayload)
 	if parseErr == nil {
 		return result, nil
 	}
 	if runErr != nil {
 		return RpaResult{}, fmt.Errorf("%w: %v: %s", ErrRunnerInfrastructure, runErr, tailMessage(stderr.String()))
 	}
-	return RpaResult{}, fmt.Errorf("%w: %v: %s", ErrRunnerInfrastructure, parseErr, tailMessage(stderr.String()))
+	return RpaResult{}, fmt.Errorf("%w: %v (result_file_bytes=%d stdout_bytes=%d result_read_error=%v): %s", ErrRunnerInfrastructure, parseErr, resultFileBytes, stdout.Len(), readErr, tailMessage(stderr.String()))
 }
 
 func parseResult(payload []byte) (RpaResult, error) {

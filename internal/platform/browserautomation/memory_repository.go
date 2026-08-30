@@ -262,8 +262,14 @@ func (r *MemoryRepository) AcquireRunLease(_ context.Context, run BrowserRpaRun,
 	}
 	profileKey := scopeKey(lease.OrganizationID, lease.ProjectID, lease.ProfileID)
 	if id, ok := r.activeProfiles[profileKey]; ok {
-		if active := r.leases[scopeKey(lease.OrganizationID, lease.ProjectID, id)]; active.ReleasedAt == nil {
-			return BrowserRpaRun{}, SessionLease{}, ErrLeaseUnavailable
+		activeKey := scopeKey(lease.OrganizationID, lease.ProjectID, id)
+		if active := r.leases[activeKey]; active.ReleasedAt == nil {
+			if active.ValidAt(now) {
+				return BrowserRpaRun{}, SessionLease{}, ErrLeaseUnavailable
+			}
+			active.ReleasedAt = &now
+			active.Version++
+			r.leases[activeKey] = active
 		}
 	}
 	for _, existing := range r.leases {

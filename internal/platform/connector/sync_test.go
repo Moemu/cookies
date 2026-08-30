@@ -100,7 +100,7 @@ func (testReader) AwemePhotoMaterialsPage(context.Context, oceanengine.AssetPage
 	return map[string]any{"data": map[string]any{"list": []any{map[string]any{"material_id": "2501", "file_name": "photo"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
 }
 func (testReader) MarketingProductsPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
-	return map[string]any{"data": map[string]any{"list": []any{map[string]any{"product_id": "2601", "name": "product"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
+	return map[string]any{"data": map[string]any{"list": []any{map[string]any{"unique_product_id": "2601", "product_id": "1601", "name": "product"}}, "pagination": map[string]any{"total_page": 1.0}}}, nil
 }
 func (testReader) OrangeLandingPagesPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
 	return map[string]any{"data": map[string]any{"data": []any{map[string]any{"site_id": "3001", "name": "landing"}}, "pagination": map[string]any{"page": 1.0, "size": 30.0, "total": 1.0}}}, nil

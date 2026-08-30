@@ -77,6 +77,7 @@ const (
 	BlockProjectNotAllowed         BlockingReason = "PROJECT_NOT_ALLOWED"
 	BlockSiteNotAllowed            BlockingReason = "SITE_NOT_ALLOWED"
 	BlockPageDrift                 BlockingReason = "PAGE_DRIFT"
+	BlockRunnerFailure             BlockingReason = "RUNNER_FAILURE"
 	BlockWorkflowDrift             BlockingReason = "WORKFLOW_DRIFT"
 	BlockSkillDrift                BlockingReason = "SKILL_DRIFT"
 	BlockResultReconciliation      BlockingReason = "RESULT_RECONCILIATION_REQUIRED"
@@ -597,7 +598,9 @@ var runTransitions = map[RunState][]RunState{
 	RunAwaitingConfirmation: {RunAwaitingTakeover, RunPreparing, RunSubmitting, RunFailed, RunCancelled},
 	RunSubmitting:           {RunVerifying, RunFailed, RunPartial, RunResultUnknown},
 	RunVerifying:            {RunEnvironmentCheck, RunSucceeded, RunFailed, RunPartial, RunResultUnknown},
-	RunSucceeded:            {}, RunFailed: {}, RunPartial: {}, RunResultUnknown: {}, RunCancelled: {},
+	RunSucceeded:            {}, RunFailed: {}, RunPartial: {},
+	RunResultUnknown: {RunEnvironmentCheck, RunSucceeded},
+	RunCancelled:     {},
 }
 
 func CanTransition(from, to RunState) bool { return slices.Contains(runTransitions[from], to) }

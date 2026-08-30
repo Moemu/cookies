@@ -251,8 +251,8 @@ func (r MySQLRepository) ListPlatformObjects(ctx context.Context, query Platform
 		args = append(args, query.Status)
 	}
 	if search := strings.TrimSpace(query.Search); search != "" {
-		statement += ` AND (o.display_name LIKE ? OR CONVERT(o.platform_object_id USING utf8mb4) LIKE ?)`
-		args = append(args, "%"+search+"%", "%"+search+"%")
+		statement += ` AND (o.display_name LIKE ? OR CONVERT(o.platform_object_id USING utf8mb4) LIKE ? OR JSON_UNQUOTE(JSON_EXTRACT(o.metadata_json,'$.product_id')) LIKE ? OR JSON_UNQUOTE(JSON_EXTRACT(o.metadata_json,'$.unique_product_id')) LIKE ?)`
+		args = append(args, "%"+search+"%", "%"+search+"%", "%"+search+"%", "%"+search+"%")
 	}
 	if cursor := strings.TrimSpace(query.Cursor); cursor != "" && query.SortBy == "" {
 		statement += ` AND o.id>?`
@@ -412,7 +412,7 @@ func (r MySQLRepository) ReadPlatformObjectPreview(ctx context.Context, query Pl
 
 func previewMediaHostAllowed(host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	for _, suffix := range []string{".oceanengine.com", ".byteadimg.com", ".byteimg.com", ".douyinpic.com"} {
+	for _, suffix := range []string{".oceanengine.com", ".byteadimg.com", ".byteimg.com", ".bytetos.com", ".douyinpic.com"} {
 		if strings.HasSuffix(host, suffix) && len(host) > len(suffix) {
 			return true
 		}

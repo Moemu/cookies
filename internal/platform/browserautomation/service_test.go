@@ -117,6 +117,40 @@ func TestLeaseHeartbeatFailsClosedAfterDeadline(t *testing.T) {
 	}
 }
 
+func TestAcquireRunLeaseReclaimsExpiredProfileLock(t *testing.T) {
+	now := time.Date(2026, 8, 12, 10, 2, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	service := Service{Repository: repo, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) {
+		return prefix + "_reclaim", nil
+	}}
+	oldRun := validRun(now.Add(-2 * time.Minute))
+	oldRun.ID = "run_old"
+	oldRun.IdempotencyKey = "run_old"
+	if _, _, err := service.CreateRun(context.Background(), CreateRunRequest{Run: oldRun}); err != nil {
+		t.Fatal(err)
+	}
+	oldLease := validLease(now.Add(-2 * time.Minute))
+	oldLease.ID = "lease_old"
+	oldLease.RunID = oldRun.ID
+	if _, err := repo.AcquireLease(context.Background(), oldLease); err != nil {
+		t.Fatal(err)
+	}
+	newRun := validRun(now)
+	newRun.ID = "run_new"
+	newRun.IdempotencyKey = "run_new"
+	if _, _, err := service.CreateRun(context.Background(), CreateRunRequest{Run: newRun}); err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := service.AcquireRunLease(context.Background(), newRun.OrganizationID, newRun.ProjectID, newRun.ID, newRun.Version, "worker_2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reclaimed, err := repo.GetLease(context.Background(), oldLease.OrganizationID, oldLease.ProjectID, oldLease.ID)
+	if err != nil || reclaimed.ReleasedAt == nil || acquired.Lease.FencingToken != oldLease.FencingToken+1 {
+		t.Fatalf("reclaimed=%#v acquired=%#v err=%v", reclaimed, acquired.Lease, err)
+	}
+}
+
 func validRun(now time.Time) BrowserRpaRun {
 	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	a := AuthorityBinding{SchemaVersion: AuthoritySchemaV1, OrganizationID: "org_1", ProjectID: "project_1", BusinessExecutionID: "exec_1", ChangeSetID: "change_1", ApprovalID: "approval_1", ApprovalActionHash: hash, AccountReferenceID: "account_1", ObjectFingerprint: hash, Action: "create_project_and_promotions", BudgetLimitMinor: 100, Currency: "CNY", PlanCanonicalHash: hash, IntentCanonicalHash: hash, FeedbackCanonicalHash: hash, DecisionCanonicalHash: hash, ConfigurationCanonicalHash: hash, WorkflowID: "workflow_1", WorkflowCanonicalHash: hash, WorkflowStepID: "step_1", SkillID: "oceanengine-ecommerce-manual", SkillVersion: "v0.1-calibration"}

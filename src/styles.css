@@ -9371,6 +9371,17 @@ button.prelaunch-row.active { background: var(--cobalt-soft); box-shadow: inset 
   gap: 7px;
 }
 
+.delivery-config-check-grid input[type="checkbox"] {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--cobalt);
+}
+
 .delivery-config-object-picker {
   grid-column: 1 / -1;
 }

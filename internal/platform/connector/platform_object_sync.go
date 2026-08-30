@@ -353,7 +353,7 @@ func imageMaterialCandidate(item map[string]any) (PlatformObjectCandidate, bool)
 	return PlatformObjectCandidate{
 		Kind: PlatformObjectImageMaterial, PlatformObjectID: id,
 		DisplayName: firstString(item, "file_name"),
-		Metadata:    scalarMetadata(item, "width", "height", "size", "image_mode", "ratio", "create_time"),
+		Metadata:    scalarMetadata(item, "width", "height", "size", "image_mode", "ratio", "create_time", "web_uri"),
 		PreviewURL:  previewURL, PreviewKind: previewKind(previewURL, "image"), PreviewExpiresAt: expiresAt,
 	}, true
 }
@@ -396,11 +396,11 @@ func awemePhotoMaterialCandidate(item map[string]any) (PlatformObjectCandidate, 
 }
 
 func marketingProductCandidate(item map[string]any) (PlatformObjectCandidate, bool) {
-	id := firstString(item, "product_id")
+	id := firstString(item, "unique_product_id")
 	if !numericPlatformObjectID(id) {
 		return PlatformObjectCandidate{}, false
 	}
-	metadata := scalarMetadata(item, "unique_product_id", "platform_product_id", "category_id", "brand_name", "audit_status", "online_status", "status", "type", "create_time", "modify_time", "online_time")
+	metadata := scalarMetadata(item, "unique_product_id", "product_id", "platform_product_id", "category_id", "brand_name", "audit_status", "online_status", "status", "type", "create_time", "modify_time", "online_time")
 	if category, ok := item["clue_product_category"].(map[string]any); ok {
 		if name := firstString(category, "category_name"); name != "" {
 			metadata["category_name"] = name
