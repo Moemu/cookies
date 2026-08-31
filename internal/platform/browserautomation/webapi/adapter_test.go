@@ -40,7 +40,7 @@ func TestSubmitGateStopsBeforeContractCapture(t *testing.T) {
 		t.Fatalf("disabled error=%v", err)
 	}
 	adapter := Adapter{WriteEnabled: true, AccountAllowlist: []string{"123"}}
-	if err := adapter.CheckSubmit(run); !errors.Is(err, ErrContractNotCaptured) {
+	if err := adapter.CheckSubmit(run); !errors.Is(err, ErrUnsupportedRequestBinding) {
 		t.Fatalf("contract error=%v", err)
 	}
 }

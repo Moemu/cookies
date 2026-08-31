@@ -33,7 +33,7 @@ func TestWebAPIContractFixtureRemainsBlockedAndRedacted(t *testing.T) {
 	if err := json.Unmarshal(payload, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.SecSDKVersion != SecSDKVersion || fixture.Status != "static_source_only" || fixture.WriteEnabled || len(fixture.EnablementBlockers) != 3 {
+	if fixture.SecSDKVersion != SecSDKVersion || fixture.Status != "blocked_additional_request_binding" || fixture.WriteEnabled || len(fixture.EnablementBlockers) != 3 {
 		t.Fatalf("fixture=%#v", fixture)
 	}
 	if fixture.Redaction["account"] != "<ACCOUNT_ID>" || fixture.Redaction["cookie"] != "<COOKIE>" || fixture.Redaction["csrf_token"] != "<CSRF_TOKEN>" {
@@ -43,6 +43,15 @@ func TestWebAPIContractFixtureRemainsBlockedAndRedacted(t *testing.T) {
 	for _, secret := range []string{"x-secsdk-csrf-token\": \"", "cookie\": \"session"} {
 		if strings.Contains(lower, secret) {
 			t.Fatalf("fixture contains forbidden value %q", secret)
+		}
+	}
+	shape, err := os.ReadFile("fixtures/web-api-request-shapes-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"cookies-api-probe-", "http://", "https://", "sign_url\": \"", "video_id\": \""} {
+		if strings.Contains(strings.ToLower(string(shape)), forbidden) {
+			t.Fatalf("request shape contains forbidden value %q", forbidden)
 		}
 	}
 }

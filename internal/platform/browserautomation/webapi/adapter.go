@@ -22,7 +22,7 @@ const (
 var (
 	ErrWriteDisabled       = errors.New("Ocean Engine Web API write is disabled")
 	ErrAccountNotAllowed   = errors.New("Ocean Engine Web API account is not allowed")
-	ErrContractNotCaptured = errors.New("Ocean Engine Web API write contract is not captured")
+	ErrUnsupportedRequestBinding = errors.New("Ocean Engine Web API request binding is unsupported")
 )
 
 type PlanCompiler interface {
@@ -92,11 +92,11 @@ func (a Adapter) CheckSubmit(run browserautomation.BrowserRpaRun) error {
 	if !slices.Contains(a.AccountAllowlist, run.AccountID) {
 		return ErrAccountNotAllowed
 	}
-	return ErrContractNotCaptured
+	return ErrUnsupportedRequestBinding
 }
 
 func (a Adapter) Submit(context.Context, browserautomation.BrowserRpaRun, browserautomation.ControlledActionAttempt, string) (browserautomation.WorkerOutcome, browserautomation.PreparedPage, error) {
-	return browserautomation.WorkerFailed, browserautomation.PreparedPage{}, ErrContractNotCaptured
+	return browserautomation.WorkerFailed, browserautomation.PreparedPage{}, ErrUnsupportedRequestBinding
 }
 
 func (a Adapter) writeGate(run browserautomation.BrowserRpaRun) string {

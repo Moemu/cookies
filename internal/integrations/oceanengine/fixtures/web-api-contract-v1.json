@@ -3,7 +3,7 @@
   "observed_at": "2026-08-31T00:00:00Z",
   "secsdk_version": "1.2.22",
   "token_path": null,
-  "status": "static_source_only",
+  "status": "blocked_additional_request_binding",
   "write_enabled": false,
   "csrf": {
     "method": "HEAD",
@@ -15,10 +15,39 @@
     "write_header": "x-secsdk-csrf-token"
   },
   "endpoints": {
-    "project_create": {"method": "POST", "path": "/superior/api/v2/project/create"},
-    "project_query": {"method": "POST", "path": "/superior/api/v2/project/list"},
-    "promotion_create": {"method": "POST", "path": "/superior/api/v2/promotion/create_promotion"},
-    "promotion_query": {"method": "POST", "path": "/superior/api/ad/promotion/list"}
+    "project_create": {
+      "method": "POST",
+      "path": "/superior/api/v2/project/create",
+      "observed_query_names": ["_signature", "aadvid"]
+    },
+    "project_detail": {
+      "method": "GET",
+      "path": "/superior/api/v2/project/detail",
+      "observed_query_names": ["aadvid", "project_ids"]
+    },
+    "promotion_create": {
+      "method": "POST",
+      "path": "/superior/api/v2/promotion/create_promotion",
+      "observed_query_names": ["_signature", "aadvid"]
+    },
+    "promotion_detail": {
+      "method": "GET",
+      "path": "/superior/api/ad/promotion/detail",
+      "observed_query_names": ["aadvid", "promotion_ids"]
+    }
+  },
+  "observed_write_binding": {
+    "query_names": ["_signature", "aadvid"],
+    "header_names": ["x-csrftoken", "x-secsdk-csrf-token", "x-sessionid"],
+    "unsupported_names": ["_signature", "x-sessionid"],
+    "policy": "stop_production_migration_do_not_bypass"
+  },
+  "capture": {
+    "source": "sanitized_har_schema_only",
+    "request_bodies_present": true,
+    "response_bodies_present": false,
+    "raw_har_committed": false,
+    "request_shape_fixture": "web-api-request-shapes-v1.json"
   },
   "redaction": {
     "account": "<ACCOUNT_ID>",
@@ -28,8 +57,8 @@
     "object_name": "<OBJECT_NAME>"
   },
   "enablement_blockers": [
-    "captured_project_request_and_response_required",
-    "captured_promotion_request_and_response_required",
-    "captured_query_and_detail_responses_required"
+    "unsupported_request_signature",
+    "unsupported_session_binding",
+    "response_bodies_not_exported"
   ]
 }
