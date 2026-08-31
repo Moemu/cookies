@@ -20,8 +20,8 @@ const (
 )
 
 var (
-	ErrWriteDisabled       = errors.New("Ocean Engine Web API write is disabled")
-	ErrAccountNotAllowed   = errors.New("Ocean Engine Web API account is not allowed")
+	ErrWriteDisabled             = errors.New("Ocean Engine Web API write is disabled")
+	ErrAccountNotAllowed         = errors.New("Ocean Engine Web API account is not allowed")
 	ErrUnsupportedRequestBinding = errors.New("Ocean Engine Web API request binding is unsupported")
 )
 
