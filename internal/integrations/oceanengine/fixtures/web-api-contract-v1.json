@@ -3,7 +3,7 @@
   "observed_at": "2026-08-31T00:00:00Z",
   "secsdk_version": "1.2.22",
   "token_path": null,
-  "status": "blocked_additional_request_binding",
+  "status": "request_captured_response_pending",
   "write_enabled": false,
   "csrf": {
     "method": "HEAD",
@@ -36,11 +36,19 @@
       "observed_query_names": ["aadvid", "promotion_ids"]
     }
   },
-  "observed_write_binding": {
+  "observed_optional_fields": {
     "query_names": ["_signature", "aadvid"],
     "header_names": ["x-csrftoken", "x-secsdk-csrf-token", "x-sessionid"],
-    "unsupported_names": ["_signature", "x-sessionid"],
-    "policy": "stop_production_migration_do_not_bypass"
+    "necessity": {
+      "_signature": "unknown",
+      "x-sessionid": "unknown"
+    },
+    "observed_sources": {
+      "_signature": "platform_bundle_sign_url_and_body",
+      "x-sessionid": "window_sessionId"
+    },
+    "evidence": "existing_connector_reads_succeed_without_both_fields",
+    "policy": "omit_by_default_and_test_each_field_independently"
   },
   "capture": {
     "source": "sanitized_har_schema_only",
@@ -57,8 +65,8 @@
     "object_name": "<OBJECT_NAME>"
   },
   "enablement_blockers": [
-    "unsupported_request_signature",
-    "unsupported_session_binding",
-    "response_bodies_not_exported"
+    "write_without_optional_fields_not_tested",
+    "response_bodies_not_exported",
+    "query_reconciliation_not_captured"
   ]
 }

@@ -18,6 +18,18 @@ func TestWriteClientUsesProtectedPostPathForHEADAndCachesToken(t *testing.T) {
 		if r.Header.Get("Cookie") != "session=secret" {
 			t.Error("session cookie missing")
 		}
+		if r.Header.Get("x-csrftoken") != "cookie-csrf" {
+			t.Error("cookie CSRF header missing")
+		}
+		if r.Header.Get("x-sessionid") != "" {
+			t.Error("unverified browser session header must be omitted")
+		}
+		if _, present := r.URL.Query()["_signature"]; present {
+			t.Error("unverified browser signature must be omitted")
+		}
+		if r.URL.Query().Get("aadvid") != "10001" {
+			t.Error("advertiser query parameter missing")
+		}
 		switch r.Method {
 		case http.MethodHead:
 			heads.Add(1)
@@ -37,7 +49,7 @@ func TestWriteClientUsesProtectedPostPathForHEADAndCachesToken(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewWriteClient(server.URL, "10001", 7, Session{Cookies: "session=secret"}, server.Client(), nil)
+	client, err := NewWriteClient(server.URL, "10001", 7, Session{Cookies: "session=secret", CSRFToken: "cookie-csrf"}, server.Client(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

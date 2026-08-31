@@ -199,6 +199,9 @@ func (c *WriteClient) newRequest(ctx context.Context, method, path string, body 
 	}
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("Cookie", c.Session.Cookies)
+	if c.Session.CSRFToken != "" {
+		req.Header.Set("x-csrftoken", c.Session.CSRFToken)
+	}
 	req.Header.Set("Origin", c.BaseURL.Scheme+"://"+c.BaseURL.Host)
 	req.Header.Set("Referer", c.BaseURL.Scheme+"://"+c.BaseURL.Host+"/superior/")
 	req.Header.Set("User-Agent", c.UserAgent)

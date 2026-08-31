@@ -23,23 +23,34 @@ The static platform build and the sanitized HAR exposed these exact paths:
 - `GET /superior/api/v2/project/detail`
 - `GET /superior/api/ad/promotion/detail`
 
-Both captured writes included the `_signature` query parameter. They also
-included `x-sessionid`, `x-csrftoken`, and the Secsdk CSRF header. This is an
-additional request binding. The migration policy requires a stop. Do not
-generate, replay, or bypass these values.
+Both captured browser writes included the `_signature` query parameter. They
+also included `x-sessionid`, `x-csrftoken`, and the Secsdk CSRF header. This
+proves presence only. It does not prove that the server requires every field.
+
+The public platform bundle shows the field sources. Its request interceptor
+sets `X-SessionId` from `window.sessionId`. Its URL transformer calls an
+obfuscated `sign({url, body})` module and adds `_signature`. The transformer
+handles same-origin GET requests and supported POST content types. This is
+browser-client enrichment. It is not evidence of a server requirement.
+
+The existing Connector omits `_signature` and `x-sessionid` for multiple live
+read-only GET and POST routes. The write Client must omit both fields first.
+Add a field only after an isolated experiment proves that the server requires
+it. Do not infer a write requirement from the browser request alone.
 
 The HAR included write request bodies. It did not include response bodies.
 Only field names and JSON types are stored in Git. The contract fixture has the
-state `blocked_additional_request_binding`.
+state `request_captured_response_pending`.
 
 ## Release gates
 
 `COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ENABLED` defaults to `false`.
 `COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ACCOUNT_ALLOWLIST` must also contain the
 exact external account ID. The current adapter blocks Submit before it consumes
-the one-time confirmation token because the request binding is unsupported.
+the one-time confirmation token because response and reconciliation contracts
+are not captured.
 
 The 2026-08-31 probe used a dedicated test account, future dates, and the
-minimum controlled budget. The operator paused both objects. The captured
-signature and session binding make production Web API writes a no-go. Keep
-Prepare and read-only research available. Do not use Secsdk `DOWNGRADE` values.
+minimum controlled budget. The operator deleted both objects after capture.
+Continue controlled research on the two optional browser fields. Keep Prepare
+and read-only research available. Do not use Secsdk `DOWNGRADE` values.
