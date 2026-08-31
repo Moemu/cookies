@@ -199,7 +199,19 @@ func TestDecodePlanVersionAcceptsStoredCarrierLandingPageConflict(t *testing.T) 
 func readyOceanRuntimeInputs(t *testing.T, promotionCount int) (DeliveryIntent, PlatformConfiguration) {
 	t.Helper()
 	intent := validDeliveryIntent(t)
+	landingPage := resolvedReference("oceanengine", "landing_page", "account:6391", "landing-page-1")
+	intent.Payload.LandingPageReferences = []StableReference{landingPage}
+	intent.CanonicalHash = ""
+	var err error
+	intent, err = FinalizeDeliveryIntent(intent)
+	if err != nil {
+		t.Fatalf("finalize ready OceanEngine intent: %v", err)
+	}
 	configuration := validOceanEnginePlatformConfiguration(t, intent, promotionCount)
+	configuration.Payload.OceanEngine.Project.OptimizationTargetReference = referencePointer(resolvedReference("oceanengine", "optimization_target", "account:6391", "optimization-target-1"))
+	for index := range configuration.Payload.OceanEngine.Promotions {
+		configuration.Payload.OceanEngine.Promotions[index].LandingPageReference = referencePointer(landingPage)
+	}
 	configuration.CompilationMetadata.FieldEvidence = []PlatformFieldEvidence{{Field: "project.carrier", State: PlatformEvidenceObserved}}
 	configuration.CanonicalHash = ""
 	finalized, err := FinalizePlatformConfiguration(configuration)
