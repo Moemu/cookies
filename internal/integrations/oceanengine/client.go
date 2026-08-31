@@ -55,6 +55,10 @@ type Endpoint struct {
 }
 
 var readOnlyEndpoints = map[Endpoint]struct{}{
+	{http.MethodPost, ProjectListPath}:                                      {},
+	{http.MethodPost, PromotionListPath}:                                    {},
+	{http.MethodGet, "/superior/api/v2/project/detail"}:                     {},
+	{http.MethodGet, "/superior/api/v2/ad/promotion/detail"}:                {},
 	{http.MethodPost, "/ad/api/promotion/ads/list"}:                         {},
 	{http.MethodGet, "/superior/api/ad/promotion/detail"}:                   {},
 	{http.MethodGet, "/ad/api/promotion/ads/get_promotion_detail"}:          {},

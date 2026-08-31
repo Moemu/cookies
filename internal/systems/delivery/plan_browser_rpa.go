@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/shikanon/cookies/internal/platform/browserautomation"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/systems/delivery/platformskills"
 )
@@ -19,6 +20,7 @@ type BrowserRpaLaunchRequest struct {
 	OrganizationID      contract.OrganizationID
 	ProjectID           contract.ProjectID
 	AccountID           string
+	ExecutionDriver     browserautomation.ExecutionDriver
 	BusinessExecutionID string
 	Action              ControlledAction
 	ParentProjectID     string
@@ -109,7 +111,7 @@ func (s Service) StartBrowserRpaExecution(ctx context.Context, actor contract.Ac
 		ConfigurationHash string `json:"configuration_hash"`
 		PreflightHash     string `json:"preflight_hash"`
 		IdempotencyKey    string `json:"idempotency_key"`
-	}{"playwright-rpa/edge/v3", version.CanonicalHash, version.PlatformConfiguration.CanonicalHash, preflightHash, request.IdempotencyKey})
+	}{string(browserautomation.ExecutionDriverOceanEngineWebAPI), version.CanonicalHash, version.PlatformConfiguration.CanonicalHash, preflightHash, request.IdempotencyKey})
 	if err != nil {
 		return StartBrowserRpaExecutionResult{}, err
 	}
@@ -130,7 +132,7 @@ func (s Service) StartBrowserRpaExecution(ctx context.Context, actor contract.Ac
 		PlanID: plan.ID, PlanVersion: int(plan.Version), PlanCanonicalHash: version.CanonicalHash,
 		IntentID: version.DeliveryIntent.IntentID, IntentVersion: version.DeliveryIntent.VersionNumber, IntentCanonicalHash: version.DeliveryIntent.CanonicalHash,
 		ConfigurationID: version.PlatformConfiguration.ConfigurationID, ConfigurationVersion: version.PlatformConfiguration.VersionNumber, ConfigurationCanonicalHash: version.PlatformConfiguration.CanonicalHash,
-		WorkflowID: "runner-v3-" + plan.ID, WorkflowCanonicalHash: workflowHash,
+		WorkflowID: "web-api-v1-" + plan.ID, WorkflowCanonicalHash: workflowHash,
 		AccountReferenceID: externalAccountID, ProjectBudgetMode: projectBudgetMode, ProjectBudgetLimitMinor: projectBudgetLimitMinor,
 		PromotionBudgetLimitMinor: promotionBudgetLimitMinor, ObjectFingerprint: fingerprint, SkillID: skill.ID, SkillVersion: skill.Version,
 	}
@@ -191,7 +193,7 @@ func (s Service) StartBrowserRpaExecution(ctx context.Context, actor contract.Ac
 				return StartBrowserRpaExecutionResult{}, replayErr
 			} else if replayed && execution.BrowserRpaRunID != "" {
 				if reconciler, supported := s.BrowserRpaLauncher.(browserRpaRunReconciler); supported {
-					reconcileRequest := BrowserRpaLaunchRequest{OrganizationID: actor.OrganizationID, ProjectID: projectID, AccountID: externalAccountID, BusinessExecutionID: execution.ID, Action: action, IdempotencyKey: request.IdempotencyKey, CreatedBy: actor.Principal.ID}
+					reconcileRequest := BrowserRpaLaunchRequest{OrganizationID: actor.OrganizationID, ProjectID: projectID, AccountID: externalAccountID, ExecutionDriver: executionDriverForBinding(change.Binding), BusinessExecutionID: execution.ID, Action: action, IdempotencyKey: request.IdempotencyKey, CreatedBy: actor.Principal.ID}
 					if reconcileErr := reconciler.ReconcileBrowserRpaRun(ctx, reconcileRequest, execution.BrowserRpaRunID); reconcileErr != nil {
 						return StartBrowserRpaExecutionResult{}, reconcileErr
 					}
@@ -208,11 +210,18 @@ func (s Service) StartBrowserRpaExecution(ctx context.Context, actor contract.Ac
 			return StartBrowserRpaExecutionResult{}, err
 		}
 	}
-	run, err := s.BrowserRpaLauncher.LaunchBrowserRpaRun(ctx, BrowserRpaLaunchRequest{OrganizationID: actor.OrganizationID, ProjectID: projectID, AccountID: externalAccountID, BusinessExecutionID: execution.ID, Action: action, IdempotencyKey: request.IdempotencyKey, CreatedBy: actor.Principal.ID})
+	run, err := s.BrowserRpaLauncher.LaunchBrowserRpaRun(ctx, BrowserRpaLaunchRequest{OrganizationID: actor.OrganizationID, ProjectID: projectID, AccountID: externalAccountID, ExecutionDriver: executionDriverForBinding(change.Binding), BusinessExecutionID: execution.ID, Action: action, IdempotencyKey: request.IdempotencyKey, CreatedBy: actor.Principal.ID})
 	if err != nil {
 		return StartBrowserRpaExecutionResult{}, err
 	}
 	return StartBrowserRpaExecutionResult{ControlledChangeSet: change, ControlledExecution: execution, BrowserRpaRun: run}, nil
+}
+
+func executionDriverForBinding(binding ControlledAuthorityBinding) browserautomation.ExecutionDriver {
+	if strings.HasPrefix(binding.WorkflowID, "web-api-v1-") {
+		return browserautomation.ExecutionDriverOceanEngineWebAPI
+	}
+	return browserautomation.ExecutionDriverPlaywrightEdgeV3
 }
 
 func replayExistingBrowserRpaExecution(change ControlledChangeSet, execution ControlledExecution) (StartBrowserRpaExecutionResult, bool, error) {

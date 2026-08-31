@@ -129,16 +129,17 @@ func (s Service) SetKillSwitch(ctx context.Context, actor contract.ActorContext,
 }
 
 type CreateBoundRunRequest struct {
-	OrganizationID contract.OrganizationID
-	ProjectID      contract.ProjectID
-	Platform       Platform
-	AccountID      string
-	ExecutionID    string
-	EnvironmentID  string
-	ProfileID      string
-	PolicyID       string
-	IdempotencyKey string
-	CreatedBy      string
+	OrganizationID  contract.OrganizationID
+	ProjectID       contract.ProjectID
+	Platform        Platform
+	AccountID       string
+	ExecutionDriver ExecutionDriver
+	ExecutionID     string
+	EnvironmentID   string
+	ProfileID       string
+	PolicyID        string
+	IdempotencyKey  string
+	CreatedBy       string
 }
 
 const (
@@ -150,7 +151,10 @@ const (
 )
 
 func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunRequest) (BrowserRpaRun, bool, error) {
-	if s.Repository == nil || s.AuthorityProvider == nil || request.OrganizationID == "" || request.ProjectID == "" || request.Platform != PlatformOceanEngine || strings.TrimSpace(request.AccountID) == "" || strings.TrimSpace(request.ExecutionID) == "" || strings.TrimSpace(request.EnvironmentID) == "" || strings.TrimSpace(request.ProfileID) == "" || strings.TrimSpace(request.PolicyID) == "" || strings.TrimSpace(request.IdempotencyKey) == "" || len(request.IdempotencyKey) > 160 || strings.TrimSpace(request.CreatedBy) == "" {
+	if request.ExecutionDriver == "" {
+		request.ExecutionDriver = ExecutionDriverPlaywrightEdgeV3
+	}
+	if s.Repository == nil || s.AuthorityProvider == nil || request.OrganizationID == "" || request.ProjectID == "" || request.Platform != PlatformOceanEngine || strings.TrimSpace(request.AccountID) == "" || strings.TrimSpace(request.ExecutionID) == "" || strings.TrimSpace(request.EnvironmentID) == "" || strings.TrimSpace(request.ProfileID) == "" || strings.TrimSpace(request.PolicyID) == "" || strings.TrimSpace(request.IdempotencyKey) == "" || len(request.IdempotencyKey) > 160 || strings.TrimSpace(request.CreatedBy) == "" || request.ExecutionDriver != ExecutionDriverPlaywrightEdgeV3 && request.ExecutionDriver != ExecutionDriverOceanEngineWebAPI {
 		return BrowserRpaRun{}, false, ErrInvalidContract
 	}
 	now := s.now()
@@ -177,22 +181,27 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 	if err != nil {
 		return BrowserRpaRun{}, false, err
 	}
-	if environment.Platform != request.Platform || environment.AccountID != request.AccountID || environment.Mode != "local_visible" || !environment.Healthy || environment.Version < 1 || profile.EnvironmentID != environment.ID || profile.Platform != request.Platform || profile.AccountID != request.AccountID || profile.State != "ready" || profile.Version < 1 || policy.Platform != request.Platform || policy.AccountID != request.AccountID || policy.Version < 1 {
+	expectedMode := "local_visible"
+	if request.ExecutionDriver == ExecutionDriverOceanEngineWebAPI {
+		expectedMode = "remote_api"
+	}
+	if environment.Platform != request.Platform || environment.AccountID != request.AccountID || environment.Mode != expectedMode || !environment.Healthy || environment.Version < 1 || profile.EnvironmentID != environment.ID || profile.Platform != request.Platform || profile.AccountID != request.AccountID || profile.State != "ready" || profile.Version < 1 || policy.Platform != request.Platform || policy.AccountID != request.AccountID || policy.Version < 1 {
 		return BrowserRpaRun{}, false, ErrInvalidContract
 	}
 	if actionRequiresBoundPlatformProject(authority.Action) && !slices.Contains(policy.AllowedPlatformProjects, authority.ParentPlatformProjectID) {
 		return BrowserRpaRun{}, false, ErrInvalidContract
 	}
 	hashInput, err := json.Marshal(struct {
-		OrganizationID contract.OrganizationID `json:"organization_id"`
-		ProjectID      contract.ProjectID      `json:"project_id"`
-		Platform       Platform                `json:"platform"`
-		AccountID      string                  `json:"account_id"`
-		ExecutionID    string                  `json:"business_execution_id"`
-		EnvironmentID  string                  `json:"environment_id"`
-		ProfileID      string                  `json:"profile_id"`
-		PolicyID       string                  `json:"policy_id"`
-	}{OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, Platform: request.Platform, AccountID: request.AccountID, ExecutionID: request.ExecutionID, EnvironmentID: request.EnvironmentID, ProfileID: request.ProfileID, PolicyID: request.PolicyID})
+		OrganizationID  contract.OrganizationID `json:"organization_id"`
+		ProjectID       contract.ProjectID      `json:"project_id"`
+		Platform        Platform                `json:"platform"`
+		AccountID       string                  `json:"account_id"`
+		ExecutionDriver ExecutionDriver         `json:"execution_driver"`
+		ExecutionID     string                  `json:"business_execution_id"`
+		EnvironmentID   string                  `json:"environment_id"`
+		ProfileID       string                  `json:"profile_id"`
+		PolicyID        string                  `json:"policy_id"`
+	}{OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, Platform: request.Platform, AccountID: request.AccountID, ExecutionDriver: request.ExecutionDriver, ExecutionID: request.ExecutionID, EnvironmentID: request.EnvironmentID, ProfileID: request.ProfileID, PolicyID: request.PolicyID})
 	if err != nil {
 		return BrowserRpaRun{}, false, err
 	}
@@ -221,7 +230,7 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 		// the retry a distinct audit identity.
 		id = retryBoundRunID(request.OrganizationID, request.ProjectID, request.ExecutionID, request.IdempotencyKey)
 	}
-	run := BrowserRpaRun{SchemaVersion: RunSchemaV1, ID: id, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, Platform: request.Platform, AccountID: request.AccountID, Authority: authority, EnvironmentID: request.EnvironmentID, ProfileID: request.ProfileID, PolicyID: request.PolicyID, State: RunQueued, Version: 1, IdempotencyKey: request.IdempotencyKey, RequestHash: requestHash, CreatedBy: request.CreatedBy, CreatedAt: now, UpdatedAt: now}
+	run := BrowserRpaRun{SchemaVersion: RunSchemaV1, ID: id, OrganizationID: request.OrganizationID, ProjectID: request.ProjectID, Platform: request.Platform, AccountID: request.AccountID, ExecutionDriver: request.ExecutionDriver, Authority: authority, EnvironmentID: request.EnvironmentID, ProfileID: request.ProfileID, PolicyID: request.PolicyID, State: RunQueued, Version: 1, IdempotencyKey: request.IdempotencyKey, RequestHash: requestHash, CreatedBy: request.CreatedBy, CreatedAt: now, UpdatedAt: now}
 	created, existingErr := s.Repository.GetRun(ctx, request.OrganizationID, request.ProjectID, id)
 	replayed := existingErr == nil
 	if replayed {

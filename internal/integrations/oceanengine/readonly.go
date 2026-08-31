@@ -65,6 +65,16 @@ func (c *Client) ListPage(ctx context.Context, request ListRequest) (map[string]
 	return c.postJSON(ctx, "/ad/api/promotion/ads/list", body)
 }
 
+// ProjectListContract and PromotionListContract are exact readback paths for
+// Web API write reconciliation. Callers must query by the unique object name.
+func (c *Client) ProjectListContract(ctx context.Context, request any) (map[string]any, error) {
+	return c.postJSON(ctx, ProjectListPath, request)
+}
+
+func (c *Client) PromotionListContract(ctx context.Context, request any) (map[string]any, error) {
+	return c.postJSON(ctx, PromotionListPath, request)
+}
+
 func (c *Client) PromotionConfiguration(ctx context.Context, promotionID string) (map[string]any, error) {
 	return c.getJSON(ctx, "/ad/api/promotion/ads/get_promotion_detail?promotion_ids="+promotionID)
 }

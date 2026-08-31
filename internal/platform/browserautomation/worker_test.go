@@ -2,12 +2,20 @@ package browserautomation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/shikanon/cookies/internal/platform/contract"
 )
+
+type submitGateAdapter struct {
+	DeterministicFakeAdapter
+	err error
+}
+
+func (a submitGateAdapter) CheckSubmit(BrowserRpaRun) error { return a.err }
 
 type stagedRecorderProvider struct {
 	recorded []PreparedPage
@@ -240,6 +248,27 @@ func TestWorkerReleasesProfileLeaseAtTerminalState(t *testing.T) {
 	}
 	if result.State != RunFailed || result.LeaseID != "" || lease.ReleasedAt == nil {
 		t.Fatalf("result=%#v lease=%#v", result, lease)
+	}
+}
+
+func TestWorkerSubmitGateDoesNotConsumeConfirmation(t *testing.T) {
+	worker, service, _, run, _ := fakeWorkerFixture(WorkerSuccess)
+	prepared, err := worker.Prepare(context.Background(), run.OrganizationID, run.ProjectID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := service.IssueFinalConfirmation(context.Background(), run.OrganizationID, run.ProjectID, run.ID, prepared.Version, prepared.Authority.ApprovalActionHash, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateErr := errors.New("write gate closed")
+	worker.Adapter = submitGateAdapter{DeterministicFakeAdapter: DeterministicFakeAdapter{Outcome: WorkerSuccess, AccountID: run.AccountID}, err: gateErr}
+	request := AuthorizeActionRequest{OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, StepID: "submit_gate", ConfirmationID: issued.Confirmation.ID, Token: issued.Token, LeaseID: "lease_1", FencingToken: 1, IdempotencyKey: "attempt_gate"}
+	if _, err := worker.Submit(context.Background(), WorkerSubmitRequest{Authorize: request}); !errors.Is(err, gateErr) {
+		t.Fatalf("gate error=%v", err)
+	}
+	if _, err := service.AuthorizeAction(context.Background(), request); err != nil {
+		t.Fatalf("confirmation was consumed by the gate: %v", err)
 	}
 }
 

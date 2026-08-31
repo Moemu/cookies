@@ -34,6 +34,7 @@ import (
 	browserautomationhttp "github.com/shikanon/cookies/internal/platform/browserautomation/httpapi"
 	"github.com/shikanon/cookies/internal/platform/browserautomation/plancompile"
 	"github.com/shikanon/cookies/internal/platform/browserautomation/rparunner"
+	webapiadapter "github.com/shikanon/cookies/internal/platform/browserautomation/webapi"
 	"github.com/shikanon/cookies/internal/platform/config"
 	"github.com/shikanon/cookies/internal/platform/connector"
 	connectorhttp "github.com/shikanon/cookies/internal/platform/connector/httpapi"
@@ -486,8 +487,17 @@ func main() {
 		},
 		NewID: func(prefix string) (string, error) { return ids.New(prefix) },
 	}
-	deliveryService.BrowserRpaLauncher = deliveryBrowserRpaLauncher{service: browserRpaService}
+	deliveryService.BrowserRpaLauncher = deliveryBrowserRpaLauncher{service: browserRpaService, executionDriver: browserautomation.ExecutionDriverOceanEngineWebAPI}
 	browserRpaServer := browserautomationhttp.NewTakeoverOnly(browserRpaService, projectStore)
+	v3Compiler := plancompile.V3Compiler{Source: delivery.MySQLRepository{DB: db}, AccountResolver: connectorRepository}
+	driverAdapters := map[browserautomation.ExecutionDriver]browserautomation.WorkerAdapter{
+		browserautomation.ExecutionDriverOceanEngineWebAPI: webapiadapter.Adapter{
+			Compiler: v3Compiler, Policies: browserRpaRepository,
+			Sessions:     oceanEngineWebAPISessionChecker{accountSessions: connectorRepository, accounts: connectorRepository},
+			WriteEnabled: cfg.OceanEngine.WebAPIWriteEnabled, AccountAllowlist: cfg.OceanEngine.WebAPIWriteAccounts,
+		},
+	}
+	var playwrightAdapter browserautomation.WorkerAdapter
 	if cfg.BrowserRPA.Enabled {
 		manifest, err := calibrationmanifest.Current()
 		if err != nil {
@@ -502,13 +512,17 @@ func main() {
 			EdgeSessionFile:     cfg.BrowserRPA.EdgeSessionFile,
 			SessionProbeScript:  cfg.BrowserRPA.SessionProbeScript,
 			AuthorityStateRoot:  cfg.BrowserRPA.AuthorityStateRoot,
-			V3Compiler:          plancompile.V3Compiler{Source: delivery.MySQLRepository{DB: db}, AccountResolver: connectorRepository},
+			V3Compiler:          v3Compiler,
 			PrepareTimeout:      time.Duration(cfg.BrowserRPA.PrepareTimeoutSeconds) * time.Second,
 			SubmitTimeout:       time.Duration(cfg.BrowserRPA.SubmitTimeoutSeconds) * time.Second,
 			FallbackCDPEndpoint: cfg.BrowserRPA.CDPEndpointFallback,
 		}, browserRpaRepository, browserRpaService, plancompile.Compiler{Manifest: manifest})
-		browserRpaServer = browserautomationhttp.New(browserRpaService, browserautomation.Worker{Service: browserRpaService, Adapter: adapter}, projectStore)
+		playwrightAdapter = adapter
+		driverAdapters[browserautomation.ExecutionDriverPlaywrightEdgeV3] = adapter
 		log.Printf("browser_rpa_automated_worker=true runner_protocol=%s", cfg.BrowserRPA.RunnerProtocol)
+	}
+	if cfg.OceanEngine.Enabled || cfg.BrowserRPA.Enabled {
+		browserRpaServer = browserautomationhttp.New(browserRpaService, browserautomation.Worker{Service: browserRpaService, Adapter: playwrightAdapter, DriverAdapters: driverAdapters}, projectStore)
 	}
 	browserRpaServer.MountLegacyAlias()
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,

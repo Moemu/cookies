@@ -50,6 +50,12 @@ type WorkerAdapter interface {
 	Submit(context.Context, BrowserRpaRun, ControlledActionAttempt, string) (WorkerOutcome, PreparedPage, error)
 }
 
+// WorkerSubmitGate checks deployment gates before a one-time confirmation is
+// consumed. API adapters use it for feature flags and account allowlists.
+type WorkerSubmitGate interface {
+	CheckSubmit(BrowserRpaRun) error
+}
+
 // WorkerPlanAdapter is optional. Real Runner v3 adapters implement it to
 // expose the exact prepare plan without opening a page or changing a run.
 type WorkerPlanAdapter interface {
@@ -153,8 +159,19 @@ func (a DeterministicFakeAdapter) Submit(_ context.Context, run BrowserRpaRun, _
 }
 
 type Worker struct {
-	Service Service
-	Adapter WorkerAdapter
+	Service        Service
+	Adapter        WorkerAdapter
+	DriverAdapters map[ExecutionDriver]WorkerAdapter
+}
+
+func (w Worker) adapterFor(run BrowserRpaRun) (WorkerAdapter, error) {
+	if adapter := w.DriverAdapters[run.EffectiveExecutionDriver()]; adapter != nil {
+		return adapter, nil
+	}
+	if run.EffectiveExecutionDriver() == ExecutionDriverPlaywrightEdgeV3 && w.Adapter != nil {
+		return w.Adapter, nil
+	}
+	return nil, ErrEnvironmentUnavailable
 }
 
 func (w Worker) CheckSession(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) (EdgeSessionProbe, error) {
@@ -162,7 +179,11 @@ func (w Worker) CheckSession(ctx context.Context, org contract.OrganizationID, p
 	if err != nil {
 		return EdgeSessionProbe{}, err
 	}
-	probe, ok := w.Adapter.(WorkerSessionProbeAdapter)
+	adapter, adapterErr := w.adapterFor(run)
+	if adapterErr != nil {
+		return EdgeSessionProbe{}, adapterErr
+	}
+	probe, ok := adapter.(WorkerSessionProbeAdapter)
 	if !ok {
 		return EdgeSessionProbe{}, ErrEnvironmentUnavailable
 	}
@@ -179,7 +200,11 @@ func (w Worker) Plan(ctx context.Context, org contract.OrganizationID, project c
 	if run.TakeoverActive {
 		return nil, ErrInvalidTransition
 	}
-	planner, ok := w.Adapter.(WorkerPlanAdapter)
+	adapter, adapterErr := w.adapterFor(run)
+	if adapterErr != nil {
+		return nil, adapterErr
+	}
+	planner, ok := adapter.(WorkerPlanAdapter)
 	if !ok {
 		return nil, ErrEnvironmentUnavailable
 	}
@@ -193,6 +218,10 @@ func (w Worker) Prepare(ctx context.Context, org contract.OrganizationID, projec
 	}
 	if run.Paused || run.TakeoverActive {
 		return BrowserRpaRun{}, ErrInvalidTransition
+	}
+	adapter, err := w.adapterFor(run)
+	if err != nil {
+		return BrowserRpaRun{}, err
 	}
 	if run.State == RunQueued {
 		run, err = w.Service.TransitionRun(ctx, org, project, runID, run.Version, RunEnvironmentCheck, "")
@@ -218,7 +247,7 @@ func (w Worker) Prepare(ctx context.Context, org contract.OrganizationID, projec
 		_ = w.Service.Repository.PutStep(ctx, org, project, step)
 		return w.transitionTerminal(ctx, org, project, runID, run.Version, RunFailed, reason)
 	}
-	prepared, err := w.Adapter.Prepare(ctx, run)
+	prepared, err := adapter.Prepare(ctx, run)
 	if err != nil {
 		reason := BlockPageDrift
 		if errors.Is(err, ErrAccountMismatch) {
@@ -249,6 +278,15 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 	if err != nil {
 		return BrowserRpaRun{}, err
 	}
+	adapter, err := w.adapterFor(run)
+	if err != nil {
+		return BrowserRpaRun{}, err
+	}
+	if gate, ok := adapter.(WorkerSubmitGate); ok {
+		if err := gate.CheckSubmit(run); err != nil {
+			return BrowserRpaRun{}, err
+		}
+	}
 	stepAction := "submit_platform_configuration"
 	if stagedCreateAction(run.Authority.Action) {
 		stepAction = string(TakeoverResultObserved)
@@ -270,7 +308,7 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 	if err := w.Service.Repository.PutStep(ctx, run.OrganizationID, run.ProjectID, step); err != nil {
 		return BrowserRpaRun{}, err
 	}
-	outcome, page, adapterErr := w.Adapter.Submit(ctx, run, attempt, request.Authorize.Token)
+	outcome, page, adapterErr := adapter.Submit(ctx, run, attempt, request.Authorize.Token)
 	if adapterErr != nil {
 		step.Status = StepFailed
 		step.Version++

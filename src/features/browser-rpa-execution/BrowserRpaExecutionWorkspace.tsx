@@ -40,13 +40,13 @@ function BrowserRpaRunList({ projectId, activeView }: { projectId: string; activ
   if (state.kind === 'loading') return <WorkspaceState kind="loading" />
   if (state.kind === 'error') return <WorkspaceState kind="error" message={state.message} onRetry={() => void load()} />
   const visibleRuns = state.runs.filter(run => runMatchesExecutionView(run, activeView))
-  return <section className="controlled-execution-run-list" aria-label="Browser RPA 执行记录">
-    <header className="controlled-execution-header"><div><span className="section-label">Controlled Browser RPA</span><h2>执行中心</h2><p>查看当前 Project 的真实 Browser RPA Run。选择一条记录可继续检查、Prepare 或 Submit。</p></div><button className="secondary-button" onClick={() => void load()}><RefreshCw size={14}/>刷新</button></header>
+  return <section className="controlled-execution-run-list" aria-label="受控平台执行记录">
+    <header className="controlled-execution-header"><div><span className="section-label">Controlled platform execution</span><h2>执行中心</h2><p>查看当前 Project 的受控平台执行。选择一条记录可继续检查、Prepare 或 Submit。</p></div><button className="secondary-button" onClick={() => void load()}><RefreshCw size={14}/>刷新</button></header>
     {visibleRuns.length ? <div className="controlled-execution-run-list-grid">{visibleRuns.map(run => {
       const presentation = presentControlledExecution(run)
       return <a key={run.id} href={`/projects/${encodeURIComponent(projectId)}/delivery/execution/${encodeURIComponent(run.id)}?view=${encodeURIComponent(activeView)}`} className={`controlled-execution-run-card ${presentation.tone}`}>
         <div><span>{runActionLabel(run.authority.action)}</span><b>{presentation.title}</b><small>{presentation.detail}</small></div>
-        <dl><div><dt>广告账户</dt><dd>{run.account_id}</dd></div><div><dt>Run</dt><dd>{shortHash(run.id)}</dd></div><div><dt>更新时间</dt><dd>{formatTime(run.updated_at)}</dd></div></dl>
+        <dl><div><dt>广告账户</dt><dd>{run.account_id}</dd></div><div><dt>执行驱动</dt><dd>{executionDriverLabel(run)}</dd></div><div><dt>Run</dt><dd>{shortHash(run.id)}</dd></div><div><dt>更新时间</dt><dd>{formatTime(run.updated_at)}</dd></div></dl>
       </a>
     })}</div> : <div className="controlled-execution-run-empty"><Clock3 size={24}/><h3>{state.runs.length ? `${activeView}视图暂无记录` : '暂无执行记录'}</h3><p>{state.runs.length ? '请选择其他状态视图，或刷新执行记录。' : '请先在平台配置页检查计划，然后进入真实受控执行。'}</p></div>}
   </section>
@@ -142,6 +142,7 @@ function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; ru
   const runWorkflow = useCallback(async (action: 'check' | 'plan' | 'prepare' | 'submit') => {
     if (transport.kind !== 'ready') return
     const { run } = transport.workspace
+    const apiDriver = effectiveExecutionDriver(run) === 'oceanengine-web-api/session/v1'
     setActionPending(true)
     setNotice('')
     try {
@@ -154,14 +155,14 @@ function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; ru
       } else if (action === 'plan') {
         const nextPlan = await controlledExecutionApi.generatePlan(projectId, run.id)
         setPlan(nextPlan)
-        setNotice(nextPlan.blocked_reasons.length ? '计划已生成，但存在阻塞原因。' : 'Runner v3 执行计划已生成。该操作未打开页面。')
+        setNotice(nextPlan.blocked_reasons.length ? '计划已生成，但存在阻塞原因。' : apiDriver ? 'API 编译输入已生成。该操作未写入平台。' : 'Runner v3 执行计划已生成。该操作未打开页面。')
       } else if (action === 'prepare') {
         let currentRun = run
         if (!currentRun.lease_id) {
           const acquired = await controlledExecutionApi.acquireLease(projectId, currentRun.id, currentRun.version)
           currentRun = acquired.run
         }
-        setNotice('Prepare 已启动。Runner v3 正在进入巨量表单并执行字段回读。该过程最长需要 3 分钟。')
+        setNotice(apiDriver ? 'Prepare 已启动。系统正在检查 Connector 会话和请求 DTO。' : 'Prepare 已启动。Runner v3 正在进入巨量表单并执行字段回读。该过程最长需要 3 分钟。')
         const prepared = await controlledExecutionApi.prepare(projectId, currentRun.id)
         if (prepared.state !== 'awaiting_confirmation') {
           const result = presentControlledExecution(prepared)
@@ -182,7 +183,7 @@ function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; ru
         if (updated.state === 'environment_check') {
           setPlan(undefined)
           setSessionProbe(undefined)
-          setNotice('当前对象已创建并回写平台 ID。请重新检查 Edge 会话，然后生成下一个对象计划。')
+          setNotice(apiDriver ? '当前对象已创建并回写平台 ID。请生成下一个对象的 API 编译输入。' : '当前对象已创建并回写平台 ID。请重新检查 Edge 会话，然后生成下一个对象计划。')
         } else {
           setNotice('Submit 已执行。请检查平台结果和写后证据。')
         }
@@ -293,6 +294,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed,
 }) {
   const { run, events, evidence } = workspace
   const presentation = useMemo(() => presentControlledExecution(run), [run])
+  const apiDriver = effectiveExecutionDriver(run) === 'oceanengine-web-api/session/v1'
   const terminal = isTerminalControlledExecutionState(run.state)
   // A Kill Switch blocks new writes, never the operator's ability to take over,
   // pause, cancel, or inspect the run.
@@ -301,9 +303,9 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed,
   return <section className="controlled-execution-workspace" aria-label="受控执行中心">
     <header className="controlled-execution-header">
       <div>
-        <span className="section-label">Controlled Browser RPA</span>
+        <span className="section-label">Controlled platform execution</span>
         <h2>受控执行中心</h2>
-        <p>按顺序检查真实 Edge 会话、生成计划、执行 Prepare、复核差异，再使用一次性授权执行 Submit。</p>
+        <p>{apiDriver ? '按顺序检查 Connector 会话、生成 API 编译输入、执行 Prepare，并复核写入门禁。' : '按顺序检查真实 Edge 会话、生成计划、执行 Prepare、复核差异，再使用一次性授权执行 Submit。'}</p>
       </div>
       <button className="secondary-button" onClick={onRefresh} disabled={busy}><RefreshCw size={15} />从服务端刷新</button>
     </header>
@@ -338,6 +340,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed,
         <dl>
           <div><dt>Run</dt><dd title={run.id}>{run.id}</dd></div>
           <div><dt>账户</dt><dd>{run.account_id}</dd></div>
+          <div><dt>执行驱动</dt><dd>{executionDriverLabel(run)}</dd></div>
           <div><dt>ChangeSet</dt><dd title={run.authority.change_set_id}>{run.authority.change_set_id}</dd></div>
           <div><dt>正式 Approval</dt><dd title={run.authority.approval_id}>{run.authority.approval_id}</dd></div>
           {run.authority.target_mapping_id ? <div><dt>目标映射版本</dt><dd title={run.authority.target_mapping_id}>{shortHash(run.authority.target_mapping_id)} · v{run.authority.target_mapping_version}</dd></div> : null}
@@ -366,7 +369,8 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onR
   onRetryPrepare: () => void
 }) {
   const { run, steps: runSteps, events, evidence, lease } = workspace
-  const sessionReady = Boolean(sessionProbe?.status === 'ready' && sessionProbe.cdp_available && sessionProbe.logged_in && sessionProbe.account_matched)
+  const apiDriver = effectiveExecutionDriver(run) === 'oceanengine-web-api/session/v1'
+  const sessionReady = apiDriver ? registeredBindingReady(workspace) : Boolean(sessionProbe?.status === 'ready' && sessionProbe.cdp_available && sessionProbe.logged_in && sessionProbe.account_matched)
   const prepareStarted = events.some(event => event.kind === 'state_transition' && event.summary.includes('-> preparing'))
     || ['preparing', 'awaiting_confirmation', 'submitting', 'verifying', 'succeeded', 'partial', 'result_unknown'].includes(run.state)
   const restoredSessionReady = prepareStarted && run.blocking_reason !== 'ACCOUNT_MISMATCH'
@@ -381,8 +385,8 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onR
   const canSubmit = run.state === 'awaiting_confirmation' && prepared && reviewed && !drift && leaseReady
   const submitStarted = ['submitting', 'verifying', 'succeeded', 'partial', 'result_unknown'].includes(run.state)
   const flowSteps = [
-    { label: '检查真实 Edge 会话', done: bindingReady, active: !bindingReady },
-    { label: '生成 Runner v3 计划', done: planReady, active: bindingReady && !planReady },
+    { label: apiDriver ? '检查 Connector 会话' : '检查真实 Edge 会话', done: bindingReady, active: !bindingReady },
+    { label: apiDriver ? '生成 API 编译输入' : '生成 Runner v3 计划', done: planReady, active: bindingReady && !planReady },
     { label: '执行 Prepare', done: prepared, active: run.state === 'preparing' },
     { label: '复核回读与差异', done: prepared && reviewed, active: run.state === 'awaiting_confirmation' && !reviewed },
     { label: '一次性确认并 Submit', done: submitStarted, active: run.state === 'submitting' || run.state === 'verifying' },
@@ -394,7 +398,7 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onR
     <ol>{flowSteps.map((step, index) => <li key={step.label} className={step.done ? 'complete' : step.active ? 'active' : ''}><span>{step.done ? <CircleCheck size={15} /> : index + 1}</span>{step.label}</li>)}</ol>
     {prepareStep ? <p className={`controlled-execution-step-status ${prepareStep.status}`}><Clock3 size={14} />Prepare 服务端任务：{runStepStatusLabel(prepareStep.status)}{prepareStep.blocking_reason ? ` · ${prepareStep.blocking_reason}` : ''}</p> : null}
     <div className="controlled-execution-flow-actions">
-      <button className="secondary-button" disabled={busy || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('check')}><MonitorCheck size={15} />检查 Edge 会话</button>
+      {!apiDriver ? <button className="secondary-button" disabled={busy || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('check')}><MonitorCheck size={15} />检查 Edge 会话</button> : null}
       <button className="secondary-button" disabled={busy || !bindingReady || !actionSupported || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('plan')}><ListChecks size={15} />生成计划</button>
       <button className="secondary-button" disabled={busy || !canPrepare} onClick={() => onWorkflow('prepare')}><Play size={15} />执行 Prepare</button>
       {canRetryPrepare ? <button className="secondary-button" disabled={busy} onClick={onRetryPrepare}><RefreshCw size={15} />重试 Prepare</button> : null}
@@ -412,20 +416,18 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onR
 
 function SessionAndTargetPanel({ workspace, sessionProbe }: { workspace: ControlledExecutionWorkspace; sessionProbe: EdgeSessionProbe | undefined }) {
   const { run, environment, profile, policy } = workspace
+  const apiDriver = effectiveExecutionDriver(run) === 'oceanengine-web-api/session/v1'
   const accountMatches = environment.account_id === run.account_id && profile.account_id === run.account_id && policy.account_id === run.account_id
   const projectAllowed = !run.authority.parent_platform_project_id || policy.allowed_platform_project_ids.includes(run.authority.parent_platform_project_id)
   const registered = registeredBindingReady(workspace)
-  const ready = registered && sessionProbe?.status === 'ready'
-  return <section className="controlled-execution-context" aria-label="Edge 登记和目标">
-    <article className={ready ? 'ready' : 'blocked'}><header><MonitorCheck size={18} /><b>真实 Edge 会话</b></header><dl>
+  const ready = registered && (apiDriver || sessionProbe?.status === 'ready')
+  return <section className="controlled-execution-context" aria-label="执行会话和目标">
+    <article className={ready ? 'ready' : 'blocked'}><header><MonitorCheck size={18} /><b>{apiDriver ? 'Connector 组织账号会话' : '真实 Edge 会话'}</b></header><dl>
       <div><dt>控制面登记</dt><dd>{registered ? '一致' : '不一致'}</dd></div>
-      <div><dt>环境</dt><dd>{environment.mode} · Edge {environment.browser_version}</dd></div>
+      <div><dt>环境</dt><dd>{apiDriver ? environment.mode : `${environment.mode} · Edge ${environment.browser_version}`}</dd></div>
       <div><dt>Profile</dt><dd>{profile.state}</dd></div>
       <div><dt>登记账户一致</dt><dd>{accountMatches ? '是' : '否'}</dd></div>
-      <div><dt>DevTools WebSocket</dt><dd>{sessionProbe ? sessionProbe.cdp_available ? '可用' : '不可用' : '等待检查'}</dd></div>
-      <div><dt>巨量页面已登录</dt><dd>{sessionProbe ? sessionProbe.logged_in ? '是' : '否' : '等待检查'}</dd></div>
-      <div><dt>页面账户匹配</dt><dd>{sessionProbe ? sessionProbe.account_matched ? '是' : '否' : '等待检查'}</dd></div>
-      {sessionProbe ? <><div><dt>结果</dt><dd>{sessionProbeReason(sessionProbe.reason)}</dd></div><div><dt>检查时间</dt><dd>{formatTime(sessionProbe.checked_at)}</dd></div></> : null}
+      {apiDriver ? <div><dt>会话检查</dt><dd>Prepare 时读取 ready 会话</dd></div> : <><div><dt>DevTools WebSocket</dt><dd>{sessionProbe ? sessionProbe.cdp_available ? '可用' : '不可用' : '等待检查'}</dd></div><div><dt>巨量页面已登录</dt><dd>{sessionProbe ? sessionProbe.logged_in ? '是' : '否' : '等待检查'}</dd></div><div><dt>页面账户匹配</dt><dd>{sessionProbe ? sessionProbe.account_matched ? '是' : '否' : '等待检查'}</dd></div>{sessionProbe ? <><div><dt>结果</dt><dd>{sessionProbeReason(sessionProbe.reason)}</dd></div><div><dt>检查时间</dt><dd>{formatTime(sessionProbe.checked_at)}</dd></div></> : null}</>}
     </dl></article>
     <article className={projectAllowed ? 'ready' : 'blocked'}><header><FileCheck2 size={18} /><b>平台目标</b></header><dl>
       <div><dt>当前广告账户</dt><dd>{run.account_id}</dd></div>
@@ -434,6 +436,14 @@ function SessionAndTargetPanel({ workspace, sessionProbe }: { workspace: Control
       <div><dt>账号路径</dt><dd>{projectAllowed ? '策略允许' : '策略阻止'}</dd></div>
     </dl></article>
   </section>
+}
+
+function effectiveExecutionDriver(run: BrowserRpaRun) {
+  return run.execution_driver ?? 'playwright-rpa/edge/v3'
+}
+
+function executionDriverLabel(run: BrowserRpaRun) {
+  return effectiveExecutionDriver(run) === 'oceanengine-web-api/session/v1' ? 'Web API 会话' : 'Playwright · Edge'
 }
 
 function runStepStatusLabel(status: string) {

@@ -27,6 +27,13 @@ const (
 	ConfirmationSchemaV1 = "browser-rpa-final-confirmation/v1"
 )
 
+type ExecutionDriver string
+
+const (
+	ExecutionDriverOceanEngineWebAPI ExecutionDriver = "oceanengine-web-api/session/v1"
+	ExecutionDriverPlaywrightEdgeV3  ExecutionDriver = "playwright-rpa/edge/v3"
+)
+
 func acceptedRunSchemaVersion(value string) bool {
 	return value == RunSchemaV1 || value == LegacyRunSchemaV1
 }
@@ -547,27 +554,28 @@ type KillSwitch struct {
 }
 
 type BrowserRpaRun struct {
-	SchemaVersion  string                  `json:"schema_version"`
-	ID             string                  `json:"id"`
-	OrganizationID contract.OrganizationID `json:"organization_id"`
-	ProjectID      contract.ProjectID      `json:"project_id"`
-	Platform       Platform                `json:"platform"`
-	AccountID      string                  `json:"account_id"`
-	Authority      AuthorityBinding        `json:"authority"`
-	EnvironmentID  string                  `json:"environment_id"`
-	ProfileID      string                  `json:"profile_id"`
-	LeaseID        string                  `json:"lease_id"`
-	PolicyID       string                  `json:"policy_id"`
-	State          RunState                `json:"state"`
-	BlockingReason BlockingReason          `json:"blocking_reason,omitempty"`
-	Paused         bool                    `json:"paused"`
-	TakeoverActive bool                    `json:"takeover_active"`
-	Version        int64                   `json:"version"`
-	IdempotencyKey string                  `json:"idempotency_key"`
-	RequestHash    string                  `json:"request_hash"`
-	CreatedBy      string                  `json:"created_by"`
-	CreatedAt      time.Time               `json:"created_at"`
-	UpdatedAt      time.Time               `json:"updated_at"`
+	SchemaVersion   string                  `json:"schema_version"`
+	ID              string                  `json:"id"`
+	OrganizationID  contract.OrganizationID `json:"organization_id"`
+	ProjectID       contract.ProjectID      `json:"project_id"`
+	Platform        Platform                `json:"platform"`
+	AccountID       string                  `json:"account_id"`
+	ExecutionDriver ExecutionDriver         `json:"execution_driver"`
+	Authority       AuthorityBinding        `json:"authority"`
+	EnvironmentID   string                  `json:"environment_id"`
+	ProfileID       string                  `json:"profile_id"`
+	LeaseID         string                  `json:"lease_id"`
+	PolicyID        string                  `json:"policy_id"`
+	State           RunState                `json:"state"`
+	BlockingReason  BlockingReason          `json:"blocking_reason,omitempty"`
+	Paused          bool                    `json:"paused"`
+	TakeoverActive  bool                    `json:"takeover_active"`
+	Version         int64                   `json:"version"`
+	IdempotencyKey  string                  `json:"idempotency_key"`
+	RequestHash     string                  `json:"request_hash"`
+	CreatedBy       string                  `json:"created_by"`
+	CreatedAt       time.Time               `json:"created_at"`
+	UpdatedAt       time.Time               `json:"updated_at"`
 }
 
 func (r BrowserRpaRun) authorizesPlatformProject(platformProjectID string) bool {
@@ -581,6 +589,9 @@ func (r BrowserRpaRun) Validate() error {
 	if !acceptedRunSchemaVersion(r.SchemaVersion) || r.ID == "" || r.OrganizationID == "" || r.ProjectID == "" || r.Platform != PlatformOceanEngine || r.AccountID == "" || r.Version < 1 || r.IdempotencyKey == "" || !isSHA256(r.RequestHash) {
 		return ErrInvalidContract
 	}
+	if r.EffectiveExecutionDriver() != ExecutionDriverPlaywrightEdgeV3 && r.EffectiveExecutionDriver() != ExecutionDriverOceanEngineWebAPI {
+		return ErrInvalidContract
+	}
 	if err := r.Authority.Validate(); err != nil || r.Authority.OrganizationID != r.OrganizationID || r.Authority.ProjectID != r.ProjectID || r.Authority.AccountReferenceID != r.AccountID {
 		return ErrInvalidContract
 	}
@@ -588,6 +599,15 @@ func (r BrowserRpaRun) Validate() error {
 		return ErrInvalidContract
 	}
 	return nil
+}
+
+// EffectiveExecutionDriver preserves the driver for rows created before the
+// execution_driver column existed.
+func (r BrowserRpaRun) EffectiveExecutionDriver() ExecutionDriver {
+	if r.ExecutionDriver == "" {
+		return ExecutionDriverPlaywrightEdgeV3
+	}
+	return r.ExecutionDriver
 }
 
 var runTransitions = map[RunState][]RunState{

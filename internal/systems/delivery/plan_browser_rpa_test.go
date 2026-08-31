@@ -1,6 +1,19 @@
 package delivery
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/shikanon/cookies/internal/platform/browserautomation"
+)
+
+func TestExecutionDriverPreservesHistoricalBindings(t *testing.T) {
+	if got := executionDriverForBinding(ControlledAuthorityBinding{WorkflowID: "runner-v3-plan_1"}); got != browserautomation.ExecutionDriverPlaywrightEdgeV3 {
+		t.Fatalf("historical driver=%s", got)
+	}
+	if got := executionDriverForBinding(ControlledAuthorityBinding{WorkflowID: "web-api-v1-plan_1"}); got != browserautomation.ExecutionDriverOceanEngineWebAPI {
+		t.Fatalf("new driver=%s", got)
+	}
+}
 
 func TestSamePlanExecutionTargetRecoversAfterClientReload(t *testing.T) {
 	binding := ControlledAuthorityBinding{

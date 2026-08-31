@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/shikanon/cookies/internal/integrations/oceanengine"
+	"github.com/shikanon/cookies/internal/platform/browserautomation"
 	"github.com/shikanon/cookies/internal/platform/connector"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/systems/insights"
@@ -17,6 +18,28 @@ import (
 type oceanEngineSessionVerifier struct {
 	baseURL string
 	client  *http.Client
+}
+
+type oceanEngineWebAPISessionChecker struct {
+	accountSessions connector.AccountSessionStore
+	accounts        interface {
+		ResolveAccountIDByExternalID(context.Context, string, string, string) (string, error)
+	}
+}
+
+func (c oceanEngineWebAPISessionChecker) Check(ctx context.Context, run browserautomation.BrowserRpaRun) error {
+	if c.accountSessions == nil || c.accounts == nil {
+		return browserautomation.ErrEnvironmentUnavailable
+	}
+	accountID, err := c.accounts.ResolveAccountIDByExternalID(ctx, string(run.OrganizationID), string(run.ProjectID), run.AccountID)
+	if err != nil {
+		return browserautomation.ErrAccountMismatch
+	}
+	session, err := c.accountSessions.GetAccountSession(ctx, string(run.OrganizationID), accountID)
+	if err != nil || session.Status != connector.AccountSessionReady {
+		return browserautomation.ErrEnvironmentUnavailable
+	}
+	return nil
 }
 
 func (v oceanEngineSessionVerifier) VerifyOceanEngineSession(ctx context.Context, session []byte) error {

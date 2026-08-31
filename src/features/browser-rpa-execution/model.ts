@@ -96,6 +96,7 @@ export type BrowserRpaRun = {
   project_id: string
   platform: 'ocean_engine'
   account_id: string
+  execution_driver?: 'oceanengine-web-api/session/v1' | 'playwright-rpa/edge/v3'
   authority: BrowserRpaAuthorityBinding
   environment_id: string
   profile_id: string
