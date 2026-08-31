@@ -10,6 +10,10 @@ omit both fields. Test omission before adding either field to the write Client.
 `web-api-request-shapes-v1.json` stores names and types only. The raw HAR and
 all scalar request values stay outside Git.
 
+The first direct-HTTP probe stopped at the Secsdk HEAD request. HTTP status was
+200, but the token response header was absent. No project POST was sent. The
+fixture records only this non-secret result and the zero-match reconciliation.
+
 Fixture rules:
 
 - Platform identifiers are intentionally opaque strings, including values larger than JavaScript's safe integer range.

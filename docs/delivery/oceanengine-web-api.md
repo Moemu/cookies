@@ -42,6 +42,19 @@ The HAR included write request bodies. It did not include response bodies.
 Only field names and JSON types are stored in Git. The contract fixture has the
 state `request_captured_response_pending`.
 
+## Controlled direct-HTTP probe
+
+The 2026-08-31 direct-HTTP probe omitted `_signature` and `x-sessionid`. The
+Client sent no project POST. Its protected-path HEAD returned HTTP 200 without
+`x-ware-csrf-token`, so the Client stopped before constructing the write.
+A read-only reconciliation query found no object with the probe name digest.
+
+The source confirms that Secsdk sends HEAD to the protected pathname without
+the `aadvid` query parameter. The write Client now follows this behavior. The
+server still did not issue a token to the Connector HTTP session. The next
+experiment must compare the same HEAD inside the declared Edge page. It must
+not retry the project POST.
+
 ## Release gates
 
 `COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ENABLED` defaults to `false`.

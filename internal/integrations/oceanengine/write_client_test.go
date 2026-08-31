@@ -15,11 +15,8 @@ import (
 func TestWriteClientUsesProtectedPostPathForHEADAndCachesToken(t *testing.T) {
 	var heads, posts atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Cookie") != "session=secret" {
+		if r.Header.Get("Cookie") != "session=secret; csrftoken=cookie-csrf" {
 			t.Error("session cookie missing")
-		}
-		if r.Header.Get("x-csrftoken") != "cookie-csrf" {
-			t.Error("cookie CSRF header missing")
 		}
 		if r.Header.Get("x-sessionid") != "" {
 			t.Error("unverified browser session header must be omitted")
@@ -27,19 +24,16 @@ func TestWriteClientUsesProtectedPostPathForHEADAndCachesToken(t *testing.T) {
 		if _, present := r.URL.Query()["_signature"]; present {
 			t.Error("unverified browser signature must be omitted")
 		}
-		if r.URL.Query().Get("aadvid") != "10001" {
-			t.Error("advertiser query parameter missing")
-		}
 		switch r.Method {
 		case http.MethodHead:
 			heads.Add(1)
-			if r.URL.Path != ProjectCreatePath || r.Header.Get("x-secsdk-csrf-request") != "1" || r.Header.Get("x-secsdk-csrf-version") != SecSDKVersion {
+			if r.URL.Path != ProjectCreatePath || r.URL.RawQuery != "" || r.Header.Get("x-csrftoken") != "" || r.Header.Get("x-secsdk-csrf-request") != "1" || r.Header.Get("x-secsdk-csrf-version") != SecSDKVersion {
 				t.Errorf("invalid HEAD contract: %s %#v", r.URL.Path, r.Header)
 			}
 			w.Header().Set("x-ware-csrf-token", "0,token-value,60000,ok,session")
 		case http.MethodPost:
 			posts.Add(1)
-			if r.URL.Path != ProjectCreatePath || r.Header.Get("x-secsdk-csrf-token") != "token-value" {
+			if r.URL.Path != ProjectCreatePath || r.URL.Query().Get("aadvid") != "10001" || r.Header.Get("x-csrftoken") != "cookie-csrf" || r.Header.Get("x-secsdk-csrf-token") != "token-value" {
 				t.Errorf("invalid POST contract: %s %#v", r.URL.Path, r.Header)
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -49,7 +43,7 @@ func TestWriteClientUsesProtectedPostPathForHEADAndCachesToken(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewWriteClient(server.URL, "10001", 7, Session{Cookies: "session=secret", CSRFToken: "cookie-csrf"}, server.Client(), nil)
+	client, err := NewWriteClient(server.URL, "10001", 7, Session{Cookies: "session=secret; csrftoken=cookie-csrf"}, server.Client(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +68,26 @@ func TestWriteClientRejectsInvalidAndDowngradeToken(t *testing.T) {
 				t.Fatalf("error=%v", err)
 			}
 		})
+	}
+}
+
+func TestWriteClientDiagnosesMissingCSRFHeaderWithoutAWrite(t *testing.T) {
+	var heads, posts atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			heads.Add(1)
+			return
+		}
+		posts.Add(1)
+	}))
+	defer server.Close()
+	client, err := NewWriteClient(server.URL, "10001", 1, Session{Cookies: "session=secret"}, server.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostic, err := client.DiagnoseCSRF(context.Background(), ProjectCreatePath)
+	if !errors.Is(err, ErrCSRFTokenInvalid) || diagnostic.HTTPStatus != http.StatusOK || diagnostic.HeaderPresent || heads.Load() != 1 || posts.Load() != 0 {
+		t.Fatalf("diagnostic=%#v error=%v heads=%d posts=%d", diagnostic, err, heads.Load(), posts.Load())
 	}
 }
 

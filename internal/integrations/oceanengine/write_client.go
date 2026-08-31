@@ -74,6 +74,17 @@ type WriteResponse struct {
 	Body       json.RawMessage
 }
 
+// CSRFDiagnostic reports only non-secret properties of a Secsdk HEAD response.
+type CSRFDiagnostic struct {
+	HTTPStatus    int
+	HeaderPresent bool
+	PartCount     int
+	StatusZero    bool
+	TokenPresent  bool
+	Downgrade     bool
+	MaxAgeValid   bool
+}
+
 func NewWriteClient(rawBaseURL, advertiserID string, sessionVersion int64, session Session, httpClient *http.Client, cache *CSRFTokenCache) (*WriteClient, error) {
 	baseURL, err := url.Parse(rawBaseURL)
 	if err != nil || baseURL.Scheme != "https" && baseURL.Scheme != "http" || baseURL.Host == "" || strings.TrimSpace(advertiserID) == "" || sessionVersion < 1 || strings.TrimSpace(session.Cookies) == "" {
@@ -86,6 +97,9 @@ func NewWriteClient(rawBaseURL, advertiserID string, sessionVersion int64, sessi
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	if cache == nil {
 		cache = NewCSRFTokenCache()
+	}
+	if strings.TrimSpace(session.CSRFToken) == "" {
+		session.CSRFToken = cookieValue(session.Cookies, "csrftoken")
 	}
 	return &WriteClient{
 		BaseURL: baseURL, HTTPClient: &copyClient, Session: session, AdvertiserID: advertiserID,
@@ -140,6 +154,56 @@ func (c *WriteClient) SubmitJSON(ctx context.Context, path string, payload any) 
 	return result, nil
 }
 
+// Prepare validates the Secsdk token contract without sending a write request.
+func (c *WriteClient) Prepare(ctx context.Context, path string) error {
+	if _, ok := writeEndpoints[Endpoint{Method: http.MethodPost, Path: path}]; !ok {
+		return fmt.Errorf("%w: POST %s", ErrWriteForbidden, path)
+	}
+	_, err := c.csrfToken(ctx, path)
+	return err
+}
+
+// DiagnoseCSRF performs one read-only HEAD and never returns the token value.
+func (c *WriteClient) DiagnoseCSRF(ctx context.Context, path string) (CSRFDiagnostic, error) {
+	if _, ok := writeEndpoints[Endpoint{Method: http.MethodPost, Path: path}]; !ok {
+		return CSRFDiagnostic{}, fmt.Errorf("%w: POST %s", ErrWriteForbidden, path)
+	}
+	req, err := c.newCSRFRequest(ctx, path)
+	if err != nil {
+		return CSRFDiagnostic{}, err
+	}
+	req.Header.Set("x-secsdk-csrf-request", "1")
+	req.Header.Set("x-secsdk-csrf-version", SecSDKVersion)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return CSRFDiagnostic{}, fmt.Errorf("diagnose Ocean Engine CSRF token: transport failed")
+	}
+	defer resp.Body.Close()
+	diagnostic := CSRFDiagnostic{HTTPStatus: resp.StatusCode}
+	if authResponse(resp) {
+		return diagnostic, ErrAuthRequired
+	}
+	if resp.StatusCode != http.StatusOK {
+		return diagnostic, fmt.Errorf("%w: token HTTP %d", ErrCSRFTokenInvalid, resp.StatusCode)
+	}
+	header := resp.Header.Get("x-ware-csrf-token")
+	diagnostic.HeaderPresent = header != ""
+	parts := strings.Split(header, ",")
+	diagnostic.PartCount = len(parts)
+	if len(parts) >= 3 {
+		diagnostic.StatusZero = strings.TrimSpace(parts[0]) == "0"
+		token := strings.TrimSpace(parts[1])
+		diagnostic.TokenPresent = token != ""
+		diagnostic.Downgrade = token == "DOWNGRADE"
+		maxAgeMS, parseErr := strconv.ParseInt(strings.TrimSpace(parts[2]), 10, 64)
+		diagnostic.MaxAgeValid = parseErr == nil && maxAgeMS > 0 && maxAgeMS <= int64((24*time.Hour)/time.Millisecond)
+	}
+	if !diagnostic.HeaderPresent || !diagnostic.StatusZero || !diagnostic.TokenPresent || diagnostic.Downgrade || !diagnostic.MaxAgeValid {
+		return diagnostic, ErrCSRFTokenInvalid
+	}
+	return diagnostic, nil
+}
+
 func (c *WriteClient) csrfToken(ctx context.Context, protectedPath string) (string, error) {
 	now := c.Now().UTC()
 	key := csrfCacheKey{host: c.BaseURL.Host, advertiserID: c.AdvertiserID, sessionVersion: c.SessionVersion}
@@ -151,7 +215,7 @@ func (c *WriteClient) csrfToken(ctx context.Context, protectedPath string) (stri
 	c.TokenCache.mu.Unlock()
 
 	// Secsdk 1.2.22 uses the protected POST path when TOKEN_PATH is undefined.
-	req, err := c.newRequest(ctx, http.MethodHead, protectedPath, nil)
+	req, err := c.newCSRFRequest(ctx, protectedPath)
 	if err != nil {
 		return "", err
 	}
@@ -202,6 +266,25 @@ func (c *WriteClient) newRequest(ctx context.Context, method, path string, body 
 	if c.Session.CSRFToken != "" {
 		req.Header.Set("x-csrftoken", c.Session.CSRFToken)
 	}
+	req.Header.Set("Origin", c.BaseURL.Scheme+"://"+c.BaseURL.Host)
+	req.Header.Set("Referer", c.BaseURL.Scheme+"://"+c.BaseURL.Host+"/superior/")
+	req.Header.Set("User-Agent", c.UserAgent)
+	return req, nil
+}
+
+func (c *WriteClient) newCSRFRequest(ctx context.Context, path string) (*http.Request, error) {
+	if !strings.HasPrefix(path, "/") || strings.Contains(path, "?") {
+		return nil, fmt.Errorf("invalid Ocean Engine endpoint path")
+	}
+	target := *c.BaseURL
+	target.Path = path
+	target.RawQuery = ""
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, target.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Cookie", c.Session.Cookies)
 	req.Header.Set("Origin", c.BaseURL.Scheme+"://"+c.BaseURL.Host)
 	req.Header.Set("Referer", c.BaseURL.Scheme+"://"+c.BaseURL.Host+"/superior/")
 	req.Header.Set("User-Agent", c.UserAgent)

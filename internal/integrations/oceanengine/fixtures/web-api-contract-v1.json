@@ -57,6 +57,15 @@
     "raw_har_committed": false,
     "request_shape_fixture": "web-api-request-shapes-v1.json"
   },
+  "direct_http_probe": {
+    "date": "2026-08-31",
+    "optional_fields": "omitted",
+    "post_sent": false,
+    "head_http_status": 200,
+    "token_header_present": false,
+    "exact_name_reconciliation_count": 0,
+    "result": "csrf_preflight_failed"
+  },
   "redaction": {
     "account": "<ACCOUNT_ID>",
     "cookie": "<COOKIE>",
@@ -65,7 +74,7 @@
     "object_name": "<OBJECT_NAME>"
   },
   "enablement_blockers": [
-    "write_without_optional_fields_not_tested",
+    "connector_http_csrf_token_not_issued",
     "response_bodies_not_exported",
     "query_reconciliation_not_captured"
   ]
