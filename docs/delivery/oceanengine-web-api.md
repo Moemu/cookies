@@ -100,6 +100,19 @@ It sends the field only with an executing, explicitly enabled downgrade probe.
 The production adapter leaves this option empty. No new write is authorized by
 this research or by the existence of the option.
 
+The operator approved one `x-sessionid` isolation write. The Client sent one
+POST with a new UUID v4 and without `_signature`. The response again had HTTP
+200 and business code `50100`. Reconciliation found no project. This proves
+that `x-sessionid` alone does not change the rejection. Do not retry it.
+
+The probe can now generate `_signature` without a platform request. It loads
+the published source map from one fixed asset URL. It requires the exact
+`@byted/acrawler@1.6.8` runtime SHA-256 before execution. A source change stops
+the probe. The runtime executes in Node.js with the exact URL and JSON body.
+Only signature presence and length enter the result. The first read-only check
+generated a 31-character signature. The signature value was not printed or
+stored. The next write must add `_signature` only and requires new approval.
+
 ## Release gates
 
 `COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ENABLED` defaults to `false`.

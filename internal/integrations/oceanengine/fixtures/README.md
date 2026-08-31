@@ -31,6 +31,11 @@ The create-page bundle initializes `window.sessionId` with a random UUID v4.
 Captured project and promotion requests used different UUID values. The
 fixture records only their value class. It does not store either value.
 
+One approved session-ID isolation POST still returned business code `50100`.
+The probe then generated a 31-character `_signature` without a platform write.
+It verified the published acrawler runtime with a fixed SHA-256 first. The
+fixture does not store the signature.
+
 Fixture rules:
 
 - Platform identifiers are intentionally opaque strings, including values larger than JavaScript's safe integer range.

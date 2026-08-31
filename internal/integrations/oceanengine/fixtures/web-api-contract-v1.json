@@ -98,6 +98,27 @@
     "exact_name_reconciliation_count": 0,
     "result": "deterministic_rejection"
   },
+  "session_id_direct_http_probe": {
+    "date": "2026-08-31",
+    "post_count": 1,
+    "optional_fields": "x-sessionid_only",
+    "session_id_value_class": "uuid_v4",
+    "http_status": 200,
+    "business_code": 50100,
+    "business_code_name": "INTERNAL_SERVICE_ERROR",
+    "exact_name_reconciliation_count": 0,
+    "result": "deterministic_rejection"
+  },
+  "signature_probe_preparation": {
+    "date": "2026-08-31",
+    "platform_request_sent": false,
+    "runtime_package": "@byted/acrawler@1.6.8",
+    "runtime_sha256": "f6cb1579cf756e234b20f4f38c59568a1e594c847d9c4102d2ba448da45014e3",
+    "signature_present": true,
+    "signature_length": 31,
+    "signature_value_stored": false,
+    "result": "ready_for_isolated_probe"
+  },
   "redaction": {
     "account": "<ACCOUNT_ID>",
     "cookie": "<COOKIE>",
@@ -106,7 +127,7 @@
     "object_name": "<OBJECT_NAME>"
   },
   "enablement_blockers": [
-    "signature_or_session_field_isolation_pending",
+    "signature_field_isolation_pending",
     "response_bodies_not_exported",
     "query_reconciliation_not_captured"
   ]

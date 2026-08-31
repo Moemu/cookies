@@ -73,7 +73,12 @@ type WriteClient struct {
 	// ProbeSessionID carries the browser-generated UUID only for an isolated
 	// field experiment. Production callers leave it empty.
 	ProbeSessionID string
+	// ProbeSigner adds the browser query signature only for an isolated field
+	// experiment. Production callers leave it nil.
+	ProbeSigner RequestSigner
 }
+
+type RequestSigner func(context.Context, *url.URL, []byte) (string, error)
 
 type WriteResponse struct {
 	StatusCode int
@@ -118,6 +123,7 @@ func (c *WriteClient) Close() {
 	c.Session.Cookies = ""
 	c.Session.CSRFToken = ""
 	c.ProbeSessionID = ""
+	c.ProbeSigner = nil
 }
 
 // SubmitJSON sends one protected POST. It never retries the write.
@@ -136,6 +142,16 @@ func (c *WriteClient) SubmitJSON(ctx context.Context, path string, payload any) 
 	req, err := c.newRequest(ctx, http.MethodPost, path, bytes.NewReader(body))
 	if err != nil {
 		return WriteResponse{}, err
+	}
+	if c.ProbeSigner != nil {
+		targetCopy := *req.URL
+		signature, signErr := c.ProbeSigner(ctx, &targetCopy, append([]byte(nil), body...))
+		if signErr != nil || strings.TrimSpace(signature) == "" || len(signature) > 256 {
+			return WriteResponse{}, fmt.Errorf("create Ocean Engine request signature")
+		}
+		query := req.URL.Query()
+		query.Set("_signature", signature)
+		req.URL.RawQuery = query.Encode()
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-secsdk-csrf-token", token)

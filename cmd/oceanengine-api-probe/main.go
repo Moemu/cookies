@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -11,9 +12,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"time"
@@ -25,7 +28,13 @@ import (
 	"github.com/shikanon/cookies/internal/systems/insights"
 )
 
-const executeConfirmation = "CREATE_PROJECT_ONCE"
+const (
+	executeConfirmation     = "CREATE_PROJECT_ONCE"
+	acrawlerSourceMapURL    = "https://lf3-ad-platform.byteadverts.com/obj/ad-platform/platform/superior/assets/js/7834.07ab154d.js.map"
+	acrawlerRuntimeSuffix   = "@byted/acrawler/dist/runtime.js"
+	acrawlerRuntimeSHA256   = "f6cb1579cf756e234b20f4f38c59568a1e594c847d9c4102d2ba448da45014e3"
+	acrawlerSourceMapMaxLen = 16 << 20
+)
 
 type harDocument struct {
 	Log struct {
@@ -79,34 +88,38 @@ type probeSummary struct {
 	ResponseIDFound  bool     `json:"response_id_found,omitempty"`
 	QueryIDFound     bool     `json:"query_id_found,omitempty"`
 	ResponseIDsMatch bool     `json:"response_ids_match,omitempty"`
+	SignaturePresent bool     `json:"signature_present,omitempty"`
+	SignatureLength  int      `json:"signature_length,omitempty"`
 	Result           string   `json:"result"`
 }
 
 func main() {
 	var harPath, accountDigest, confirmation, reconcileDigest string
-	var execute, csrfOnly, cookieSchema, allowSDKDowngrade, withSessionID bool
+	var execute, csrfOnly, cookieSchema, signatureCheck, allowSDKDowngrade, withSessionID, withSignature bool
 	flag.StringVar(&harPath, "har", "", "path to the local HAR capture")
 	flag.StringVar(&accountDigest, "account-sha256", "", "SHA-256 of the selected external account ID")
 	flag.BoolVar(&execute, "execute", false, "send one project-create POST")
 	flag.BoolVar(&csrfOnly, "csrf-only", false, "perform only the protected-path HEAD token request")
 	flag.BoolVar(&cookieSchema, "cookie-schema", false, "compare Connector and captured Cookie names without values")
+	flag.BoolVar(&signatureCheck, "signature-check", false, "generate signature metadata without a platform request")
 	flag.BoolVar(&allowSDKDowngrade, "allow-sdk-downgrade", false, "allow the observed Secsdk fallback for this one probe")
 	flag.BoolVar(&withSessionID, "with-session-id", false, "add only a new browser-style UUID session ID to this one probe")
+	flag.BoolVar(&withSignature, "with-signature", false, "add only a pinned acrawler signature to this one probe")
 	flag.StringVar(&reconcileDigest, "reconcile-name-sha256", "", "query only and match an exact object-name digest")
 	flag.StringVar(&confirmation, "confirm", "", "must equal "+executeConfirmation+" when execute is set")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	if err := run(ctx, harPath, accountDigest, execute, csrfOnly, cookieSchema, allowSDKDowngrade, withSessionID, reconcileDigest, confirmation); err != nil {
+	if err := run(ctx, harPath, accountDigest, execute, csrfOnly, cookieSchema, signatureCheck, allowSDKDowngrade, withSessionID, withSignature, reconcileDigest, confirmation); err != nil {
 		fmt.Fprintln(os.Stderr, "probe failed:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, cookieSchema, allowSDKDowngrade, withSessionID bool, reconcileDigest, confirmation string) error {
+func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, cookieSchema, signatureCheck, allowSDKDowngrade, withSessionID, withSignature bool, reconcileDigest, confirmation string) error {
 	modeCount := 0
-	for _, selected := range []bool{execute, csrfOnly, cookieSchema, reconcileDigest != ""} {
+	for _, selected := range []bool{execute, csrfOnly, cookieSchema, signatureCheck, reconcileDigest != ""} {
 		if selected {
 			modeCount++
 		}
@@ -134,7 +147,7 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 		summary.NameSHA256 = digestString(name)
 		summary.PayloadSHA256 = digestBytes(encoded)
 	}
-	if !execute && !csrfOnly && !cookieSchema && reconcileDigest == "" {
+	if !execute && !csrfOnly && !cookieSchema && !signatureCheck && reconcileDigest == "" {
 		summary.Mode = "dry_run"
 		return writeSummary(summary)
 	}
@@ -146,6 +159,31 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 	}
 	if withSessionID && (!execute || !allowSDKDowngrade) {
 		return fmt.Errorf("session ID isolation requires an executing SDK downgrade probe")
+	}
+	if withSignature && (!execute || !allowSDKDowngrade || withSessionID) {
+		return fmt.Errorf("signature isolation requires an executing SDK downgrade probe without a session ID")
+	}
+	if signatureCheck {
+		target, targetErr := capturedProjectTarget(harPath, accountDigest)
+		if targetErr != nil {
+			return targetErr
+		}
+		body, encodeErr := json.Marshal(payload)
+		if encodeErr != nil {
+			return fmt.Errorf("encode signature-check payload")
+		}
+		signer := newACrawlerProbeSigner(&http.Client{Timeout: 20 * time.Second})
+		signature, signErr := signer(ctx, target, body)
+		clear(body)
+		if signErr != nil {
+			return signErr
+		}
+		summary.Mode = "signature_check"
+		summary.OptionalFields = "_signature_only"
+		summary.SignaturePresent = signature != ""
+		summary.SignatureLength = len(signature)
+		summary.Result = "generated"
+		return writeSummary(summary)
 	}
 
 	cfg, err := config.Load()
@@ -209,6 +247,10 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 			return err
 		}
 		summary.OptionalFields = "x-sessionid_only"
+	}
+	if withSignature {
+		writer.ProbeSigner = newACrawlerProbeSigner(&http.Client{Timeout: 20 * time.Second})
+		summary.OptionalFields = "_signature_only"
 	}
 	reader, err := oceanengine.NewClient(cfg.OceanEngine.BaseURL, binding.externalID, oceanengine.Session{Cookies: string(plaintext)}, httpClient)
 	if err != nil {
@@ -290,6 +332,112 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 		return fmt.Errorf("platform rejected the write with business code %d", summary.BusinessCode)
 	}
 	return nil
+}
+
+func capturedProjectTarget(harPath, accountDigest string) (*url.URL, error) {
+	data, err := os.ReadFile(harPath)
+	if err != nil {
+		return nil, fmt.Errorf("read HAR: %w", err)
+	}
+	var document harDocument
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, fmt.Errorf("decode HAR: %w", err)
+	}
+	for _, entry := range document.Log.Entries {
+		target, parseErr := url.Parse(entry.Request.URL)
+		if parseErr != nil || entry.Request.Method != http.MethodPost || target.Host != "ad.oceanengine.com" || target.Path != oceanengine.ProjectCreatePath {
+			continue
+		}
+		account := target.Query().Get("aadvid")
+		if account == "" || digestString(account) != strings.ToLower(accountDigest) {
+			return nil, fmt.Errorf("captured account does not match the approved digest")
+		}
+		query := target.Query()
+		query.Del("_signature")
+		target.RawQuery = query.Encode()
+		target.Fragment = ""
+		return target, nil
+	}
+	return nil, fmt.Errorf("captured project-create target is absent")
+}
+
+func newACrawlerProbeSigner(client *http.Client) oceanengine.RequestSigner {
+	return func(ctx context.Context, target *url.URL, body []byte) (string, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, acrawlerSourceMapURL, nil)
+		if err != nil {
+			return "", err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("download pinned acrawler source map")
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("download pinned acrawler source map: HTTP %d", resp.StatusCode)
+		}
+		encodedMap, err := io.ReadAll(io.LimitReader(resp.Body, acrawlerSourceMapMaxLen+1))
+		if err != nil || len(encodedMap) > acrawlerSourceMapMaxLen {
+			return "", fmt.Errorf("read pinned acrawler source map")
+		}
+		runtime, err := extractPinnedRuntime(encodedMap, acrawlerRuntimeSuffix, acrawlerRuntimeSHA256)
+		if err != nil {
+			return "", err
+		}
+		return runNodeSigner(ctx, runtime, target.String(), body)
+	}
+}
+
+func extractPinnedRuntime(encodedMap []byte, sourceSuffix, expectedHash string) ([]byte, error) {
+	var sourceMap struct {
+		Sources        []string `json:"sources"`
+		SourcesContent []string `json:"sourcesContent"`
+	}
+	if err := json.Unmarshal(encodedMap, &sourceMap); err != nil || len(sourceMap.Sources) != len(sourceMap.SourcesContent) {
+		return nil, fmt.Errorf("decode pinned acrawler source map")
+	}
+	for index, name := range sourceMap.Sources {
+		if strings.HasSuffix(strings.ReplaceAll(name, "+", "/"), sourceSuffix) {
+			runtime := []byte(sourceMap.SourcesContent[index])
+			if digestBytes(runtime) != expectedHash {
+				return nil, fmt.Errorf("pinned acrawler runtime hash changed")
+			}
+			return runtime, nil
+		}
+	}
+	return nil, fmt.Errorf("pinned acrawler runtime is absent")
+}
+
+func runNodeSigner(ctx context.Context, runtime []byte, target string, body []byte) (string, error) {
+	if _, err := exec.LookPath("node"); err != nil {
+		return "", fmt.Errorf("Node.js is required for the isolated signature probe")
+	}
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", fmt.Errorf("decode signature body")
+	}
+	input, err := json.Marshal(map[string]any{
+		"runtime": string(runtime),
+		"nonce":   map[string]any{"url": target, "body": payload, "bodyVal2str": false},
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode signature input")
+	}
+	const script = `const fs=require("fs");const input=JSON.parse(fs.readFileSync(0,"utf8"));const holder={};const loaded=new Function("exports",input.runtime+"\n;return exports;")(holder);const value=loaded.sign(input.nonce);process.stdout.write(JSON.stringify({signature:value}));`
+	command := exec.CommandContext(ctx, "node", "-e", script)
+	command.Stdin = bytes.NewReader(input)
+	output, err := command.Output()
+	clear(input)
+	if err != nil {
+		return "", fmt.Errorf("execute pinned acrawler runtime")
+	}
+	var result struct {
+		Signature string `json:"signature"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil || strings.TrimSpace(result.Signature) == "" {
+		return "", fmt.Errorf("decode acrawler signature")
+	}
+	clear(output)
+	return result.Signature, nil
 }
 
 func newUUIDv4() (string, error) {

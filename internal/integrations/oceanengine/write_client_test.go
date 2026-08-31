@@ -1,11 +1,13 @@
 package oceanengine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -143,6 +145,64 @@ func TestWriteClientAddsProbeSessionIDOnlyWhenConfigured(t *testing.T) {
 	client.Close()
 	if client.ProbeSessionID != "" {
 		t.Fatal("probe session ID was not cleared")
+	}
+}
+
+func TestWriteClientAddsProbeSignatureWithoutLoggingItsValue(t *testing.T) {
+	const signature = "sensitive-signature"
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+		case http.MethodPost:
+			if got := r.URL.Query().Get("_signature"); got != signature {
+				t.Errorf("signature mismatch")
+			}
+			_, _ = w.Write([]byte(`{"code":0}`))
+		}
+	}))
+	defer server.Close()
+	client, err := NewWriteClient(server.URL, "10001", 1, Session{Cookies: "session=secret"}, server.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.AllowSDKDowngrade = true
+	client.ProbeSigner = func(_ context.Context, target *url.URL, body []byte) (string, error) {
+		if target.Query().Get("aadvid") != "10001" || !bytes.Contains(body, []byte(`"name":"redacted"`)) {
+			t.Fatal("signer did not receive the exact URL and body")
+		}
+		return signature, nil
+	}
+	if _, err = client.SubmitJSON(context.Background(), ProjectCreatePath, map[string]any{"name": "redacted"}); err != nil {
+		t.Fatal(err)
+	}
+	client.Close()
+	if client.ProbeSigner != nil {
+		t.Fatal("probe signer was not cleared")
+	}
+}
+
+func TestWriteClientStopsBeforePostWhenProbeSignerFails(t *testing.T) {
+	var posts atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			posts.Add(1)
+		}
+	}))
+	defer server.Close()
+	client, err := NewWriteClient(server.URL, "10001", 1, Session{Cookies: "session=secret"}, server.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.AllowSDKDowngrade = true
+	client.ProbeSigner = func(context.Context, *url.URL, []byte) (string, error) {
+		return "", errors.New("sensitive signer detail")
+	}
+	_, err = client.SubmitJSON(context.Background(), ProjectCreatePath, map[string]any{"name": "redacted"})
+	if err == nil || strings.Contains(err.Error(), "sensitive") {
+		t.Fatalf("unsafe signer error=%v", err)
+	}
+	if posts.Load() != 0 {
+		t.Fatalf("posts=%d", posts.Load())
 	}
 }
 
