@@ -181,6 +181,65 @@ func TestWriteClientAddsProbeSignatureWithoutLoggingItsValue(t *testing.T) {
 	}
 }
 
+func TestWriteClientAddsBrowserHeadersOnlyWhenConfigured(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+		case http.MethodPost:
+			for _, name := range []string{"Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Ch-Ua", "Priority"} {
+				if r.Header.Get(name) == "" {
+					t.Errorf("missing browser header %s", name)
+				}
+			}
+			if got := r.Header.Get("User-Agent"); !strings.Contains(got, "Edg/153") {
+				t.Errorf("user agent override=%q", got)
+			}
+			if got := r.Header.Get("Referer"); !strings.Contains(got, "create-project?aadvid=10001") {
+				t.Errorf("referer override=%q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0}`))
+		}
+	}))
+	defer server.Close()
+	client, err := NewWriteClient(server.URL, "10001", 1, Session{Cookies: "session=secret"}, server.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.AllowSDKDowngrade = true
+	client.ProbeBrowserHeaders = true
+	client.ProbeUserAgent = browserUserAgent
+	client.ProbeReferer = server.URL + "/superior/create-project?aadvid=10001&fromPage=newProject"
+	if _, err = client.SubmitJSON(context.Background(), ProjectCreatePath, map[string]any{"name": "redacted"}); err != nil {
+		t.Fatal(err)
+	}
+	client.Close()
+	if client.ProbeBrowserHeaders || client.ProbeReferer != "" || client.ProbeUserAgent != "" {
+		t.Fatal("browser header probe fields were not cleared")
+	}
+}
+
+func TestWriteClientOmitsBrowserHeadersByDefault(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+		case http.MethodPost:
+			if r.Header.Get("Sec-Fetch-Site") != "" || r.Header.Get("Priority") != "" {
+				t.Fatal("browser headers leaked into the default client")
+			}
+			_, _ = w.Write([]byte(`{"code":0}`))
+		}
+	}))
+	defer server.Close()
+	client, err := NewWriteClient(server.URL, "10001", 1, Session{Cookies: "session=secret"}, server.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.AllowSDKDowngrade = true
+	if _, err = client.SubmitJSON(context.Background(), ProjectCreatePath, map[string]any{"name": "redacted"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWriteClientStopsBeforePostWhenProbeSignerFails(t *testing.T) {
 	var posts atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

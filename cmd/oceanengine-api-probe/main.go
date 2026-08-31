@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,9 @@ const (
 	acrawlerRuntimeSuffix   = "@byted/acrawler/dist/runtime.js"
 	acrawlerRuntimeSHA256   = "f6cb1579cf756e234b20f4f38c59568a1e594c847d9c4102d2ba448da45014e3"
 	acrawlerSourceMapMaxLen = 16 << 20
+	// browserParityUserAgent is the captured Edge user agent from the
+	// sanitized 2026-08-31 HAR. It is probe-only.
+	browserParityUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0"
 )
 
 type harDocument struct {
@@ -95,31 +99,34 @@ type probeSummary struct {
 
 func main() {
 	var harPath, accountDigest, confirmation, reconcileDigest string
-	var execute, csrfOnly, cookieSchema, signatureCheck, allowSDKDowngrade, withSessionID, withSignature bool
+	var execute, csrfOnly, cookieSchema, signatureCheck, checkName, allowSDKDowngrade, withSessionID, withSignature, withInvalidSignature, withBrowserHeaders bool
 	flag.StringVar(&harPath, "har", "", "path to the local HAR capture")
 	flag.StringVar(&accountDigest, "account-sha256", "", "SHA-256 of the selected external account ID")
 	flag.BoolVar(&execute, "execute", false, "send one project-create POST")
 	flag.BoolVar(&csrfOnly, "csrf-only", false, "perform only the protected-path HEAD token request")
 	flag.BoolVar(&cookieSchema, "cookie-schema", false, "compare Connector and captured Cookie names without values")
 	flag.BoolVar(&signatureCheck, "signature-check", false, "generate signature metadata without a platform request")
+	flag.BoolVar(&checkName, "check-name", false, "run only the read-only project-name availability query")
 	flag.BoolVar(&allowSDKDowngrade, "allow-sdk-downgrade", false, "allow the observed Secsdk fallback for this one probe")
 	flag.BoolVar(&withSessionID, "with-session-id", false, "add only a new browser-style UUID session ID to this one probe")
 	flag.BoolVar(&withSignature, "with-signature", false, "add only a pinned acrawler signature to this one probe")
+	flag.BoolVar(&withInvalidSignature, "with-invalid-signature", false, "add one fixed malformed signature to this one probe")
+	flag.BoolVar(&withBrowserHeaders, "with-browser-headers", false, "add the captured browser header surface to this one probe")
 	flag.StringVar(&reconcileDigest, "reconcile-name-sha256", "", "query only and match an exact object-name digest")
 	flag.StringVar(&confirmation, "confirm", "", "must equal "+executeConfirmation+" when execute is set")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	if err := run(ctx, harPath, accountDigest, execute, csrfOnly, cookieSchema, signatureCheck, allowSDKDowngrade, withSessionID, withSignature, reconcileDigest, confirmation); err != nil {
+	if err := run(ctx, harPath, accountDigest, execute, csrfOnly, cookieSchema, signatureCheck, checkName, allowSDKDowngrade, withSessionID, withSignature, withInvalidSignature, withBrowserHeaders, reconcileDigest, confirmation); err != nil {
 		fmt.Fprintln(os.Stderr, "probe failed:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, cookieSchema, signatureCheck, allowSDKDowngrade, withSessionID, withSignature bool, reconcileDigest, confirmation string) error {
+func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, cookieSchema, signatureCheck, checkName, allowSDKDowngrade, withSessionID, withSignature, withInvalidSignature, withBrowserHeaders bool, reconcileDigest, confirmation string) error {
 	modeCount := 0
-	for _, selected := range []bool{execute, csrfOnly, cookieSchema, signatureCheck, reconcileDigest != ""} {
+	for _, selected := range []bool{execute, csrfOnly, cookieSchema, signatureCheck, checkName, reconcileDigest != ""} {
 		if selected {
 			modeCount++
 		}
@@ -147,7 +154,7 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 		summary.NameSHA256 = digestString(name)
 		summary.PayloadSHA256 = digestBytes(encoded)
 	}
-	if !execute && !csrfOnly && !cookieSchema && !signatureCheck && reconcileDigest == "" {
+	if !execute && !csrfOnly && !cookieSchema && !signatureCheck && !checkName && reconcileDigest == "" {
 		summary.Mode = "dry_run"
 		return writeSummary(summary)
 	}
@@ -157,11 +164,21 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 	if allowSDKDowngrade && !execute {
 		return fmt.Errorf("SDK downgrade is valid only for an executing controlled probe")
 	}
+	signaturePresent := withSignature || withInvalidSignature
+	if withSignature && withInvalidSignature {
+		return fmt.Errorf("choose either the pinned signature or the malformed signature probe")
+	}
 	if withSessionID && (!execute || !allowSDKDowngrade) {
 		return fmt.Errorf("session ID isolation requires an executing SDK downgrade probe")
 	}
-	if withSignature && (!execute || !allowSDKDowngrade || withSessionID) {
+	if withSignature && (!execute || !allowSDKDowngrade || (withSessionID && !withBrowserHeaders)) {
 		return fmt.Errorf("signature isolation requires an executing SDK downgrade probe without a session ID")
+	}
+	if withInvalidSignature && (!execute || !allowSDKDowngrade) {
+		return fmt.Errorf("the malformed signature probe requires an executing SDK downgrade probe")
+	}
+	if withBrowserHeaders && (!execute || !allowSDKDowngrade || !signaturePresent || !withSessionID) {
+		return fmt.Errorf("browser header parity requires an executing signature probe with a session ID")
 	}
 	if signatureCheck {
 		target, targetErr := capturedProjectTarget(harPath, accountDigest)
@@ -252,6 +269,24 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 		writer.ProbeSigner = newACrawlerProbeSigner(&http.Client{Timeout: 20 * time.Second})
 		summary.OptionalFields = "_signature_only"
 	}
+	if withInvalidSignature {
+		writer.ProbeSigner = func(context.Context, *url.URL, []byte) (string, error) {
+			return "AAAAinvalidAAAAinvalidAAAAinvalidA", nil
+		}
+		summary.OptionalFields = "invalid_signature_only"
+	}
+	if withBrowserHeaders {
+		cascadeID, uuidErr := newUUIDv4()
+		if uuidErr != nil {
+			return uuidErr
+		}
+		writer.ProbeBrowserHeaders = true
+		writer.ProbeUserAgent = browserParityUserAgent
+		writer.ProbeReferer = fmt.Sprintf(
+			"%s/superior/create-project?aadvid=%s&is_create=1&campaign_type=1&search_pkg=false&fromPage=newProject&cascade_id=%s",
+			strings.TrimRight(cfg.OceanEngine.BaseURL, "/"), binding.externalID, cascadeID)
+		summary.OptionalFields = "browser_headers_full_parity"
+	}
 	reader, err := oceanengine.NewClient(cfg.OceanEngine.BaseURL, binding.externalID, oceanengine.Session{Cookies: string(plaintext)}, httpClient)
 	if err != nil {
 		return err
@@ -297,8 +332,33 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 		}
 		return writeSummary(summary)
 	}
+	if checkName {
+		summary.Mode = "check_name_only"
+		summary.NameSHA256 = digestString(name)
+		check, checkErr := reader.CheckProjectName(ctx, name)
+		if checkErr != nil {
+			summary.ErrorKind = errorKind(checkErr)
+			summary.Result = "query_failed"
+			return writeSummary(summary)
+		}
+		summary.BusinessCode = businessCode(check)
+		if summary.BusinessCode == 0 {
+			summary.Result = "available"
+		} else {
+			summary.Result = "platform_rejected"
+		}
+		return writeSummary(summary)
+	}
 
-	response, writeErr := writer.SubmitJSON(ctx, oceanengine.ProjectCreatePath, payload)
+	response, writeErr := func() (oceanengine.WriteResponse, error) {
+		// The browser queries name availability for the exact name immediately
+		// before it creates the project. Mirror that read-only step so the
+		// experiment also tests any server-side precheck state.
+		if _, checkErr := reader.CheckProjectName(ctx, name); checkErr != nil {
+			return oceanengine.WriteResponse{}, fmt.Errorf("pre-create name check: %w", checkErr)
+		}
+		return writer.SubmitJSON(ctx, oceanengine.ProjectCreatePath, payload)
+	}()
 	summary.Mode = "execute"
 	summary.HTTPStatus = response.StatusCode
 	responseObject := decodeObject(response.Body)
@@ -307,15 +367,37 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 	responseID := findNumericID(responseObject)
 	summary.ResponseIDFound = responseID != ""
 
-	query, queryErr := reader.ListPage(ctx, oceanengine.ListRequest{
-		Start: "2026-09-01", End: "2026-09-02", Page: 1, Limit: 100,
-	})
-	matches := exactNameObjects(query, name)
-	summary.ExactMatchCount = len(matches)
+	// The browser confirms a create with a by-ID project read. The aggregate
+	// project/promotion list omits projects that have no promotions yet, so it
+	// is only the fallback reconciliation source.
+	matches := []map[string]any{}
+	var queryErr error
 	queryID := ""
-	if len(matches) == 1 {
-		queryID = findNumericID(matches[0])
+	if responseID != "" {
+		detail, detailErr := reader.GetProjects(ctx, responseID)
+		if detailErr != nil {
+			queryErr = detailErr
+		} else {
+			matches = exactNameObjects(detail, name)
+			if len(matches) == 1 {
+				queryID = findNumericID(matches[0])
+			}
+		}
 	}
+	if len(matches) == 0 && queryErr == nil {
+		query, listErr := reader.ListPage(ctx, oceanengine.ListRequest{
+			Start: "2026-09-01", End: "2026-09-02", Page: 1, Limit: 100,
+		})
+		if listErr != nil {
+			queryErr = listErr
+		} else {
+			matches = exactNameObjects(query, name)
+			if len(matches) == 1 {
+				queryID = findNumericID(matches[0])
+			}
+		}
+	}
+	summary.ExactMatchCount = len(matches)
 	summary.QueryIDFound = queryID != ""
 	summary.ResponseIDsMatch = responseID != "" && queryID != "" && responseID == queryID
 	summary.Result = classifyExecutionResult(summary.BusinessCode, writeErr, queryErr, matches, responseID, queryID)
@@ -487,8 +569,12 @@ func projectPayload(path string, now time.Time) (map[string]any, error) {
 		}
 		stamp := now.Format("20060102T150405Z")
 		payload["name"] = "cookies-api-probe-" + stamp + "-project"
-		payload["start_time"] = replaceDate(payload["start_time"], "2026-09-01")
-		payload["end_time"] = replaceDate(payload["end_time"], "2026-09-02")
+		// Both captures send the schedule as epoch-second strings in UTC+8:
+		// start at midnight of the first day, end at 23:59:59 of the last day.
+		// A literal "2026-09-01" string is a contract violation.
+		scheduleZone := time.FixedZone("UTC8", 8*60*60)
+		payload["start_time"] = strconv.FormatInt(time.Date(2026, 9, 1, 0, 0, 0, 0, scheduleZone).Unix(), 10)
+		payload["end_time"] = strconv.FormatInt(time.Date(2026, 9, 2, 23, 59, 59, 0, scheduleZone).Unix(), 10)
 		return payload, nil
 	}
 	return nil, fmt.Errorf("captured project-create request was not found")
@@ -566,14 +652,6 @@ func findAccount(ctx context.Context, repository connector.MySQLRepository, dige
 		return accountBinding{}, fmt.Errorf("selected Edge account has no ready Connector session")
 	}
 	return *match, nil
-}
-
-func replaceDate(value any, date string) string {
-	original, _ := value.(string)
-	if len(original) >= 10 && original[4] == '-' && original[7] == '-' {
-		return date + original[10:]
-	}
-	return date
 }
 
 func decodeObject(data json.RawMessage) map[string]any {

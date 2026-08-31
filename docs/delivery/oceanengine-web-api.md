@@ -126,21 +126,55 @@ response had HTTP 200 and business code `50100`. Reconciliation found no
 project. The corrected query signature does not lift the rejection. Do not
 retry this write.
 
-The remaining blocker is not the query signature alone. The browser request
-still differs from the probe in ways the contract has not captured, such as
-device or request binding. Further signature-only POSTs have no value. Keep
-the probe read-only unless the operator approves a new isolation hypothesis.
+Every rejection above shared one hidden defect. The probe payload replaced the
+captured epoch schedule values with literal `"2026-09-01"` strings. Both
+captures prove that the platform sends `start_time` and `end_time` as
+UTC+8 epoch-second strings, for example `1788192000`. The literal date strings
+are a schedule contract violation, and the platform answers them with business
+code `50100` before any deeper validation. The signature and the header
+surface were never the blocker. The malformed-signature probe produced the
+same code for the same reason.
+
+The platform bundle source confirms the interceptor contract. It sets
+`X-CSRFToken` from the `csrftoken` Cookie, sets `X-SessionId` from
+`window.sessionId`, calls `sign({url, body})`, and appends `aadvid` last. For
+JSON POSTs the nonce body is `JSON.parse(config.data)` when `config.data` is a
+string; an object argument fails that parse, so the nonce body stays `{}`.
+The sign path reads exactly one `new Date()` at module load and the browser
+user agent, with no randomness. The captured `_signature` values prove that
+query parameters are absent from the nonce URL. The runtime strips scheme and
+host itself, so absolute and path inputs sign the same. Instrumented sampling
+maps the output to a bit-packed structure with time, user agent, and URL
+fields.
+
+The operator then ran the corrected experiment. The probe sent one POST with
+the epoch schedule contract, full captured browser header parity, a fresh
+`x-sessionid`, the corrected signature, and the observed `DOWNGRADE` CSRF
+fallback. The platform returned HTTP 200 with code `0` and a positive numeric
+`project_id` in the response. The operator confirmed the created project
+`cookies-api-probe-<UTC>-project` in the account with the exact name digest,
+matching schedule, and status active. This is the first confirmed Web API
+write. One POST created one object.
+
+Reconciliation needs the by-ID read. `POST /superior/api/v2/project/list`
+returns a project and promotion aggregate view that omits projects without
+promotions, and its rows name fields `project_name` and `promotion_name`. The
+browser confirms a create with `GET /superior/api/project?project_ids=<id>`,
+which returns the full project rows. The probe now uses the same order:
+response ID first, by-ID read second, aggregate list last.
 
 ## Release gates
 
 `COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ENABLED` defaults to `false`.
 `COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ACCOUNT_ALLOWLIST` must also contain the
 exact external account ID. The current adapter blocks Submit before it consumes
-the one-time confirmation token because response and reconciliation contracts
-are not captured.
+the one-time confirmation token because the promotion contract and the full
+response capture are not yet wired into the production driver.
 
-The 2026-08-31 probe used a dedicated test account, future dates, and the
-minimum controlled budget. The operator deleted both objects after capture.
-Continue controlled research on the two optional browser fields. Keep Prepare
-and read-only research available. Production writes must not use `DOWNGRADE`
-unless the product policy changes explicitly.
+The 2026-08-31 probes used a dedicated test account, future dates, and the
+minimum controlled budget. The operator deletes the created objects after each
+session. The confirmed create contract covers the project create path only.
+The promotion create path, the mapping write flow, and the production driver
+wiring remain blocked until their contracts are captured and reviewed. Keep
+Prepare and read-only research available. Production writes must not use
+`DOWNGRADE` unless the product policy changes explicitly.

@@ -19,10 +19,11 @@ const (
 	SecSDKVersion  = "1.2.22"
 	writeUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0"
 
-	ProjectCreatePath   = "/superior/api/v2/project/create"
-	ProjectListPath     = "/superior/api/v2/project/list"
-	PromotionCreatePath = "/superior/api/v2/promotion/create_promotion"
-	PromotionListPath   = "/superior/api/ad/promotion/list"
+	ProjectCreatePath    = "/superior/api/v2/project/create"
+	ProjectListPath      = "/superior/api/v2/project/list"
+	PromotionCreatePath  = "/superior/api/v2/promotion/create_promotion"
+	PromotionListPath    = "/superior/api/ad/promotion/list"
+	CheckProjectNamePath = "/superior/api/agw/project/check_project_name"
 )
 
 var (
@@ -76,7 +77,25 @@ type WriteClient struct {
 	// ProbeSigner adds the browser query signature only for an isolated field
 	// experiment. Production callers leave it nil.
 	ProbeSigner RequestSigner
+	// ProbeBrowserHeaders adds the captured browser client-hint and fetch-metadata
+	// headers only for an isolated field experiment. Production callers leave it
+	// false.
+	ProbeBrowserHeaders bool
+	// ProbeReferer overrides the Referer with the captured page URL only for an
+	// isolated field experiment. Production callers leave it empty.
+	ProbeReferer string
+	// ProbeUserAgent overrides the fixed User-Agent only for an isolated field
+	// experiment. Production callers leave it empty.
+	ProbeUserAgent string
 }
+
+// Captured browser parity values from the sanitized 2026-08-31 HAR. They name
+// no secret: they are the standard Edge fetch-metadata and client-hint headers.
+const (
+	browserUserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0"
+	browserAcceptLanguage = "zh-CN,zh-TW;q=0.9,zh;q=0.8,en;q=0.7,en-GB;q=0.6,en-US;q=0.5"
+	browserSecCHUA        = `"Microsoft Edge";v="153", "Not_A Brand";v="8", "Chromium";v="153"`
+)
 
 type RequestSigner func(context.Context, *url.URL, []byte) (string, error)
 
@@ -124,6 +143,9 @@ func (c *WriteClient) Close() {
 	c.Session.CSRFToken = ""
 	c.ProbeSessionID = ""
 	c.ProbeSigner = nil
+	c.ProbeBrowserHeaders = false
+	c.ProbeReferer = ""
+	c.ProbeUserAgent = ""
 }
 
 // SubmitJSON sends one protected POST. It never retries the write.
@@ -304,6 +326,24 @@ func (c *WriteClient) newRequest(ctx context.Context, method, path string, body 
 	req.Header.Set("Origin", c.BaseURL.Scheme+"://"+c.BaseURL.Host)
 	req.Header.Set("Referer", c.BaseURL.Scheme+"://"+c.BaseURL.Host+"/superior/")
 	req.Header.Set("User-Agent", c.UserAgent)
+	if c.ProbeBrowserHeaders {
+		req.Header.Set("accept-language", browserAcceptLanguage)
+		req.Header.Set("cache-control", "no-cache")
+		req.Header.Set("pragma", "no-cache")
+		req.Header.Set("priority", "u=1, i")
+		req.Header.Set("sec-ch-ua", browserSecCHUA)
+		req.Header.Set("sec-ch-ua-mobile", "?0")
+		req.Header.Set("sec-ch-ua-platform", `"Windows"`)
+		req.Header.Set("sec-fetch-dest", "empty")
+		req.Header.Set("sec-fetch-mode", "cors")
+		req.Header.Set("sec-fetch-site", "same-origin")
+	}
+	if c.ProbeReferer != "" {
+		req.Header.Set("Referer", c.ProbeReferer)
+	}
+	if c.ProbeUserAgent != "" {
+		req.Header.Set("User-Agent", c.ProbeUserAgent)
+	}
 	return req, nil
 }
 

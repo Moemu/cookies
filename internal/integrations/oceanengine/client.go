@@ -80,6 +80,8 @@ var readOnlyEndpoints = map[Endpoint]struct{}{
 	{http.MethodGet, "/nbs/api/ads/brand/yuntu/query_brand_industry"}:       {},
 	{http.MethodGet, "/superior/api/v2/agw/ad/brand"}:                       {},
 	{http.MethodPost, "/superior/api/v2/ad/authorize/list"}:                 {},
+	{http.MethodGet, CheckProjectNamePath}:                                  {},
+	{http.MethodGet, "/superior/api/project"}:                               {},
 }
 
 type Session struct {
@@ -200,6 +202,25 @@ func cookieValue(header, name string) string {
 		}
 	}
 	return ""
+}
+
+// CheckProjectName runs the read-only project-name availability query the
+// browser sends before a create. It is part of the read-only calibration
+// surface only.
+func (c *Client) CheckProjectName(ctx context.Context, projectName string) (map[string]any, error) {
+	query := url.Values{}
+	query.Set("projectName", projectName)
+	return c.do(ctx, http.MethodGet, CheckProjectNamePath+"?"+query.Encode(), nil, "")
+}
+
+// GetProjects reads project rows by platform ID. This is the same read the
+// browser issues after a create; the aggregate project/promotion list omits
+// projects that have no promotions yet.
+func (c *Client) GetProjects(ctx context.Context, projectIDs ...string) (map[string]any, error) {
+	query := url.Values{}
+	query.Set("project_ids", strings.Join(projectIDs, ","))
+	query.Set("need_raw_campaign", "true")
+	return c.do(ctx, http.MethodGet, "/superior/api/project?"+query.Encode(), nil, "")
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader, contentType string) (map[string]any, error) {

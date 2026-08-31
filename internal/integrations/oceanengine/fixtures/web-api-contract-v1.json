@@ -142,6 +142,56 @@
     "exact_name_reconciliation_count": 0,
     "result": "deterministic_rejection"
   },
+  "browser_header_parity_probe": {
+    "date": "2026-08-31",
+    "post_count": 1,
+    "optional_fields": "corrected_signature_plus_session_id_plus_captured_browser_headers",
+    "header_parity": "sec_fetch_and_client_hints_and_page_referer_and_edge_153_user_agent",
+    "precheck_query_sent": true,
+    "http_status": 200,
+    "business_code": 50100,
+    "exact_name_reconciliation_count": 0,
+    "result": "deterministic_rejection",
+    "root_cause_found_later": "probe_payload_sent_literal_date_strings_instead_of_epoch_seconds"
+  },
+  "invalid_signature_discriminator_probe": {
+    "date": "2026-08-31",
+    "post_count": 1,
+    "optional_fields": "malformed_signature_plus_parity_headers",
+    "signature_value": "fixed_31_char_malformed",
+    "http_status": 200,
+    "business_code": 50100,
+    "exact_name_reconciliation_count": 0,
+    "result": "deterministic_rejection",
+    "root_cause_found_later": "same_payload_defect_poisoned_this_experiment"
+  },
+  "read_path_discrimination": {
+    "date": "2026-08-31",
+    "get_endpoint": "/superior/api/agw/project/check_project_name",
+    "transport": "go_http_client_with_connector_cookies",
+    "business_code": 0,
+    "result": "read_path_accepted"
+  },
+  "confirmed_project_create_write": {
+    "date": "2026-09-01",
+    "post_count": 1,
+    "payload_contract": "schedule_as_utc8_epoch_second_strings",
+    "optional_fields": "corrected_signature_plus_session_id_plus_captured_browser_headers",
+    "http_status": 200,
+    "business_code": 0,
+    "response_platform_id_present": true,
+    "operator_confirmed_object": true,
+    "exact_name_digest_match": true,
+    "result": "confirmed_create"
+  },
+  "reconciliation_contract": {
+    "aggregate_list_endpoint": "POST /superior/api/v2/project/list",
+    "aggregate_list_behavior": "project_promotion_join_rows_only",
+    "aggregate_list_name_fields": "project_name_and_promotion_name",
+    "by_id_read_endpoint": "GET /superior/api/project",
+    "by_id_read_params": "project_ids_comma_separated",
+    "create_confirmation_order": "response_id_then_by_id_read_then_aggregate_list"
+  },
   "redaction": {
     "account": "<ACCOUNT_ID>",
     "cookie": "<COOKIE>",
@@ -150,8 +200,8 @@
     "object_name": "<OBJECT_NAME>"
   },
   "enablement_blockers": [
-    "write_rejection_cause_unresolved",
-    "response_bodies_not_exported",
-    "query_reconciliation_not_captured"
+    "promotion_create_contract_uncaptured",
+    "full_create_response_body_not_exported",
+    "write_driver_adapter_not_wired"
   ]
 }

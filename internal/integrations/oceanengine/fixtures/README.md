@@ -36,8 +36,11 @@ The first signature POST signed after `aadvid` was present. The browser signs
 before it adds `aadvid`, so that experiment is invalid. The corrected probe
 generates a 31-character `_signature` without a platform write. It verifies the
 published acrawler runtime with a fixed SHA-256 first. The fixture does not
-store the signature. One approved corrected-signature POST kept business code
-`50100`. The query signature alone does not lift the rejection.
+store the signature. Every `50100` rejection above shared one payload defect:
+the probe replaced the captured epoch schedule strings with literal dates.
+After the probe adopted the epoch contract, one approved POST returned code
+`0` with a platform project ID, and the operator confirmed the object by its
+exact name digest. This is the first confirmed Web API create.
 
 Fixture rules:
 
