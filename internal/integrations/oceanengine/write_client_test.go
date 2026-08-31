@@ -167,7 +167,7 @@ func TestWriteClientAddsProbeSignatureWithoutLoggingItsValue(t *testing.T) {
 	}
 	client.AllowSDKDowngrade = true
 	client.ProbeSigner = func(_ context.Context, target *url.URL, body []byte) (string, error) {
-		if target.Query().Get("aadvid") != "10001" || !bytes.Contains(body, []byte(`"name":"redacted"`)) {
+		if target.Query().Has("aadvid") || target.Path != ProjectCreatePath || !bytes.Contains(body, []byte(`"name":"redacted"`)) {
 			t.Fatal("signer did not receive the exact URL and body")
 		}
 		return signature, nil

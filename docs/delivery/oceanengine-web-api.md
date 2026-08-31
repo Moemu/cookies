@@ -105,13 +105,20 @@ POST with a new UUID v4 and without `_signature`. The response again had HTTP
 200 and business code `50100`. Reconciliation found no project. This proves
 that `x-sessionid` alone does not change the rejection. Do not retry it.
 
-The probe can now generate `_signature` without a platform request. It loads
+The first `_signature` POST exposed a probe-order defect. It signed a URL that
+already contained `aadvid`. The browser signs first and appends `aadvid` next.
+The response had HTTP 200 and business code `50100`, with zero reconciliation
+matches. This experiment is invalid for signature necessity. It does not rule
+out `_signature`. The Client now removes `aadvid` from the signer input.
+
+The probe can generate `_signature` without a platform request. It loads
 the published source map from one fixed asset URL. It requires the exact
 `@byted/acrawler@1.6.8` runtime SHA-256 before execution. A source change stops
 the probe. The runtime executes in Node.js with the exact URL and JSON body.
 Only signature presence and length enter the result. The first read-only check
-generated a 31-character signature. The signature value was not printed or
-stored. The next write must add `_signature` only and requires new approval.
+generated a 31-character signature from the corrected input. The signature
+value was not printed or stored. The next write must add corrected `_signature`
+only and requires new approval.
 
 ## Release gates
 

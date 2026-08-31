@@ -354,6 +354,7 @@ func capturedProjectTarget(harPath, accountDigest string) (*url.URL, error) {
 		}
 		query := target.Query()
 		query.Del("_signature")
+		query.Del("aadvid")
 		target.RawQuery = query.Encode()
 		target.Fragment = ""
 		return target, nil

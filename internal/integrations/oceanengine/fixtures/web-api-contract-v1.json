@@ -119,6 +119,17 @@
     "signature_value_stored": false,
     "result": "ready_for_isolated_probe"
   },
+  "invalid_signature_direct_http_probe": {
+    "date": "2026-08-31",
+    "post_count": 1,
+    "optional_fields": "_signature_only",
+    "signature_input": "incorrectly_included_aadvid",
+    "browser_order": "sign_then_append_aadvid",
+    "http_status": 200,
+    "business_code": 50100,
+    "exact_name_reconciliation_count": 0,
+    "result": "invalid_experiment"
+  },
   "redaction": {
     "account": "<ACCOUNT_ID>",
     "cookie": "<COOKIE>",

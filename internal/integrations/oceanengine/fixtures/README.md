@@ -32,9 +32,11 @@ Captured project and promotion requests used different UUID values. The
 fixture records only their value class. It does not store either value.
 
 One approved session-ID isolation POST still returned business code `50100`.
-The probe then generated a 31-character `_signature` without a platform write.
-It verified the published acrawler runtime with a fixed SHA-256 first. The
-fixture does not store the signature.
+The first signature POST signed after `aadvid` was present. The browser signs
+before it adds `aadvid`, so that experiment is invalid. The corrected probe
+generates a 31-character `_signature` without a platform write. It verifies the
+published acrawler runtime with a fixed SHA-256 first. The fixture does not
+store the signature.
 
 Fixture rules:
 

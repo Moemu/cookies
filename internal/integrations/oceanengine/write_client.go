@@ -145,6 +145,11 @@ func (c *WriteClient) SubmitJSON(ctx context.Context, path string, payload any) 
 	}
 	if c.ProbeSigner != nil {
 		targetCopy := *req.URL
+		// The browser calls addSignature before updateQueryWithAdvid. The signer
+		// therefore receives the protected URL without the advertiser query.
+		signQuery := targetCopy.Query()
+		signQuery.Del("aadvid")
+		targetCopy.RawQuery = signQuery.Encode()
 		signature, signErr := c.ProbeSigner(ctx, &targetCopy, append([]byte(nil), body...))
 		if signErr != nil || strings.TrimSpace(signature) == "" || len(signature) > 256 {
 			return WriteResponse{}, fmt.Errorf("create Ocean Engine request signature")
