@@ -14,6 +14,23 @@ The first direct-HTTP probe stopped at the Secsdk HEAD request. HTTP status was
 200, but the token response header was absent. No project POST was sent. The
 fixture records only this non-secret result and the zero-match reconciliation.
 
+The declared Edge page produced the same HEAD result. Secsdk then returned its
+official `DOWNGRADE` fallback. Both captured browser writes used that exact
+fallback value. No token value is stored in the fixture.
+
+One approved direct-HTTP probe used that fallback. It sent one POST without
+`_signature` or `x-sessionid`. The response had HTTP 200 and business code
+`50100`. Reconciliation found no project. This is a deterministic rejection.
+
+The public bundle source map identifies `_signature` as output from
+`@byted/acrawler@1.6.8`. The input contains the exact URL and normalized body.
+The output also contains module-load clock state. No test found account,
+Cookie, DOM, or device input. Do not reuse a captured signature.
+
+The create-page bundle initializes `window.sessionId` with a random UUID v4.
+Captured project and promotion requests used different UUID values. The
+fixture records only their value class. It does not store either value.
+
 Fixture rules:
 
 - Platform identifiers are intentionally opaque strings, including values larger than JavaScript's safe integer range.

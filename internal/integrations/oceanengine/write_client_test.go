@@ -91,6 +91,61 @@ func TestWriteClientDiagnosesMissingCSRFHeaderWithoutAWrite(t *testing.T) {
 	}
 }
 
+func TestWriteClientAllowsObservedSDKDowngradeOnlyWhenExplicit(t *testing.T) {
+	var heads, posts atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+			heads.Add(1)
+		case http.MethodPost:
+			posts.Add(1)
+			if r.Header.Get("x-secsdk-csrf-token") != "DOWNGRADE" {
+				t.Errorf("csrf header=%q", r.Header.Get("x-secsdk-csrf-token"))
+			}
+			_, _ = w.Write([]byte(`{"code":0}`))
+		}
+	}))
+	defer server.Close()
+	client, err := NewWriteClient(server.URL, "10001", 1, Session{Cookies: "session=secret"}, server.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.AllowSDKDowngrade = true
+	if _, err = client.SubmitJSON(context.Background(), ProjectCreatePath, map[string]any{"name": "redacted"}); err != nil {
+		t.Fatal(err)
+	}
+	if heads.Load() != 1 || posts.Load() != 1 {
+		t.Fatalf("heads=%d posts=%d", heads.Load(), posts.Load())
+	}
+}
+
+func TestWriteClientAddsProbeSessionIDOnlyWhenConfigured(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+		case http.MethodPost:
+			if got := r.Header.Get("x-sessionid"); got != "00000000-0000-4000-8000-000000000000" {
+				t.Errorf("session header=%q", got)
+			}
+			_, _ = w.Write([]byte(`{"code":0}`))
+		}
+	}))
+	defer server.Close()
+	client, err := NewWriteClient(server.URL, "10001", 1, Session{Cookies: "session=secret"}, server.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.AllowSDKDowngrade = true
+	client.ProbeSessionID = "00000000-0000-4000-8000-000000000000"
+	if _, err = client.SubmitJSON(context.Background(), ProjectCreatePath, map[string]any{"name": "redacted"}); err != nil {
+		t.Fatal(err)
+	}
+	client.Close()
+	if client.ProbeSessionID != "" {
+		t.Fatal("probe session ID was not cleared")
+	}
+}
+
 func TestWriteClientDoesNotRetryUnknownPost(t *testing.T) {
 	var posts atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

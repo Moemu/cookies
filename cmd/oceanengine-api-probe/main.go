@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -68,6 +69,7 @@ type probeSummary struct {
 	CSRFTokenPresent bool     `json:"csrf_token_present,omitempty"`
 	CSRFMaxAgeValid  bool     `json:"csrf_max_age_valid,omitempty"`
 	CSRFDowngrade    bool     `json:"csrf_downgrade,omitempty"`
+	SDKDowngradeUsed bool     `json:"sdk_downgrade_used,omitempty"`
 	ConnectorCookies int      `json:"connector_cookie_name_count,omitempty"`
 	CapturedCookies  int      `json:"captured_cookie_name_count,omitempty"`
 	MissingCookies   []string `json:"missing_cookie_names,omitempty"`
@@ -82,25 +84,27 @@ type probeSummary struct {
 
 func main() {
 	var harPath, accountDigest, confirmation, reconcileDigest string
-	var execute, csrfOnly, cookieSchema bool
+	var execute, csrfOnly, cookieSchema, allowSDKDowngrade, withSessionID bool
 	flag.StringVar(&harPath, "har", "", "path to the local HAR capture")
 	flag.StringVar(&accountDigest, "account-sha256", "", "SHA-256 of the selected external account ID")
 	flag.BoolVar(&execute, "execute", false, "send one project-create POST")
 	flag.BoolVar(&csrfOnly, "csrf-only", false, "perform only the protected-path HEAD token request")
 	flag.BoolVar(&cookieSchema, "cookie-schema", false, "compare Connector and captured Cookie names without values")
+	flag.BoolVar(&allowSDKDowngrade, "allow-sdk-downgrade", false, "allow the observed Secsdk fallback for this one probe")
+	flag.BoolVar(&withSessionID, "with-session-id", false, "add only a new browser-style UUID session ID to this one probe")
 	flag.StringVar(&reconcileDigest, "reconcile-name-sha256", "", "query only and match an exact object-name digest")
 	flag.StringVar(&confirmation, "confirm", "", "must equal "+executeConfirmation+" when execute is set")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	if err := run(ctx, harPath, accountDigest, execute, csrfOnly, cookieSchema, reconcileDigest, confirmation); err != nil {
+	if err := run(ctx, harPath, accountDigest, execute, csrfOnly, cookieSchema, allowSDKDowngrade, withSessionID, reconcileDigest, confirmation); err != nil {
 		fmt.Fprintln(os.Stderr, "probe failed:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, cookieSchema bool, reconcileDigest, confirmation string) error {
+func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, cookieSchema, allowSDKDowngrade, withSessionID bool, reconcileDigest, confirmation string) error {
 	modeCount := 0
 	for _, selected := range []bool{execute, csrfOnly, cookieSchema, reconcileDigest != ""} {
 		if selected {
@@ -136,6 +140,12 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 	}
 	if execute && confirmation != executeConfirmation {
 		return fmt.Errorf("exact execution confirmation is required")
+	}
+	if allowSDKDowngrade && !execute {
+		return fmt.Errorf("SDK downgrade is valid only for an executing controlled probe")
+	}
+	if withSessionID && (!execute || !allowSDKDowngrade) {
+		return fmt.Errorf("session ID isolation requires an executing SDK downgrade probe")
 	}
 
 	cfg, err := config.Load()
@@ -191,6 +201,15 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 		return err
 	}
 	defer writer.Close()
+	writer.AllowSDKDowngrade = allowSDKDowngrade
+	summary.SDKDowngradeUsed = allowSDKDowngrade
+	if withSessionID {
+		writer.ProbeSessionID, err = newUUIDv4()
+		if err != nil {
+			return err
+		}
+		summary.OptionalFields = "x-sessionid_only"
+	}
 	reader, err := oceanengine.NewClient(cfg.OceanEngine.BaseURL, binding.externalID, oceanengine.Session{Cookies: string(plaintext)}, httpClient)
 	if err != nil {
 		return err
@@ -257,16 +276,7 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 	}
 	summary.QueryIDFound = queryID != ""
 	summary.ResponseIDsMatch = responseID != "" && queryID != "" && responseID == queryID
-	switch {
-	case len(matches) > 1:
-		summary.Result = "manual_reconciliation"
-	case len(matches) == 1 && queryID != "" && (responseID == "" || responseID == queryID):
-		summary.Result = "confirmed"
-	case writeErr != nil || queryErr != nil || len(matches) == 0:
-		summary.Result = "result_unknown"
-	default:
-		summary.Result = "contract_mismatch"
-	}
+	summary.Result = classifyExecutionResult(summary.BusinessCode, writeErr, queryErr, matches, responseID, queryID)
 	if err := writeSummary(summary); err != nil {
 		return err
 	}
@@ -276,7 +286,36 @@ func run(ctx context.Context, harPath, accountDigest string, execute, csrfOnly, 
 	if writeErr != nil && summary.Result != "confirmed" {
 		return fmt.Errorf("write did not produce a confirmed result")
 	}
+	if summary.Result == "deterministic_rejection" {
+		return fmt.Errorf("platform rejected the write with business code %d", summary.BusinessCode)
+	}
 	return nil
+}
+
+func newUUIDv4() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", fmt.Errorf("generate probe session ID: %w", err)
+	}
+	value[6] = value[6]&0x0f | 0x40
+	value[8] = value[8]&0x3f | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		value[0:4], value[4:6], value[6:8], value[8:10], value[10:16]), nil
+}
+
+func classifyExecutionResult(businessCode int, writeErr, queryErr error, matches []map[string]any, responseID, queryID string) string {
+	switch {
+	case len(matches) > 1:
+		return "manual_reconciliation"
+	case len(matches) == 1 && queryID != "" && (responseID == "" || responseID == queryID):
+		return "confirmed"
+	case businessCode != 0 && writeErr == nil && queryErr == nil && len(matches) == 0:
+		return "deterministic_rejection"
+	case writeErr != nil || queryErr != nil || len(matches) == 0:
+		return "result_unknown"
+	default:
+		return "contract_mismatch"
+	}
 }
 
 func projectPayload(path string, now time.Time) (map[string]any, error) {

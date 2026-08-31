@@ -12,7 +12,8 @@
       "x-secsdk-csrf-version": "1.2.22"
     },
     "response_header": "x-ware-csrf-token",
-    "write_header": "x-secsdk-csrf-token"
+    "write_header": "x-secsdk-csrf-token",
+    "observed_browser_write_value_class": "DOWNGRADE"
   },
   "endpoints": {
     "project_create": {
@@ -44,8 +45,14 @@
       "x-sessionid": "unknown"
     },
     "observed_sources": {
-      "_signature": "platform_bundle_sign_url_and_body",
-      "x-sessionid": "window_sessionId"
+      "_signature": "@byted/acrawler@1.6.8_sign_url_normalized_body_and_module_load_time",
+      "x-sessionid": "window_sessionId_from_uuid@8.3.2_v4"
+    },
+    "x_sessionid_observation": {
+      "value_class": "uuid_v4",
+      "same_across_captured_writes": false,
+      "current_management_page_present": false,
+      "account_or_device_binding_observed": false
     },
     "evidence": "existing_connector_reads_succeed_without_both_fields",
     "policy": "omit_by_default_and_test_each_field_independently"
@@ -66,6 +73,31 @@
     "exact_name_reconciliation_count": 0,
     "result": "csrf_preflight_failed"
   },
+  "browser_same_origin_head_probe": {
+    "date": "2026-08-31",
+    "http_status": 200,
+    "token_header_present": false,
+    "post_sent": false,
+    "secsdk_cache_present": false,
+    "secsdk_native_result": "DOWNGRADE",
+    "result": "same_as_connector_http"
+  },
+  "captured_browser_writes": {
+    "project_csrf_value_class": "DOWNGRADE",
+    "promotion_csrf_value_class": "DOWNGRADE",
+    "project_http_status": 200,
+    "promotion_http_status": 200
+  },
+  "downgrade_direct_http_probe": {
+    "date": "2026-08-31",
+    "post_count": 1,
+    "optional_fields": "omitted",
+    "http_status": 200,
+    "business_code": 50100,
+    "business_code_name": "INTERNAL_SERVICE_ERROR",
+    "exact_name_reconciliation_count": 0,
+    "result": "deterministic_rejection"
+  },
   "redaction": {
     "account": "<ACCOUNT_ID>",
     "cookie": "<COOKIE>",
@@ -74,7 +106,7 @@
     "object_name": "<OBJECT_NAME>"
   },
   "enablement_blockers": [
-    "connector_http_csrf_token_not_issued",
+    "signature_or_session_field_isolation_pending",
     "response_bodies_not_exported",
     "query_reconciliation_not_captured"
   ]

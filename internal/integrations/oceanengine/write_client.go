@@ -67,6 +67,12 @@ type WriteClient struct {
 	UserAgent      string
 	TokenCache     *CSRFTokenCache
 	Now            func() time.Time
+	// AllowSDKDowngrade permits the Secsdk 1.2.22 fallback only for a
+	// separately authorized controlled probe. Production callers leave it false.
+	AllowSDKDowngrade bool
+	// ProbeSessionID carries the browser-generated UUID only for an isolated
+	// field experiment. Production callers leave it empty.
+	ProbeSessionID string
 }
 
 type WriteResponse struct {
@@ -111,6 +117,7 @@ func NewWriteClient(rawBaseURL, advertiserID string, sessionVersion int64, sessi
 func (c *WriteClient) Close() {
 	c.Session.Cookies = ""
 	c.Session.CSRFToken = ""
+	c.ProbeSessionID = ""
 }
 
 // SubmitJSON sends one protected POST. It never retries the write.
@@ -132,6 +139,9 @@ func (c *WriteClient) SubmitJSON(ctx context.Context, path string, payload any) 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-secsdk-csrf-token", token)
+	if c.ProbeSessionID != "" {
+		req.Header.Set("x-sessionid", c.ProbeSessionID)
+	}
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return WriteResponse{}, fmt.Errorf("%w: write transport failed", ErrResultUnknown)
@@ -235,7 +245,11 @@ func (c *WriteClient) csrfToken(ctx context.Context, protectedPath string) (stri
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("%w: token HTTP %d", ErrCSRFTokenInvalid, resp.StatusCode)
 	}
-	parts := strings.Split(resp.Header.Get("x-ware-csrf-token"), ",")
+	header := resp.Header.Get("x-ware-csrf-token")
+	if header == "" && c.AllowSDKDowngrade {
+		return "DOWNGRADE", nil
+	}
+	parts := strings.Split(header, ",")
 	if len(parts) < 3 || parts[0] != "0" || strings.TrimSpace(parts[1]) == "" || parts[1] == "DOWNGRADE" {
 		return "", ErrCSRFTokenInvalid
 	}
