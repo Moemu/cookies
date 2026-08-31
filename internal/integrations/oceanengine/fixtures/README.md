@@ -36,7 +36,8 @@ The first signature POST signed after `aadvid` was present. The browser signs
 before it adds `aadvid`, so that experiment is invalid. The corrected probe
 generates a 31-character `_signature` without a platform write. It verifies the
 published acrawler runtime with a fixed SHA-256 first. The fixture does not
-store the signature.
+store the signature. One approved corrected-signature POST kept business code
+`50100`. The query signature alone does not lift the rejection.
 
 Fixture rules:
 

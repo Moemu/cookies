@@ -117,7 +117,7 @@
     "signature_present": true,
     "signature_length": 31,
     "signature_value_stored": false,
-    "result": "ready_for_isolated_probe"
+    "result": "isolated_probe_completed"
   },
   "invalid_signature_direct_http_probe": {
     "date": "2026-08-31",
@@ -130,6 +130,18 @@
     "exact_name_reconciliation_count": 0,
     "result": "invalid_experiment"
   },
+  "corrected_signature_direct_http_probe": {
+    "date": "2026-08-31",
+    "post_count": 1,
+    "optional_fields": "_signature_only",
+    "signature_input": "url_without_aadvid_and_body",
+    "browser_order": "sign_then_append_aadvid",
+    "http_status": 200,
+    "business_code": 50100,
+    "business_code_name": "INTERNAL_SERVICE_ERROR",
+    "exact_name_reconciliation_count": 0,
+    "result": "deterministic_rejection"
+  },
   "redaction": {
     "account": "<ACCOUNT_ID>",
     "cookie": "<COOKIE>",
@@ -138,7 +150,7 @@
     "object_name": "<OBJECT_NAME>"
   },
   "enablement_blockers": [
-    "signature_field_isolation_pending",
+    "write_rejection_cause_unresolved",
     "response_bodies_not_exported",
     "query_reconciliation_not_captured"
   ]

@@ -115,10 +115,21 @@ The probe can generate `_signature` without a platform request. It loads
 the published source map from one fixed asset URL. It requires the exact
 `@byted/acrawler@1.6.8` runtime SHA-256 before execution. A source change stops
 the probe. The runtime executes in Node.js with the exact URL and JSON body.
-Only signature presence and length enter the result. The first read-only check
-generated a 31-character signature from the corrected input. The signature
-value was not printed or stored. The next write must add corrected `_signature`
-only and requires new approval.
+Only signature presence and length enter the result. The corrected-input check
+generated a 31-character signature. The signature value was not printed or
+stored.
+
+The operator approved one corrected `_signature` write. The Client signed the
+protected URL without `aadvid` and appended `aadvid` after signing, which
+matches the browser order. The POST went once, without `x-sessionid`. The
+response had HTTP 200 and business code `50100`. Reconciliation found no
+project. The corrected query signature does not lift the rejection. Do not
+retry this write.
+
+The remaining blocker is not the query signature alone. The browser request
+still differs from the probe in ways the contract has not captured, such as
+device or request binding. Further signature-only POSTs have no value. Keep
+the probe read-only unless the operator approves a new isolation hypothesis.
 
 ## Release gates
 
