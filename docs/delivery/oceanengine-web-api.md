@@ -163,18 +163,28 @@ browser confirms a create with `GET /superior/api/project?project_ids=<id>`,
 which returns the full project rows. The probe now uses the same order:
 response ID first, by-ID read second, aggregate list last.
 
+The operator then approved the promotion contract experiment. One run chained
+the confirmed project create, the `check_promotion_name` read, and one
+promotion create POST. The promotion body reused the captured material and
+title references verbatim and refreshed only `name`, `project_id`, and
+`check_hash`. The capture shows `check_hash` as a client millisecond timestamp
+taken between the name check and the create, and the accepted write confirms
+that model. The response carried the promotion ID, the by-ID promotion detail
+read matched it against the exact name, and the IDs agreed. This is the first
+confirmed end-to-end project-to-promotion submit chain over the Web API.
+The reused title `request_id` and material references succeeded, but their
+freshness behavior on new material sets is not yet verified.
+
 ## Release gates
 
 `COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ENABLED` defaults to `false`.
 `COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ACCOUNT_ALLOWLIST` must also contain the
-exact external account ID. The current adapter blocks Submit before it consumes
-the one-time confirmation token because the promotion contract and the full
-response capture are not yet wired into the production driver.
+exact external account ID. The confirmed contracts cover the project create
+and the promotion create probe paths. The production driver wiring, the
+mapping write flow, and the full response-body export remain open before a
+production Submit can consume the one-time confirmation token.
 
-The 2026-08-31 probes used a dedicated test account, future dates, and the
-minimum controlled budget. The operator deletes the created objects after each
-session. The confirmed create contract covers the project create path only.
-The promotion create path, the mapping write flow, and the production driver
-wiring remain blocked until their contracts are captured and reviewed. Keep
-Prepare and read-only research available. Production writes must not use
-`DOWNGRADE` unless the product policy changes explicitly.
+The probes use a dedicated test account, future dates, and the minimum
+controlled budget. The operator deletes the created objects after each
+session. Keep Prepare and read-only research available. Production writes must
+not use `DOWNGRADE` unless the product policy changes explicitly.

@@ -81,6 +81,7 @@ var readOnlyEndpoints = map[Endpoint]struct{}{
 	{http.MethodGet, "/superior/api/v2/agw/ad/brand"}:                       {},
 	{http.MethodPost, "/superior/api/v2/ad/authorize/list"}:                 {},
 	{http.MethodGet, CheckProjectNamePath}:                                  {},
+	{http.MethodGet, CheckPromotionNamePath}:                                {},
 	{http.MethodGet, "/superior/api/project"}:                               {},
 }
 
@@ -211,6 +212,14 @@ func (c *Client) CheckProjectName(ctx context.Context, projectName string) (map[
 	query := url.Values{}
 	query.Set("projectName", projectName)
 	return c.do(ctx, http.MethodGet, CheckProjectNamePath+"?"+query.Encode(), nil, "")
+}
+
+// CheckPromotionName runs the read-only promotion-name availability query the
+// browser sends immediately before a promotion create.
+func (c *Client) CheckPromotionName(ctx context.Context, promotionName string) (map[string]any, error) {
+	query := url.Values{}
+	query.Set("promotionName", promotionName)
+	return c.do(ctx, http.MethodGet, CheckPromotionNamePath+"?"+query.Encode(), nil, "")
 }
 
 // GetProjects reads project rows by platform ID. This is the same read the

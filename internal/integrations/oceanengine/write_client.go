@@ -19,11 +19,12 @@ const (
 	SecSDKVersion  = "1.2.22"
 	writeUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0"
 
-	ProjectCreatePath    = "/superior/api/v2/project/create"
-	ProjectListPath      = "/superior/api/v2/project/list"
-	PromotionCreatePath  = "/superior/api/v2/promotion/create_promotion"
-	PromotionListPath    = "/superior/api/ad/promotion/list"
-	CheckProjectNamePath = "/superior/api/agw/project/check_project_name"
+	ProjectCreatePath      = "/superior/api/v2/project/create"
+	ProjectListPath        = "/superior/api/v2/project/list"
+	PromotionCreatePath    = "/superior/api/v2/promotion/create_promotion"
+	PromotionListPath      = "/superior/api/ad/promotion/list"
+	CheckProjectNamePath   = "/superior/api/agw/project/check_project_name"
+	CheckPromotionNamePath = "/superior/api/agw/ad/check_promotion_name"
 )
 
 var (

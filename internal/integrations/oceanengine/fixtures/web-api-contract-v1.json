@@ -184,12 +184,28 @@
     "exact_name_digest_match": true,
     "result": "confirmed_create"
   },
+  "confirmed_promotion_create_write": {
+    "date": "2026-09-01",
+    "post_count": 1,
+    "chain": "project_created_first_in_same_run",
+    "payload_contract": "captured_body_with_name_check_hash_and_project_id_refreshed",
+    "precheck_query": "GET /superior/api/agw/ad/check_promotion_name",
+    "check_hash_contract": "client_millisecond_timestamp_between_name_check_and_create",
+    "http_status": 200,
+    "business_code": 0,
+    "response_platform_id_present": true,
+    "query_id_match": true,
+    "exact_match_count": 1,
+    "result": "confirmed_create"
+  },
   "reconciliation_contract": {
     "aggregate_list_endpoint": "POST /superior/api/v2/project/list",
     "aggregate_list_behavior": "project_promotion_join_rows_only",
     "aggregate_list_name_fields": "project_name_and_promotion_name",
     "by_id_read_endpoint": "GET /superior/api/project",
     "by_id_read_params": "project_ids_comma_separated",
+    "promotion_by_id_read_endpoint": "GET /superior/api/ad/promotion/detail",
+    "promotion_by_id_read_params": "promotion_ids_comma_separated",
     "create_confirmation_order": "response_id_then_by_id_read_then_aggregate_list"
   },
   "redaction": {
@@ -200,8 +216,8 @@
     "object_name": "<OBJECT_NAME>"
   },
   "enablement_blockers": [
-    "promotion_create_contract_uncaptured",
+    "write_driver_adapter_not_wired",
     "full_create_response_body_not_exported",
-    "write_driver_adapter_not_wired"
+    "promotion_material_reference_freshness_unverified"
   ]
 }
