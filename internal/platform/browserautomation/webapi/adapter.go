@@ -39,6 +39,14 @@ type Adapter struct {
 	Sessions         SessionChecker
 	WriteEnabled     bool
 	AccountAllowlist []string
+	// PayloadSource produces the next pending staged create from the immutable
+	// plan version and the pending platform entity mappings.
+	PayloadSource PayloadSource
+	// Templates loads the account-calibrated create payloads from the local
+	// git-ignored template file.
+	Templates TemplateSource
+	// SessionFactory opens one decrypted Connector session per submit.
+	SessionFactory WriteSessionFactory
 }
 
 var _ browserautomation.WorkerAdapter = Adapter{}
@@ -85,6 +93,9 @@ func (a Adapter) Prepare(ctx context.Context, run browserautomation.BrowserRpaRu
 	}, nil
 }
 
+// CheckSubmit reports whether this driver may execute a controlled write. The
+// write switch, the account allowlist, and the wired contract plumbing
+// (payload source, calibrated templates, session factory) must all be ready.
 func (a Adapter) CheckSubmit(run browserautomation.BrowserRpaRun) error {
 	if !a.WriteEnabled {
 		return ErrWriteDisabled
@@ -92,11 +103,10 @@ func (a Adapter) CheckSubmit(run browserautomation.BrowserRpaRun) error {
 	if !slices.Contains(a.AccountAllowlist, run.AccountID) {
 		return ErrAccountNotAllowed
 	}
-	return ErrContractNotCaptured
-}
-
-func (a Adapter) Submit(context.Context, browserautomation.BrowserRpaRun, browserautomation.ControlledActionAttempt, string) (browserautomation.WorkerOutcome, browserautomation.PreparedPage, error) {
-	return browserautomation.WorkerFailed, browserautomation.PreparedPage{}, ErrContractNotCaptured
+	if a.PayloadSource == nil || a.Templates == nil || a.SessionFactory == nil {
+		return ErrContractNotCaptured
+	}
+	return nil
 }
 
 func (a Adapter) writeGate(run browserautomation.BrowserRpaRun) string {

@@ -179,10 +179,23 @@ freshness behavior on new material sets is not yet verified.
 
 `COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ENABLED` defaults to `false`.
 `COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ACCOUNT_ALLOWLIST` must also contain the
-exact external account ID. The confirmed contracts cover the project create
-and the promotion create probe paths. The production driver wiring, the
-mapping write flow, and the full response-body export remain open before a
-production Submit can consume the one-time confirmation token.
+exact external account ID.
+
+The driver Submit is wired. One submit executes the next pending staged
+create: the delivery payload source derives it from the immutable plan version
+and the pending platform entity mappings, the adapter assembles the payload
+from the calibrated local template, runs the name precheck, sends one
+protected POST, and reconciles through the by-ID read with name, schedule, and
+bid checks. The worker consumes a fresh one-time confirmation per object and
+confirms each platform entity mapping. Plan references outside the calibrated
+template stop before any write.
+
+The calibrated create templates carry the account's product, landing asset,
+and material references. They live in a git-ignored local file named by
+`COOKIES_OCEAN_ENGINE_WEB_API_TEMPLATE_FILE` and never enter the repository.
+A missing template keeps the driver fail-closed. The daily-budget create
+contract, the full response-body export, and the material reference freshness
+on new material sets remain open.
 
 The probes use a dedicated test account, future dates, and the minimum
 controlled budget. The operator deletes the created objects after each

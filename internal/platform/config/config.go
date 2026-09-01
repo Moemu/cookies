@@ -196,6 +196,7 @@ type OceanEngine struct {
 	Enabled             bool
 	WebAPIWriteEnabled  bool
 	WebAPIWriteAccounts []string
+	WebAPITemplateFile  string
 	BaseURL             string
 	BusinessBaseURL     string
 	MasterKey           string
@@ -625,6 +626,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 			Enabled:             oceanEngineEnabled,
 			WebAPIWriteEnabled:  oceanEngineWebAPIWriteEnabled,
 			WebAPIWriteAccounts: splitCSV(valueOr(lookup, "COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ACCOUNT_ALLOWLIST", "")),
+			WebAPITemplateFile:  valueOr(lookup, "COOKIES_OCEAN_ENGINE_WEB_API_TEMPLATE_FILE", ""),
 			BaseURL:             valueOr(lookup, "COOKIES_OCEAN_ENGINE_BASE_URL", "https://ad.oceanengine.com"),
 			BusinessBaseURL:     valueOr(lookup, "COOKIES_OCEAN_ENGINE_BUSINESS_BASE_URL", "https://business.oceanengine.com"),
 			MasterKey:           valueOr(lookup, "COOKIES_OCEAN_ENGINE_MASTER_KEY", ""),

@@ -363,3 +363,29 @@ func walkRows(value any, leaves *[]map[string]any) {
 		}
 	}
 }
+
+// FlattenNamedRows collects every object carrying a non-empty value under the
+// given name key. The aggregate platform views name rows project_name and
+// promotion_name instead of name.
+func FlattenNamedRows(value any, nameKey string) []map[string]any {
+	var rows []map[string]any
+	var walk func(any)
+	walk = func(current any) {
+		switch typed := current.(type) {
+		case map[string]any:
+			if name, ok := typed[nameKey].(string); ok && name != "" {
+				rows = append(rows, typed)
+				return
+			}
+			for _, child := range typed {
+				walk(child)
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return rows
+}

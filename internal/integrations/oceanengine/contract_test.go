@@ -33,7 +33,7 @@ func TestWebAPIContractFixtureRemainsBlockedAndRedacted(t *testing.T) {
 	if err := json.Unmarshal(payload, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.SecSDKVersion != SecSDKVersion || fixture.Status != "request_captured_response_pending" || fixture.WriteEnabled || len(fixture.EnablementBlockers) != 3 {
+	if fixture.SecSDKVersion != SecSDKVersion || fixture.Status != "create_contracts_confirmed" || fixture.WriteEnabled || len(fixture.EnablementBlockers) != 3 {
 		t.Fatalf("fixture=%#v", fixture)
 	}
 	if fixture.Redaction["account"] != "<ACCOUNT_ID>" || fixture.Redaction["cookie"] != "<COOKIE>" || fixture.Redaction["csrf_token"] != "<CSRF_TOKEN>" {

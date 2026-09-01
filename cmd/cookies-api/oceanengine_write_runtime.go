@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/shikanon/cookies/internal/integrations/oceanengine"
 	"github.com/shikanon/cookies/internal/platform/browserautomation"
+	"github.com/shikanon/cookies/internal/platform/browserautomation/webapi"
 	"github.com/shikanon/cookies/internal/platform/connector"
 	"github.com/shikanon/cookies/internal/systems/insights"
 )
@@ -72,4 +76,45 @@ func (w *oceanEngineConnectorWriter) MarkAuthRequired(ctx context.Context, now t
 	}
 	_, err := w.factory.authMarker.MarkAccountSessionAuthRequired(ctx, w.OrganizationID, w.AccountID, w.SessionVersion, now.UTC())
 	return err
+}
+
+// OpenWebAPISession adapts the Connector writer factory to the Web API driver
+// session contract: one decrypted write client plus its read client.
+func (f oceanEngineConnectorWriterFactory) OpenSession(ctx context.Context, run browserautomation.BrowserRpaRun) (webapi.WriteSession, error) {
+	writer, cleanup, err := f.Open(ctx, run)
+	if err != nil {
+		return webapi.WriteSession{}, err
+	}
+	reader, readerErr := oceanengine.NewClient(f.baseURL, run.AccountID, oceanengine.Session{Cookies: writer.Client.Session.Cookies}, f.client)
+	if readerErr != nil {
+		cleanup()
+		return webapi.WriteSession{}, readerErr
+	}
+	reader.Delay = 0
+	reader.MaxAttempts = 1
+	return webapi.WriteSession{Writer: writer.Client, Reader: reader, Close: cleanup}, nil
+}
+
+// fileTemplateSource loads the account-calibrated create templates from the
+// local git-ignored template file named by the configuration.
+type fileTemplateSource struct {
+	Path string
+}
+
+func (s fileTemplateSource) Load(context.Context) (webapi.CreateTemplates, error) {
+	if s.Path == "" {
+		return webapi.CreateTemplates{}, webapi.ErrTemplateNotConfigured
+	}
+	data, err := os.ReadFile(s.Path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return webapi.CreateTemplates{}, webapi.ErrTemplateNotConfigured
+		}
+		return webapi.CreateTemplates{}, err
+	}
+	var templates webapi.CreateTemplates
+	if err := json.Unmarshal(data, &templates); err != nil {
+		return webapi.CreateTemplates{}, fmt.Errorf("decode Ocean Engine Web API templates: %w", err)
+	}
+	return templates, nil
 }

@@ -3,7 +3,7 @@
   "observed_at": "2026-08-31T00:00:00Z",
   "secsdk_version": "1.2.22",
   "token_path": null,
-  "status": "request_captured_response_pending",
+  "status": "create_contracts_confirmed",
   "write_enabled": false,
   "csrf": {
     "method": "HEAD",
@@ -208,6 +208,15 @@
     "promotion_by_id_read_params": "promotion_ids_comma_separated",
     "create_confirmation_order": "response_id_then_by_id_read_then_aggregate_list"
   },
+  "driver_wiring": {
+    "submit_implemented": true,
+    "staging": "one_pending_mapping_per_submit_fresh_confirmation_each",
+    "payload_source": "plan_version_and_pending_mappings",
+    "payload_assembly": "calibrated_local_template_plus_plan_identity_fields",
+    "reference_guard": "plan_references_outside_calibrated_template_fail_closed",
+    "reconciliation": "by_id_read_with_name_and_schedule_and_bid_checks",
+    "template_source": "local_git_ignored_file_via_environment"
+  },
   "redaction": {
     "account": "<ACCOUNT_ID>",
     "cookie": "<COOKIE>",
@@ -216,7 +225,7 @@
     "object_name": "<OBJECT_NAME>"
   },
   "enablement_blockers": [
-    "write_driver_adapter_not_wired",
+    "calibrated_template_file_not_in_repository",
     "full_create_response_body_not_exported",
     "promotion_material_reference_freshness_unverified"
   ]

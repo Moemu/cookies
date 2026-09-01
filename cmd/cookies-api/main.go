@@ -25,6 +25,7 @@ import (
 	"github.com/shikanon/cookies/internal/integrations/deliveryinsights"
 	"github.com/shikanon/cookies/internal/integrations/gotenberg"
 	"github.com/shikanon/cookies/internal/integrations/lasdocument"
+	"github.com/shikanon/cookies/internal/integrations/oceanengine"
 	"github.com/shikanon/cookies/internal/integrations/productsource"
 	"github.com/shikanon/cookies/internal/integrations/seedresearch"
 	"github.com/shikanon/cookies/internal/integrations/strategycreative"
@@ -480,21 +481,35 @@ func main() {
 	dependencies.AuthenticatedDomainMounts = append(dependencies.AuthenticatedDomainMounts,
 		httpserver.DomainMount{Pattern: "/api/delivery/v1/", Handler: deliveryhttp.New(deliveryService)})
 	browserRpaRepository := browserautomation.MySQLRepository{DB: db}
+	deliveryAuthorityProvider := delivery.BrowserRpaAuthorityProvider{Repository: delivery.MySQLRepository{DB: db}}
 	browserRpaService := browserautomation.Service{
-		Repository: browserRpaRepository,
-		AuthorityProvider: delivery.BrowserRpaAuthorityProvider{
-			Repository: delivery.MySQLRepository{DB: db},
-		},
-		NewID: func(prefix string) (string, error) { return ids.New(prefix) },
+		Repository:        browserRpaRepository,
+		AuthorityProvider: deliveryAuthorityProvider,
+		NewID:             func(prefix string) (string, error) { return ids.New(prefix) },
 	}
 	deliveryService.BrowserRpaLauncher = deliveryBrowserRpaLauncher{service: browserRpaService, executionDriver: browserautomation.ExecutionDriverOceanEngineWebAPI}
 	browserRpaServer := browserautomationhttp.NewTakeoverOnly(browserRpaService, projectStore)
 	v3Compiler := plancompile.V3Compiler{Source: delivery.MySQLRepository{DB: db}, AccountResolver: connectorRepository}
+	var oceanEngineWriterFactory oceanEngineConnectorWriterFactory
+	if cfg.OceanEngine.Enabled {
+		oceanEngineCipher, cipherErr := insights.NewAESGCMSecretCipher(cfg.OceanEngine.MasterKey, cfg.OceanEngine.MasterKeyVersion)
+		if cipherErr != nil {
+			log.Fatalf("configure Ocean Engine session cipher: %v", cipherErr)
+		}
+		oceanEngineWriterFactory = oceanEngineConnectorWriterFactory{
+			accountSessions: connectorRepository, accounts: connectorRepository, cipher: oceanEngineCipher,
+			baseURL: cfg.OceanEngine.BaseURL, client: &http.Client{Timeout: 30 * time.Second},
+			tokenCache: oceanengine.NewCSRFTokenCache(),
+		}
+	}
 	driverAdapters := map[browserautomation.ExecutionDriver]browserautomation.WorkerAdapter{
 		browserautomation.ExecutionDriverOceanEngineWebAPI: webapiadapter.Adapter{
 			Compiler: v3Compiler, Policies: browserRpaRepository,
 			Sessions:     oceanEngineWebAPISessionChecker{accountSessions: connectorRepository, accounts: connectorRepository},
 			WriteEnabled: cfg.OceanEngine.WebAPIWriteEnabled, AccountAllowlist: cfg.OceanEngine.WebAPIWriteAccounts,
+			PayloadSource:  deliveryAuthorityProvider,
+			Templates:      fileTemplateSource{Path: cfg.OceanEngine.WebAPITemplateFile},
+			SessionFactory: oceanEngineWriterFactory,
 		},
 	}
 	var playwrightAdapter browserautomation.WorkerAdapter
