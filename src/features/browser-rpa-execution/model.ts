@@ -26,6 +26,7 @@ export type BrowserRpaBlockingReason =
   | 'WORKFLOW_DRIFT'
   | 'SKILL_DRIFT'
   | 'RESULT_RECONCILIATION_REQUIRED'
+  | 'TARGET_EFFECT_NOT_OBSERVED'
 
 export type BrowserRpaAuthorityBinding = {
   schema_version: 'browser-rpa-authority/v1' | 'computer-use-authority/v1'

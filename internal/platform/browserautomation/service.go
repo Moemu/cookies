@@ -166,6 +166,9 @@ func (s Service) CreateBoundRun(ctx context.Context, request CreateBoundRunReque
 	if err := authority.Validate(); err != nil || authority.OrganizationID != request.OrganizationID || authority.ProjectID != request.ProjectID || authority.BusinessExecutionID != request.ExecutionID || authority.AccountReferenceID != request.AccountID {
 		return BrowserRpaRun{}, false, ErrInvalidContract
 	}
+	if authority.ExecutionDriver != "" && authority.ExecutionDriver != request.ExecutionDriver {
+		return BrowserRpaRun{}, false, ErrInvalidContract
+	}
 	if authority.OperatorPrincipalID != "" && request.CreatedBy != authority.OperatorPrincipalID {
 		return BrowserRpaRun{}, false, ErrInvalidContract
 	}

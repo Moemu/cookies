@@ -240,7 +240,20 @@ func (r MySQLRepository) ResetSafeFailedBrowserRpaExecution(ctx context.Context,
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_rpa_final_confirmations WHERE organization_id=? AND project_id=? AND run_id=? AND consumed_at IS NOT NULL`, org, project, runID).Scan(&consumedConfirmationCount); err != nil {
 		return ControlledExecution{}, err
 	}
-	if attemptCount != 0 || consumedConfirmationCount != 0 {
+	var latestStepAction, latestStepStatus, latestStepBlockingReason string
+	if err := tx.QueryRowContext(ctx, `SELECT action,status,COALESCE(blocking_reason,'') FROM browser_rpa_run_steps WHERE organization_id=? AND project_id=? AND run_id=? ORDER BY sequence_number DESC LIMIT 1`, org, project, runID).Scan(&latestStepAction, &latestStepStatus, &latestStepBlockingReason); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ControlledExecution{}, ErrInvalidState
+		}
+		return ControlledExecution{}, err
+	}
+	stagedPrepareFailure := safeStagedPrepareRetry(latestStepAction, latestStepStatus, latestStepBlockingReason)
+	var confirmedNoEffectEvidenceCount int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_rpa_evidence WHERE organization_id=? AND project_id=? AND run_id=? AND JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'$.field_readback.reconciliation'))='not_found' AND ((JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'$.field_readback.read_only_reconciliation'))='true' AND JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'$.field_readback.platform_write_performed'))='false' AND JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'$.field_readback.exact_name_matches'))='0') OR (JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'$.field_readback.final_click_performed'))='true' AND JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'$.field_readback.platform_write_request_observed'))='false'))`, org, project, runID).Scan(&confirmedNoEffectEvidenceCount); err != nil {
+		return ControlledExecution{}, err
+	}
+	confirmedNoEffect := confirmedNoEffectEvidenceCount > 0 && ((latestStepAction == string(browserautomation.TakeoverListConfirmed) && latestStepStatus == "succeeded") || latestStepStatus == "failed")
+	if !stagedPrepareFailure && !confirmedNoEffect && (attemptCount != 0 || consumedConfirmationCount != 0) {
 		var noClickEvidenceCount, clickEvidenceCount int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_rpa_evidence WHERE organization_id=? AND project_id=? AND run_id=? AND JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'$.field_readback.final_click_performed'))='false'`, org, project, runID).Scan(&noClickEvidenceCount); err != nil {
 			return ControlledExecution{}, err
@@ -269,6 +282,13 @@ func (r MySQLRepository) ResetSafeFailedBrowserRpaExecution(ctx context.Context,
 		return ControlledExecution{}, err
 	}
 	return r.GetControlledExecution(ctx, org, project, executionID)
+}
+
+func safeStagedPrepareRetry(action, status, blockingReason string) bool {
+	if action != "prepare_and_readback" || status != "failed" {
+		return false
+	}
+	return blockingReason == string(browserautomation.BlockPageDrift) || blockingReason == string(browserautomation.BlockRunnerFailure)
 }
 
 func (r MySQLRepository) InvalidateCalibratedControlledChangeSet(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, id string, expectedVersion int64, now time.Time) (ControlledChangeSet, ControlledExecution, error) {

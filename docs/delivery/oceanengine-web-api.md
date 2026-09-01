@@ -181,6 +181,12 @@ freshness behavior on new material sets is not yet verified.
 `COOKIES_OCEAN_ENGINE_WEB_API_WRITE_ACCOUNT_ALLOWLIST` must also contain the
 exact external account ID.
 
+New plan executions expose an explicit driver choice. Web API remains the UI
+default. The selected driver is frozen into the ChangeSet authority binding,
+object fingerprint, workflow ID, workflow canonical hash, and Browser RPA Run.
+Changing the driver creates a different controlled target. An existing Run can
+never switch drivers or automatically fall back after a write attempt.
+
 The driver Submit is wired. One submit executes the next pending staged
 create: the delivery payload source derives it from the immutable plan version
 and the pending platform entity mappings, the adapter assembles the payload

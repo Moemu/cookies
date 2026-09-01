@@ -13,6 +13,51 @@ func TestExecutionDriverPreservesHistoricalBindings(t *testing.T) {
 	if got := executionDriverForBinding(ControlledAuthorityBinding{WorkflowID: "web-api-v1-plan_1"}); got != browserautomation.ExecutionDriverOceanEngineWebAPI {
 		t.Fatalf("new driver=%s", got)
 	}
+	if got := executionDriverForBinding(ControlledAuthorityBinding{WorkflowID: "web-api-v1-plan_1", ExecutionDriver: browserautomation.ExecutionDriverPlaywrightEdgeV3}); got != browserautomation.ExecutionDriverPlaywrightEdgeV3 {
+		t.Fatalf("explicit driver=%s", got)
+	}
+}
+
+func TestPlanExecutionDriverSelectionIsValidatedAndDefaultsToWebAPI(t *testing.T) {
+	if got, err := normalizePlanExecutionDriver(""); err != nil || got != browserautomation.ExecutionDriverOceanEngineWebAPI {
+		t.Fatalf("default driver=%s err=%v", got, err)
+	}
+	for _, driver := range []browserautomation.ExecutionDriver{browserautomation.ExecutionDriverOceanEngineWebAPI, browserautomation.ExecutionDriverPlaywrightEdgeV3} {
+		if got, err := normalizePlanExecutionDriver(driver); err != nil || got != driver {
+			t.Fatalf("driver=%s got=%s err=%v", driver, got, err)
+		}
+	}
+	if _, err := normalizePlanExecutionDriver("unknown/v1"); err != ErrInvalidRequest {
+		t.Fatalf("invalid driver err=%v", err)
+	}
+}
+
+func TestPlanExecutionDriverIsBoundIntoWorkflowAndObjectIdentity(t *testing.T) {
+	webHash, err := planExecutionWorkflowHash(browserautomation.ExecutionDriverOceanEngineWebAPI, "plan", "configuration", "preflight", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	playwrightHash, err := planExecutionWorkflowHash(browserautomation.ExecutionDriverPlaywrightEdgeV3, "plan", "configuration", "preflight", "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if webHash == playwrightHash {
+		t.Fatal("different drivers must produce different workflow hashes")
+	}
+	webFingerprint, err := planExecutionObjectFingerprint(browserautomation.ExecutionDriverOceanEngineWebAPI, "account", ControlledActionCreateProjectAndPromotions, "configuration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	playwrightFingerprint, err := planExecutionObjectFingerprint(browserautomation.ExecutionDriverPlaywrightEdgeV3, "account", ControlledActionCreateProjectAndPromotions, "configuration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if webFingerprint == playwrightFingerprint {
+		t.Fatal("different drivers must not reuse one ChangeSet fingerprint")
+	}
+	if workflowIDForExecutionDriver(browserautomation.ExecutionDriverOceanEngineWebAPI, "plan_1") != "web-api-v1-plan_1" || workflowIDForExecutionDriver(browserautomation.ExecutionDriverPlaywrightEdgeV3, "plan_1") != "playwright-v3-plan_1" {
+		t.Fatal("workflow IDs must record the selected driver")
+	}
 }
 
 func TestSamePlanExecutionTargetRecoversAfterClientReload(t *testing.T) {
@@ -35,6 +80,12 @@ func TestSamePlanExecutionTargetRecoversAfterClientReload(t *testing.T) {
 	retryBinding.ConfigurationCanonicalHash = "different_configuration"
 	if samePlanExecutionTarget(change, retryBinding, ControlledActionCreateProjectAndPromotions) {
 		t.Fatal("a different configuration must not reuse the existing execution")
+	}
+	retryBinding = binding
+	retryBinding.ExecutionDriver = browserautomation.ExecutionDriverPlaywrightEdgeV3
+	change.Binding.ExecutionDriver = browserautomation.ExecutionDriverOceanEngineWebAPI
+	if samePlanExecutionTarget(change, retryBinding, ControlledActionCreateProjectAndPromotions) {
+		t.Fatal("a different driver must not reuse the existing execution")
 	}
 	change.Status = ControlledChangeSetInvalidated
 	if samePlanExecutionTarget(change, binding, ControlledActionCreateProjectAndPromotions) {
@@ -62,5 +113,23 @@ func TestExistingBrowserRpaExecutionOnlyContinuesAnUnboundPendingExecution(t *te
 	invalid.Status = "running"
 	if _, _, err := replayExistingBrowserRpaExecution(change, invalid); err != ErrInvalidState {
 		t.Fatalf("invalid execution error=%v", err)
+	}
+}
+
+func TestSafeStagedPrepareRetryRequiresAnUnsubmittedLatestStage(t *testing.T) {
+	if !safeStagedPrepareRetry("prepare_and_readback", "failed", string(browserautomation.BlockPageDrift)) {
+		t.Fatal("a staged page-drift failure before submit must allow a new run")
+	}
+	if !safeStagedPrepareRetry("prepare_and_readback", "failed", string(browserautomation.BlockRunnerFailure)) {
+		t.Fatal("a staged runner failure before submit must allow a new run")
+	}
+	for _, value := range [][3]string{
+		{"result_observed", "failed", string(browserautomation.BlockPageDrift)},
+		{"prepare_and_readback", "succeeded", ""},
+		{"prepare_and_readback", "failed", string(browserautomation.BlockResultReconciliation)},
+	} {
+		if safeStagedPrepareRetry(value[0], value[1], value[2]) {
+			t.Fatalf("unsafe staged retry accepted: %#v", value)
+		}
 	}
 }

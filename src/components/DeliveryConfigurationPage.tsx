@@ -5,6 +5,7 @@ import {
   deliveryPlanApi,
   deliveryExecutionApi,
   type DeliveryPlan,
+  type DeliveryExecutionDriver,
   type PlatformConfiguration,
   type StableReference,
 } from '../api/delivery'
@@ -870,6 +871,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
   const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get('plan_id') ?? '')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [executionDriver, setExecutionDriver] = useState<DeliveryExecutionDriver>('oceanengine-web-api/session/v1')
   const [editableConfiguration, setEditableConfiguration] = useState<PlatformConfiguration>()
   const [platformObjects, setPlatformObjects] = useState<ApiConnectorPlatformObject[]>([])
   const [connectorAccounts, setConnectorAccounts] = useState<ApiConnectorAccount[]>([])
@@ -916,7 +918,7 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
     }
     setEditableConfiguration(next)
   }, [selectedId, selectedPlan?.currentVersionNumber])
-  useEffect(() => { executionStartKeyRef.current = '' }, [selectedId, selectedPlan?.currentVersionNumber])
+  useEffect(() => { executionStartKeyRef.current = '' }, [executionDriver, selectedId, selectedPlan?.currentVersionNumber])
   useEffect(() => {
     let active = true
     setAccountsLoaded(false)
@@ -997,9 +999,9 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
     if (!selectedPlan) return
     setBusy(true)
     try {
-      if (!executionStartKeyRef.current) executionStartKeyRef.current = `browser-rpa-${selectedPlan.id}-v${selectedPlan.currentVersionNumber}`
+      if (!executionStartKeyRef.current) executionStartKeyRef.current = `browser-rpa-${executionDriver === 'playwright-rpa/edge/v3' ? 'playwright-v3' : 'web-api-v1'}-${selectedPlan.id}-v${selectedPlan.currentVersionNumber}`
       const idempotencyKey = executionStartKeyRef.current
-      const result = await deliveryExecutionApi.startBrowserRpaExecution(projectId, selectedPlan.id, selectedPlan.currentVersionNumber, idempotencyKey)
+      const result = await deliveryExecutionApi.startBrowserRpaExecution(projectId, selectedPlan.id, selectedPlan.currentVersionNumber, executionDriver, idempotencyKey)
       window.location.assign(projectPath(projectId, 'delivery', 'execution', result.browser_rpa_run.run_id))
     } catch (error) {
       if (error instanceof DeliveryApiError && error.code === 'VALIDATION_FAILED' && error.violations.length) {
@@ -1020,11 +1022,22 @@ export function DeliveryConfigurationPage({ state, activeView, tourRunId, tourCa
         {showConfiguration && platformConfiguration && editableConfiguration ? <section className="delivery-config-config-card"><header><div><span>当前计划 · V{selectedPlan.currentVersionNumber}</span><h3>{selectedPlan.currentVersion.name}</h3><p>更新于 {formatTime(selectedPlan.updatedAt)}</p></div><div className="delivery-config-contract"><span>配置草稿</span><button className="primary-button" type="button" onClick={() => void saveConfiguration()} disabled={busy}><Save size={15} aria-hidden="true"/>{busy ? '保存中…' : '保存'}</button></div></header><PlatformConfigurationEditor value={editableConfiguration} onChange={setEditableConfiguration} products={currentProject.products ?? []} assets={confirmedAssets} platformObjects={platformObjects} connectorAccounts={connectorAccounts} platformObjectError={platformObjectError} loadVideos={loadVideos} loadImages={loadImages} loadProductImages={loadProductImages} loadPhotos={loadPhotos} loadProducts={loadProducts} loadOptimizationTargets={loadOptimizationTargets} loadAuthorizedIdentities={loadAuthorizedIdentities} loadCategories={loadCategories} loadBrands={loadBrands}/><details className="delivery-config-mapping-details"><summary>查看 Manifest 字段映射</summary><PlatformConfigurationDetails value={editableConfiguration}/></details></section> : null}
         {showCalibration && platformConfiguration ? <CalibrationDispositionView value={platformConfiguration}/> : null}
         {showPreflight ? <section className="delivery-config-flow-grid delivery-config-flow-grid--preflight"><article className="delivery-config-preflight-card">
-          <header><div><span className="section-label">真实受控执行</span><h3>检查配置并进入 Runner v3</h3></div><strong className="delivery-config-preflight-state">尚未创建执行</strong></header>
-          <div className="delivery-config-preflight-summary"><b>执行前置检查</b><p>服务端先检查结构、预算、日期、引用和平台对象。通过后创建真实 Browser RPA Run。Runner 会在最终提交前停止并等待确认。</p></div>
+          <header><div><span className="section-label">真实受控执行</span><h3>选择驱动并检查配置</h3></div><strong className="delivery-config-preflight-state">尚未创建执行</strong></header>
+          <fieldset className="delivery-config-driver-options">
+            <legend>执行驱动</legend>
+            <label className={executionDriver === 'oceanengine-web-api/session/v1' ? 'selected' : undefined}>
+              <input type="radio" name="execution_driver" value="oceanengine-web-api/session/v1" checked={executionDriver === 'oceanengine-web-api/session/v1'} onChange={() => setExecutionDriver('oceanengine-web-api/session/v1')}/>
+              <span><b>Web API</b><small>默认路线。使用已校准的巨量接口模板。</small></span>
+            </label>
+            <label className={executionDriver === 'playwright-rpa/edge/v3' ? 'selected' : undefined}>
+              <input type="radio" name="execution_driver" value="playwright-rpa/edge/v3" checked={executionDriver === 'playwright-rpa/edge/v3'} onChange={() => setExecutionDriver('playwright-rpa/edge/v3')}/>
+              <span><b>Playwright · Edge</b><small>使用本机 Edge 页面。适用于页面路径测试和明确回退。</small></span>
+            </label>
+          </fieldset>
+          <div className="delivery-config-preflight-summary"><b>执行前置检查</b><p>服务端检查结构、预算、日期、引用和平台对象。创建执行后，驱动选择不能更改。</p><small>{executionDriver === 'playwright-rpa/edge/v3' ? 'Prepare 会连接本机 Edge，并停在最终点击边界。' : 'Web API 会使用本地模板，并在每个对象写入前要求一次性确认。'}</small></div>
           {referenceIntentIssues.length ? <div className="delivery-config-empty-inline"><CircleAlert size={20}/><div><b>平台对象未加入投放意图</b><p>{referenceIntentIssues.join('、')}。返回“配置映射”并保存。系统会生成包含这些引用的新计划版本。</p></div></div> : null}
           <div className="delivery-config-actions delivery-config-preflight-actions">
-            <button className="primary-button" onClick={() => void startRealExecution()} disabled={busy || legacyReadOnly || referenceIntentIssues.length > 0}><Check size={14}/>{busy ? '正在创建…' : '进入真实受控执行'}</button>
+            <button className="primary-button" type="button" onClick={() => void startRealExecution()} disabled={busy || legacyReadOnly || referenceIntentIssues.length > 0}><Check size={14}/>{busy ? '正在创建…' : `使用${executionDriver === 'playwright-rpa/edge/v3' ? ' Playwright' : ' Web API'}创建执行`}</button>
           </div>
         </article></section> : null}
       </>}

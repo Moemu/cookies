@@ -88,6 +88,7 @@ const (
 	BlockWorkflowDrift             BlockingReason = "WORKFLOW_DRIFT"
 	BlockSkillDrift                BlockingReason = "SKILL_DRIFT"
 	BlockResultReconciliation      BlockingReason = "RESULT_RECONCILIATION_REQUIRED"
+	BlockTargetEffectNotObserved   BlockingReason = "TARGET_EFFECT_NOT_OBSERVED"
 )
 
 type Platform string
@@ -295,6 +296,7 @@ type AuthorityBinding struct {
 	ConfigurationCanonicalHash      string                    `json:"configuration_canonical_hash"`
 	WorkflowID                      string                    `json:"workflow_id"`
 	WorkflowCanonicalHash           string                    `json:"workflow_canonical_hash"`
+	ExecutionDriver                 ExecutionDriver           `json:"execution_driver,omitempty"`
 	WorkflowStepID                  string                    `json:"workflow_step_id"`
 	SkillID                         string                    `json:"skill_id,omitempty"`
 	SkillVersion                    string                    `json:"skill_version,omitempty"`
@@ -342,6 +344,9 @@ func (b AuthorityBinding) Validate() error {
 		if !isSHA256(hash) {
 			return ErrInvalidContract
 		}
+	}
+	if b.ExecutionDriver != "" && b.ExecutionDriver != ExecutionDriverPlaywrightEdgeV3 && b.ExecutionDriver != ExecutionDriverOceanEngineWebAPI {
+		return ErrInvalidContract
 	}
 	return nil
 }
@@ -619,7 +624,7 @@ var runTransitions = map[RunState][]RunState{
 	RunSubmitting:           {RunVerifying, RunFailed, RunPartial, RunResultUnknown},
 	RunVerifying:            {RunEnvironmentCheck, RunSucceeded, RunFailed, RunPartial, RunResultUnknown},
 	RunSucceeded:            {}, RunFailed: {}, RunPartial: {},
-	RunResultUnknown: {RunEnvironmentCheck, RunSucceeded},
+	RunResultUnknown: {RunEnvironmentCheck, RunSucceeded, RunFailed},
 	RunCancelled:     {},
 }
 

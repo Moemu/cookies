@@ -128,6 +128,39 @@ func TestWorkerRejectsUnknownResultReconciliationWithoutFinalClickEvidence(t *te
 	}
 }
 
+func TestWorkerRecordsReadOnlyNoEffectAndMakesRunSafelyFailed(t *testing.T) {
+	now := time.Date(2026, 8, 30, 20, 45, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	service := Service{Repository: repo, AuthorityProvider: &stagedRecorderProvider{complete: true}, Now: func() time.Time { return now }}
+	run := validRun(now)
+	run.State = RunResultUnknown
+	if _, _, err := repo.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PutStep(context.Background(), run.OrganizationID, run.ProjectID, RunStep{ID: "submit_unknown", RunID: run.ID, Sequence: 1, Status: StepResultUnknown}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (Worker{Service: service}).ReconcileResultUnknown(context.Background(), run.OrganizationID, run.ProjectID, run.ID, PreparedPage{
+		InternalObjectKind: "promotion",
+		InternalObjectID:   "promotion-draft-1",
+		Readback: map[string]string{
+			"reconciliation":           "not_found",
+			"read_only_reconciliation": "true",
+			"platform_write_performed": "false",
+			"exact_name_matches":       "0",
+			"query_attempts":           "3",
+			"final_click_performed":    "false",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.State != RunFailed || result.BlockingReason != BlockTargetEffectNotObserved {
+		t.Fatalf("run=%#v", result)
+	}
+}
+
 type stagedWorkerAdapter struct{ stage int }
 
 func (a *stagedWorkerAdapter) Prepare(context.Context, BrowserRpaRun) (PreparedPage, error) {
@@ -141,6 +174,19 @@ type unavailableWorkerAdapter struct{}
 type probeCountingWorkerAdapter struct {
 	probeCalls   int
 	prepareCalls int
+}
+
+type driverRecordingAdapter struct {
+	prepareCalls int
+}
+
+func (a *driverRecordingAdapter) Prepare(_ context.Context, _ BrowserRpaRun) (PreparedPage, error) {
+	a.prepareCalls++
+	return PreparedPage{Readback: map[string]string{}}, nil
+}
+
+func (*driverRecordingAdapter) Submit(context.Context, BrowserRpaRun, ControlledActionAttempt, string) (WorkerOutcome, PreparedPage, error) {
+	return WorkerSuccess, PreparedPage{}, nil
 }
 
 func (a *probeCountingWorkerAdapter) CheckSession(context.Context, BrowserRpaRun) (EdgeSessionProbe, error) {
@@ -210,6 +256,27 @@ func TestDeterministicFakeWorkerTerminalOutcomes(t *testing.T) {
 			}
 			_ = now
 		})
+	}
+}
+
+func TestWorkerDispatchesTheRunOnlyToItsFrozenExecutionDriver(t *testing.T) {
+	worker, _, repo, run, _ := fakeWorkerFixture(WorkerSuccess)
+	playwright := &driverRecordingAdapter{}
+	webAPI := &driverRecordingAdapter{}
+	run.ExecutionDriver = ExecutionDriverPlaywrightEdgeV3
+	run.Authority.ExecutionDriver = ExecutionDriverPlaywrightEdgeV3
+	repo.runs[scopeKey(run.OrganizationID, run.ProjectID, run.ID)] = run
+	worker.Adapter = nil
+	worker.DriverAdapters = map[ExecutionDriver]WorkerAdapter{
+		ExecutionDriverPlaywrightEdgeV3:  playwright,
+		ExecutionDriverOceanEngineWebAPI: webAPI,
+	}
+
+	if _, err := worker.Prepare(context.Background(), run.OrganizationID, run.ProjectID, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if playwright.prepareCalls != 1 || webAPI.prepareCalls != 0 {
+		t.Fatalf("playwright calls=%d web API calls=%d", playwright.prepareCalls, webAPI.prepareCalls)
 	}
 }
 

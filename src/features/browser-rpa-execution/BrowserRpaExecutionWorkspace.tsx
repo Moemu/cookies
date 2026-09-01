@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import { CircleAlert, CircleCheck, Clock3, FileCheck2, Hand, ListChecks, MonitorCheck, Pause, Play, RefreshCw, Send, ShieldAlert, XCircle } from 'lucide-react'
+import { CircleAlert, CircleCheck, Clock3, FileCheck2, Hand, ListChecks, MonitorCheck, Pause, Play, RefreshCw, Search, Send, ShieldAlert, XCircle } from 'lucide-react'
 import { controlledExecutionApi, ControlledExecutionApiError } from './api'
 import { deliveryExecutionApi } from '../../api/delivery'
 import type { BrowserRpaEvidence, BrowserRpaRun, BrowserRpaRunEvent, ControlledExecutionTransportState, ControlledExecutionWorkspace, EdgeSessionProbe, RunnerV3Plan } from './model'
@@ -242,6 +242,7 @@ function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; ru
         projectId,
         run.authority.plan_id,
         run.authority.plan_version,
+        effectiveExecutionDriver(run),
         `browser-rpa-retry-${run.id}-${crypto.randomUUID()}`,
       )
       window.location.assign(`/projects/${encodeURIComponent(projectId)}/delivery/execution/${encodeURIComponent(result.browser_rpa_run.run_id)}?view=${encodeURIComponent('待执行')}`)
@@ -251,6 +252,25 @@ function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; ru
       setActionPending(false)
     }
   }, [projectId, transport])
+
+  const reconcileResult = useCallback(async () => {
+    if (transport.kind !== 'ready' || transport.workspace.run.state !== 'result_unknown') return
+    const { run } = transport.workspace
+    setActionPending(true)
+    setNotice('正在只读查询巨量列表。系统不会再次点击 Submit。')
+    try {
+      const updated = await controlledExecutionApi.reconcileResult(projectId, run.id)
+      setNotice(updated.state === 'failed'
+        ? '只读查询已确认目标对象不存在。现在可以创建安全重试。'
+        : '只读查询已找到目标对象，并完成平台 ID 回写。')
+      await load()
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '只读结果核对失败。')
+      await load()
+    } finally {
+      setActionPending(false)
+    }
+  }, [load, projectId, transport])
 
   if (transport.kind === 'loading') return <WorkspaceState kind="loading" />
   if (transport.kind === 'empty') return <WorkspaceState kind="empty" />
@@ -269,6 +289,7 @@ function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; ru
     onRefresh={refresh}
     onControl={runControl}
     onRetryPrepare={retryPrepare}
+    onReconcileResult={reconcileResult}
   />
 }
 
@@ -279,7 +300,7 @@ function runActionLabel(action: string): string {
   return '受控平台操作'
 }
 
-function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed, onReviewed, onWorkflow, onRefresh, onControl, onRetryPrepare }: {
+function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed, onReviewed, onWorkflow, onRefresh, onControl, onRetryPrepare, onReconcileResult }: {
   workspace: Extract<ControlledExecutionTransportState, { kind: 'ready' }>['workspace']
   busy: boolean
   notice: string
@@ -291,6 +312,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed,
   onRefresh: () => void
   onControl: (action: 'pause' | 'resume' | 'cancel' | 'takeover' | 'release_takeover') => void
   onRetryPrepare: () => void
+  onReconcileResult: () => void
 }) {
   const { run, events, evidence } = workspace
   const presentation = useMemo(() => presentControlledExecution(run), [run])
@@ -321,6 +343,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed,
       onReviewed={onReviewed}
       onWorkflow={onWorkflow}
       onRetryPrepare={onRetryPrepare}
+      onReconcileResult={onReconcileResult}
     />
     <SessionAndTargetPanel workspace={workspace} sessionProbe={sessionProbe} />
     {plan ? <PlanPanel plan={plan} run={run} /> : null}
@@ -358,7 +381,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed,
   </section>
 }
 
-function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onReviewed, onWorkflow, onRetryPrepare }: {
+function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onReviewed, onWorkflow, onRetryPrepare, onReconcileResult }: {
   workspace: ControlledExecutionWorkspace
   plan?: RunnerV3Plan
   busy: boolean
@@ -367,6 +390,7 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onR
   onReviewed: (value: boolean) => void
   onWorkflow: (action: 'check' | 'plan' | 'prepare' | 'submit') => void
   onRetryPrepare: () => void
+  onReconcileResult: () => void
 }) {
   const { run, steps: runSteps, events, evidence, lease } = workspace
   const apiDriver = effectiveExecutionDriver(run) === 'oceanengine-web-api/session/v1'
@@ -402,6 +426,7 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onR
       <button className="secondary-button" disabled={busy || !bindingReady || !actionSupported || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('plan')}><ListChecks size={15} />生成计划</button>
       <button className="secondary-button" disabled={busy || !canPrepare} onClick={() => onWorkflow('prepare')}><Play size={15} />执行 Prepare</button>
       {canRetryPrepare ? <button className="secondary-button" disabled={busy} onClick={onRetryPrepare}><RefreshCw size={15} />重试 Prepare</button> : null}
+      {run.state === 'result_unknown' && !apiDriver ? <button className="secondary-button" disabled={busy} onClick={onReconcileResult}><Search size={15} />只读查询平台结果</button> : null}
     </div>
     {canRetryPrepare ? <p className="controlled-execution-retry-note">重试会创建新 Run。失败 Run 和证据会保留。服务端会再次检查最终点击边界。</p> : null}
     {!actionSupported ? <p className="danger-copy">当前动作没有 Runner v3 单表单协议。系统不会生成可执行计划。</p> : null}

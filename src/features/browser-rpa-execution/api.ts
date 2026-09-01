@@ -75,6 +75,9 @@ export const controlledExecutionApi = {
   prepare(projectId: string, runId: string) {
     return request<BrowserRpaRun>(runPath(projectId, runId, ':prepare'), { method: 'POST' })
   },
+  reconcileResult(projectId: string, runId: string) {
+    return request<BrowserRpaRun>(runPath(projectId, runId, ':reconcile-result'), { method: 'POST' })
+  },
   confirm(projectId: string, run: BrowserRpaRun) {
     return request<IssuedFinalConfirmation>(`${runPath(projectId, run.id)}/confirmations`, {
       method: 'POST',

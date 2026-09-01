@@ -62,6 +62,12 @@ type WorkerPlanAdapter interface {
 	Plan(context.Context, BrowserRpaRun) (json.RawMessage, error)
 }
 
+// WorkerResultReconciliationAdapter performs a read-only platform query. It
+// must not authorize or perform a controlled action.
+type WorkerResultReconciliationAdapter interface {
+	ReconcileResultUnknown(context.Context, BrowserRpaRun) (PreparedPage, error)
+}
+
 const EdgeSessionProbeSchemaV1 = "browser-rpa-edge-session-probe/v1"
 
 // EdgeSessionProbe contains only safe session facts. It never exposes a CDP
@@ -394,6 +400,9 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 	reason := BlockingReason("")
 	if outcome == WorkerFailed {
 		terminal = RunFailed
+		if page.Readback["final_click_performed"] == "true" && page.Readback["reconciliation"] == "not_found" && page.Readback["platform_write_request_observed"] == "false" {
+			reason = BlockTargetEffectNotObserved
+		}
 	}
 	if outcome == WorkerPartial {
 		terminal = RunPartial
@@ -458,7 +467,13 @@ func (w Worker) ReconcileResultUnknown(ctx context.Context, org contract.Organiz
 	if err != nil {
 		return BrowserRpaRun{}, err
 	}
-	if run.State != RunResultUnknown || run.LeaseID != "" || !stagedCreateAction(run.Authority.Action) || page.InternalObjectID == "" || (page.InternalObjectKind != "project" && page.InternalObjectKind != "promotion") || !numericReadbackID(page.Readback["platform_object_id"]) || page.Readback["reconciliation"] != "matched" || page.Readback["field_reconciliation_status"] == "not_checked" {
+	reconciliation := page.Readback["reconciliation"]
+	matched := reconciliation == "matched"
+	confirmedNoEffect := reconciliation == "not_found" && page.Readback["read_only_reconciliation"] == "true" && page.Readback["platform_write_performed"] == "false" && page.Readback["exact_name_matches"] == "0"
+	if run.State != RunResultUnknown || run.LeaseID != "" || !stagedCreateAction(run.Authority.Action) || page.InternalObjectID == "" || (page.InternalObjectKind != "project" && page.InternalObjectKind != "promotion") || (!matched && !confirmedNoEffect) {
+		return BrowserRpaRun{}, ErrInvalidTransition
+	}
+	if matched && (!numericReadbackID(page.Readback["platform_object_id"]) || page.Readback["field_reconciliation_status"] == "not_checked") {
 		return BrowserRpaRun{}, ErrInvalidTransition
 	}
 	steps, err := w.Service.Repository.ListSteps(ctx, org, project, run.ID)
@@ -482,7 +497,7 @@ func (w Worker) ReconcileResultUnknown(ctx context.Context, org contract.Organiz
 			break
 		}
 	}
-	if !clicked {
+	if matched && !clicked {
 		return BrowserRpaRun{}, ErrInvalidTransition
 	}
 	resultStep := RunStep{ID: run.ID + "-reidentified-v" + strconv.FormatInt(run.Version, 10), RunID: run.ID, Sequence: int(run.Version)*10 + 1, WorkflowStepID: run.Authority.WorkflowStepID, Action: string(TakeoverResultObserved), Status: StepSucceeded, Attempt: 1, Version: 1}
@@ -501,6 +516,9 @@ func (w Worker) ReconcileResultUnknown(ctx context.Context, org contract.Organiz
 	if err != nil {
 		return BrowserRpaRun{}, err
 	}
+	if confirmedNoEffect {
+		return w.Service.TransitionRun(ctx, org, project, run.ID, run.Version, RunFailed, BlockTargetEffectNotObserved)
+	}
 	recorder, ok := w.Service.AuthorityProvider.(CreatedObjectRecorder)
 	if !ok {
 		return BrowserRpaRun{}, ErrInvalidContract
@@ -514,6 +532,27 @@ func (w Worker) ReconcileResultUnknown(ctx context.Context, org contract.Organiz
 		next = RunSucceeded
 	}
 	return w.Service.TransitionRun(ctx, org, project, run.ID, run.Version, next, "")
+}
+
+// ReconcileUnknownFromPlatform runs the adapter's query-only workflow and
+// records its result. It never issues a final confirmation or a submit token.
+func (w Worker) ReconcileUnknownFromPlatform(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string) (BrowserRpaRun, error) {
+	run, err := w.Service.Repository.GetRun(ctx, org, project, runID)
+	if err != nil {
+		return BrowserRpaRun{}, err
+	}
+	if run.State != RunResultUnknown || run.LeaseID != "" {
+		return BrowserRpaRun{}, ErrInvalidTransition
+	}
+	adapter, ok := w.Adapter.(WorkerResultReconciliationAdapter)
+	if !ok {
+		return BrowserRpaRun{}, ErrInvalidContract
+	}
+	page, err := adapter.ReconcileResultUnknown(ctx, run)
+	if err != nil {
+		return BrowserRpaRun{}, err
+	}
+	return w.ReconcileResultUnknown(ctx, org, project, runID, page)
 }
 
 func numericReadbackID(value string) bool {

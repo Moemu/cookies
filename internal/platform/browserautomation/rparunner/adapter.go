@@ -99,6 +99,7 @@ type PlaywrightRPAAdapter struct {
 var _ browserautomation.WorkerAdapter = PlaywrightRPAAdapter{}
 var _ browserautomation.WorkerPlanAdapter = PlaywrightRPAAdapter{}
 var _ browserautomation.WorkerSessionProbeAdapter = PlaywrightRPAAdapter{}
+var _ browserautomation.WorkerResultReconciliationAdapter = PlaywrightRPAAdapter{}
 
 func (a PlaywrightRPAAdapter) CheckSession(ctx context.Context, run browserautomation.BrowserRpaRun) (browserautomation.EdgeSessionProbe, error) {
 	if _, _, err := a.resolveSession(ctx, run); err != nil {
@@ -126,6 +127,30 @@ func (a PlaywrightRPAAdapter) Plan(ctx context.Context, run browserautomation.Br
 		return nil, fmt.Errorf("%w: %v", browserautomation.ErrPageDrift, err)
 	}
 	return plan, nil
+}
+
+func (a PlaywrightRPAAdapter) ReconcileResultUnknown(ctx context.Context, run browserautomation.BrowserRpaRun) (browserautomation.PreparedPage, error) {
+	env, policy, err := a.resolveSession(ctx, run)
+	if err != nil {
+		return browserautomation.PreparedPage{}, err
+	}
+	if a.protocol() != ProtocolV3 || a.V3Compiler == nil {
+		return browserautomation.PreparedPage{}, fmt.Errorf("%w: read-only reconciliation requires Runner v3", browserautomation.ErrEnvironmentUnavailable)
+	}
+	plan, err := a.V3Compiler.CompilePrepareV3(ctx, run, policy)
+	if err != nil {
+		return browserautomation.PreparedPage{}, fmt.Errorf("%w: %v", browserautomation.ErrPageDrift, err)
+	}
+	result, err := a.sessionRunner(env).RunV3Reconcile(ctx, plan)
+	if err != nil {
+		return browserautomation.PreparedPage{}, fmt.Errorf("%w: %v", browserautomation.ErrEnvironmentUnavailable, err)
+	}
+	page := preparedPageFromResult(result)
+	attachPlannedObject(plan, &page)
+	if result.Reconciliation != "matched" && result.Reconciliation != "not_found" {
+		return browserautomation.PreparedPage{}, fmt.Errorf("%w: runner returned no stable reconciliation", browserautomation.ErrPageDrift)
+	}
+	return page, nil
 }
 
 func (a PlaywrightRPAAdapter) Prepare(ctx context.Context, run browserautomation.BrowserRpaRun) (browserautomation.PreparedPage, error) {
@@ -298,6 +323,11 @@ func (a PlaywrightRPAAdapter) Submit(ctx context.Context, run browserautomation.
 	}
 	if result.Outcome == OutcomeSuccess && !result.FinalClickPerformed {
 		return browserautomation.WorkerFailed, browserautomation.PreparedPage{}, fmt.Errorf("%w: runner reported success without performing the authorized click", browserautomation.ErrPageDrift)
+	}
+	if result.FinalClickPerformed && result.Outcome == OutcomeFailed && result.ErrorCode == "submit_no_effect_confirmed" && result.Reconciliation == "not_found" {
+		page := preparedPageFromResult(result)
+		attachPlannedObject(compiledV3Plan, &page)
+		return browserautomation.WorkerFailed, page, nil
 	}
 	if result.FinalClickPerformed && result.Outcome != OutcomeSuccess && result.Outcome != OutcomeSuccessWithDrift {
 		// A failed result after the write boundary does not prove that the

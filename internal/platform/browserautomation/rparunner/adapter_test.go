@@ -183,6 +183,20 @@ func TestAdapterSubmitInfrastructureFailureIsResultUnknown(t *testing.T) {
 	}
 }
 
+func TestAdapterSubmitAcceptsConfirmedNoEffectAsFailed(t *testing.T) {
+	run, env, policy := adapterFixture()
+	adapter := testAdapter(t, "v3-no-effect", env, policy)
+	adapter.Protocol = ProtocolV3
+	adapter.V3Compiler = stubV3Compiler{}
+	outcome, page, err := adapter.Submit(context.Background(), run, browserautomation.ControlledActionAttempt{}, "token")
+	if err != nil || outcome != browserautomation.WorkerFailed {
+		t.Fatalf("confirmed no effect must be a failed action: outcome=%s err=%v", outcome, err)
+	}
+	if page.Readback["reconciliation"] != "not_found" || page.Readback["platform_write_request_observed"] != "false" {
+		t.Fatalf("confirmed no-effect proof was not preserved: %#v", page.Readback)
+	}
+}
+
 func TestAdapterSubmitRejectsSuccessWithoutClick(t *testing.T) {
 	run, env, policy := adapterFixture()
 	adapter := testAdapter(t, "success", env, policy)

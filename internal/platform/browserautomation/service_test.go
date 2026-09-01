@@ -5,8 +5,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/contract"
 	platformids "github.com/shikanon/cookies/internal/platform/ids"
 )
+
+type fixedAuthorityProvider struct {
+	binding AuthorityBinding
+	boundID string
+}
+
+func (p *fixedAuthorityProvider) ResolveAuthority(context.Context, contract.OrganizationID, contract.ProjectID, string, time.Time) (AuthorityResolution, error) {
+	return AuthorityResolution{Binding: p.binding, BoundRunID: p.boundID}, nil
+}
+
+func (p *fixedAuthorityProvider) BindRun(_ context.Context, _ AuthorityBinding, runID string, _ time.Time) error {
+	p.boundID = runID
+	return nil
+}
+
+func (*fixedAuthorityProvider) VerifyAuthority(context.Context, AuthorityBinding, string, time.Time) error {
+	return nil
+}
 
 func TestBrowserRpaIDPrefixesUseProductionGeneratorSyntax(t *testing.T) {
 	prefixes := []string{
@@ -20,6 +39,27 @@ func TestBrowserRpaIDPrefixesUseProductionGeneratorSyntax(t *testing.T) {
 		if _, err := platformids.New(prefix); err != nil {
 			t.Fatalf("production ID prefix %q: %v", prefix, err)
 		}
+	}
+}
+
+func TestCreateBoundRunRejectsARequestThatChangesTheAuthorityDriver(t *testing.T) {
+	now := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	authority := validRun(now).Authority
+	authority.ExecutionDriver = ExecutionDriverPlaywrightEdgeV3
+	provider := &fixedAuthorityProvider{binding: authority}
+	repo.PutEnvironment(ExecutionEnvironment{ID: "env", OrganizationID: authority.OrganizationID, ProjectID: authority.ProjectID, Platform: PlatformOceanEngine, AccountID: authority.AccountReferenceID, Mode: "local_visible", BrowserVersion: "edge-test", Region: "local", Healthy: true, Version: 1})
+	repo.PutBrowserProfile(BrowserProfile{ID: "profile", OrganizationID: authority.OrganizationID, ProjectID: authority.ProjectID, EnvironmentID: "env", Platform: PlatformOceanEngine, AccountID: authority.AccountReferenceID, State: "ready", Version: 1})
+	repo.PutSitePolicy(SitePolicy{ID: "policy", OrganizationID: authority.OrganizationID, ProjectID: authority.ProjectID, Platform: PlatformOceanEngine, AccountID: authority.AccountReferenceID, AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create"}, AllowedPlatformProjects: []string{"unbound_project"}, Version: 1})
+	service := Service{Repository: repo, AuthorityProvider: provider, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) { return prefix + "_driver", nil }}
+	request := CreateBoundRunRequest{OrganizationID: authority.OrganizationID, ProjectID: authority.ProjectID, Platform: PlatformOceanEngine, AccountID: authority.AccountReferenceID, ExecutionDriver: ExecutionDriverOceanEngineWebAPI, ExecutionID: authority.BusinessExecutionID, EnvironmentID: "env", ProfileID: "profile", PolicyID: "policy", IdempotencyKey: "driver-test", CreatedBy: "user"}
+
+	if _, _, err := service.CreateBoundRun(context.Background(), request); err != ErrInvalidContract {
+		t.Fatalf("driver mismatch err=%v", err)
+	}
+	request.ExecutionDriver = ExecutionDriverPlaywrightEdgeV3
+	if run, replay, err := service.CreateBoundRun(context.Background(), request); err != nil || replay || run.ExecutionDriver != ExecutionDriverPlaywrightEdgeV3 || run.Authority.ExecutionDriver != ExecutionDriverPlaywrightEdgeV3 {
+		t.Fatalf("run=%#v replay=%v err=%v", run, replay, err)
 	}
 }
 

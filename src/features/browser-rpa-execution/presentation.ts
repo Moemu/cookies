@@ -58,8 +58,17 @@ export function runMatchesExecutionView(run: BrowserRpaRun, view: string) {
 
 export function isSafePrepareRetryCandidate(workspace: ControlledExecutionWorkspace): boolean {
   const { run, steps, evidence } = workspace
-  if (run.state !== 'failed' || (run.blocking_reason !== 'PAGE_DRIFT' && run.blocking_reason !== 'RUNNER_FAILURE')) return false
+  if (run.state !== 'failed') return false
   if (!run.authority.plan_id || !run.authority.plan_version || run.takeover_active) return false
+  if (run.blocking_reason === 'TARGET_EFFECT_NOT_OBSERVED') {
+    return evidence.some(item => item.field_readback?.reconciliation === 'not_found'
+      && ((item.field_readback?.read_only_reconciliation === 'true'
+        && item.field_readback?.platform_write_performed === 'false'
+        && item.field_readback?.exact_name_matches === '0')
+        || (item.field_readback?.final_click_performed === 'true'
+          && item.field_readback?.platform_write_request_observed === 'false')))
+  }
+  if (run.blocking_reason !== 'PAGE_DRIFT' && run.blocking_reason !== 'RUNNER_FAILURE') return false
   if (!steps.some(step => step.action === 'prepare_and_readback' && step.status === 'failed')) return false
   if (steps.some(step => step.action.toLowerCase().includes('submit') || step.status === 'result_unknown')) return false
   return !evidence.some(item => item.field_readback?.final_click_performed === 'true' || item.after_page_facts?.final_click_performed === 'true')

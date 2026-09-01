@@ -1053,6 +1053,7 @@ export const deliveryExecutionApi = {
     projectId: string,
     planId: string,
     expectedVersion: number,
+    executionDriver: DeliveryExecutionDriver,
     idempotencyKey: string,
   ): Promise<{ controlled_change_set: { id: string }; controlled_execution: { id: string }; browser_rpa_run: { run_id: string } }> {
     return deliveryPlanRequest<{ controlled_change_set: { id: string }; controlled_execution: { id: string }; browser_rpa_run: { run_id: string } }>(
@@ -1061,7 +1062,7 @@ export const deliveryExecutionApi = {
       {
         method: 'POST',
         headers: { 'Idempotency-Key': idempotencyKey },
-        body: JSON.stringify({ expected_version: expectedVersion }),
+        body: JSON.stringify({ expected_version: expectedVersion, execution_driver: executionDriver }),
       },
     )
   },
@@ -1116,6 +1117,8 @@ export const deliveryExecutionApi = {
     )
   },
 }
+
+export type DeliveryExecutionDriver = 'oceanengine-web-api/session/v1' | 'playwright-rpa/edge/v3'
 
 export type DeliveryPlatformEntityMapping = {
   id: string

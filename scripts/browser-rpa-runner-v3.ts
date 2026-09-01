@@ -71,12 +71,16 @@ export type SubmitObservation = {
   outcome: "success" | "validation_error" | "result_unknown";
   error_message?: string;
   created_object_id?: string;
+  platform_write_request_observed?: boolean;
+  platform_write_response_status?: number;
 };
 
 export type ReconciliationResult = {
   status: "matched" | "not_found" | "not_applicable";
   created_object_id?: string;
   field_reconciliation?: FieldReconciliation;
+  query_attempts?: number;
+  exact_name_matches?: number;
 };
 
 export interface PageOperations {
@@ -220,20 +224,28 @@ export async function executePlan(
             steps: results,
           };
         }
-        if (observation.outcome === "result_unknown") {
-          results.push({ id: step.id, status: "result_unknown", error_code: "result_unknown", error_message: observation.error_message });
-          return {
-            schema_version: "oceanengine-playwright-rpa-result/v2",
-            outcome: "result_unknown",
-            error_code: "result_unknown",
-            error_message: observation.error_message,
-            final_click_performed: true,
-            reconciliation: "not_started",
-            steps: results,
-          };
-        }
         const reconciliation = await page.reconcileSubmit(plan, observation);
         if (reconciliation.status === "not_found") {
+          const noWriteRequest = observation.platform_write_request_observed === false;
+          const readback = {
+            ...reconciliation,
+            platform_write_request_observed: observation.platform_write_request_observed,
+            ...(observation.platform_write_response_status !== undefined
+              ? { platform_write_response_status: observation.platform_write_response_status }
+              : {}),
+          };
+          if (observation.outcome === "result_unknown" && noWriteRequest) {
+            results.push({ id: step.id, status: "failed", error_code: "submit_no_effect_confirmed", readback });
+            return {
+              schema_version: "oceanengine-playwright-rpa-result/v2",
+              outcome: "failed",
+              error_code: "submit_no_effect_confirmed",
+              error_message: "the final click sent no platform write request and exact-name reconciliation found no target object",
+              final_click_performed: true,
+              reconciliation: "not_found",
+              steps: results,
+            };
+          }
           results.push({ id: step.id, status: "result_unknown", error_code: "reconciliation_not_found", readback: reconciliation });
           return {
             schema_version: "oceanengine-playwright-rpa-result/v2",
@@ -385,6 +397,8 @@ export async function executePreparePlan(
 
 export class PlaywrightPageOperations implements PageOperations {
   private preSubmitUrl = "";
+  private platformWriteRequestObserved = false;
+  private platformWriteResponseStatus: number | undefined;
   private readonly referenceReadbacks = new Map<string, unknown>();
 
   constructor(private readonly page: Page) {}
@@ -1222,7 +1236,16 @@ export class PlaywrightPageOperations implements PageOperations {
       if (matched.visibleCount < (spec.minimum_visible ?? 1)) throw new RunnerV3Error("async_load_timeout", `${step.id}: product image inventory did not load`);
       await matched.image.click();
       await this.stableVisibleCount(root.getByText(/已选择\s*1\s*\/\s*10/), 1, step.id);
-      const verified = await this.imagesMatchingSourceIdentity(root.locator("img:visible"), matched.identity);
+      // Ocean Engine renders the selected image twice after a click: once in
+      // the selected material card and once in the submit-bar preview. Verify
+      // only the selected card, because the preview is not a second choice.
+      const selectedCards = root.locator(
+        ".oc-create-material-card-content.oc-create-material-card-selected:visible",
+      );
+      if ((await selectedCards.count()) !== 1) {
+        throw new RunnerV3Error("field_readback_mismatch", `${step.id}: selected product image card is not unique`);
+      }
+      const verified = await this.imagesMatchingSourceIdentity(selectedCards.locator("img:visible"), matched.identity);
       if (verified.length !== 1) throw new RunnerV3Error("field_readback_mismatch", `${step.id}: selected product image identity changed after click`);
       await this.confirmPicker(root, spec, step.id);
       return {
@@ -1341,6 +1364,20 @@ export class PlaywrightPageOperations implements PageOperations {
     await this.assertFinalReady(step);
     const button = this.page.getByRole("button", { name: step.target!, exact: true });
     this.preSubmitUrl = this.page.url();
+    this.platformWriteRequestObserved = false;
+    this.platformWriteResponseStatus = undefined;
+    this.page.on("request", (request) => {
+      if (request.method() === "POST" && /\/superior\/api\/v2\/(?:project\/create|promotion\/create_promotion)(?:\?|$)/.test(request.url())) {
+        this.platformWriteRequestObserved = true;
+      }
+    });
+    this.page.on("response", (response) => {
+      const request = response.request();
+      if (request.method() === "POST" && /\/superior\/api\/v2\/(?:project\/create|promotion\/create_promotion)(?:\?|$)/.test(response.url())) {
+        this.platformWriteRequestObserved = true;
+        this.platformWriteResponseStatus = response.status();
+      }
+    });
     await button.click({ noWaitAfter: true });
   }
 
@@ -1355,7 +1392,7 @@ export class PlaywrightPageOperations implements PageOperations {
     for (let attempt = 0; attempt < 24; attempt += 1) {
       const success = this.page.getByText(/(?:保存|创建).{0,8}成功/);
       for (let index = 0; index < await success.count(); index += 1) {
-        if (await success.nth(index).isVisible()) return { outcome: "success" };
+        if (await success.nth(index).isVisible()) return this.submitObservation("success");
       }
       const errors = this.page.locator(".ovui-form-item-error,[class*='form-item-error'],[class*='FormItemError']");
       const messages: string[] = [];
@@ -1363,15 +1400,26 @@ export class PlaywrightPageOperations implements PageOperations {
         const error = errors.nth(index);
         if (await error.isVisible()) messages.push((await error.innerText()).trim());
       }
-      if (messages.some(Boolean)) return { outcome: "validation_error", error_message: messages.filter(Boolean).join("; ") };
+      if (messages.some(Boolean)) return this.submitObservation("validation_error", messages.filter(Boolean).join("; "));
       const validationSummary = this.page.getByText("有些项目填写错误，请修改后再提交", { exact: true });
       if ((await validationSummary.count()) > 0 && await validationSummary.last().isVisible()) {
-        return { outcome: "validation_error", error_message: "the platform reported form validation errors" };
+        return this.submitObservation("validation_error", "the platform reported form validation errors");
       }
-      if (this.page.url() !== this.preSubmitUrl) return { outcome: "success" };
+      if (this.page.url() !== this.preSubmitUrl) return this.submitObservation("success");
       await this.page.waitForTimeout(250);
     }
-    return { outcome: "result_unknown", error_message: "no success, validation error, or navigation was observed after one click" };
+    return this.submitObservation("result_unknown", "no success, validation error, or navigation was observed after one click");
+  }
+
+  private submitObservation(outcome: SubmitObservation["outcome"], errorMessage?: string): SubmitObservation {
+    return {
+      outcome,
+      ...(errorMessage ? { error_message: errorMessage } : {}),
+      platform_write_request_observed: this.platformWriteRequestObserved,
+      ...(this.platformWriteResponseStatus !== undefined
+        ? { platform_write_response_status: this.platformWriteResponseStatus }
+        : {}),
+    };
   }
 
   async reconcileSubmit(plan: OceanEngineFormPlan, observation: SubmitObservation): Promise<ReconciliationResult> {
@@ -1414,31 +1462,34 @@ export class PlaywrightPageOperations implements PageOperations {
         search = this.page.getByPlaceholder(placeholder, { exact: true });
       }
     }
-    if ((await search.count()) === 1) {
-      await search.fill(expectedName);
+    if ((await search.count()) !== 1) return { status: "not_found", query_attempts: 0, exact_name_matches: 0 };
+    await search.fill(expectedName);
+    for (let queryAttempt = 1; queryAttempt <= 3; queryAttempt += 1) {
       await search.press("Enter");
-    }
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      let row = this.page.locator("tr.ovui-tr").filter({ hasText: expectedName });
-      if ((await row.count()) === 0) {
-        row = this.page.getByRole("row").filter({ hasText: expectedName });
-      }
-      if ((await row.count()) === 1) {
-        const match = (await row.innerText()).match(/ID[:：]\s*(\d+)/);
-        if (match?.[1]) {
-          const fieldReconciliation = plan.plan_kind === "promotion_create"
-            ? await this.reconcilePromotionFields(plan, row)
-            : undefined;
-          return {
-            status: "matched",
-            created_object_id: match[1],
-            ...(fieldReconciliation ? { field_reconciliation: fieldReconciliation } : {}),
-          };
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        let row = this.page.locator("tr.ovui-tr").filter({ hasText: expectedName });
+        if ((await row.count()) === 0) {
+          row = this.page.getByRole("row").filter({ hasText: expectedName });
         }
+        if ((await row.count()) === 1) {
+          const match = (await row.innerText()).match(/ID[:：]\s*(\d+)/);
+          if (match?.[1]) {
+            const fieldReconciliation = plan.plan_kind === "promotion_create"
+              ? await this.reconcilePromotionFields(plan, row)
+              : undefined;
+            return {
+              status: "matched",
+              created_object_id: match[1],
+              query_attempts: queryAttempt,
+              exact_name_matches: 1,
+              ...(fieldReconciliation ? { field_reconciliation: fieldReconciliation } : {}),
+            };
+          }
+        }
+        await this.page.waitForTimeout(250);
       }
-      await this.page.waitForTimeout(250);
     }
-    return { status: "not_found" };
+    return { status: "not_found", query_attempts: 3, exact_name_matches: 0 };
   }
 
   private async reconcilePromotionFields(plan: OceanEngineFormPlan, row: Locator): Promise<FieldReconciliation> {
@@ -1553,6 +1604,42 @@ async function main() {
   const browser = await chromium.connectOverCDP(cdpURL);
   const context = browser.contexts()[0];
   if (!context) throw new Error("the Edge session has no browser context");
+  if (args.includes("--reconcile-only")) {
+    const page = await context.newPage();
+    try {
+      const managementURL = new URL("https://ad.oceanengine.com/promotion/promote-manage/project");
+      managementURL.searchParams.set("aadvid", plan.account_reference);
+      await page.goto(managementURL.toString(), { waitUntil: "domcontentloaded" });
+      page.setDefaultTimeout(15_000);
+      page.setDefaultNavigationTimeout(15_000);
+      const reconciliation = await new PlaywrightPageOperations(page).reconcileSubmit(plan, {
+        outcome: "result_unknown",
+      });
+      const matched = reconciliation.status === "matched";
+      writeResultAndExit({
+        schema_version: "oceanengine-playwright-rpa-result/v2",
+        outcome: matched ? "success" : "failed",
+        error_code: matched ? "ok" : "target_effect_not_observed",
+        ...(!matched ? { error_message: "the read-only exact-name query did not find the target object" } : {}),
+        final_click_performed: false,
+        ...(reconciliation.created_object_id ? { created_object_id: reconciliation.created_object_id } : {}),
+        reconciliation: reconciliation.status,
+        ...(reconciliation.field_reconciliation ? { field_reconciliation: reconciliation.field_reconciliation } : {}),
+        steps: [{
+          id: "read-only-result-reconciliation",
+          status: matched ? "succeeded" : "failed",
+          readback: {
+            ...reconciliation,
+            read_only_reconciliation: true,
+            platform_write_performed: false,
+          },
+        }],
+      }, 0);
+      return;
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  }
   const page = await resolvePlanPage(context, plan);
   // Keep one drifting selector from consuming the complete Prepare timeout.
   page.setDefaultTimeout(15_000);

@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 const component = readFileSync(resolve(import.meta.dirname, '../src/components/DeliveryConfigurationPage.tsx'), 'utf8')
+const executionWorkspace = readFileSync(resolve(import.meta.dirname, '../src/features/browser-rpa-execution/BrowserRpaExecutionWorkspace.tsx'), 'utf8')
 const styles = readFileSync(resolve(import.meta.dirname, '../src/styles.css'), 'utf8')
 
 test('delivery line-list fields preserve the editing draft until blur', () => {
@@ -37,4 +38,13 @@ test('enumerated Runner paths and CPM bid limits are visible before execution', 
   assert.match(component, /<option value="content_marketing">内容营销<\/option>/)
   assert.match(component, /value="short_video_image_text"/)
   assert.match(component, /CPM 项目出价必须是 4 至 100 元/)
+})
+
+test('real execution selects one immutable Web API or Playwright driver', () => {
+  assert.match(component, /useState<DeliveryExecutionDriver>\('oceanengine-web-api\/session\/v1'\)/)
+  assert.match(component, /value="oceanengine-web-api\/session\/v1"/)
+  assert.match(component, /value="playwright-rpa\/edge\/v3"/)
+  assert.match(component, /创建执行后，驱动选择不能更改/)
+  assert.match(styles, /\.delivery-config-driver-options label\.selected/)
+  assert.match(executionWorkspace, /effectiveExecutionDriver\(run\),\s*`browser-rpa-retry-/)
 })

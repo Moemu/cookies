@@ -13,12 +13,12 @@ test('delivery execution client starts a real Browser RPA run from one plan vers
   }
   t.after(() => { globalThis.fetch = originalFetch })
 
-  const result = await deliveryExecutionApi.startBrowserRpaExecution('project_1', 'plan_1', 3, 'real-run-1')
+  const result = await deliveryExecutionApi.startBrowserRpaExecution('project_1', 'plan_1', 3, 'playwright-rpa/edge/v3', 'real-run-1')
 
   assert.equal(calls[0].url, '/api/delivery/v1/projects/project_1/plans/plan_1/browser-rpa-runs')
   assert.equal(calls[0].init?.method, 'POST')
   assert.equal(new Headers(calls[0].init?.headers).get('Idempotency-Key'), 'real-run-1')
-  assert.deepEqual(JSON.parse(calls[0].init?.body as string), { expected_version: 3 })
+  assert.deepEqual(JSON.parse(calls[0].init?.body as string), { expected_version: 3, execution_driver: 'playwright-rpa/edge/v3' })
   assert.equal(result.browser_rpa_run.run_id, 'curun_1')
 })
 

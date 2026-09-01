@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shikanon/cookies/internal/platform/browserautomation"
 	"github.com/shikanon/cookies/internal/platform/contract"
 	"github.com/shikanon/cookies/internal/platform/identity"
 	"github.com/shikanon/cookies/internal/systems/delivery"
@@ -392,11 +393,11 @@ func TestObservatoryHTTPExposesReplayAndAuditableFeedback(t *testing.T) {
 func TestStartBrowserRpaExecutionHTTPReturnsRealRunID(t *testing.T) {
 	app := &applicationStub{browserRpaExecution: delivery.StartBrowserRpaExecutionResult{BrowserRpaRun: delivery.BrowserRpaLaunchResult{RunID: "curun_real_1"}}}
 	server := New(app)
-	request := authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/plans/plan_1/browser-rpa-runs", `{"expected_version":3}`)
+	request := authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/plans/plan_1/browser-rpa-runs", `{"expected_version":3,"execution_driver":"playwright-rpa/edge/v3"}`)
 	request.Header.Set("Idempotency-Key", "start-real-run-1")
 	response := httptest.NewRecorder()
 	server.ServeHTTP(response, request)
-	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"run_id":"curun_real_1"`) || app.startedPlanID != "plan_1" || app.startedBrowserRpa.ExpectedVersion != 3 || app.startedBrowserRpa.IdempotencyKey != "start-real-run-1" {
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"run_id":"curun_real_1"`) || app.startedPlanID != "plan_1" || app.startedBrowserRpa.ExpectedVersion != 3 || app.startedBrowserRpa.ExecutionDriver != browserautomation.ExecutionDriverPlaywrightEdgeV3 || app.startedBrowserRpa.IdempotencyKey != "start-real-run-1" {
 		t.Fatalf("start Browser RPA status=%d body=%s request=%#v", response.Code, response.Body.String(), app.startedBrowserRpa)
 	}
 }

@@ -83,6 +83,12 @@ func (r Runner) RunV3(ctx context.Context, plan json.RawMessage, confirmToken, a
 	return r.runPayload(ctx, plan, header.Mode, extraArgs)
 }
 
+// RunV3Reconcile runs only a read-only exact-name platform query. It does not
+// pass a confirmation token and the runner cannot enter the submit workflow.
+func (r Runner) RunV3Reconcile(ctx context.Context, plan json.RawMessage) (RpaResult, error) {
+	return r.runPayload(ctx, plan, "prepare", []string{"--reconcile-only"})
+}
+
 func (r Runner) runPayload(ctx context.Context, payload []byte, mode string, extraArgs []string) (RpaResult, error) {
 	timeout := r.PrepareTimeout
 	if mode == "submit" {

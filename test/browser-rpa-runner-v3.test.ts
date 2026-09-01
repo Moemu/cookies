@@ -157,6 +157,7 @@ test("runner v3 retains the live promotion adapters", () => {
   assert.match(runnerSource, /root\.locator\("img:visible"\)/);
   assert.match(runnerSource, /waitForStableProductImage/);
   assert.match(runnerSource, /stable_absolute_img_src_and_selected_count/);
+  assert.match(runnerSource, /oc-create-material-card-selected:visible/);
   assert.doesNotMatch(runnerSource, /product image index is out of range/);
   assert.match(runnerSource, /createad_yuntuCategory_popover_content/);
   assert.match(runnerSource, /ovui-cascader-search-option/);
@@ -349,7 +350,7 @@ test("runner v3 does not click when the confirmation token is wrong", async () =
   assert.equal(page.finalClicks, 0);
 });
 
-test("runner v3 reports result_unknown without a second click", async () => {
+test("runner v3 reconciles an unclear submit without a second click", async () => {
   const preparePlan = compilePromotionPlan();
   preparePlan.account_reference = "1855554434276391";
   preparePlan.parent_project_reference = "7677595885572784182";
@@ -368,7 +369,41 @@ test("runner v3 reports result_unknown without a second click", async () => {
       authorityStateDirectory: stateDirectory,
       now,
     });
-    assert.equal(result.outcome, "result_unknown");
+    assert.equal(result.outcome, "success");
+    assert.equal(result.final_click_performed, true);
+    assert.equal(page.finalClicks, 1);
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true });
+  }
+});
+
+test("runner v3 reports a confirmed no-effect failure when no write request and no target exist", async () => {
+  const preparePlan = compilePromotionPlan();
+  preparePlan.account_reference = "1855554434276391";
+  preparePlan.parent_project_reference = "7677595885572784182";
+  const now = new Date("2026-08-25T01:00:00.000Z");
+  const bundle = authorizeSubmitPlan(preparePlan, {
+    account_reference: preparePlan.account_reference,
+    maximum_money_cny: 300,
+    schedule_date: "2026-08-26",
+  }, now);
+  const stateDirectory = await mkdtemp(join(tmpdir(), "cookies-runner-no-effect-"));
+  try {
+    const page = new FakePage();
+    page.submitObservation = {
+      outcome: "result_unknown",
+      error_message: "no stable result",
+      platform_write_request_observed: false,
+    };
+    page.reconciliation = { status: "not_found" };
+    const result = await executePlan(bundle.plan, page, {
+      confirmToken: bundle.confirm_token,
+      authorityStateDirectory: stateDirectory,
+      now,
+    });
+    assert.equal(result.outcome, "failed");
+    assert.equal(result.error_code, "submit_no_effect_confirmed");
+    assert.equal(result.reconciliation, "not_found");
     assert.equal(result.final_click_performed, true);
     assert.equal(page.finalClicks, 1);
   } finally {

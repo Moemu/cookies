@@ -110,6 +110,12 @@ func (s *Server) command(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.submit(w, r)
+	case "reconcile-result":
+		if !s.automatedWorker {
+			writeError(w, http.StatusNotFound, "automated worker is not mounted")
+			return
+		}
+		s.reconcileResult(w, r)
 	case "pause", "resume", "cancel", "takeover", "release_takeover":
 		s.control(w, r)
 	default:
@@ -560,6 +566,15 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	value, err := s.worker.Submit(context.WithoutCancel(r.Context()), browserautomation.WorkerSubmitRequest{Authorize: browserautomation.AuthorizeActionRequest{OrganizationID: actor.OrganizationID, ProjectID: project, RunID: r.PathValue("run_id"), StepID: body.StepID, ConfirmationID: body.ConfirmationID, Token: body.Token, LeaseID: body.LeaseID, FencingToken: body.FencingToken, IdempotencyKey: body.IdempotencyKey}})
+	writeResult(w, value, err)
+}
+
+func (s *Server) reconcileResult(w http.ResponseWriter, r *http.Request) {
+	actor, project, ok := s.authorize(w, r, "delivery.execute")
+	if !ok {
+		return
+	}
+	value, err := s.worker.ReconcileUnknownFromPlatform(context.WithoutCancel(r.Context()), actor.OrganizationID, project, r.PathValue("run_id"))
 	writeResult(w, value, err)
 }
 

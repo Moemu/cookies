@@ -12,8 +12,9 @@ import (
 )
 
 type StartBrowserRpaExecutionRequest struct {
-	ExpectedVersion int64  `json:"expected_version"`
-	IdempotencyKey  string `json:"-"`
+	ExpectedVersion int64                             `json:"expected_version"`
+	ExecutionDriver browserautomation.ExecutionDriver `json:"execution_driver,omitempty"`
+	IdempotencyKey  string                            `json:"-"`
 }
 
 type BrowserRpaLaunchRequest struct {
@@ -61,6 +62,10 @@ func (s Service) StartBrowserRpaExecution(ctx context.Context, actor contract.Ac
 	if request.ExpectedVersion < 1 || strings.TrimSpace(request.IdempotencyKey) == "" || len(request.IdempotencyKey) > 160 || s.ExternalAccountIDs == nil || s.BrowserRpaLauncher == nil {
 		return StartBrowserRpaExecutionResult{}, ErrUnsupportedConfigurationWorkflow
 	}
+	executionDriver, err := normalizePlanExecutionDriver(request.ExecutionDriver)
+	if err != nil {
+		return StartBrowserRpaExecutionResult{}, err
+	}
 	if _, err := s.Projects.RequireActiveContext(ctx, actor, projectID); err != nil {
 		return StartBrowserRpaExecutionResult{}, err
 	}
@@ -105,21 +110,11 @@ func (s Service) StartBrowserRpaExecution(ctx context.Context, actor contract.Ac
 		}
 	}
 	action := ControlledActionCreateProjectAndPromotions
-	workflowHash, err := contract.CanonicalJSONHash(struct {
-		Driver            string `json:"driver"`
-		PlanCanonicalHash string `json:"plan_canonical_hash"`
-		ConfigurationHash string `json:"configuration_hash"`
-		PreflightHash     string `json:"preflight_hash"`
-		IdempotencyKey    string `json:"idempotency_key"`
-	}{string(browserautomation.ExecutionDriverOceanEngineWebAPI), version.CanonicalHash, version.PlatformConfiguration.CanonicalHash, preflightHash, request.IdempotencyKey})
+	workflowHash, err := planExecutionWorkflowHash(executionDriver, version.CanonicalHash, version.PlatformConfiguration.CanonicalHash, preflightHash, request.IdempotencyKey)
 	if err != nil {
 		return StartBrowserRpaExecutionResult{}, err
 	}
-	fingerprint, err := contract.CanonicalJSONHash(struct {
-		AccountID         string           `json:"account_id"`
-		Action            ControlledAction `json:"action"`
-		ConfigurationHash string           `json:"configuration_hash"`
-	}{externalAccountID, action, version.PlatformConfiguration.CanonicalHash})
+	fingerprint, err := planExecutionObjectFingerprint(executionDriver, externalAccountID, action, version.PlatformConfiguration.CanonicalHash)
 	if err != nil {
 		return StartBrowserRpaExecutionResult{}, err
 	}
@@ -132,7 +127,7 @@ func (s Service) StartBrowserRpaExecution(ctx context.Context, actor contract.Ac
 		PlanID: plan.ID, PlanVersion: int(plan.Version), PlanCanonicalHash: version.CanonicalHash,
 		IntentID: version.DeliveryIntent.IntentID, IntentVersion: version.DeliveryIntent.VersionNumber, IntentCanonicalHash: version.DeliveryIntent.CanonicalHash,
 		ConfigurationID: version.PlatformConfiguration.ConfigurationID, ConfigurationVersion: version.PlatformConfiguration.VersionNumber, ConfigurationCanonicalHash: version.PlatformConfiguration.CanonicalHash,
-		WorkflowID: "web-api-v1-" + plan.ID, WorkflowCanonicalHash: workflowHash,
+		WorkflowID: workflowIDForExecutionDriver(executionDriver, plan.ID), WorkflowCanonicalHash: workflowHash, ExecutionDriver: executionDriver,
 		AccountReferenceID: externalAccountID, ProjectBudgetMode: projectBudgetMode, ProjectBudgetLimitMinor: projectBudgetLimitMinor,
 		PromotionBudgetLimitMinor: promotionBudgetLimitMinor, ObjectFingerprint: fingerprint, SkillID: skill.ID, SkillVersion: skill.Version,
 	}
@@ -217,11 +212,50 @@ func (s Service) StartBrowserRpaExecution(ctx context.Context, actor contract.Ac
 	return StartBrowserRpaExecutionResult{ControlledChangeSet: change, ControlledExecution: execution, BrowserRpaRun: run}, nil
 }
 
+func planExecutionWorkflowHash(driver browserautomation.ExecutionDriver, planHash, configurationHash, preflightHash, idempotencyKey string) (string, error) {
+	return contract.CanonicalJSONHash(struct {
+		Driver            string `json:"driver"`
+		PlanCanonicalHash string `json:"plan_canonical_hash"`
+		ConfigurationHash string `json:"configuration_hash"`
+		PreflightHash     string `json:"preflight_hash"`
+		IdempotencyKey    string `json:"idempotency_key"`
+	}{string(driver), planHash, configurationHash, preflightHash, idempotencyKey})
+}
+
+func planExecutionObjectFingerprint(driver browserautomation.ExecutionDriver, accountID string, action ControlledAction, configurationHash string) (string, error) {
+	return contract.CanonicalJSONHash(struct {
+		AccountID         string           `json:"account_id"`
+		Action            ControlledAction `json:"action"`
+		ConfigurationHash string           `json:"configuration_hash"`
+		ExecutionDriver   string           `json:"execution_driver"`
+	}{accountID, action, configurationHash, string(driver)})
+}
+
 func executionDriverForBinding(binding ControlledAuthorityBinding) browserautomation.ExecutionDriver {
+	if binding.ExecutionDriver != "" {
+		return binding.ExecutionDriver
+	}
 	if strings.HasPrefix(binding.WorkflowID, "web-api-v1-") {
 		return browserautomation.ExecutionDriverOceanEngineWebAPI
 	}
 	return browserautomation.ExecutionDriverPlaywrightEdgeV3
+}
+
+func normalizePlanExecutionDriver(driver browserautomation.ExecutionDriver) (browserautomation.ExecutionDriver, error) {
+	if driver == "" {
+		return browserautomation.ExecutionDriverOceanEngineWebAPI, nil
+	}
+	if driver != browserautomation.ExecutionDriverOceanEngineWebAPI && driver != browserautomation.ExecutionDriverPlaywrightEdgeV3 {
+		return "", ErrInvalidRequest
+	}
+	return driver, nil
+}
+
+func workflowIDForExecutionDriver(driver browserautomation.ExecutionDriver, planID string) string {
+	if driver == browserautomation.ExecutionDriverPlaywrightEdgeV3 {
+		return "playwright-v3-" + planID
+	}
+	return "web-api-v1-" + planID
 }
 
 func replayExistingBrowserRpaExecution(change ControlledChangeSet, execution ControlledExecution) (StartBrowserRpaExecutionResult, bool, error) {
@@ -247,5 +281,6 @@ func samePlanExecutionTarget(change ControlledChangeSet, binding ControlledAutho
 		change.Binding.PlanID == binding.PlanID &&
 		change.Binding.ConfigurationCanonicalHash == binding.ConfigurationCanonicalHash &&
 		change.Binding.AccountReferenceID == binding.AccountReferenceID &&
+		executionDriverForBinding(change.Binding) == executionDriverForBinding(binding) &&
 		change.Binding.ObjectFingerprint == binding.ObjectFingerprint
 }
