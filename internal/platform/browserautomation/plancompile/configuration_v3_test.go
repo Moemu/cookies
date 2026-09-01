@@ -134,6 +134,50 @@ func TestCompileConfigurationV3UsesEnumeratedLeadGenerationPath(t *testing.T) {
 	}
 }
 
+func TestCompileConfigurationV3InfersLegacyLeadCaptureModeFromCarrier(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	project := configuration.Payload.OceanEngine.Project
+	project.MarketingPurpose = "lead_generation"
+	project.MarketingScenario = "short_video_image_text"
+	project.LeadCaptureMode = ""
+	project.Carrier = "owned_landing_page"
+	project.OptimizationTargetReference.SemanticKey = "click"
+	project.DeliveryMode = "ubmax"
+
+	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projectPlan v3Plan
+	if err := json.Unmarshal(compiled.Forms[0].Plan, &projectPlan); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range projectPlan.Steps {
+		if step.FieldKey == "project.lead_capture_mode" && step.Value == "自定义" {
+			return
+		}
+	}
+	t.Fatalf("legacy lead capture mode was not inferred: %#v", projectPlan.Steps)
+}
+
+func TestCompileConfigurationV3BlocksUnsupportedOwnedLandingPageLeadPath(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	project := configuration.Payload.OceanEngine.Project
+	project.MarketingPurpose = "lead_generation"
+	project.MarketingScenario = "short_video_image_text"
+	project.LeadCaptureMode = "custom_lead"
+	project.Carrier = "owned_landing_page"
+	project.OptimizationTargetReference.SemanticKey = "button_redirect"
+	project.DeliveryMode = "manual"
+
+	_, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err == nil || !strings.Contains(err.Error(), "project.optimization_target_reference click or impression") || !strings.Contains(err.Error(), "project.delivery_mode ubmax") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestCompileConfigurationV3FillsOwnedLandingPageLink(t *testing.T) {
 	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
 	configuration, intent := executableConfigurationFixture(now)

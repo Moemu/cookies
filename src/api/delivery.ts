@@ -1042,6 +1042,13 @@ export const deliveryOptimizationApi = {
 }
 
 export const deliveryExecutionApi = {
+  async listPlatformEntityMappings(projectId: string, accountReferenceId: string): Promise<DeliveryPlatformEntityMapping[]> {
+    const response = await deliveryPlanRequest<{ items?: DeliveryPlatformEntityMapping[] | null }>(
+      projectId,
+      `/platform-entity-mappings?account_reference_id=${encodeURIComponent(accountReferenceId)}`,
+    )
+    return response.items ?? []
+  },
   async startBrowserRpaExecution(
     projectId: string,
     planId: string,
@@ -1108,6 +1115,24 @@ export const deliveryExecutionApi = {
       },
     )
   },
+}
+
+export type DeliveryPlatformEntityMapping = {
+  id: string
+  account_reference_id: string
+  plan_id: string
+  configuration_id: string
+  business_execution_id: string
+  browser_rpa_run_id: string
+  internal_object_kind: 'project' | 'promotion' | string
+  internal_object_id: string
+  platform_object_kind: 'project' | 'promotion' | string
+  platform_object_id: string
+  platform_status: string
+  status: 'pending_verification' | 'confirmed'
+  version: number
+  created_at: string
+  updated_at: string
 }
 
 function toDeliveryOutcomeSimulation(value: WireDeliveryOutcomeSimulation): DeliveryOutcomeSimulation {

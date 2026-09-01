@@ -1,4 +1,4 @@
-import type { BrowserRpaRun, ControlledExecutionPresentation } from './model'
+import type { BrowserRpaRun, ControlledExecutionPresentation, ControlledExecutionWorkspace } from './model'
 
 const statePresentation: Record<BrowserRpaRun['state'], Omit<ControlledExecutionPresentation, 'kind' | 'allowsNormalRetry'>> = {
   queued: { tone: 'neutral', title: '已排队等待环境检查', detail: '尚未开始页面或平台动作。' },
@@ -54,6 +54,15 @@ const executionViewStates: Record<string, ReadonlySet<BrowserRpaRun['state']>> =
 
 export function runMatchesExecutionView(run: BrowserRpaRun, view: string) {
   return executionViewStates[view]?.has(run.state) ?? true
+}
+
+export function isSafePrepareRetryCandidate(workspace: ControlledExecutionWorkspace): boolean {
+  const { run, steps, evidence } = workspace
+  if (run.state !== 'failed' || (run.blocking_reason !== 'PAGE_DRIFT' && run.blocking_reason !== 'RUNNER_FAILURE')) return false
+  if (!run.authority.plan_id || !run.authority.plan_version || run.takeover_active) return false
+  if (!steps.some(step => step.action === 'prepare_and_readback' && step.status === 'failed')) return false
+  if (steps.some(step => step.action.toLowerCase().includes('submit') || step.status === 'result_unknown')) return false
+  return !evidence.some(item => item.field_readback?.final_click_performed === 'true' || item.after_page_facts?.final_click_performed === 'true')
 }
 
 export function shortHash(value: string) {

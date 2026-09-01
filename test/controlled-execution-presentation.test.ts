@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { BrowserRpaRun } from '../src/features/browser-rpa-execution/model.ts'
-import { presentControlledExecution, runMatchesExecutionView } from '../src/features/browser-rpa-execution/presentation.ts'
+import { isSafePrepareRetryCandidate, presentControlledExecution, runMatchesExecutionView } from '../src/features/browser-rpa-execution/presentation.ts'
 
 const hash = 'a'.repeat(64)
 
@@ -39,6 +39,18 @@ test('controlled execution tabs filter runs by workflow state', () => {
   for (const value of cases) {
     assert.deepEqual(allStates.filter(state => runMatchesExecutionView(run({ state }), value.view)), value.states, value.view)
   }
+})
+
+test('only a failed Prepare without a submit boundary can create a safe retry', () => {
+  const candidate = {
+    run: run({ state: 'failed', blocking_reason: 'PAGE_DRIFT', authority: { ...run({}).authority, plan_id: 'plan_1', plan_version: 3 } }),
+    steps: [{ id: 'prepare', run_id: 'run_1', sequence: 1, workflow_step_id: 'prepare', action: 'prepare_and_readback', status: 'failed', attempt: 1, version: 1 }],
+    evidence: [],
+  }
+  assert.equal(isSafePrepareRetryCandidate(candidate as never), true)
+  assert.equal(isSafePrepareRetryCandidate({ ...candidate, steps: [...candidate.steps, { ...candidate.steps[0], id: 'submit', action: 'submit_platform_configuration' }] } as never), false)
+  assert.equal(isSafePrepareRetryCandidate({ ...candidate, evidence: [{ field_readback: { final_click_performed: 'true' } }] } as never), false)
+  assert.equal(isSafePrepareRetryCandidate({ ...candidate, run: run({ state: 'failed', blocking_reason: 'ACCOUNT_MISMATCH' }) } as never), false)
 })
 
 function run(patch: Partial<BrowserRpaRun>): BrowserRpaRun {

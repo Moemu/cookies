@@ -74,6 +74,10 @@ test('controlled execution UI reports the real Edge probe and keeps unsupported 
   assert.match(source, /prepared\.state !== 'awaiting_confirmation'/)
   assert.match(source, /Prepare 服务端任务/)
   assert.match(source, /observedRunState/)
+  assert.match(source, /重试 Prepare/)
+  assert.match(source, /isSafePrepareRetryCandidate/)
+  assert.match(source, /deliveryExecutionApi\.startBrowserRpaExecution/)
+  assert.match(source, /失败 Run 和证据会保留/)
 })
 
 test('controlled execution API shows a structured platform error', async () => {

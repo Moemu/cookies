@@ -121,6 +121,16 @@ func (r *controlledMemoryRepository) CreatePlatformEntityMapping(_ context.Conte
 	r.mappings[repositoryKey(v.OrganizationID, v.ProjectID, v.ID)] = v
 	return v, nil
 }
+
+func (r *controlledMemoryRepository) ListPlatformEntityMappings(_ context.Context, org contract.OrganizationID, project contract.ProjectID, account string) ([]PlatformEntityMapping, error) {
+	values := make([]PlatformEntityMapping, 0)
+	for _, value := range r.mappings {
+		if value.OrganizationID == org && value.ProjectID == project && value.AccountReferenceID == account {
+			values = append(values, value)
+		}
+	}
+	return values, nil
+}
 func (r *controlledMemoryRepository) GetPlatformEntityMapping(_ context.Context, org contract.OrganizationID, project contract.ProjectID, id string) (PlatformEntityMapping, error) {
 	v, ok := r.mappings[repositoryKey(org, project, id)]
 	if !ok {

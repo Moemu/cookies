@@ -5735,6 +5735,23 @@ export type ApiConnectorPlatformObject = {
     conversions: number; ctr: number; data_through?: string
   }
 }
+
+export type ApiConnectorObjectSnapshot = {
+  id: string
+  object_kind: 'account' | 'project' | 'campaign' | 'promotion' | 'product' | 'material' | string
+  object_ref: string
+  parent_ref?: string
+  state: Record<string, unknown>
+  available_at: string
+  data_through: string
+  quality_status: string
+}
+
+export type ApiConnectorCanonicalSnapshot = {
+  dataset_version: string
+  prediction_cutoff: string
+  objects: ApiConnectorObjectSnapshot[]
+}
 export type ApiLaunchBatchMetricDistribution = { metric: string; p10: number; p50: number; p90: number }
 export type ApiLaunchBatchCalibration = {
   id: string; account_id: string; schema_version: string; model_version: string; status: 'ready_for_probabilistic_shadow'
@@ -6625,6 +6642,7 @@ export const api = {
   verifyProjectConnectorAccount: (projectId: string, accountId: string) => request<ApiConnectorAccount>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/verify`, 'POST'),
   syncProjectConnectorAccount: (projectId: string, accountId: string, body: { start: string; end: string; time_zone: string; currency: string; sync_mode?: 'full' | 'metrics_only' | 'inventory_only' }, idempotencyKey: string) => request<ApiConnectorSyncResult>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/syncs`, 'POST', body, { 'Idempotency-Key': idempotencyKey }),
   getProjectConnectorSync: (projectId: string, accountId: string, syncId: string) => request<ApiConnectorSyncStatus>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/syncs/${encodeURIComponent(syncId)}`),
+  getProjectConnectorSnapshot: (projectId: string, accountId: string, predictionCutoff = new Date().toISOString()) => request<ApiConnectorCanonicalSnapshot>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/canonical-snapshots?prediction_cutoff=${encodeURIComponent(predictionCutoff)}`),
   listProjectConnectorPlatformObjects: (projectId: string, accountId: string, filter: { objectKind?: ApiConnectorPlatformObjectKind; status?: 'active' | 'unavailable'; q?: string; cursor?: string; limit?: number; sortBy?: 'created_at' | 'ctr' | 'conversions'; sortOrder?: 'asc' | 'desc' } = {}) => {
     const search = new URLSearchParams({ limit: String(filter.limit ?? 100) })
     if (filter.objectKind) search.set('object_kind', filter.objectKind)

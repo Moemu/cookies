@@ -95,6 +95,10 @@ test('explains other configuration requirements with direct repair instructions'
     '项目出价超出当前 Runner 的校准范围。CPM 出价必须是 4 至 100 元。',
   )
   assert.equal(
+    presentConfigurationIssue('lead_generation with owned_landing_page requires project.optimization_target_reference click or impression and project.delivery_mode ubmax'),
+    '销售线索使用自研落地页时，优化目标只能选择“点击量”或“展示量”，投放模式必须选择“UBMax”。',
+  )
+  assert.equal(
     presentConfigurationIssue('marketing product: reference 1786513565497554221 is outside the delivery intent'),
     '营销商品未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。',
   )

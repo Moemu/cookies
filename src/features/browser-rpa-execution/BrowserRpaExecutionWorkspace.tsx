@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { CircleAlert, CircleCheck, Clock3, FileCheck2, Hand, ListChecks, MonitorCheck, Pause, Play, RefreshCw, Send, ShieldAlert, XCircle } from 'lucide-react'
 import { controlledExecutionApi, ControlledExecutionApiError } from './api'
+import { deliveryExecutionApi } from '../../api/delivery'
 import type { BrowserRpaEvidence, BrowserRpaRun, BrowserRpaRunEvent, ControlledExecutionTransportState, ControlledExecutionWorkspace, EdgeSessionProbe, RunnerV3Plan } from './model'
 import { presentConfigurationIssue, presentObjectAvailability, presentPlanBlockedReason } from './objectAvailabilityPresentation'
-import { isTerminalControlledExecutionState, presentControlledExecution, runMatchesExecutionView, shortHash } from './presentation'
+import { isSafePrepareRetryCandidate, isTerminalControlledExecutionState, presentControlledExecution, runMatchesExecutionView, shortHash } from './presentation'
 import './browser-rpa-execution.css'
 
 type Props = {
@@ -216,6 +217,40 @@ function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; ru
     }
   }, [projectId, transport])
 
+  const retryPrepare = useCallback(async () => {
+    if (transport.kind !== 'ready') return
+    const { run } = transport.workspace
+    if (!isSafePrepareRetryCandidate(transport.workspace)) {
+      setNotice('当前失败不允许普通重试。请先修复配置或账号问题，或执行结果识别。')
+      return
+    }
+    if (!run.authority.plan_id || !run.authority.plan_version) {
+      setNotice('当前 Run 缺少投放计划版本，不能创建安全重试。')
+      return
+    }
+    setActionPending(true)
+    setNotice('正在重新检查固定计划。系统不会修改或删除失败 Run。')
+    try {
+      const retryPlan = await controlledExecutionApi.generatePlan(projectId, run.id)
+      setPlan(retryPlan)
+      if (retryPlan.blocked_reasons.length || retryPlan.configuration_issues?.length) {
+        setNotice('固定计划仍有配置阻塞。请先修复平台配置，再创建新执行。')
+        return
+      }
+      const result = await deliveryExecutionApi.startBrowserRpaExecution(
+        projectId,
+        run.authority.plan_id,
+        run.authority.plan_version,
+        `browser-rpa-retry-${run.id}-${crypto.randomUUID()}`,
+      )
+      window.location.assign(`/projects/${encodeURIComponent(projectId)}/delivery/execution/${encodeURIComponent(result.browser_rpa_run.run_id)}?view=${encodeURIComponent('待执行')}`)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '创建安全重试失败。')
+    } finally {
+      setActionPending(false)
+    }
+  }, [projectId, transport])
+
   if (transport.kind === 'loading') return <WorkspaceState kind="loading" />
   if (transport.kind === 'empty') return <WorkspaceState kind="empty" />
   if (transport.kind === 'forbidden') return <WorkspaceState kind="forbidden" message={transport.message} />
@@ -232,6 +267,7 @@ function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; ru
     onWorkflow={runWorkflow}
     onRefresh={refresh}
     onControl={runControl}
+    onRetryPrepare={retryPrepare}
   />
 }
 
@@ -242,7 +278,7 @@ function runActionLabel(action: string): string {
   return '受控平台操作'
 }
 
-function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed, onReviewed, onWorkflow, onRefresh, onControl }: {
+function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed, onReviewed, onWorkflow, onRefresh, onControl, onRetryPrepare }: {
   workspace: Extract<ControlledExecutionTransportState, { kind: 'ready' }>['workspace']
   busy: boolean
   notice: string
@@ -253,6 +289,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed,
   onWorkflow: (action: 'check' | 'plan' | 'prepare' | 'submit') => void
   onRefresh: () => void
   onControl: (action: 'pause' | 'resume' | 'cancel' | 'takeover' | 'release_takeover') => void
+  onRetryPrepare: () => void
 }) {
   const { run, events, evidence } = workspace
   const presentation = useMemo(() => presentControlledExecution(run), [run])
@@ -281,6 +318,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed,
       reviewed={reviewed}
       onReviewed={onReviewed}
       onWorkflow={onWorkflow}
+      onRetryPrepare={onRetryPrepare}
     />
     <SessionAndTargetPanel workspace={workspace} sessionProbe={sessionProbe} />
     {plan ? <PlanPanel plan={plan} run={run} /> : null}
@@ -317,7 +355,7 @@ function WorkspaceReady({ workspace, busy, notice, plan, sessionProbe, reviewed,
   </section>
 }
 
-function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onReviewed, onWorkflow }: {
+function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onReviewed, onWorkflow, onRetryPrepare }: {
   workspace: ControlledExecutionWorkspace
   plan?: RunnerV3Plan
   busy: boolean
@@ -325,6 +363,7 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onR
   reviewed: boolean
   onReviewed: (value: boolean) => void
   onWorkflow: (action: 'check' | 'plan' | 'prepare' | 'submit') => void
+  onRetryPrepare: () => void
 }) {
   const { run, steps: runSteps, events, evidence, lease } = workspace
   const sessionReady = Boolean(sessionProbe?.status === 'ready' && sessionProbe.cdp_available && sessionProbe.logged_in && sessionProbe.account_matched)
@@ -349,6 +388,7 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onR
     { label: '一次性确认并 Submit', done: submitStarted, active: run.state === 'submitting' || run.state === 'verifying' },
   ]
   const prepareStep = runSteps.find(step => step.action === 'prepare_and_readback')
+  const canRetryPrepare = isSafePrepareRetryCandidate(workspace)
   return <section className="controlled-execution-flow" aria-label="执行操作闭环">
     <header><div><span className="section-label">Operation flow</span><h3>执行操作闭环</h3></div><small>Submit 会跨越最终点击边界。确认令牌仅在当前请求内存中存在。</small></header>
     <ol>{flowSteps.map((step, index) => <li key={step.label} className={step.done ? 'complete' : step.active ? 'active' : ''}><span>{step.done ? <CircleCheck size={15} /> : index + 1}</span>{step.label}</li>)}</ol>
@@ -357,7 +397,9 @@ function ExecutionFlowPanel({ workspace, plan, busy, sessionProbe, reviewed, onR
       <button className="secondary-button" disabled={busy || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('check')}><MonitorCheck size={15} />检查 Edge 会话</button>
       <button className="secondary-button" disabled={busy || !bindingReady || !actionSupported || isTerminalControlledExecutionState(run.state)} onClick={() => onWorkflow('plan')}><ListChecks size={15} />生成计划</button>
       <button className="secondary-button" disabled={busy || !canPrepare} onClick={() => onWorkflow('prepare')}><Play size={15} />执行 Prepare</button>
+      {canRetryPrepare ? <button className="secondary-button" disabled={busy} onClick={onRetryPrepare}><RefreshCw size={15} />重试 Prepare</button> : null}
     </div>
+    {canRetryPrepare ? <p className="controlled-execution-retry-note">重试会创建新 Run。失败 Run 和证据会保留。服务端会再次检查最终点击边界。</p> : null}
     {!actionSupported ? <p className="danger-copy">当前动作没有 Runner v3 单表单协议。系统不会生成可执行计划。</p> : null}
     {run.state === 'awaiting_confirmation' ? <div className="controlled-execution-confirm">
       <label><input type="checkbox" checked={reviewed} onChange={event => onReviewed(event.target.checked)} disabled={busy || drift} />我已核对当前账户、目标对象、字段回读、差异和最终点击边界。</label>

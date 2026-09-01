@@ -331,6 +331,16 @@ func validateBid(value delivery.OceanEngineBudgetAndBidding) error {
 }
 
 func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *delivery.DeliveryIntent) (map[string]any, error) {
+	if project.MarketingPurpose == "lead_generation" && project.Carrier == "owned_landing_page" {
+		optimization := normalizedOptimizationTarget(referenceKey(project.OptimizationTargetReference))
+		deliveryMode := strings.TrimSpace(project.DeliveryMode)
+		if deliveryMode == "automatic" {
+			deliveryMode = "ubmax"
+		}
+		if !slices.Contains([]string{"click", "impression"}, optimization) || deliveryMode != "ubmax" {
+			return nil, fmt.Errorf("lead_generation with owned_landing_page requires project.optimization_target_reference click or impression and project.delivery_mode ubmax")
+		}
+	}
 	shanghai := time.FixedZone("Asia/Shanghai", 8*60*60)
 	values := map[string]any{
 		"project.marketing_purpose": marketingPurposeLabel(project.MarketingPurpose),
@@ -352,7 +362,14 @@ func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *deliver
 		values["project.marketing_product_reference"] = spec
 	}
 	if project.MarketingPurpose == "lead_generation" {
-		values["project.lead_capture_mode"] = leadCaptureModeLabel(project.LeadCaptureMode)
+		leadCaptureMode := project.LeadCaptureMode
+		if leadCaptureMode == "" {
+			leadCaptureMode = "smart_lead"
+			if project.Carrier == "owned_landing_page" || project.Carrier == "im" {
+				leadCaptureMode = "custom_lead"
+			}
+		}
+		values["project.lead_capture_mode"] = leadCaptureModeLabel(leadCaptureMode)
 	}
 	if project.MarketingPurpose == "application" {
 		if project.ApplicationReference == nil {
@@ -676,7 +693,7 @@ func projectBidRequired(project delivery.OceanEngineProjectDraft) bool {
 }
 func optimizationLabel(value string) string {
 	value = normalizedOptimizationTarget(value)
-	return map[string]string{"button_jump": "按钮跳转", "in_app_order": "app内下单", "click": "点击", "impression": "展示", "store_call": "门店电话拨打", "store_stay": "门店停留"}[value]
+	return map[string]string{"button_jump": "按钮跳转", "in_app_order": "app内下单", "click": "点击量", "impression": "展示量", "store_call": "门店电话拨打", "store_stay": "门店停留"}[value]
 }
 func deepOptimizationLabel(value string) string {
 	return map[string]string{"disabled": "不启用", "conversion_roi": "成交ROI", "net_order": "净成交下单", "net_roi": "净成交ROI"}[value]
@@ -719,6 +736,9 @@ func orderedProjectFields(project delivery.OceanEngineProjectDraft, parent v3Par
 		keys = append(keys, "project.carrier")
 	}
 	keys = append(keys, "project.optimization_target_reference", "project.deep_optimization_mode", "project.delivery_mode", "project.schedule", "project.daily_budget", "project.project_name")
+	if project.MarketingPurpose == "lead_generation" && project.Carrier == "owned_landing_page" {
+		keys = removeKey(keys, "project.delivery_mode")
+	}
 	if parent.DeliveryMode == "ubmax" {
 		if slices.Contains([]string{"ecommerce", "lead_generation"}, project.MarketingPurpose) {
 			keys = append(keys, "project.aigc_dynamic_creative")

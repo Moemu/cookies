@@ -121,6 +121,9 @@ export function presentConfigurationIssue(issue: string): string {
   if (/configuration has no calibrated optimization target key/i.test(issue)) {
     return '优化目标不在当前 Runner 的校准范围内。请返回平台配置页并重新选择优化目标。'
   }
+  if (/lead_generation with owned_landing_page requires project\.optimization_target_reference click or impression and project\.delivery_mode ubmax/i.test(issue)) {
+    return '销售线索使用自研落地页时，优化目标只能选择“点击量”或“展示量”，投放模式必须选择“UBMax”。'
+  }
   if (/marketing product: reference .* is outside the delivery intent/i.test(issue)) {
     return '营销商品未加入投放意图。请返回平台配置页，保存当前配置并创建新执行。'
   }

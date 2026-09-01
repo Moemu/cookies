@@ -93,6 +93,7 @@ type controlledAuthorityApplication interface {
 type platformEntityMappingApplication interface {
 	CreatePendingPlatformEntityMapping(context.Context, contract.ActorContext, delivery.PlatformEntityMapping) (delivery.PlatformEntityMapping, error)
 	GetPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PlatformEntityMapping, error)
+	ListPlatformEntityMappings(context.Context, contract.ActorContext, contract.ProjectID, string) ([]delivery.PlatformEntityMapping, error)
 	ConfirmPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ConfirmPlatformEntityMappingRequest) (delivery.PlatformEntityMapping, error)
 	ConfirmPlatformEntityMappingMutation(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ConfirmPlatformEntityMappingMutationRequest) (delivery.PlatformEntityMapping, delivery.PlatformEntityMappingRevision, error)
 	ConfirmPlatformEntityMappingChange(context.Context, contract.ActorContext, contract.ProjectID, string, delivery.ConfirmPlatformEntityMappingChangeRequest) (delivery.PlatformEntityMapping, delivery.PlatformEntityMappingRevision, error)
@@ -148,6 +149,7 @@ func New(app Application) *Server {
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/controlled-change-sets/{controlled_change_set_action}", server.controlledChangeSetAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/controlled-executions/{execution_id}", server.getControlledExecution)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings", server.createPlatformEntityMapping)
+	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/platform-entity-mappings", server.listPlatformEntityMappings)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_id}", server.getPlatformEntityMapping)
 	server.mux.HandleFunc("POST /api/delivery/v1/projects/{project_id}/platform-entity-mappings/{mapping_action}", server.platformEntityMappingAction)
 	server.mux.HandleFunc("GET /api/delivery/v1/projects/{project_id}/executions", server.listExecutions)

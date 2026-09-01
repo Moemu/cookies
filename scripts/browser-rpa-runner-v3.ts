@@ -815,6 +815,14 @@ export class PlaywrightPageOperations implements PageOperations {
     }
     if (step.operation === "choose_exact_visible_option") {
       const value = String(step.value);
+      await this.confirmKnownFieldTransition(step, false);
+      const inlineOption = await this.projectInlineOption(step, value);
+      if (inlineOption) {
+        if ((await inlineOption.getAttribute("class"))?.includes("ovui-radio-item--checked")) return;
+        await inlineOption.click();
+        await this.confirmKnownFieldTransition(step, true);
+        return;
+      }
       if (step.target !== value) {
         const target = await this.targetLocator(step);
         if (!(await target.isEnabled())) {
@@ -829,6 +837,7 @@ export class PlaywrightPageOperations implements PageOperations {
         const option = await this.targetLocator(step);
         await option.click();
       }
+      await this.confirmKnownFieldTransition(step, true);
       return;
     }
 
@@ -909,6 +918,49 @@ export class PlaywrightPageOperations implements PageOperations {
       await this.page.waitForTimeout(250);
     }
     return (await dialogs.count()) > 0 ? dialogs.last() : this.page.locator("body");
+  }
+
+  private async confirmKnownFieldTransition(step: PlanStep, waitForAppearance: boolean) {
+    if (step.field_key !== "project.marketing_purpose") return;
+    const message = "切换营销目的将会清空您已填写的所有内容，是否继续切换？";
+    let modal = this.page.locator(".ovui-modal__wrap:visible").filter({ hasText: message });
+    for (let attempt = 0; waitForAppearance && attempt < 20 && (await modal.count()) === 0; attempt += 1) {
+      await this.page.waitForTimeout(100);
+      modal = this.page.locator(".ovui-modal__wrap:visible").filter({ hasText: message });
+    }
+    if ((await modal.count()) === 0) return;
+    if ((await modal.count()) !== 1) {
+      throw new RunnerV3Error("locator_not_unique", `${step.id}: marketing-purpose confirmation is not unique`);
+    }
+    const confirm = modal.getByRole("button", { name: "确定", exact: true });
+    if ((await confirm.count()) !== 1 || !(await confirm.isVisible())) {
+      throw new RunnerV3Error("page_drift", `${step.id}: marketing-purpose confirmation action is unavailable`);
+    }
+    await confirm.click();
+    await modal.waitFor({ state: "hidden", timeout: 5_000 });
+  }
+
+  private async projectInlineOption(step: PlanStep, value: string): Promise<Locator | undefined> {
+    let option: Locator | undefined;
+    if (step.field_key === "project.marketing_purpose") {
+      option = this.page.locator("[data-e2e='createproject_landingtype__ocSwitchCard']:visible").filter({
+        has: this.page.getByText(value, { exact: true }),
+      });
+    } else if (step.field_key === "project.lead_capture_mode") {
+      const dataE2E = value === "智能优选"
+        ? "createproject_assetType_multioption_1"
+        : value === "自定义" ? "createproject_assetType_multioption_0" : undefined;
+      if (!dataE2E) throw new RunnerV3Error("invalid_value", `${step.id}: unsupported lead capture mode`);
+      option = this.page.locator(`[data-e2e='${dataE2E}']:visible`);
+    }
+    if (!option) return undefined;
+    for (let attempt = 0; attempt < 40 && (await option.count()) === 0; attempt += 1) {
+      await this.page.waitForTimeout(250);
+    }
+    if ((await option.count()) !== 1) {
+      throw new RunnerV3Error("locator_not_unique", `${step.id}: inline option is not unique`);
+    }
+    return option;
   }
 
   private waitForProductListRequest(query: string | undefined, timeout: number) {

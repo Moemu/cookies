@@ -127,6 +127,16 @@ func TestPlatformEntityMappingHTTPKeepsPlatformValuesServerOwnedAndRequiresTwoRe
 	if response.Code != http.StatusCreated || app.created.ProjectID != "project_1" || app.created.PlatformObjectID != "" || !strings.Contains(response.Body.String(), `"status":"pending_verification"`) {
 		t.Fatalf("create status=%d created=%#v body=%s", response.Code, app.created, response.Body.String())
 	}
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet, "/api/delivery/v1/projects/project_1/platform-entity-mappings?account_reference_id=account_1", ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"items"`) || !strings.Contains(response.Body.String(), `"id":"mapping_1"`) {
+		t.Fatalf("list status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, authenticatedRequest(http.MethodGet, "/api/delivery/v1/projects/project_1/platform-entity-mappings", ""))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("list without account status=%d body=%s", response.Code, response.Body.String())
+	}
 	injected := strings.TrimSuffix(body, "}") + `,"platform_object_id":"forged"}`
 	response = httptest.NewRecorder()
 	server.ServeHTTP(response, authenticatedRequest(http.MethodPost, "/api/delivery/v1/projects/project_1/platform-entity-mappings", injected))
@@ -447,6 +457,9 @@ func (s *mappingApplicationStub) CreatePendingPlatformEntityMapping(_ context.Co
 }
 func (s *mappingApplicationStub) GetPlatformEntityMapping(context.Context, contract.ActorContext, contract.ProjectID, string) (delivery.PlatformEntityMapping, error) {
 	return s.mapping, nil
+}
+func (s *mappingApplicationStub) ListPlatformEntityMappings(context.Context, contract.ActorContext, contract.ProjectID, string) ([]delivery.PlatformEntityMapping, error) {
+	return []delivery.PlatformEntityMapping{s.mapping}, nil
 }
 func (s *mappingApplicationStub) ConfirmPlatformEntityMapping(_ context.Context, _ contract.ActorContext, _ contract.ProjectID, _ string, request delivery.ConfirmPlatformEntityMappingRequest) (delivery.PlatformEntityMapping, error) {
 	s.confirm = request
