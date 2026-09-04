@@ -70,7 +70,7 @@ func configurationObjectAvailability(configuration delivery.OceanEngineConfigura
 		return values
 	}
 	switch project.MarketingPurpose {
-	case "ecommerce":
+	case "ecommerce", "lead_generation":
 		appendReference("project.marketing_product_reference", project.MarketingProductReference)
 	case "application":
 		appendReference("project.application_reference", project.ApplicationReference)
@@ -87,6 +87,13 @@ func configurationObjectAvailability(configuration delivery.OceanEngineConfigura
 		appendReferences(prefix+".product_image_references", promotion.ProductImageReferences)
 		appendReference(prefix+".native_anchor_reference", promotion.NativeAnchorReference)
 		appendReference(prefix+".landing_page_reference", promotion.LandingPageReference)
+		if requiredAction := requiredMultiLeadLandingAction(*project); requiredAction != "" && promotion.LandingPageReference != nil {
+			item := &values[len(values)-1]
+			if item.FieldKey == prefix+".landing_page_reference" && !landingSupportsMultiLeadAction(*promotion.LandingPageReference, requiredAction) {
+				item.Available = false
+				item.Reason = fmt.Sprintf("当前橙子落地页不支持优化目标 %s 的多留资组件分支。请同步巨量对象后重新选择。当前账户可能没有可用落地页", requiredAction)
+			}
+		}
 		appendReference(prefix+".direct_link_reference", promotion.DirectLinkReference)
 		appendReference(prefix+".product_reference", promotion.ProductReference)
 		appendReferences(prefix+".creative_component_references", promotion.CreativeComponentReferences)
@@ -94,6 +101,33 @@ func configurationObjectAvailability(configuration delivery.OceanEngineConfigura
 		appendReference(prefix+".settings.brand_reference", promotion.Settings.BrandReference)
 	}
 	return values
+}
+
+func requiredMultiLeadLandingAction(project delivery.OceanEngineProjectDraft) string {
+	if project.MarketingPurpose != "lead_generation" || project.OptimizationTargetReference == nil {
+		return ""
+	}
+	leadCaptureMode := strings.TrimSpace(project.LeadCaptureMode)
+	if leadCaptureMode == "" {
+		if project.Carrier == "owned_landing_page" || project.Carrier == "im" {
+			leadCaptureMode = "custom_lead"
+		} else {
+			leadCaptureMode = "smart_lead"
+		}
+	}
+	if leadCaptureMode != "smart_lead" || (project.Carrier != "orange_landing_page" && project.Carrier != "orange_landing_page_and_im") {
+		return ""
+	}
+	return strings.TrimSpace(project.OptimizationTargetReference.ID)
+}
+
+func landingSupportsMultiLeadAction(reference delivery.StableReference, action string) bool {
+	for _, value := range strings.Split(reference.AuditAttributes["multi_lead_external_actions"], ",") {
+		if strings.TrimSpace(value) == action {
+			return true
+		}
+	}
+	return action == "100" && strings.TrimSpace(reference.AuditAttributes["multi_conversion_eligible"]) == "true"
 }
 
 func validManualDirectLink(value string) bool {

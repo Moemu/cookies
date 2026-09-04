@@ -68,6 +68,7 @@ var readOnlyEndpoints = map[Endpoint]struct{}{
 	{http.MethodPost, "/ad/api/agw/statistics_sophonx/statQuery"}:           {},
 	{http.MethodGet, "/ad/api/account/info"}:                                {},
 	{http.MethodGet, "/superior/api/v2/account/info"}:                       {},
+	{http.MethodGet, "/superior/api/v2/account/conf"}:                       {},
 	{http.MethodGet, "/ad/api/account/conf"}:                                {},
 	{http.MethodGet, "/api/ebp/ebp_info/get_global_info"}:                   {},
 	{http.MethodPost, "/superior/api/v2/ad/getImageList"}:                   {},
@@ -76,6 +77,7 @@ var readOnlyEndpoints = map[Endpoint]struct{}{
 	{http.MethodGet, "/superior/api/v2/creative/material/aweme_photo_list"}: {},
 	{http.MethodPost, "/superior/api/v2/ad/product/clue_product_list"}:      {},
 	{http.MethodGet, "/platform/api/v1/orange/third_part_list"}:             {},
+	{http.MethodGet, "/superior/api/v2/ad/get_orange_landing_page"}:         {},
 	{http.MethodPost, "/superior/api/v2/project/get_optimization_goal_v2"}:  {},
 	{http.MethodGet, "/nbs/api/ads/brand/yuntu/query_brand_industry"}:       {},
 	{http.MethodGet, "/superior/api/v2/agw/ad/brand"}:                       {},
@@ -230,6 +232,19 @@ func (c *Client) GetProjects(ctx context.Context, projectIDs ...string) (map[str
 	query.Set("project_ids", strings.Join(projectIDs, ","))
 	query.Set("need_raw_campaign", "true")
 	return c.do(ctx, http.MethodGet, "/superior/api/project?"+query.Encode(), nil, "")
+}
+
+// ProjectDetails reads the complete project state used by the Superior edit
+// form. It is read-only and includes the platform-resolved external_action.
+func (c *Client) ProjectDetails(ctx context.Context, projectIDs ...string) (map[string]any, error) {
+	query := url.Values{}
+	query.Set("project_ids", strings.Join(projectIDs, ","))
+	query.Set("need_product_recognition", "true")
+	query.Set("need_bind_product_material", "true")
+	query.Set("need_keywords", "true")
+	query.Set("need_ea_conversion_status", "true")
+	query.Set("need_fill_history_blue_keywords_info", "true")
+	return c.do(ctx, http.MethodGet, "/superior/api/v2/project/detail?"+query.Encode(), nil, "")
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader, contentType string) (map[string]any, error) {

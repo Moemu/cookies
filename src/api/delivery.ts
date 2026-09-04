@@ -907,12 +907,28 @@ export const deliveryPlanApi = {
     const intent = plan.currentVersion.deliveryIntent
     if (!intent) throw new DeliveryApiError('LEGACY_CONFIGURATION_UNSUPPORTED', 409, '当前计划没有可编辑的业务意图。')
     const nextVersion = plan.currentVersionNumber + 1
+    const oceanEngine = configuration.payload.ocean_engine
+    const revisedOceanEngine = oceanEngine ? {
+      ...oceanEngine,
+      project: {
+        ...oceanEngine.project,
+        project_draft_id: `project-${plan.id}-${nextVersion}`,
+      },
+      promotions: oceanEngine.promotions.map((promotion, index) => ({
+        ...promotion,
+        promotion_draft_id: `promotion-${plan.id}-${nextVersion}-${index + 1}`,
+      })),
+    } : undefined
     const nextConfiguration = {
       ...configuration,
       configuration_id: planRevisionIdentity('configuration', plan.id, nextVersion),
       version_number: nextVersion,
       canonical_hash: undefined,
       intent: { schema_version: 'delivery-intent/v1' as const, intent_id: planRevisionIdentity('intent', plan.id, nextVersion), version_number: nextVersion },
+      payload: {
+        ...configuration.payload,
+        ocean_engine: revisedOceanEngine,
+      },
     }
     const marketingProduct = nextConfiguration.payload.ocean_engine?.project.marketing_product_reference
     const promotions = nextConfiguration.payload.ocean_engine?.promotions ?? []
@@ -1673,7 +1689,7 @@ function toPlatformRuntimeDraft(projectId: string, identity: string, versionNumb
           project_name: draft.name,
         },
         promotions: materialReferences.map((reference, index) => ({
-          draft_schema_version: 'oceanengine-configuration/v1', promotion_draft_id: `promotion-${identity}-${index + 1}`,
+          draft_schema_version: 'oceanengine-configuration/v1', promotion_draft_id: `promotion-${identity}-${versionNumber}-${index + 1}`,
           delivery_identity: { mode: 'account_info' }, base_material_references: [reference], copy_items: [],
           product_name: draft.marketingProduct.name,
           landing_page_reference: landingPageReference,

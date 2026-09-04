@@ -393,6 +393,10 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 			return w.transitionTerminal(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunFailed, BlockResultReconciliation)
 		}
 		if outcome == WorkerSuccess && !complete {
+			run, releaseErr := w.releaseRunLease(ctx, run)
+			if releaseErr != nil {
+				return run, releaseErr
+			}
 			return w.Service.TransitionRun(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, RunEnvironmentCheck, "")
 		}
 	}
@@ -409,6 +413,24 @@ func (w Worker) Submit(ctx context.Context, request WorkerSubmitRequest) (Browse
 		reason = BlockResultReconciliation
 	}
 	return w.transitionTerminal(ctx, run.OrganizationID, run.ProjectID, run.ID, run.Version, terminal, reason)
+}
+
+func (w Worker) releaseRunLease(ctx context.Context, run BrowserRpaRun) (BrowserRpaRun, error) {
+	if run.LeaseID == "" {
+		return run, nil
+	}
+	lease, err := w.Service.Repository.GetLease(ctx, run.OrganizationID, run.ProjectID, run.LeaseID)
+	if err != nil {
+		return run, err
+	}
+	if lease.ReleasedAt != nil {
+		return run, ErrLeaseUnavailable
+	}
+	released, err := w.Service.ReleaseRunLease(ctx, run.OrganizationID, run.ProjectID, run.ID, lease.ID, run.Version, lease.Version, lease.FencingToken)
+	if err != nil {
+		return run, err
+	}
+	return released.Run, nil
 }
 
 func (w Worker) transitionTerminal(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, runID string, expected int64, state RunState, reason BlockingReason) (BrowserRpaRun, error) {

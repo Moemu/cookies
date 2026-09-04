@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/shikanon/cookies/internal/platform/browserautomation"
 	"github.com/shikanon/cookies/internal/platform/browserautomation/webapi"
@@ -92,6 +94,14 @@ func compileWebAPIProject(draft *OceanEngineProjectDraft) (webapi.CompiledObject
 		StartUnix:  draft.Schedule.StartAt.Unix(),
 		EndUnix:    draft.Schedule.EndAt.Unix(),
 	}
+	if draft.OptimizationTargetReference == nil {
+		return webapi.CompiledObject{}, fmt.Errorf("%w: project optimization target is absent", browserautomation.ErrInvalidContract)
+	}
+	externalAction := strings.TrimSpace(draft.OptimizationTargetReference.ID)
+	if _, err := strconv.Atoi(externalAction); err != nil {
+		return webapi.CompiledObject{}, fmt.Errorf("%w: project external_action is invalid", browserautomation.ErrInvalidContract)
+	}
+	object.ExternalAction = externalAction
 	if draft.BudgetAndBidding.BudgetMode == OceanEngineBudgetModeDaily {
 		// The captured create contract only covers the unlimited budget mode.
 		// A daily budget write needs its own captured contract.

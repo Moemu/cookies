@@ -86,6 +86,8 @@ test('delivery plan client writes DeliveryIntent plus tagged PlatformConfigurati
   assert.equal(written.expected_version, 4)
   assert.equal(written.intent.intent_id, 'intent-plan_1-plan-v5')
   assert.equal(written.platform_configuration.configuration_id, 'configuration-plan_1-plan-v5')
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.project_draft_id, 'project-plan_1-5')
+  assert.equal(written.platform_configuration.payload.ocean_engine.promotions[0].promotion_draft_id, 'promotion-plan_1-5-1')
 
   plan.currentVersion.deliveryIntent!.payload.product_references = []
   const editedConfiguration = structuredClone(plan.currentVersion.platformConfiguration!)
@@ -99,6 +101,8 @@ test('delivery plan client writes DeliveryIntent plus tagged PlatformConfigurati
   assert.deepEqual(written.intent.payload.product_references.map((reference: { id?: string }) => reference.id), ['product-1'])
   assert.deepEqual(written.intent.payload.material_references.map((reference: { id?: string }) => reference.id), ['asset-1', 'video-1', 'image-1'])
   assert.equal(written.intent.intent_id, written.platform_configuration.intent.intent_id)
+  assert.equal(written.platform_configuration.payload.ocean_engine.project.project_draft_id, 'project-plan_1-2')
+  assert.equal(written.platform_configuration.payload.ocean_engine.promotions[0].promotion_draft_id, 'promotion-plan_1-2-1')
 })
 
 function draft(): DeliveryPlanDraft {

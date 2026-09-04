@@ -2,6 +2,7 @@ package webapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -93,10 +94,17 @@ func TestWebAPISubmitCreatesProjectAndReconcilesByID(t *testing.T) {
 			if r.Header.Get("x-secsdk-csrf-token") != "DOWNGRADE" {
 				t.Errorf("csrf header=%q", r.Header.Get("x-secsdk-csrf-token"))
 			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["external_action"] != "2" {
+				t.Errorf("project payload=%#v err=%v", body, err)
+			}
 			_, _ = w.Write([]byte(`{"code":0,"data":{"project_id":"7680332723195904041"}}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/superior/api/project":
+		case r.Method == http.MethodGet && r.URL.Path == "/superior/api/v2/project/detail":
 			reads.Add(1)
-			_, _ = w.Write([]byte(`{"code":0,"data":{"projects":[{"project_id":"7680332723195904041","project_name":"probe-project","start_time":"2026-09-01 00:00:00","end_time":"2026-09-02 23:59:59","project_bid":"0.01"}]}}`))
+			if r.URL.Query().Get("need_ea_conversion_status") != "true" {
+				t.Errorf("project detail query=%s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"code":0,"data":{"projects":[{"project_id":"7680332723195904041","project_name":"probe-project","external_action":"2","start_time":"2026-09-01 00:00:00","end_time":"2026-09-02 23:59:59","project_bid":"0.01"}]}}`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
@@ -107,7 +115,7 @@ func TestWebAPISubmitCreatesProjectAndReconcilesByID(t *testing.T) {
 	bid := 0.01
 	source := payloadSourceStub{object: CompiledObject{
 		Kind: "project", InternalID: "draft_1", Name: "probe-project",
-		StartUnix: schedule, EndUnix: end, BidYuan: &bid, ProductReferenceID: "1784863906740671489",
+		StartUnix: schedule, EndUnix: end, BidYuan: &bid, ExternalAction: "2", ProductReferenceID: "1784863906740671489",
 	}, pending: true}
 	adapter := submitReadyAdapter(source, writeSessionStub{server: server})
 	attempt := browserautomation.ControlledActionAttempt{ID: "attempt_1"}
@@ -124,8 +132,21 @@ func TestWebAPISubmitCreatesProjectAndReconcilesByID(t *testing.T) {
 	if page.InternalObjectKind != "project" || page.InternalObjectID != "draft_1" {
 		t.Fatalf("staged identity=%s/%s", page.InternalObjectKind, page.InternalObjectID)
 	}
-	if page.Readback["platform_object_id"] != "7680332723195904041" || page.Readback["reconciliation"] != "matched" || page.Readback["field_reconciliation_status"] != "matched" {
+	if page.Readback["platform_object_id"] != "7680332723195904041" || page.Readback["reconciliation"] != "matched" || page.Readback["field_reconciliation_status"] != "matched" || page.Readback["external_action"] != "2" {
 		t.Fatalf("readback=%#v", page.Readback)
+	}
+}
+
+func TestProjectReadbackRequiresMatchingExternalAction(t *testing.T) {
+	object := CompiledObject{Kind: "project", ExternalAction: "2"}
+	if status := reconcileScheduleAndBid(object, map[string]any{}, map[string]any{"external_action": "100"}); status != "mismatched" {
+		t.Fatalf("mismatched action status=%s", status)
+	}
+	if status := reconcileScheduleAndBid(object, map[string]any{}, map[string]any{}); status != "not_checked" {
+		t.Fatalf("missing action status=%s", status)
+	}
+	if status := reconcileScheduleAndBid(object, map[string]any{}, map[string]any{"marketing_info": map[string]any{"external_action": 2.0}}); status != "matched" {
+		t.Fatalf("numeric action status=%s", status)
 	}
 }
 
@@ -212,7 +233,7 @@ func TestWebAPISubmitReportsUnknownOnTransportFailure(t *testing.T) {
 		_, _ = w.Write([]byte(`{"code":0}`))
 	}))
 	defer server.Close()
-	source := payloadSourceStub{object: CompiledObject{Kind: "project", InternalID: "draft_1", Name: "probe-project"}, pending: true}
+	source := payloadSourceStub{object: CompiledObject{Kind: "project", InternalID: "draft_1", Name: "probe-project", ExternalAction: "2"}, pending: true}
 	adapter := submitReadyAdapter(source, writeSessionStub{server: server})
 	outcome, _, err := adapter.Submit(context.Background(), submitTestRun(), browserautomation.ControlledActionAttempt{ID: "attempt_4"}, "token")
 	if err != nil {
@@ -231,7 +252,7 @@ func TestWebAPISubmitFailsClosedOnBusinessRejection(t *testing.T) {
 		_, _ = w.Write([]byte(`{"code":50100,"name":"INTERNAL_SERVICE_ERROR"}`))
 	}))
 	defer server.Close()
-	source := payloadSourceStub{object: CompiledObject{Kind: "project", InternalID: "draft_1", Name: "probe-project"}, pending: true}
+	source := payloadSourceStub{object: CompiledObject{Kind: "project", InternalID: "draft_1", Name: "probe-project", ExternalAction: "2"}, pending: true}
 	adapter := submitReadyAdapter(source, writeSessionStub{server: server})
 	outcome, _, err := adapter.Submit(context.Background(), submitTestRun(), browserautomation.ControlledActionAttempt{ID: "attempt_5"}, "token")
 	if err == nil || outcome != browserautomation.WorkerFailed {

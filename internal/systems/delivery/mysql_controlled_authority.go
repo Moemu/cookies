@@ -445,20 +445,32 @@ func (r MySQLRepository) RebindSafePendingPlatformEntityMapping(ctx context.Cont
 	if err != nil {
 		return PlatformEntityMapping{}, err
 	}
-	failedLeaseInactive := oldLeaseID == ""
-	if oldLeaseID != "" && oldRunState == "failed" {
+	oldLeaseInactive := oldLeaseID == ""
+	if oldLeaseID != "" && (oldRunState == "failed" || oldRunState == "cancelled" || oldRunState == "awaiting_confirmation") {
 		var inactiveCount int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_rpa_session_leases WHERE organization_id=? AND project_id=? AND id=? AND run_id=? AND (released_at IS NOT NULL OR expires_at<=? OR heartbeat_deadline<=?)`, request.OrganizationID, request.ProjectID, oldLeaseID, mapping.BrowserRpaRunID, request.Now, request.Now).Scan(&inactiveCount); err != nil {
 			return PlatformEntityMapping{}, err
 		}
-		failedLeaseInactive = inactiveCount == 1
-		if failedLeaseInactive {
+		oldLeaseInactive = inactiveCount == 1
+		if oldLeaseInactive {
 			if _, err := tx.ExecContext(ctx, `UPDATE browser_rpa_session_leases SET active_lock_key=NULL,released_at=COALESCE(released_at,?),version=version+1 WHERE organization_id=? AND project_id=? AND id=? AND run_id=? AND released_at IS NULL`, request.Now, request.OrganizationID, request.ProjectID, oldLeaseID, mapping.BrowserRpaRunID); err != nil {
 				return PlatformEntityMapping{}, err
 			}
 		}
 	}
 	controlledActionSafe := attemptCount == 0 && confirmationCount == 0
+	if oldRunState == "awaiting_confirmation" {
+		var noClickEvidenceCount, clickEvidenceCount int
+		if err := tx.QueryRowContext(ctx, `SELECT
+			(SELECT COUNT(*) FROM browser_rpa_evidence WHERE organization_id=? AND project_id=? AND run_id=? AND JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'$.field_readback.final_click_performed'))='false'),
+			(SELECT COUNT(*) FROM browser_rpa_evidence WHERE organization_id=? AND project_id=? AND run_id=? AND JSON_UNQUOTE(JSON_EXTRACT(evidence_json,'$.field_readback.final_click_performed'))='true')`,
+			request.OrganizationID, request.ProjectID, mapping.BrowserRpaRunID,
+			request.OrganizationID, request.ProjectID, mapping.BrowserRpaRunID).
+			Scan(&noClickEvidenceCount, &clickEvidenceCount); err != nil {
+			return PlatformEntityMapping{}, err
+		}
+		controlledActionSafe = preparedRunCanRebind(attemptCount, confirmationCount, noClickEvidenceCount, clickEvidenceCount)
+	}
 	if oldRunState == "failed" && attemptCount > 0 && failedAttemptCount == attemptCount {
 		var noClickEvidenceCount, clickEvidenceCount int
 		if err := tx.QueryRowContext(ctx, `SELECT
@@ -491,13 +503,13 @@ func (r MySQLRepository) RebindSafePendingPlatformEntityMapping(ctx context.Cont
 		}
 		controlledActionSafe = controlledActionsBelongToOtherObjects(attemptCount, confirmationCount, targetClickEvidenceCount, otherObjectAttemptCount)
 	}
-	if !failedLeaseInactive || oldTakeoverActive || !controlledActionSafe {
+	if !oldLeaseInactive || oldTakeoverActive || !controlledActionSafe {
 		return PlatformEntityMapping{}, ErrInvalidState
 	}
-	// Prepare steps and readback evidence are safe to retain after a failed or
-	// cancelled pre-submit run. They do not prove a remote write. A queued run
-	// must still have no recorded page activity before reassignment.
-	if oldRunState != "failed" && oldRunState != "cancelled" && (stepCount != 0 || evidenceCount != 0) {
+	// Prepare steps and readback evidence are safe to retain after a failed,
+	// cancelled, or unsubmitted prepared run. They do not prove a remote write.
+	// A queued run must still have no recorded page activity before reassignment.
+	if oldRunState != "failed" && oldRunState != "cancelled" && oldRunState != "awaiting_confirmation" && (stepCount != 0 || evidenceCount != 0) {
 		return PlatformEntityMapping{}, ErrInvalidState
 	}
 
@@ -505,10 +517,11 @@ func (r MySQLRepository) RebindSafePendingPlatformEntityMapping(ctx context.Cont
 	cancelledOldRun := oldExecutionStatus == "cancelled" && oldChangeStatus == string(ControlledChangeSetInvalidated) && oldRunState == "cancelled"
 	orphanedCancelledRun := oldExecutionStatus == "running" && oldChangeStatus == string(ControlledChangeSetExecuting) && oldRunState == "cancelled"
 	failedOldRun := oldExecutionStatus == "running" && oldChangeStatus == string(ControlledChangeSetExecuting) && oldRunState == "failed"
-	if !activeOldRun && !cancelledOldRun && !orphanedCancelledRun && !failedOldRun {
+	preparedOldRun := oldExecutionStatus == "running" && oldChangeStatus == string(ControlledChangeSetExecuting) && oldRunState == "awaiting_confirmation"
+	if !activeOldRun && !cancelledOldRun && !orphanedCancelledRun && !failedOldRun && !preparedOldRun {
 		return PlatformEntityMapping{}, ErrInvalidState
 	}
-	if activeOldRun || orphanedCancelledRun {
+	if activeOldRun || orphanedCancelledRun || preparedOldRun {
 		updates := []struct {
 			query string
 			args  []any
@@ -521,6 +534,11 @@ func (r MySQLRepository) RebindSafePendingPlatformEntityMapping(ctx context.Cont
 				query string
 				args  []any
 			}{{`UPDATE browser_rpa_runs SET state='cancelled',version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND state='queued' AND lease_id IS NULL AND takeover_active=FALSE`, []any{request.Now, request.OrganizationID, request.ProjectID, mapping.BrowserRpaRunID}}}, updates...)
+		} else if preparedOldRun {
+			updates = append([]struct {
+				query string
+				args  []any
+			}{{`UPDATE browser_rpa_runs SET state='cancelled',blocking_reason=NULL,version=version+1,updated_at=? WHERE organization_id=? AND project_id=? AND id=? AND state='awaiting_confirmation' AND takeover_active=FALSE`, []any{request.Now, request.OrganizationID, request.ProjectID, mapping.BrowserRpaRunID}}}, updates...)
 		}
 		for _, update := range updates {
 			result, updateErr := tx.ExecContext(ctx, update.query, update.args...)
@@ -559,6 +577,10 @@ func (r MySQLRepository) RebindSafePendingPlatformEntityMapping(ctx context.Cont
 
 func controlledActionsBelongToOtherObjects(attemptCount, confirmationCount, targetClickEvidenceCount, otherObjectAttemptCount int) bool {
 	return attemptCount > 0 && confirmationCount == attemptCount && targetClickEvidenceCount == 0 && otherObjectAttemptCount == attemptCount
+}
+
+func preparedRunCanRebind(attemptCount, confirmationCount, noClickEvidenceCount, clickEvidenceCount int) bool {
+	return attemptCount == 0 && confirmationCount == 0 && noClickEvidenceCount > 0 && clickEvidenceCount == 0
 }
 
 func (r MySQLRepository) ListPlatformEntityMappings(ctx context.Context, org contract.OrganizationID, project contract.ProjectID, account string) ([]PlatformEntityMapping, error) {

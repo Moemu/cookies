@@ -1,6 +1,7 @@
 package plancompile
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/shikanon/cookies/internal/systems/delivery"
@@ -86,5 +87,52 @@ func TestConfigurationObjectAvailabilityRejectsImageMaterialAsProductImage(t *te
 	}
 	if items[0].Available || items[0].Reason != "产品主图必须来自巨量“我的图片”，不能使用图片素材" {
 		t.Fatalf("availability = %#v", items[0])
+	}
+}
+
+func TestConfigurationObjectAvailabilityRejectsUnqualifiedMultiConversionLandingPage(t *testing.T) {
+	landing := delivery.StableReference{Namespace: "oceanengine", ObjectKind: "orange_landing_page", ID: "7047763949009535007", State: delivery.ReferenceResolved}
+	configuration := delivery.OceanEngineConfiguration{
+		Project: &delivery.OceanEngineProjectDraft{
+			MarketingPurpose:            "lead_generation",
+			LeadCaptureMode:             "smart_lead",
+			Carrier:                     "orange_landing_page",
+			OptimizationTargetReference: &delivery.StableReference{ID: "100", State: delivery.ReferenceResolved},
+		},
+		Promotions: []delivery.OceanEnginePromotionDraft{{LandingPageReference: &landing}},
+	}
+	items := configurationObjectAvailability(configuration)
+	if len(items) != 1 || items[0].Available || !strings.Contains(items[0].Reason, "优化目标 100") {
+		t.Fatalf("availability = %#v", items)
+	}
+	landing.AuditAttributes = map[string]string{"multi_conversion_eligible": "true"}
+	items = configurationObjectAvailability(configuration)
+	if len(items) != 1 || !items[0].Available {
+		t.Fatalf("qualified availability = %#v", items)
+	}
+}
+
+func TestConfigurationObjectAvailabilityChecksFormSubmissionLandingQualification(t *testing.T) {
+	landing := delivery.StableReference{
+		Namespace: "oceanengine", ObjectKind: "orange_landing_page", ID: "7047763949009535007", State: delivery.ReferenceResolved,
+		AuditAttributes: map[string]string{"multi_lead_external_actions": "100"},
+	}
+	configuration := delivery.OceanEngineConfiguration{
+		Project: &delivery.OceanEngineProjectDraft{
+			MarketingPurpose:            "lead_generation",
+			LeadCaptureMode:             "smart_lead",
+			Carrier:                     "orange_landing_page",
+			OptimizationTargetReference: &delivery.StableReference{ID: "2", State: delivery.ReferenceResolved},
+		},
+		Promotions: []delivery.OceanEnginePromotionDraft{{LandingPageReference: &landing}},
+	}
+	items := configurationObjectAvailability(configuration)
+	if len(items) != 1 || items[0].Available || !strings.Contains(items[0].Reason, "优化目标 2") {
+		t.Fatalf("unqualified form-submission availability = %#v", items)
+	}
+	landing.AuditAttributes["multi_lead_external_actions"] = "2,100"
+	items = configurationObjectAvailability(configuration)
+	if len(items) != 1 || !items[0].Available {
+		t.Fatalf("qualified form-submission availability = %#v", items)
 	}
 }

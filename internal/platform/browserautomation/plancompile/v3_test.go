@@ -152,6 +152,9 @@ func TestV3CompilerSelectsProjectAsFirstStagedCreateForm(t *testing.T) {
 	if json.Unmarshal(raw, &plan) != nil || plan.PlanKind != "project_create" || plan.InternalObjectKind != "project" || plan.InternalObjectID != "project-draft-1" {
 		t.Fatalf("staged project plan = %#v", plan)
 	}
+	if plan.ParentContext.OptimizationTargetExternalAction != "9001" {
+		t.Fatalf("external_action evidence = %#v", plan.ParentContext)
+	}
 }
 
 func TestV3CompilerResolvesConnectorAccountBeforeBuildingRunnerPlan(t *testing.T) {
@@ -184,8 +187,8 @@ func TestV3CompilerAdvancesThroughMappedProjectAndPromotions(t *testing.T) {
 	second.PromotionName = "第二个测试单元"
 	configuration.Payload.OceanEngine.Promotions = append(configuration.Payload.OceanEngine.Promotions, second)
 	planHash := strings.Repeat("a", 64)
-	projectMapping := delivery.PlatformEntityMapping{ID: "mapping-project", AccountReferenceID: "1855554434276391", InternalObjectKind: "project", InternalObjectID: "project-draft-1", PlatformObjectKind: "project", PlatformObjectID: "7677595885572784182", Status: delivery.PlatformEntityMappingConfirmed}
-	firstPromotionMapping := delivery.PlatformEntityMapping{ID: "mapping-promotion-1", AccountReferenceID: "1855554434276391", InternalObjectKind: "promotion", InternalObjectID: "promotion-draft-1", PlatformObjectKind: "promotion", PlatformObjectID: "7683558668450021382", Status: delivery.PlatformEntityMappingConfirmed}
+	projectMapping := delivery.PlatformEntityMapping{ID: "mapping-project", ConfigurationID: configuration.ConfigurationID, AccountReferenceID: "1855554434276391", InternalObjectKind: "project", InternalObjectID: "project-draft-1", PlatformObjectKind: "project", PlatformObjectID: "7677595885572784182", Status: delivery.PlatformEntityMappingConfirmed}
+	firstPromotionMapping := delivery.PlatformEntityMapping{ID: "mapping-promotion-1", ConfigurationID: configuration.ConfigurationID, AccountReferenceID: "1855554434276391", InternalObjectKind: "promotion", InternalObjectID: "promotion-draft-1", PlatformObjectKind: "promotion", PlatformObjectID: "7683558668450021382", Status: delivery.PlatformEntityMappingConfirmed}
 	run := browserautomation.BrowserRpaRun{OrganizationID: "org_1", ProjectID: "project_1", AccountID: "1855554434276391", Authority: browserautomation.AuthorityBinding{Action: "create_project_and_promotions", PlanID: "plan_1", PlanVersion: 1, PlanCanonicalHash: planHash, ConfigurationCanonicalHash: configuration.CanonicalHash}}
 	policy := browserautomation.SitePolicy{AllowedProtocols: []string{"https"}, AllowedHosts: []string{"ad.oceanengine.com"}, AllowedPageKinds: []string{"project_create", "promotion_create"}}
 

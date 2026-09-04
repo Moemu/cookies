@@ -116,7 +116,14 @@ func (p BrowserRpaAuthorityProvider) initializeStagedMappings(ctx context.Contex
 	for _, item := range targets {
 		existing, getErr := repo.GetPlatformEntityMappingByInternalObject(ctx, authority.OrganizationID, authority.ProjectID, authority.AccountReferenceID, item.kind, item.id)
 		if getErr == nil {
-			if existing.Status == PlatformEntityMappingConfirmed || (existing.Status == PlatformEntityMappingPending && existing.BusinessExecutionID == authority.BusinessExecutionID && existing.BrowserRpaRunID == runID) {
+			currentConfiguration := existing.PlanID == authority.PlanID && existing.ConfigurationID == version.PlatformConfiguration.ConfigurationID
+			if existing.Status == PlatformEntityMappingConfirmed {
+				if !currentConfiguration {
+					return browserautomation.ErrInvalidContract
+				}
+				continue
+			}
+			if existing.Status == PlatformEntityMappingPending && currentConfiguration && existing.BusinessExecutionID == authority.BusinessExecutionID && existing.BrowserRpaRunID == runID {
 				continue
 			}
 			if existing.Status == PlatformEntityMappingPending {
@@ -237,7 +244,15 @@ func (p BrowserRpaAuthorityProvider) load(ctx context.Context, organizationID co
 	if err := change.Validate(); err != nil {
 		return ControlledExecution{}, ControlledChangeSet{}, RemoteWriteApproval{}, browserautomation.ErrInvalidContract
 	}
-	if err := approval.Validate(now); err != nil {
+	approvalValidationTime := now
+	if change.Binding.AuthorityOrigin == "plan_execution" &&
+		(change.Action == ControlledActionCreateProjectAndPromotions || change.Action == ControlledActionCreatePromotionsInExistingProject) {
+		// A safe Prepare retry can occur after the server-created approval TTL.
+		// The immutable plan still binds the action. Submit also requires a new
+		// five-minute final confirmation, so this does not extend click authority.
+		approvalValidationTime = approval.ApprovedAt
+	}
+	if err := approval.Validate(approvalValidationTime); err != nil {
 		return ControlledExecution{}, ControlledChangeSet{}, RemoteWriteApproval{}, browserautomation.ErrInvalidContract
 	}
 	return execution, change, approval, nil

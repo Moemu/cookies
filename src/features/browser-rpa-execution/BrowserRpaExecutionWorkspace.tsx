@@ -158,7 +158,14 @@ function BrowserRpaExecutionDetail({ projectId, runId }: { projectId: string; ru
         setNotice(nextPlan.blocked_reasons.length ? '计划已生成，但存在阻塞原因。' : apiDriver ? 'API 编译输入已生成。该操作未写入平台。' : 'Runner v3 执行计划已生成。该操作未打开页面。')
       } else if (action === 'prepare') {
         let currentRun = run
-        if (!currentRun.lease_id) {
+        const currentLease = transport.workspace.lease
+        const leaseActive = Boolean(
+          currentLease
+          && currentLease.id === currentRun.lease_id
+          && !currentLease.released_at
+          && new Date(currentLease.heartbeat_deadline).getTime() > Date.now(),
+        )
+        if (!leaseActive) {
           const acquired = await controlledExecutionApi.acquireLease(projectId, currentRun.id, currentRun.version)
           currentRun = acquired.run
         }

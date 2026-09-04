@@ -350,15 +350,18 @@ func TestWorkerAdvancesStagedCreatesAndUsesFreshConfirmationPerObject(t *testing
 	}}
 	run := validRun(now)
 	run.Authority.Action = "create_project_and_promotions"
-	if _, _, err := service.CreateRun(context.Background(), CreateRunRequest{Run: run}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AcquireLease(context.Background(), validLease(now)); err != nil {
+	created, _, err := service.CreateRun(context.Background(), CreateRunRequest{Run: run})
+	if err != nil {
 		t.Fatal(err)
 	}
 	worker := Worker{Service: service, Adapter: &stagedWorkerAdapter{}}
-	current := run
+	current := created
 	for stage := 0; stage < 2; stage++ {
+		acquired, err := service.AcquireRunLease(context.Background(), current.OrganizationID, current.ProjectID, current.ID, current.Version, fmt.Sprintf("worker_%d", stage))
+		if err != nil {
+			t.Fatal(err)
+		}
+		current = acquired.Run
 		prepared, err := worker.Prepare(context.Background(), current.OrganizationID, current.ProjectID, current.ID)
 		if err != nil {
 			t.Fatal(err)
@@ -367,7 +370,7 @@ func TestWorkerAdvancesStagedCreatesAndUsesFreshConfirmationPerObject(t *testing
 		if err != nil {
 			t.Fatal(err)
 		}
-		current, err = worker.Submit(context.Background(), WorkerSubmitRequest{Authorize: AuthorizeActionRequest{OrganizationID: current.OrganizationID, ProjectID: current.ProjectID, RunID: current.ID, StepID: fmt.Sprintf("submit_%d", stage), ConfirmationID: issued.Confirmation.ID, Token: issued.Token, LeaseID: "lease_1", FencingToken: 1, IdempotencyKey: fmt.Sprintf("attempt_%d", stage)}})
+		current, err = worker.Submit(context.Background(), WorkerSubmitRequest{Authorize: AuthorizeActionRequest{OrganizationID: current.OrganizationID, ProjectID: current.ProjectID, RunID: current.ID, StepID: fmt.Sprintf("submit_%d", stage), ConfirmationID: issued.Confirmation.ID, Token: issued.Token, LeaseID: acquired.Lease.ID, FencingToken: acquired.Lease.FencingToken, IdempotencyKey: fmt.Sprintf("attempt_%d", stage)}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -377,6 +380,10 @@ func TestWorkerAdvancesStagedCreatesAndUsesFreshConfirmationPerObject(t *testing
 		}
 		if current.State != want {
 			t.Fatalf("stage %d state=%s want=%s", stage, current.State, want)
+		}
+		lease, leaseErr := repo.GetLease(context.Background(), current.OrganizationID, current.ProjectID, acquired.Lease.ID)
+		if leaseErr != nil || current.LeaseID != "" || lease.ReleasedAt == nil {
+			t.Fatalf("stage %d run=%#v lease=%#v err=%v", stage, current, lease, leaseErr)
 		}
 	}
 	if len(provider.recorded) != 2 || provider.recorded[0].InternalObjectKind != "project" || provider.recorded[1].InternalObjectKind != "promotion" {

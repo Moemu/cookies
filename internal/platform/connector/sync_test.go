@@ -105,6 +105,13 @@ func (testReader) MarketingProductsPage(context.Context, oceanengine.AssetPageRe
 func (testReader) OrangeLandingPagesPage(context.Context, oceanengine.AssetPageRequest) (map[string]any, error) {
 	return map[string]any{"data": map[string]any{"data": []any{map[string]any{"site_id": "3001", "name": "landing"}}, "pagination": map[string]any{"page": 1.0, "size": 30.0, "total": 1.0}}}, nil
 }
+func (testReader) FilteredOrangeLandingPagesPage(_ context.Context, _ oceanengine.AssetPageRequest, filter oceanengine.OrangeLandingPageFilter) (map[string]any, error) {
+	items := []any{}
+	if filter.ExternalAction == 100 {
+		items = append(items, map[string]any{"site_id": "3001", "name": "landing"})
+	}
+	return map[string]any{"data": map[string]any{"data": items, "pagination": map[string]any{"page": 1.0, "size": 30.0, "total": float64(len(items))}}}, nil
+}
 func (testReader) OptimizationTargets(_ context.Context, assetType int, _ bool) (map[string]any, error) {
 	goal := map[string]any{"optimization_name": "conversion", "external_action": 20.0}
 	if assetType == 3 {
@@ -254,11 +261,19 @@ func TestSynchronizerBuildsEncryptedImmutableLedgerSlice(t *testing.T) {
 	if result.ObjectCount != 5 || result.MetricCount != 2 || writer.completed != "completed" {
 		t.Fatalf("result=%#v completed=%s", result, writer.completed)
 	}
-	if len(writer.raw) != 18 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
+	if len(writer.raw) != 20 || len(writer.configs) != 1 || len(writer.bindings) != 1 || len(writer.diagnoses) != 1 || len(writer.statuses) != 1 {
 		t.Fatalf("raw=%d config=%d binding=%d diagnosis=%d status=%d", len(writer.raw), len(writer.configs), len(writer.bindings), len(writer.diagnoses), len(writer.statuses))
 	}
 	if len(writer.platformObjects) != 11 || result.PlatformObjects[PlatformObjectProductImage].Created != 1 || result.PlatformObjects[PlatformObjectVideoMaterial].Created != 1 || result.PlatformObjects[PlatformObjectAwemePhotoMaterial].Created != 1 || result.PlatformObjects[PlatformObjectMarketingProduct].Created != 1 || result.PlatformObjects[PlatformObjectConversionAsset].Created != 1 || result.PlatformObjects[PlatformObjectAuthorizedIdentity].Created != 1 {
 		t.Fatalf("platform objects=%#v result=%#v", writer.platformObjects, result.PlatformObjects)
+	}
+	landing := writer.platformObjects[PlatformObjectOrangeLandingPage][0]
+	if eligible, ok := landing.Metadata["multi_conversion_eligible"].(bool); !ok || !eligible {
+		t.Fatalf("legacy multi-conversion landing eligibility = %#v", landing.Metadata)
+	}
+	actions, ok := landing.Metadata["multi_lead_external_actions"].([]string)
+	if !ok || len(actions) != 1 || actions[0] != "100" {
+		t.Fatalf("multi-lead landing actions = %#v", landing.Metadata)
 	}
 	if writer.objects[0].ObjectRef == "raw-account-1" || writer.objects[1].ObjectRef == "raw-promotion-1" || writer.bindings[0].MaterialRef == "raw-material-1" {
 		t.Fatal("raw platform identity leaked")

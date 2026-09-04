@@ -34,6 +34,12 @@ planSetAjv.addSchema(readJSON("docs/delivery/schemas/oceanengine-playwright-rpa-
 const validatePlanSet = planSetAjv.compile(readJSON("docs/delivery/schemas/oceanengine-configuration-plan-set-v1.json"));
 const runnerSource = readFileSync(resolve(root, "scripts/browser-rpa-runner-v3.ts"), "utf8");
 
+test("project form navigation waits for the asynchronous New Project action", () => {
+  assert.match(runnerSource, /attempt < 120 && !createProject/);
+  assert.match(runnerSource, /the New Project action did not load/);
+  assert.doesNotMatch(runnerSource, /the New Project action is unavailable/);
+});
+
 class FakePage implements PageOperations {
   readonly applied: string[] = [];
   identified = 0;
@@ -149,6 +155,7 @@ test("runner v3 retains the live promotion adapters", () => {
 	assert.match(runnerSource, /createad_openUrl_input_input_component/);
 	assert.match(runnerSource, /createad_productName/);
 	assert.match(runnerSource, /waitForStableMaterialCard/);
+	assert.match(runnerSource, /waitForStableMaterialInventory/);
 	assert.match(runnerSource, /createad_videoLib_close/);
 	assert.match(runnerSource, /createad_productImg__createProductImg__createMaterialLib/);
 	assert.match(runnerSource, /可搜索视频名称或ID/);
@@ -164,7 +171,22 @@ test("runner v3 retains the live promotion adapters", () => {
   assert.match(runnerSource, /自定义品牌名称/);
   assert.match(runnerSource, /await target\.press\("Enter"\)/);
   assert.match(runnerSource, /step\.operation === "toggle"/);
-  assert.match(runnerSource, /\.isChecked\(\)/);
+  assert.match(runnerSource, /checkboxState/);
+  assert.match(runnerSource, /ovui-switch--checked/);
+  assert.match(runnerSource, /createproject_aigcDynamic/);
+});
+
+test("project submission reconciles the selected external_action from the observed write request", () => {
+  assert.match(runnerSource, /request\.postDataJSON\(\)/);
+  assert.match(runnerSource, /payload\.external_action/);
+  assert.match(runnerSource, /optimization_target_external_action/);
+  assert.match(runnerSource, /reconcileProjectSubmission/);
+});
+
+test("delivery mode ignores hidden controls retained by a prior marketing branch", () => {
+  assert.match(runnerSource, /step\.field_key === "project\.delivery_mode"/);
+  assert.match(runnerSource, /createproject_deliverymode\$\{expectedSuffix\}/);
+  assert.match(runnerSource, /Hidden controls from an old marketing branch must not match/);
 });
 
 test("product image matching ignores signed URL hosts, queries, and transform suffixes", () => {
@@ -179,20 +201,24 @@ test("runner v3 enters the project form from the management page", () => {
 	assert.match(runnerSource, /plan\.plan_kind === "promotion_create"/);
 	assert.match(runnerSource, /searchParams\.set\("project_id", plan\.parent_project_reference/);
   assert.match(runnerSource, /getByText\("新建项目", \{ exact: true \}\)/);
+  assert.match(runnerSource, /managementURL\.searchParams\.set\("aadvid", plan\.account_reference\)/);
   assert.match(runnerSource, /the project creation form did not load/);
   assert.match(runnerSource, /runner_step_start/);
 });
 
-test("runner v3 uses the unique empty product control", () => {
+test("runner v3 supports ecommerce and sales-lead product controls", () => {
   assert.match(runnerSource, /locator\("\.create-product-add-empty"\)/);
+  assert.match(runnerSource, /\["点击选择商品", "添加商品"\]/);
   assert.match(runnerSource, /getByPlaceholder\("请输入商品名称或ID", \{ exact: true \}\)/);
   assert.match(runnerSource, /spec\.expected_total !== undefined && !projectProduct/);
   assert.match(runnerSource, /searched_product_card_and_unique_product_id/);
   assert.match(runnerSource, /waitForProductListRequest/);
+  assert.match(runnerSource, /clue_product_list/);
   assert.match(runnerSource, /finishProductListRequest/);
   assert.match(runnerSource, /waitForStableProductCard/);
   assert.match(runnerSource, /createproject_productselectdrawer_close/);
   assert.match(runnerSource, /createproject_audienceextend_/);
+  assert.match(runnerSource, /projectMoney\.nth\(step\.field_key === "project\.daily_budget" \? 0 : 1\)/);
   assert.match(runnerSource, /process\.stdout\.write\(JSON\.stringify\(result\)/);
   assert.match(runnerSource, /commandOption\("--result-file"\)/);
   assert.match(runnerSource, /writeFileSync\(resultFile, JSON\.stringify\(result\)\)/);

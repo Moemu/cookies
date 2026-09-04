@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shikanon/cookies/internal/integrations/oceanengine"
@@ -27,6 +28,9 @@ type CompiledObject struct {
 	EndUnix   int64
 	// BidYuan carries the plan bid in yuan. Nil keeps the template value.
 	BidYuan *float64
+	// ExternalAction is the selected optimization target ID from the immutable
+	// plan. Project creation must not inherit this value from a local template.
+	ExternalAction string
 	// ProductReferenceID is the plan's resolved product reference. A non-empty
 	// value must equal the template product_id or the adapter stops before the
 	// write.
@@ -174,6 +178,10 @@ func assembleCreatePayload(object CompiledObject, templates CreateTemplates) (ma
 		if object.BidYuan != nil {
 			payload["bid"] = *object.BidYuan
 		}
+		if object.ExternalAction == "" {
+			return nil, fmt.Errorf("%w: project external_action is absent", browserautomation.ErrInvalidContract)
+		}
+		payload["external_action"] = object.ExternalAction
 	case "promotion":
 		if object.DependsOnPlatformID == "" {
 			return nil, fmt.Errorf("%w: promotion without a confirmed project binding", browserautomation.ErrInvalidContract)
@@ -268,11 +276,21 @@ func reconcileCreatedObject(ctx context.Context, reader *oceanengine.Client, obj
 		"platform_object_id": platformID,
 		"reconciliation":     "matched",
 	}
+	if object.Kind == "project" && object.ExternalAction != "" {
+		readback["expected_external_action"] = object.ExternalAction
+		if echoed := findScalarString(row, "external_action"); echoed != "" {
+			readback["external_action"] = echoed
+		}
+	}
 	nameKey := "project_name"
 	if object.Kind == "promotion" {
 		nameKey = "promotion_name"
 	}
-	if name, _ := row[nameKey].(string); name != object.Name {
+	name, _ := row[nameKey].(string)
+	if object.Kind == "project" && name == "" {
+		name, _ = row["name"].(string)
+	}
+	if name != object.Name {
 		return "mismatched", readback, nil
 	}
 	if status := reconcileScheduleAndBid(object, payload, row); status != "matched" {
@@ -284,13 +302,16 @@ func reconcileCreatedObject(ctx context.Context, reader *oceanengine.Client, obj
 }
 
 func projectRowByID(ctx context.Context, reader *oceanengine.Client, platformID string) (map[string]any, error) {
-	value, err := reader.GetProjects(ctx, platformID)
+	value, err := reader.ProjectDetails(ctx, platformID)
 	if err != nil {
 		return nil, err
 	}
 	rows := oceanengine.FlattenNamedRows(value, "project_name")
+	if len(rows) == 0 {
+		rows = oceanengine.FlattenNamedRows(value, "name")
+	}
 	if len(rows) != 1 {
-		return nil, fmt.Errorf("project %s read returned %d rows", platformID, len(rows))
+		return nil, fmt.Errorf("project %s detail returned %d rows", platformID, len(rows))
 	}
 	return rows[0], nil
 }
@@ -310,6 +331,15 @@ func promotionRowByID(ctx context.Context, reader *oceanengine.Client, platformI
 // reconcileScheduleAndBid compares the plan fields the platform echoes back.
 // Absent fields stay unchecked and keep the status matched.
 func reconcileScheduleAndBid(object CompiledObject, payload map[string]any, row map[string]any) string {
+	if object.Kind == "project" && object.ExternalAction != "" {
+		echoed := findScalarString(row, "external_action")
+		if echoed == "" {
+			return "not_checked"
+		}
+		if echoed != object.ExternalAction {
+			return "mismatched"
+		}
+	}
 	if object.StartUnix > 0 {
 		if echoed, ok := row["start_time"].(string); ok && echoed != "" {
 			if echoed != formatPlatformTime(object.StartUnix) {
@@ -332,6 +362,40 @@ func reconcileScheduleAndBid(object CompiledObject, payload map[string]any, row 
 		}
 	}
 	return "matched"
+}
+
+func firstScalarString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		return strconv.FormatInt(int64(typed), 10)
+	case json.Number:
+		return typed.String()
+	default:
+		return ""
+	}
+}
+
+func findScalarString(value any, key string) string {
+	switch typed := value.(type) {
+	case map[string]any:
+		if result := firstScalarString(typed[key]); result != "" {
+			return result
+		}
+		for _, child := range typed {
+			if result := findScalarString(child, key); result != "" {
+				return result
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if result := findScalarString(child, key); result != "" {
+				return result
+			}
+		}
+	}
+	return ""
 }
 
 func formatPlatformTime(unix int64) string {

@@ -22,6 +22,7 @@
       "properties": {
         "carrier": {"type": "string", "minLength": 1},
         "optimization_target": {"type": "string", "minLength": 1},
+        "optimization_target_external_action": {"type": "string", "pattern": "^-?[0-9]+$"},
         "deep_optimization": {"type": "string", "minLength": 1},
         "delivery_mode": {"type": "string", "minLength": 1},
         "placement_mode": {"type": "string", "minLength": 1},

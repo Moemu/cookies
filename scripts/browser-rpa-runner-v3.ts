@@ -373,15 +373,33 @@ async function resolvePlanPage(context: BrowserContext, plan: OceanEngineFormPla
     if (!managePage) await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
   } while (!managePage && Date.now() < manageDeadline);
 
+  if (!managePage && plan.plan_kind === "project_create" && /^\d+$/.test(plan.account_reference)) {
+    managePage = await context.newPage();
+    const managementURL = new URL("https://ad.oceanengine.com/promotion/promote-manage/project");
+    managementURL.searchParams.set("aadvid", plan.account_reference);
+    await managePage.goto(managementURL.toString(), { waitUntil: "domcontentloaded" });
+  }
+
   if (!managePage) throw new RunnerV3Error("page_drift", "the OceanEngine management page did not load");
   if (plan.plan_kind !== "project_create") {
     throw new RunnerV3Error("operator_required", `open the ${plan.plan_kind} form before Prepare`);
   }
 
-  const createProject = managePage.getByText("新建项目", { exact: true });
-  if ((await createProject.count()) !== 1 || !(await createProject.isVisible())) {
-    throw new RunnerV3Error("locator_not_unique", "the New Project action is unavailable");
+  const createProjectCandidates = managePage.getByText("新建项目", { exact: true });
+  let createProject: Locator | undefined;
+  for (let attempt = 0; attempt < 120 && !createProject; attempt += 1) {
+    const visible: Locator[] = [];
+    for (let index = 0; index < await createProjectCandidates.count(); index += 1) {
+      const candidate = createProjectCandidates.nth(index);
+      if (await candidate.isVisible()) visible.push(candidate);
+    }
+    if (visible.length > 1) {
+      throw new RunnerV3Error("locator_not_unique", "the New Project action is not unique");
+    }
+    createProject = visible[0];
+    if (!createProject) await managePage.waitForTimeout(250);
   }
+  if (!createProject) throw new RunnerV3Error("async_load_timeout", "the New Project action did not load");
   await createProject.click({ noWaitAfter: true });
   const opened = await waitForPlanPage(context, plan, 15_000);
   if (!opened) throw new RunnerV3Error("async_load_timeout", "the project creation form did not load");
@@ -399,6 +417,7 @@ export class PlaywrightPageOperations implements PageOperations {
   private preSubmitUrl = "";
   private platformWriteRequestObserved = false;
   private platformWriteResponseStatus: number | undefined;
+  private submittedExternalAction: string | undefined;
   private readonly referenceReadbacks = new Map<string, unknown>();
 
   constructor(private readonly page: Page) {}
@@ -494,6 +513,11 @@ export class PlaywrightPageOperations implements PageOperations {
       if ((await directLinkInput.count()) === 1) return directLinkInput;
       throw new RunnerV3Error("locator_not_unique", `${step.id}: direct-link input is not unique`);
     }
+    if (step.field_key === "project.budget_mode") {
+      // Sales-lead pages render the budget options without the ecommerce
+      // "项目日预算" label. The exact option is stable across both branches.
+      return this.uniqueVisibleText(step.target, step.id);
+    }
     const scope = this.scopeLocator(step);
     for (let attempt = 0; attempt < 40 && (await scope.count()) < 1; attempt += 1) {
       await this.page.waitForTimeout(250);
@@ -506,6 +530,20 @@ export class PlaywrightPageOperations implements PageOperations {
         if (await emptyProduct.nth(index).isVisible()) visibleEmptyProducts.push(emptyProduct.nth(index));
       }
       if (visibleEmptyProducts.length === 1) return visibleEmptyProducts[0];
+      // The sales-lead branch does not use the ecommerce empty-product card.
+      // It renders a text action instead. Use the branch-specific action before
+      // falling back to the target from an older generated plan (usually 更换).
+      for (const label of ["点击选择商品", "添加商品"]) {
+        const candidates = this.page.getByText(label, { exact: true });
+        const visible: Locator[] = [];
+        for (let index = 0; index < await candidates.count(); index += 1) {
+          if (await candidates.nth(index).isVisible()) visible.push(candidates.nth(index));
+        }
+        if (visible.length === 1) return visible[0];
+        if (visible.length > 1) {
+          throw new RunnerV3Error("locator_not_unique", `${step.id}: sales-lead product action is not unique`);
+        }
+      }
       return this.uniqueVisibleText(step.target, step.id);
     }
     if (step.field_key === "promotion.base_materials") {
@@ -556,6 +594,11 @@ export class PlaywrightPageOperations implements PageOperations {
       const checkbox = this.page.getByRole("checkbox", { name: "开启智能生成", exact: true });
       if ((await checkbox.count()) === 1 && await checkbox.isVisible()) return checkbox;
     }
+    if (step.field_key === "project.aigc_dynamic_creative") {
+      const control = this.page.locator("[data-auto-id='switch-btn'][data-e2e='createproject_aigcDynamic']:visible");
+      if ((await control.count()) === 1) return control;
+      throw new RunnerV3Error("page_drift", `${step.id}: AIGC switch is unavailable`);
+    }
     if (step.target === "spinbutton") {
       if (step.field_key === "project.daily_budget" && (await this.page.getByRole("spinbutton").count()) === 0) {
         const reveal = await this.uniqueVisibleText("设置预算", step.id);
@@ -571,6 +614,16 @@ export class PlaywrightPageOperations implements PageOperations {
         }
         if ((await promotionMoney.count()) === 2) {
           return promotionMoney.nth(step.field_key === "promotion.daily_budget" ? 0 : 1);
+        }
+      }
+      if (step.field_key === "project.daily_budget" || step.field_key === "project.bid") {
+        const projectMoney = this.page.getByRole("spinbutton");
+        for (let attempt = 0; attempt < 40 && (await projectMoney.count()) < 2; attempt += 1) {
+          await this.page.waitForTimeout(250);
+        }
+        if ((await projectMoney.count()) === 2) {
+          // The calibrated sales-lead form renders daily budget before bid.
+          return projectMoney.nth(step.field_key === "project.daily_budget" ? 0 : 1);
         }
       }
       const scoped = scope.first().locator("xpath=ancestor::*[.//*[@role='spinbutton'] or .//input][1]").getByRole("spinbutton");
@@ -832,7 +885,11 @@ export class PlaywrightPageOperations implements PageOperations {
       await this.confirmKnownFieldTransition(step, false);
       const inlineOption = await this.projectInlineOption(step, value);
       if (inlineOption) {
-        if ((await inlineOption.getAttribute("class"))?.includes("ovui-radio-item--checked")) return;
+        const optionClass = (await inlineOption.getAttribute("class")) ?? "";
+        if (
+          optionClass.includes("ovui-radio-item--checked") ||
+          (step.field_key === "project.marketing_purpose" && optionClass.split(/\s+/).includes("active"))
+        ) return;
         await inlineOption.click();
         await this.confirmKnownFieldTransition(step, true);
         return;
@@ -966,6 +1023,11 @@ export class PlaywrightPageOperations implements PageOperations {
         : value === "自定义" ? "createproject_assetType_multioption_0" : undefined;
       if (!dataE2E) throw new RunnerV3Error("invalid_value", `${step.id}: unsupported lead capture mode`);
       option = this.page.locator(`[data-e2e='${dataE2E}']:visible`);
+    } else if (step.field_key === "project.delivery_mode") {
+      const expectedSuffix = value === "手动投放" ? "_1" : value === "自动投放(UBMax)" ? "_3" : undefined;
+      if (!expectedSuffix) throw new RunnerV3Error("invalid_value", `${step.id}: unsupported delivery mode`);
+      // Hidden controls from an old marketing branch must not match.
+      option = this.page.locator(`[data-e2e='createproject_deliverymode${expectedSuffix}']:visible`);
     }
     if (!option) return undefined;
     for (let attempt = 0; attempt < 40 && (await option.count()) === 0; attempt += 1) {
@@ -979,7 +1041,10 @@ export class PlaywrightPageOperations implements PageOperations {
 
   private waitForProductListRequest(query: string | undefined, timeout: number) {
     return this.page.waitForRequest((request) => {
-      if (!request.url().includes("/superior/api/agw/ad/recommend_product_list")) return false;
+      if (
+        !request.url().includes("/superior/api/agw/ad/recommend_product_list") &&
+        !request.url().includes("/superior/api/v2/ad/product/clue_product_list")
+      ) return false;
       if (!query) return true;
       return request.url().includes(encodeURIComponent(query)) || (request.postData() ?? "").includes(query);
     }, { timeout }).catch(() => undefined);
@@ -1035,7 +1100,7 @@ export class PlaywrightPageOperations implements PageOperations {
     }
     // Let the initial account-wide list finish before filtering. Otherwise a
     // late initial response can overwrite the filtered result.
-    await this.stableVisibleCount(root.getByText(/共\s*\d+\s*个视频/), 1, stepId);
+    await this.waitForStableMaterialInventory(root, stepId);
     await search.fill(query);
     await search.press("Enter");
     let prior = "";
@@ -1050,9 +1115,8 @@ export class PlaywrightPageOperations implements PageOperations {
         if ((await card.count()) === 1) cards.push(card);
       }
       if (cards.length > 1) throw new RunnerV3Error("locator_not_unique", `${stepId}: searched material card is not unique`);
-      const total = await root.getByText(/共\s*1\s*个视频/).allInnerTexts();
-      const signature = cards.length === 1 && await search.inputValue() === query && total.length > 0
-        ? `${await cards[0].innerText()}\u0000${total.join("\u0000")}`
+      const signature = cards.length === 1 && await search.inputValue() === query
+        ? await cards[0].innerText()
         : "";
       stable = signature && signature === prior ? stable + 1 : 0;
       if (cards.length === 1 && stable >= 4) return cards[0];
@@ -1060,6 +1124,21 @@ export class PlaywrightPageOperations implements PageOperations {
       await this.page.waitForTimeout(250);
     }
     throw new RunnerV3Error("async_load_timeout", `${stepId}: searched material result did not become stable`);
+  }
+
+  private async waitForStableMaterialInventory(root: Locator, stepId: string) {
+    const cards = root.locator(".create-material-list-card-item:visible");
+    let prior = "";
+    let stable = 0;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const texts = await cards.allInnerTexts();
+      const signature = texts.join("\u0000");
+      stable = signature && signature === prior ? stable + 1 : 0;
+      if (texts.length > 0 && stable >= 8) return;
+      prior = signature;
+      await this.page.waitForTimeout(250);
+    }
+    throw new RunnerV3Error("async_load_timeout", `${stepId}: initial material inventory did not become stable`);
   }
 
   private async confirmPicker(root: Locator, spec: ReferenceSelectionSpec, stepId: string) {
@@ -1078,15 +1157,33 @@ export class PlaywrightPageOperations implements PageOperations {
     await visible[0].click();
   }
 
+  private async checkboxState(checkbox: Locator, stepId: string) {
+    const state = await checkbox.evaluate((element) => {
+      const input = element instanceof HTMLInputElement && element.type === "checkbox"
+        ? element
+        : element.querySelector<HTMLInputElement>("input[type='checkbox']");
+      if (input) return input.checked;
+      const ariaChecked = element.getAttribute("aria-checked");
+      if (ariaChecked === "true" || ariaChecked === "false") return ariaChecked === "true";
+      const visualSwitch = element.matches(".ovui-switch") ? element : element.querySelector(".ovui-switch");
+      if (visualSwitch) return visualSwitch.classList.contains("ovui-switch--checked");
+      return null;
+    });
+    if (state === null) throw new RunnerV3Error("page_drift", `${stepId}: toggle state is unavailable`);
+    return state;
+  }
+
   private async setCheckbox(checkbox: Locator, checked: boolean, stepId: string) {
-    if (await checkbox.isChecked() === checked) return;
+    if (await this.checkboxState(checkbox, stepId) === checked) return;
     const visualControl = checkbox.locator("xpath=following-sibling::*[contains(@class,'checkbox__inner')][1]");
     if ((await visualControl.count()) === 1 && await visualControl.isVisible()) {
       await visualControl.click();
-    } else {
+    } else if (await checkbox.evaluate((element) => element instanceof HTMLInputElement && element.type === "checkbox")) {
       await checkbox.setChecked(checked, { force: true });
+    } else {
+      await checkbox.click();
     }
-    if (await checkbox.isChecked() !== checked) {
+    if (await this.checkboxState(checkbox, stepId) !== checked) {
       throw new RunnerV3Error("reference_not_selected", `${stepId}: checkbox state did not change`);
     }
   }
@@ -1152,8 +1249,10 @@ export class PlaywrightPageOperations implements PageOperations {
       const productCard = await this.waitForStableProductCard(root, spec.label, spec.object_id, step.id);
       const checkbox = productCard.locator("input[type='checkbox']");
       if ((await checkbox.count()) !== 1) throw new RunnerV3Error("locator_not_unique", `${step.id}: product checkbox is not unique`);
-      if (!(await checkbox.isChecked())) await checkbox.click({ force: true });
-      await this.stableVisibleCount(root.getByText(/已选择\s*1\s*\/\s*1/), 1, step.id);
+      // The ecommerce picker shows 1/1. The sales-lead drawer shows 1/10,
+      // and some revisions update that counter after the confirm action. The
+      // checked control is the stable pre-confirm selection evidence.
+      await this.setCheckbox(checkbox, true, step.id);
       await this.confirmPicker(root, spec, step.id);
       return {
         selection_kind: spec.selection_kind,
@@ -1168,7 +1267,7 @@ export class PlaywrightPageOperations implements PageOperations {
       const checkbox = card.locator("input[type='checkbox']");
       if ((await checkbox.count()) !== 1) throw new RunnerV3Error("locator_not_unique", `${step.id}: material checkbox is not unique`);
       await this.setCheckbox(checkbox, true, step.id);
-      await this.stableVisibleCount(root.getByText(/已选择\s*1\s*\/\s*10/), 1, step.id);
+      await this.stableVisibleCount(root.getByText(/已选择\s*1\s*\/\s*30/), 1, step.id);
       await this.confirmPicker(root, spec, step.id);
       return {
         selection_kind: spec.selection_kind,
@@ -1349,7 +1448,7 @@ export class PlaywrightPageOperations implements PageOperations {
       return this.referenceReadbacks.get(step.id);
     }
     if (step.operation === "toggle") {
-      return (await this.targetLocator(step)).isChecked();
+      return this.checkboxState(await this.targetLocator(step), step.id);
     }
     if (step.operation === "choose_exact_visible_option" || step.operation === "open_reference_picker") {
       return step.value;
@@ -1366,9 +1465,19 @@ export class PlaywrightPageOperations implements PageOperations {
     this.preSubmitUrl = this.page.url();
     this.platformWriteRequestObserved = false;
     this.platformWriteResponseStatus = undefined;
+    this.submittedExternalAction = undefined;
     this.page.on("request", (request) => {
       if (request.method() === "POST" && /\/superior\/api\/v2\/(?:project\/create|promotion\/create_promotion)(?:\?|$)/.test(request.url())) {
         this.platformWriteRequestObserved = true;
+        if (/\/superior\/api\/v2\/project\/create(?:\?|$)/.test(request.url())) {
+          try {
+            const payload = request.postDataJSON() as Record<string, unknown>;
+            const value = payload.external_action;
+            if (typeof value === "string" || typeof value === "number") this.submittedExternalAction = String(value);
+          } catch {
+            // The write was still observed. Field reconciliation reports not_checked.
+          }
+        }
       }
     });
     this.page.on("response", (response) => {
@@ -1435,7 +1544,11 @@ export class PlaywrightPageOperations implements PageOperations {
       queryId = new URL(this.page.url()).searchParams.get(queryKey);
       if (!queryId) await this.page.waitForTimeout(250);
     }
-    if (queryId) return { status: "matched", created_object_id: queryId };
+    if (queryId) return {
+      status: "matched",
+      created_object_id: queryId,
+      ...(plan.plan_kind === "project_create" ? { field_reconciliation: this.reconcileProjectSubmission(plan) } : {}),
+    };
 
     const nameKey = plan.plan_kind === "project_create" ? "project.project_name" : "promotion.promotion_name";
     const expectedName = plan.steps.find((step) => step.field_key === nameKey)?.value;
@@ -1476,7 +1589,9 @@ export class PlaywrightPageOperations implements PageOperations {
           if (match?.[1]) {
             const fieldReconciliation = plan.plan_kind === "promotion_create"
               ? await this.reconcilePromotionFields(plan, row)
-              : undefined;
+              : plan.plan_kind === "project_create"
+                ? this.reconcileProjectSubmission(plan)
+                : undefined;
             return {
               status: "matched",
               created_object_id: match[1],
@@ -1490,6 +1605,16 @@ export class PlaywrightPageOperations implements PageOperations {
       }
     }
     return { status: "not_found", query_attempts: 3, exact_name_matches: 0 };
+  }
+
+  private reconcileProjectSubmission(plan: OceanEngineFormPlan): FieldReconciliation {
+    const fieldKey = "project.optimization_target_reference";
+    const expected = plan.parent_context.optimization_target_external_action;
+    if (!expected || !this.submittedExternalAction) {
+      return { status: "not_checked", fields: [{ field_key: fieldKey, ...(expected ? { expected } : {}), status: "not_checked" }] };
+    }
+    const status = expected === this.submittedExternalAction ? "matched" : "drifted";
+    return { status, fields: [{ field_key: fieldKey, expected, observed: this.submittedExternalAction, status }] };
   }
 
   private async reconcilePromotionFields(plan: OceanEngineFormPlan, row: Locator): Promise<FieldReconciliation> {
@@ -1601,7 +1726,9 @@ async function main() {
     "browser-rpa",
     "authority-consumed",
   );
-  const browser = await chromium.connectOverCDP(cdpURL);
+  // Edge can require one explicit external-debugging confirmation.
+  // Keep one connection for the complete Runner plan and allow time for it.
+  const browser = await chromium.connectOverCDP(cdpURL, { timeout: 120_000 });
   const context = browser.contexts()[0];
   if (!context) throw new Error("the Edge session has no browser context");
   if (args.includes("--reconcile-only")) {

@@ -63,9 +63,10 @@ func stagedTestVersion() DeliveryPlanVersion {
 			Payload: PlatformConfigurationPayload{OceanEngine: &OceanEngineConfiguration{
 				Project: &OceanEngineProjectDraft{
 					ProjectDraftID: "draft_p1", ProjectName: "计划项目",
-					Schedule:                  OceanEngineSchedule{StartAt: time.Unix(1788192000, 0).UTC(), EndAt: time.Unix(1788364799, 0).UTC()},
-					BudgetAndBidding:          OceanEngineBudgetAndBidding{BudgetMode: OceanEngineBudgetModeUnlimited, BidMinor: int64Ptr(1)},
-					MarketingProductReference: &StableReference{Namespace: "oceanengine", ObjectKind: "product", Scope: "account", ID: "1784863906740671489", State: ReferenceResolved},
+					Schedule:                    OceanEngineSchedule{StartAt: time.Unix(1788192000, 0).UTC(), EndAt: time.Unix(1788364799, 0).UTC()},
+					BudgetAndBidding:            OceanEngineBudgetAndBidding{BudgetMode: OceanEngineBudgetModeUnlimited, BidMinor: int64Ptr(1)},
+					MarketingProductReference:   &StableReference{Namespace: "oceanengine", ObjectKind: "product", Scope: "account", ID: "1784863906740671489", State: ReferenceResolved},
+					OptimizationTargetReference: &StableReference{Namespace: "oceanengine_capability", ObjectKind: "optimization_target", Scope: "account", ID: "2", State: ReferenceResolved},
 				},
 				Promotions: []OceanEnginePromotionDraft{{
 					PromotionDraftID: "draft_r1", PromotionName: "计划单元",
@@ -116,6 +117,9 @@ func TestCompileNextReturnsProjectBeforePromotions(t *testing.T) {
 	}
 	if object.ProductReferenceID != "1784863906740671489" {
 		t.Fatalf("product=%q", object.ProductReferenceID)
+	}
+	if object.ExternalAction != "2" {
+		t.Fatalf("external_action=%q", object.ExternalAction)
 	}
 }
 

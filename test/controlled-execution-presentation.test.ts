@@ -14,6 +14,8 @@ test('controlled execution presentation keeps approval, confirmation, and result
     { name: 'cancelled', run: { state: 'cancelled' }, kind: 'cancelled', retry: false },
     { name: 'kill switch', run: { state: 'preparing', blocking_reason: 'KILL_SWITCH_ACTIVE' }, kind: 'kill_switch_active', retry: false },
     { name: 'runner failure', run: { state: 'failed', blocking_reason: 'RUNNER_FAILURE' }, kind: 'runner_failure', retry: false },
+    { name: 'page drift', run: { state: 'failed', blocking_reason: 'PAGE_DRIFT' }, kind: 'page_drift', retry: false },
+    { name: 'target absent', run: { state: 'failed', blocking_reason: 'TARGET_EFFECT_NOT_OBSERVED' }, kind: 'target_effect_not_observed', retry: false },
     { name: 'takeover', run: { state: 'awaiting_takeover' }, kind: 'awaiting_takeover', retry: true },
   ]
 
@@ -22,6 +24,12 @@ test('controlled execution presentation keeps approval, confirmation, and result
     assert.equal(presentation.kind, value.kind, value.name)
     assert.equal(presentation.allowsNormalRetry, value.retry, value.name)
   }
+})
+
+test('page drift does not claim that the target effect is absent', () => {
+  const presentation = presentControlledExecution(run({ state: 'failed', blocking_reason: 'PAGE_DRIFT' }))
+  assert.equal(presentation.title, 'Runner 页面匹配失败')
+  assert.match(presentation.detail, /不能证明目标效果不存在/)
 })
 
 test('controlled execution tabs filter runs by workflow state', () => {

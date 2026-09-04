@@ -30,6 +30,26 @@ func TestControlledActionsBelongToOtherObjects(t *testing.T) {
 	}
 }
 
+func TestPreparedRunCanRebindOnlyBeforeSubmit(t *testing.T) {
+	tests := []struct {
+		name                                      string
+		attempts, confirmations, noClick, clicked int
+		want                                      bool
+	}{
+		{name: "prepare evidence is safe", noClick: 1, want: true},
+		{name: "missing evidence is unsafe", want: false},
+		{name: "submit attempt is unsafe", attempts: 1, confirmations: 1, noClick: 1, want: false},
+		{name: "click evidence is unsafe", noClick: 1, clicked: 1, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := preparedRunCanRebind(test.attempts, test.confirmations, test.noClick, test.clicked); got != test.want {
+				t.Fatalf("got %t want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestBrowserRpaAuthorityIsServerResolvedBoundAndRevalidated(t *testing.T) {
 	now := time.Date(2026, 8, 13, 9, 0, 0, 0, time.UTC)
 	repo := newControlledMemoryRepository()
@@ -65,6 +85,39 @@ func TestBrowserRpaAuthorityIsServerResolvedBoundAndRevalidated(t *testing.T) {
 	}
 	if _, err := provider.ResolveAuthority(context.Background(), change.OrganizationID, change.ProjectID, execution.ID, approval.ExpiresAt); err != browserautomation.ErrInvalidContract {
 		t.Fatalf("expired approval err=%v", err)
+	}
+}
+
+func TestPlanExecutionPrepareRetryAcceptsExpiredServerApproval(t *testing.T) {
+	now := time.Date(2026, 8, 13, 9, 0, 0, 0, time.UTC)
+	repo := newControlledMemoryRepository()
+	binding := validControlledBinding()
+	binding.AuthorityOrigin = "plan_execution"
+	binding.PreflightCanonicalHash = testHash("2")
+	binding.SelectionID = ""
+	binding.ObservatoryRunID = ""
+	binding.ObservatoryRunCanonicalHash = ""
+	binding.OperatorFeedbackID = ""
+	binding.OperatorFeedbackCanonicalHash = ""
+	binding.OperatorFeedbackDisposition = ""
+	binding.DecisionID = ""
+	binding.DecisionCanonicalHash = ""
+	change := ControlledChangeSet{SchemaVersion: ControlledChangeSetSchemaV1, ID: "change_plan_retry", OrganizationID: "org_1", ProjectID: "project_1", Binding: binding, Action: ControlledActionCreateProjectAndPromotions, BudgetLimitMinor: 30000, Currency: "CNY", Status: ControlledChangeSetExecuting, Version: 3, CreatedBy: "operator", CreatedAt: now.Add(-time.Hour), UpdatedAt: now}
+	change.CanonicalHash, _ = change.ComputeCanonicalHash()
+	approval := RemoteWriteApproval{SchemaVersion: RemoteWriteApprovalSchemaV1, ID: "approval_plan_retry", OrganizationID: change.OrganizationID, ProjectID: change.ProjectID, ControlledChangeSetID: change.ID, ControlledChangeSetHash: change.CanonicalHash, Binding: binding, Action: change.Action, Scope: "controlled_remote_write", BudgetLimitMinor: change.BudgetLimitMinor, Currency: change.Currency, ApprovedBy: "operator", ApprovedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-30 * time.Minute)}
+	approval.ActionHash, _ = approval.ComputeActionHash()
+	execution := ControlledExecution{ID: "execution_plan_retry", OrganizationID: change.OrganizationID, ProjectID: change.ProjectID, ControlledChangeSetID: change.ID, RemoteWriteApprovalID: approval.ID, Status: "pending", Version: 2, CreatedBy: "operator", CreatedAt: now.Add(-time.Hour), UpdatedAt: now}
+	repo.changes[repositoryKey(change.OrganizationID, change.ProjectID, change.ID)] = change
+	repo.approvals[repositoryKey(change.OrganizationID, change.ProjectID, change.ID)] = approval
+	repo.executions[repositoryKey(change.OrganizationID, change.ProjectID, execution.ID)] = execution
+
+	provider := BrowserRpaAuthorityProvider{Repository: repo}
+	resolved, err := provider.ResolveAuthority(context.Background(), change.OrganizationID, change.ProjectID, execution.ID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Binding.AuthorityOrigin != "plan_execution" || resolved.Binding.ApprovalID != approval.ID {
+		t.Fatalf("resolved=%+v", resolved)
 	}
 }
 

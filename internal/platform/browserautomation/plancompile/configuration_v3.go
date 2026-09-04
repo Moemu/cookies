@@ -54,6 +54,9 @@ func V3BindingsFromMappings(configuration delivery.PlatformConfiguration, accoun
 		return V3ObjectBindings{}, fmt.Errorf("configuration has no OceanEngine project")
 	}
 	for _, mapping := range mappings {
+		if mapping.ConfigurationID != configuration.ConfigurationID {
+			continue
+		}
 		isProject := mapping.InternalObjectKind == "project" && mapping.InternalObjectID == ocean.Project.ProjectDraftID
 		isPromotion := mapping.InternalObjectKind == "promotion" && slices.ContainsFunc(ocean.Promotions, func(value delivery.OceanEnginePromotionDraft) bool {
 			return value.PromotionDraftID == mapping.InternalObjectID
@@ -111,6 +114,7 @@ var projectSpecs = map[string]fieldSpec{
 	"project.placement_strategy":            {"project.placement_strategy", "choose_exact_visible_option", "投放位置", "通投智选", true},
 	"project.placement_media":               {"project.placement_media", "configure_object", "媒体选择", "全选", true},
 	"project.schedule":                      {"project.schedule", "configure_object", "投放时间", "设置开始和结束日期", true},
+	"project.budget_mode":                   {"project.budget_mode", "choose_exact_visible_option", "项目日预算", "不限", true},
 	"project.daily_budget":                  {"project.daily_budget", "fill_money", "日预算", "spinbutton", true},
 	"project.bid":                           {"project.bid", "fill_money", "出价", "spinbutton", true},
 	"project.roi_coefficient":               {"project.roi_coefficient", "fill_decimal", "净成交ROI系数", "spinbutton", true},
@@ -219,6 +223,9 @@ func validateAccountPath(project delivery.OceanEngineProjectDraft, account strin
 
 func validateConfigurationLimits(project delivery.OceanEngineProjectDraft, promotions []delivery.OceanEnginePromotionDraft, intent *delivery.DeliveryIntent, now time.Time) error {
 	budget := project.BudgetAndBidding
+	if project.MarketingPurpose == "lead_generation" && budget.BudgetMode == delivery.OceanEngineBudgetModeUnlimited {
+		return fmt.Errorf("sales-lead projects require a daily budget of at least CNY 300")
+	}
 	if budget.Currency != "CNY" || (budget.BudgetMode != delivery.OceanEngineBudgetModeUnlimited && budget.DailyBudgetMinor < 30000) {
 		return fmt.Errorf("project daily budget must be unlimited or at least CNY 300")
 	}
@@ -316,11 +323,7 @@ func duplicateOrBlank(values []string) bool {
 
 func validateBid(value delivery.OceanEngineBudgetAndBidding) error {
 	if value.BidMinor != nil {
-		minimum, maximum := int64(1), int64(0)
-		if value.ChargingMode == "CPM" {
-			minimum, maximum = 400, 10000
-		}
-		if *value.BidMinor < minimum || (maximum > 0 && *value.BidMinor > maximum) {
+		if *value.BidMinor < 1 || (value.DailyBudgetMinor > 0 && *value.BidMinor > value.DailyBudgetMinor) {
 			return fmt.Errorf("bid is outside the calibrated limit")
 		}
 	}
@@ -331,21 +334,12 @@ func validateBid(value delivery.OceanEngineBudgetAndBidding) error {
 }
 
 func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *delivery.DeliveryIntent) (map[string]any, error) {
-	if project.MarketingPurpose == "lead_generation" && project.Carrier == "owned_landing_page" {
-		optimization := normalizedOptimizationTarget(referenceKey(project.OptimizationTargetReference))
-		deliveryMode := strings.TrimSpace(project.DeliveryMode)
-		if deliveryMode == "automatic" {
-			deliveryMode = "ubmax"
-		}
-		if !slices.Contains([]string{"click", "impression"}, optimization) || deliveryMode != "ubmax" {
-			return nil, fmt.Errorf("lead_generation with owned_landing_page requires project.optimization_target_reference click or impression and project.delivery_mode ubmax")
-		}
-	}
 	shanghai := time.FixedZone("Asia/Shanghai", 8*60*60)
 	values := map[string]any{
 		"project.marketing_purpose": marketingPurposeLabel(project.MarketingPurpose),
 		"project.carrier":           carrierLabel(project.Carrier), "project.delivery_mode": deliveryModeLabel(project.DeliveryMode),
 		"project.schedule":     map[string]string{"start": project.Schedule.StartAt.In(shanghai).Format(time.DateOnly), "end": project.Schedule.EndAt.In(shanghai).Format(time.DateOnly)},
+		"project.budget_mode":  budgetModeLabel(project.BudgetAndBidding.BudgetMode),
 		"project.project_name": project.ProjectName,
 	}
 	if project.MarketingPurpose != "product_catalog" {
@@ -354,7 +348,7 @@ func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *deliver
 	if project.BudgetAndBidding.BudgetMode != delivery.OceanEngineBudgetModeUnlimited {
 		values["project.daily_budget"] = money(project.BudgetAndBidding.DailyBudgetMinor)
 	}
-	if project.MarketingPurpose == "ecommerce" && project.MarketingProductReference != nil {
+	if slices.Contains([]string{"ecommerce", "lead_generation"}, project.MarketingPurpose) && project.MarketingProductReference != nil {
 		spec, err := stableReferenceSpec(*project.MarketingProductReference, intentRefs(intent, "product"))
 		if err != nil {
 			return nil, fmt.Errorf("marketing product: %w", err)
@@ -422,7 +416,7 @@ func projectPlanValues(project delivery.OceanEngineProjectDraft, intent *deliver
 	}
 	values["project.placement_strategy"] = placementLabel(placementStrategy)
 	if len(project.PlacementMedia) > 0 {
-		values["project.placement_media"] = project.PlacementMedia
+		values["project.placement_media"] = placementMediaLabels(project.PlacementMedia)
 	}
 	if projectBidRequired(project) && project.BudgetAndBidding.BidMinor != nil {
 		values["project.bid"] = money(*project.BudgetAndBidding.BidMinor)
@@ -689,7 +683,13 @@ func applicationLaunchModeLabel(value string) string {
 	return map[string]string{"direct_launch": "直接调起", "landing_page_launch": "落地页调起"}[value]
 }
 func projectBidRequired(project delivery.OceanEngineProjectDraft) bool {
-	return project.BudgetAndBidding.BiddingStrategy == "stable_cost" && !slices.Contains([]string{"conversion_roi", "net_roi"}, project.DeepOptimizationMode)
+	return slices.Contains([]string{"stable_cost", "cost_cap"}, project.BudgetAndBidding.BiddingStrategy) && !slices.Contains([]string{"conversion_roi", "net_roi"}, project.DeepOptimizationMode)
+}
+func budgetModeLabel(value string) string {
+	if value == delivery.OceanEngineBudgetModeUnlimited {
+		return "不限"
+	}
+	return "设置预算"
 }
 func optimizationLabel(value string) string {
 	value = normalizedOptimizationTarget(value)
@@ -720,7 +720,7 @@ func orderedProjectFields(project delivery.OceanEngineProjectDraft, parent v3Par
 	case "ecommerce":
 		keys = append(keys, "project.marketing_product_reference")
 	case "lead_generation":
-		keys = append(keys, "project.lead_capture_mode")
+		keys = append(keys, "project.marketing_product_reference", "project.lead_capture_mode")
 	case "application":
 		keys = append(keys, "project.application_reference", "project.application_scenario", "project.operating_system")
 		if project.ApplicationScenario == "app_download" {
@@ -735,8 +735,8 @@ func orderedProjectFields(project delivery.OceanEngineProjectDraft, parent v3Par
 	if slices.Contains([]string{"ecommerce", "lead_generation", "content_marketing"}, project.MarketingPurpose) {
 		keys = append(keys, "project.carrier")
 	}
-	keys = append(keys, "project.optimization_target_reference", "project.deep_optimization_mode", "project.delivery_mode", "project.schedule", "project.daily_budget", "project.project_name")
-	if project.MarketingPurpose == "lead_generation" && project.Carrier == "owned_landing_page" {
+	keys = append(keys, "project.optimization_target_reference", "project.deep_optimization_mode", "project.delivery_mode", "project.schedule", "project.budget_mode", "project.daily_budget", "project.project_name")
+	if project.MarketingPurpose == "lead_generation" {
 		keys = removeKey(keys, "project.delivery_mode")
 	}
 	if parent.DeliveryMode == "ubmax" {
@@ -753,6 +753,11 @@ func orderedProjectFields(project delivery.OceanEngineProjectDraft, parent v3Par
 	}
 	if project.BudgetAndBidding.BudgetMode == delivery.OceanEngineBudgetModeUnlimited {
 		keys = removeKey(keys, "project.daily_budget")
+	}
+	if project.MarketingPurpose == "lead_generation" {
+		// The current sales-lead form has one required numeric daily-budget
+		// input. It has no ecommerce-style budget-mode control.
+		keys = removeKey(keys, "project.budget_mode")
 	}
 	if projectBidRequired(project) {
 		keys = append(keys, "project.bid")
@@ -785,7 +790,7 @@ func orderedPromotionFields(project delivery.OceanEngineProjectDraft, promotion 
 		keys = removeKey(keys, "promotion.bid")
 		keys = append(keys, "promotion.roi_coefficient")
 	}
-	if parent.PlacementMode == "preferred_media" {
+	if parent.PlacementMode == "preferred_media" && placementMediaSelected(project.PlacementMedia, "pangolin", "穿山甲") {
 		keys = append(keys, "promotion.pangle_bid_coefficient")
 	}
 	fields := specs(keys, promotionSpecs)
@@ -810,6 +815,31 @@ func orderedPromotionFields(project delivery.OceanEngineProjectDraft, promotion 
 		}
 	}
 	return fields
+}
+
+func placementMediaLabels(values []string) []string {
+	labels := map[string]string{
+		"toutiao":  "今日头条",
+		"xigua":    "西瓜视频",
+		"douyin":   "抖音",
+		"fanqie":   "番茄系媒体",
+		"pangolin": "穿山甲",
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if label := labels[value]; label != "" {
+			result = append(result, label)
+			continue
+		}
+		result = append(result, value)
+	}
+	return result
+}
+
+func placementMediaSelected(values []string, keys ...string) bool {
+	return slices.ContainsFunc(values, func(value string) bool {
+		return slices.Contains(keys, strings.TrimSpace(value))
+	})
 }
 func specs(keys []string, source map[string]fieldSpec) []fieldSpec {
 	out := make([]fieldSpec, 0, len(keys))

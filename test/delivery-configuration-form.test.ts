@@ -30,14 +30,55 @@ test('manual direct links do not require an OceanEngine object binding', () => {
   assert.match(component, /missingRequiredFields\.has\('direct_link'\)/)
 })
 
-test('enumerated Runner paths and CPM bid limits are visible before execution', () => {
+test('enumerated Runner paths and dynamic bid limits are visible before execution', () => {
   assert.match(component, /当前项目路径不能生成 Runner 计划/)
   assert.match(component, /<option value="lead_generation">销售线索<\/option>/)
   assert.match(component, /<option value="application">应用<\/option>/)
   assert.match(component, /<option value="product_catalog">商品<\/option>/)
   assert.match(component, /<option value="content_marketing">内容营销<\/option>/)
   assert.match(component, /value="short_video_image_text"/)
-  assert.match(component, /CPM 项目出价必须是 4 至 100 元/)
+  assert.match(component, /项目出价必须不少于 0\.01 元，且不能超过项目日预算/)
+  assert.match(component, /不得超过项目日预算/)
+  assert.match(component, /销售线索项目必须设置日预算，且不能低于 300 元/)
+  assert.match(component, /销售线索页面要求设置日预算/)
+})
+
+test('sales-lead optimization targets come from the exact account capability branch', () => {
+  assert.match(component, /function OptimizationTargetCapabilityField/)
+  assert.match(component, /当前账户和分支返回 \{snapshot\.options\.length\} 个优化目标/)
+  assert.match(component, /oceanEngineLeadCaptureMode/)
+  assert.match(component, /readProjectOptimizationTargetCapabilities/)
+  assert.match(component, /capability_snapshot_id/)
+  assert.match(component, /优化目标能力已变化/)
+  assert.doesNotMatch(component, /当前分支只允许“点击量”或“展示量”/)
+  assert.match(component, /if \(project\.marketing_purpose === 'lead_generation'\) project\.delivery_mode = 'ubmax'/)
+  assert.match(component, /UBMax（平台固定）/)
+  assert.match(component, /销售线索页面固定使用 delivery_mode=3。Runner 不操作此字段。/)
+  assert.match(component, /\['stable_cost', 'cost_cap'\]\.includes\(ocean\.project\.budget_and_bidding\.bidding_strategy\)/)
+})
+
+test('multi-lead plans accept only Orange landing pages qualified for the selected optimization target', () => {
+  assert.match(component, /multi_lead_external_actions/)
+  assert.match(component, /multi_conversion_eligible/)
+  assert.match(component, /当前账户没有支持/)
+  assert.match(component, /支持当前优化目标/)
+})
+
+test('marketing product selection uses unique_product_id from Connector metadata', () => {
+  assert.match(component, /function connectorMarketingProductIDs/)
+  assert.match(component, /metadata\.unique_product_id/)
+  assert.match(component, /id: uniqueProductID/)
+  assert.match(component, /unique_product_id: uniqueProductID/)
+  assert.match(component, /product_id: productID/)
+})
+
+test('product targeting is limited to the product-catalog branch and uses one exclusive mode', () => {
+  assert.match(component, /marketing_purpose === 'product_catalog' \? <fieldset className="delivery-config-inline-fieldset"><legend>商品定向<\/legend>/)
+  assert.match(component, /<ToggleField label="RTA 重定向"/)
+  assert.match(component, /<option value="region_match">地域匹配<\/option><option value="delivery_conditions">商品投放条件<\/option>/)
+  assert.doesNotMatch(component, /商品定向 · RTA 跳转/)
+  assert.doesNotMatch(component, /商品定向 · 地域匹配/)
+  assert.match(component, /marketingPurpose === 'product_catalog' \? \{\} : \{ product_targeting: undefined \}/)
 })
 
 test('real execution selects one immutable Web API or Playwright driver', () => {

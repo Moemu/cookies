@@ -2,6 +2,7 @@ package browserautomation
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -188,6 +189,37 @@ func TestAcquireRunLeaseReclaimsExpiredProfileLock(t *testing.T) {
 	reclaimed, err := repo.GetLease(context.Background(), oldLease.OrganizationID, oldLease.ProjectID, oldLease.ID)
 	if err != nil || reclaimed.ReleasedAt == nil || acquired.Lease.FencingToken != oldLease.FencingToken+1 {
 		t.Fatalf("reclaimed=%#v acquired=%#v err=%v", reclaimed, acquired.Lease, err)
+	}
+}
+
+func TestAcquireRunLeaseReplacesExpiredLeaseOnSameRun(t *testing.T) {
+	now := time.Date(2026, 8, 12, 10, 2, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	counter := 0
+	service := Service{Repository: repo, Now: func() time.Time { return now }, NewID: func(prefix string) (string, error) {
+		counter++
+		return fmt.Sprintf("%s_%d", prefix, counter), nil
+	}}
+	run := validRun(now.Add(-2 * time.Minute))
+	created, _, err := service.CreateRun(context.Background(), CreateRunRequest{Run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.AcquireRunLease(context.Background(), created.OrganizationID, created.ProjectID, created.ID, created.Version, "worker_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(2 * time.Minute)
+	second, err := service.AcquireRunLease(context.Background(), first.Run.OrganizationID, first.Run.ProjectID, first.Run.ID, first.Run.Version, "worker_2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	released, err := repo.GetLease(context.Background(), first.Run.OrganizationID, first.Run.ProjectID, first.Lease.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if released.ReleasedAt == nil || second.Run.LeaseID != second.Lease.ID || second.Lease.ID == first.Lease.ID || second.Lease.FencingToken <= first.Lease.FencingToken {
+		t.Fatalf("first=%#v released=%#v second=%#v", first, released, second)
 	}
 }
 

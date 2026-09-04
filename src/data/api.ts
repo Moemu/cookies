@@ -5722,6 +5722,49 @@ export type ApiConnectorSyncStatus = {
   status: 'queued' | 'running' | 'completed' | 'failed'; cursor?: string
   attempt: number; started_at: string; completed_at?: string
 }
+export type ApiOptimizationTargetContext = {
+  campaign_type: number; landing_type: number; asset_type: number
+  micro_app_id: string; cdp_marketing_goal: number; dpa_ad_type: number
+  micro_promotion_type: number; micro_app_instance_id: string
+  multi_asset_types?: number[]; need_assets: boolean
+}
+export type ApiOptimizationTargetCapability = {
+  external_action: string; semantic_key: string; display_name: string
+  optimization_event_type?: string; asset_types?: string[]; track_types?: string[]
+  is_gray: boolean; deep_goal_required: boolean; need_assets: boolean
+  limits: { delivery_modes?: number[]; auto_ad_types?: number[]; delivery_packages?: number[] }
+  event_assets?: Array<{ asset_id: string; asset_name?: string; role?: string }>
+}
+export type ApiOptimizationTargetCapabilitySnapshot = {
+  schema_version: 'oceanengine-optimization-target-capability/v1'
+  snapshot_id: string; account_id: string; context: ApiOptimizationTargetContext; context_hash: string
+  options: ApiOptimizationTargetCapability[]; asset_ids?: string[]; show_other: boolean; observed_at: string
+}
+
+export type ApiOceanEngineAccountCapabilitySnapshot = {
+  schema_version: 'oceanengine-account-capability/v1'
+  snapshot_id: string
+  account_id: string
+  external_actions: Array<{ key: string; display_name: string; value: string; step?: string; default?: boolean }>
+  deep_external_actions: Array<{ key: string; display_name: string; value: string; step?: string; default?: boolean }>
+  creative_components: Array<{
+    component_type_ids: string[]
+    access_flags?: string[]
+    landing_types?: string[]
+    campaign_types?: string[]
+    inventory_types?: string[]
+    inventory_catalogs?: string[]
+    image_modes?: string[]
+    content_types?: string[]
+  }>
+  budget_rules?: Record<string, unknown>
+  bid_constraints?: Record<string, unknown>
+  quotas?: Record<string, unknown>
+  feature_rules?: Record<string, unknown>
+  orange_site_domains?: string[]
+  interfaces?: Array<{ method?: string; path: string; description?: string; empty_events?: string[] }>
+  observed_at: string
+}
 export type ApiConnectorPlatformObjectKind = 'image_material' | 'product_image' | 'video_material' | 'aweme_photo_material' | 'marketing_product' | 'orange_landing_page' | 'optimization_target' | 'conversion_event_asset' | 'industry_category' | 'brand' | 'authorized_identity'
 export type ApiConnectorPlatformObject = {
   id: string; organization_id: string; account_id: string
@@ -6653,6 +6696,8 @@ export const api = {
     if (filter.sortOrder) search.set('sort_order', filter.sortOrder)
     return request<{ items: ApiConnectorPlatformObject[]; next_cursor: string }>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/platform-objects?${search.toString()}`)
   },
+  readProjectOptimizationTargetCapabilities: (projectId: string, accountId: string, context: ApiOptimizationTargetContext) => request<ApiOptimizationTargetCapabilitySnapshot>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/optimization-target-capabilities`, 'POST', { context }),
+  readProjectOceanEngineAccountCapabilities: (projectId: string, accountId: string) => request<ApiOceanEngineAccountCapabilitySnapshot>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/capabilities`),
   getProjectConnectorLaunchBatchCalibration: (projectId: string, accountId: string) => request<ApiLaunchBatchCalibration>(`/connector/v1/projects/${encodeURIComponent(projectId)}/accounts/${encodeURIComponent(accountId)}/launch-batch-calibration`),
   getMiyunConnection: (projectId: string) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`),
   updateMiyunConnection: (projectId: string, body: { session: string; session_expires_at?: string; expected_version?: number }) => request<ApiMiyunConnection>(`${miyunProjectPath(projectId)}/connection`, 'PUT', body),

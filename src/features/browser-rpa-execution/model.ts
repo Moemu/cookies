@@ -293,6 +293,8 @@ export type ControlledExecutionPresentation = {
     | 'cancelled'
     | 'kill_switch_active'
     | 'runner_failure'
+    | 'page_drift'
+    | 'target_effect_not_observed'
     | 'blocked'
   tone: 'neutral' | 'warning' | 'danger' | 'success'
   title: string

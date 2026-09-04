@@ -315,14 +315,29 @@ func (s Service) AcquireRunLease(ctx context.Context, organizationID contract.Or
 	if run.Version != expectedVersion {
 		return AcquireRunLeaseResult{}, ErrVersionConflict
 	}
-	if terminalState(run.State) || run.LeaseID != "" {
+	if terminalState(run.State) {
 		return AcquireRunLeaseResult{}, ErrInvalidTransition
+	}
+	now := s.now()
+	if run.LeaseID != "" {
+		currentLease, leaseErr := s.Repository.GetLease(ctx, organizationID, projectID, run.LeaseID)
+		if leaseErr != nil {
+			return AcquireRunLeaseResult{}, leaseErr
+		}
+		if currentLease.ValidAt(now) {
+			return AcquireRunLeaseResult{}, ErrInvalidTransition
+		}
+		released, _, releaseErr := s.Repository.ReleaseRunLease(ctx, run, expectedVersion, currentLease, currentLease.Version, currentLease.FencingToken, now)
+		if releaseErr != nil {
+			return AcquireRunLeaseResult{}, releaseErr
+		}
+		run = released
+		expectedVersion = run.Version
 	}
 	id, err := s.newID(browserRpaLeaseIDPrefix)
 	if err != nil {
 		return AcquireRunLeaseResult{}, err
 	}
-	now := s.now()
 	lease := SessionLease{ID: id, OrganizationID: run.OrganizationID, ProjectID: run.ProjectID, RunID: run.ID, EnvironmentID: run.EnvironmentID, ProfileID: run.ProfileID, Platform: run.Platform, AccountID: run.AccountID, Holder: holder, FencingToken: 1, Version: 1, ExpiresAt: now.Add(SessionLeaseTTL), HeartbeatDeadline: now.Add(SessionHeartbeatTTL)}
 	updated, lease, err := s.Repository.AcquireRunLease(ctx, run, expectedVersion, lease, now)
 	if err != nil {

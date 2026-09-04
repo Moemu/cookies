@@ -72,6 +72,39 @@ func TestCompileConfigurationV3UsesCalibratedProjectDefaults(t *testing.T) {
 	}
 }
 
+func TestCompileConfigurationV3RequiresPangleCoefficientOnlyForPangle(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	project := configuration.Payload.OceanEngine.Project
+	project.PlacementStrategy = "preferred_media"
+	project.PlacementMedia = []string{"douyin"}
+
+	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projectPlan, promotionPlan v3Plan
+	if err := json.Unmarshal(compiled.Forms[0].Plan, &projectPlan); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(compiled.Forms[1].Plan, &promotionPlan); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range projectPlan.Steps {
+		if step.FieldKey == "project.placement_media" {
+			media, ok := step.Value.([]any)
+			if !ok || len(media) != 1 || media[0] != "抖音" {
+				t.Fatalf("placement media = %#v", step.Value)
+			}
+		}
+	}
+	for _, step := range promotionPlan.Steps {
+		if step.FieldKey == "promotion.pangle_bid_coefficient" {
+			t.Fatalf("Douyin-only plan contains Pangle coefficient: %#v", promotionPlan.Steps)
+		}
+	}
+}
+
 func TestCompileConfigurationV3NormalizesButtonRedirectOptimizationTarget(t *testing.T) {
 	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
 	configuration, intent := executableConfigurationFixture(now)
@@ -98,11 +131,14 @@ func TestCompileConfigurationV3UsesEnumeratedLeadGenerationPath(t *testing.T) {
 	project.MarketingScenario = "short_video_image_text"
 	project.LeadCaptureMode = "custom_lead"
 	project.OptimizationTargetReference.SemanticKey = "button_redirect"
-	project.BudgetAndBidding.BudgetMode = delivery.OceanEngineBudgetModeUnlimited
-	project.BudgetAndBidding.DailyBudgetMinor = 0
+	project.OptimizationTargetReference.AuditAttributes = map[string]string{}
+	project.OptimizationTargetReference.AuditAttributes["capability_snapshot_id"] = "oecap_lead"
+	project.OptimizationTargetReference.AuditAttributes["capability_context_hash"] = strings.Repeat("a", 64)
+	project.BudgetAndBidding.BudgetMode = delivery.OceanEngineBudgetModeDaily
+	project.BudgetAndBidding.DailyBudgetMinor = 30000
 	project.BudgetAndBidding.BiddingStrategy = "cost_cap"
-	largeBid := int64(999999900)
-	project.BudgetAndBidding.BidMinor = &largeBid
+	minimumBid := int64(1)
+	project.BudgetAndBidding.BidMinor = &minimumBid
 
 	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
 	if err != nil {
@@ -121,16 +157,43 @@ func TestCompileConfigurationV3UsesEnumeratedLeadGenerationPath(t *testing.T) {
 	if provided["project.marketing_purpose"] != "销售线索" || provided["project.lead_capture_mode"] != "自定义" {
 		t.Fatalf("lead-generation values = %#v", provided)
 	}
-	for _, excluded := range []string{"project.marketing_product_reference", "project.placement_strategy", "project.search_bid_coefficient", "project.daily_budget", "project.bid"} {
+	if provided["project.daily_budget"] != "300.00" || provided["project.bid"] != "0.01" {
+		t.Fatalf("lead-generation budget values = %#v", provided)
+	}
+	if _, ok := provided["project.marketing_product_reference"]; !ok {
+		t.Fatalf("lead-generation plan has no marketing product: %#v", provided)
+	}
+	if projectPlan.ParentContext.DeliveryMode != "ubmax" {
+		t.Fatalf("lead-generation delivery mode = %q", projectPlan.ParentContext.DeliveryMode)
+	}
+	for _, excluded := range []string{"project.delivery_mode", "project.placement_strategy", "project.search_bid_coefficient", "project.budget_mode"} {
 		if _, ok := provided[excluded]; ok {
 			t.Fatalf("lead-generation plan contains %s: %#v", excluded, provided)
 		}
 	}
 	availability := configurationObjectAvailability(*configuration.Payload.OceanEngine)
+	productAvailable := false
 	for _, item := range availability {
 		if item.FieldKey == "project.marketing_product_reference" {
-			t.Fatalf("lead-generation availability contains an ecommerce product: %#v", availability)
+			productAvailable = item.Available && item.PlatformObjectID == "1001"
 		}
+	}
+	if !productAvailable {
+		t.Fatalf("lead-generation product availability = %#v", availability)
+	}
+}
+
+func TestCompileConfigurationV3RejectsUnlimitedSalesLeadBudget(t *testing.T) {
+	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
+	configuration, intent := executableConfigurationFixture(now)
+	project := configuration.Payload.OceanEngine.Project
+	project.MarketingPurpose = "lead_generation"
+	project.BudgetAndBidding.BudgetMode = delivery.OceanEngineBudgetModeUnlimited
+	project.BudgetAndBidding.DailyBudgetMinor = 0
+
+	_, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err == nil || !strings.Contains(err.Error(), "sales-lead projects require a daily budget") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -143,6 +206,9 @@ func TestCompileConfigurationV3InfersLegacyLeadCaptureModeFromCarrier(t *testing
 	project.LeadCaptureMode = ""
 	project.Carrier = "owned_landing_page"
 	project.OptimizationTargetReference.SemanticKey = "click"
+	project.OptimizationTargetReference.AuditAttributes = map[string]string{}
+	project.OptimizationTargetReference.AuditAttributes["capability_snapshot_id"] = "oecap_lead"
+	project.OptimizationTargetReference.AuditAttributes["capability_context_hash"] = strings.Repeat("a", 64)
 	project.DeliveryMode = "ubmax"
 
 	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
@@ -161,7 +227,7 @@ func TestCompileConfigurationV3InfersLegacyLeadCaptureModeFromCarrier(t *testing
 	t.Fatalf("legacy lead capture mode was not inferred: %#v", projectPlan.Steps)
 }
 
-func TestCompileConfigurationV3BlocksUnsupportedOwnedLandingPageLeadPath(t *testing.T) {
+func TestCompileConfigurationV3UsesAccountCapabilityForOwnedLandingPageLeadPath(t *testing.T) {
 	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
 	configuration, intent := executableConfigurationFixture(now)
 	project := configuration.Payload.OceanEngine.Project
@@ -169,12 +235,23 @@ func TestCompileConfigurationV3BlocksUnsupportedOwnedLandingPageLeadPath(t *test
 	project.MarketingScenario = "short_video_image_text"
 	project.LeadCaptureMode = "custom_lead"
 	project.Carrier = "owned_landing_page"
-	project.OptimizationTargetReference.SemanticKey = "button_redirect"
+	project.OptimizationTargetReference.SemanticKey = "form"
+	project.OptimizationTargetReference.DisplayNameSnapshot = "表单提交"
+	project.OptimizationTargetReference.AuditAttributes = map[string]string{}
+	project.OptimizationTargetReference.AuditAttributes["capability_snapshot_id"] = "oecap_lead"
+	project.OptimizationTargetReference.AuditAttributes["capability_context_hash"] = strings.Repeat("a", 64)
 	project.DeliveryMode = "manual"
 
-	_, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
-	if err == nil || !strings.Contains(err.Error(), "project.optimization_target_reference click or impression") || !strings.Contains(err.Error(), "project.delivery_mode ubmax") {
-		t.Fatalf("error = %v", err)
+	compiled, err := CompileConfigurationV3(configuration, &intent, "1855554434276391", V3ObjectBindings{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projectPlan v3Plan
+	if err := json.Unmarshal(compiled.Forms[0].Plan, &projectPlan); err != nil {
+		t.Fatal(err)
+	}
+	if projectPlan.ParentContext.OptimizationTarget != "form" {
+		t.Fatalf("parent context = %#v", projectPlan.ParentContext)
 	}
 }
 
@@ -322,14 +399,19 @@ func TestV3BindingsFromMappingsUsesConfirmedObjectsAndSkipsPendingStages(t *test
 	now := time.Date(2026, 8, 25, 6, 0, 0, 0, time.UTC)
 	configuration, _ := executableConfigurationFixture(now)
 	mappings := []delivery.PlatformEntityMapping{
+		{ID: "mapping-stale-project", ConfigurationID: "configuration-previous", AccountReferenceID: "1855554434276391", InternalObjectKind: "project", InternalObjectID: "project-draft-1", PlatformObjectKind: "project", PlatformObjectID: "7677595885572784999", Status: delivery.PlatformEntityMappingConfirmed},
 		{ID: "mapping-project", ConfigurationID: configuration.ConfigurationID, AccountReferenceID: "1855554434276391", InternalObjectKind: "project", InternalObjectID: "project-draft-1", PlatformObjectKind: "project", PlatformObjectID: "7677595885572784182", Status: delivery.PlatformEntityMappingConfirmed},
 		{ID: "mapping-promotion", ConfigurationID: configuration.ConfigurationID, AccountReferenceID: "1855554434276391", InternalObjectKind: "promotion", InternalObjectID: "promotion-draft-1", PlatformObjectKind: "promotion", PlatformObjectID: "7683558668450021382", Status: delivery.PlatformEntityMappingConfirmed},
+	}
+	staleOnly, err := V3BindingsFromMappings(configuration, "1855554434276391", mappings[:1])
+	if err != nil || staleOnly.ProjectPlatformID != "" || len(staleOnly.PromotionPlatformIDs) != 0 {
+		t.Fatalf("stale bindings=%#v err=%v", staleOnly, err)
 	}
 	bindings, err := V3BindingsFromMappings(configuration, "1855554434276391", mappings)
 	if err != nil || bindings.ProjectPlatformID != "7677595885572784182" || bindings.PromotionPlatformIDs["promotion-draft-1"] != "7683558668450021382" {
 		t.Fatalf("bindings=%#v err=%v", bindings, err)
 	}
-	mappings[1].Status = delivery.PlatformEntityMappingPending
+	mappings[2].Status = delivery.PlatformEntityMappingPending
 	pending, err := V3BindingsFromMappings(configuration, "1855554434276391", mappings)
 	if err != nil || pending.ProjectPlatformID == "" || pending.PromotionPlatformIDs["promotion-draft-1"] != "" {
 		t.Fatalf("pending bindings=%#v err=%v", pending, err)
@@ -356,6 +438,12 @@ func TestCompileConfigurationV3RejectsLimitsReferencesAndAccountPaths(t *testing
 			value := int64(0)
 			c.Payload.OceanEngine.Promotions[0].BudgetAndBidding.BidMinor = &value
 		}, "1855554434276391", "bid is outside"},
+		{"cost cap project bid", func(c *delivery.PlatformConfiguration, _ *delivery.DeliveryIntent) {
+			value := int64(30001)
+			c.Payload.OceanEngine.Project.BudgetAndBidding.BiddingStrategy = "cost_cap"
+			c.Payload.OceanEngine.Project.BudgetAndBidding.ChargingMode = "CPM"
+			c.Payload.OceanEngine.Project.BudgetAndBidding.BidMinor = &value
+		}, "1855554434276391", "project: bid is outside"},
 		{"date", func(c *delivery.PlatformConfiguration, _ *delivery.DeliveryIntent) {
 			c.Payload.OceanEngine.Project.Schedule.StartAt = now
 		}, "1855554434276391", "must be no earlier than"},

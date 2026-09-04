@@ -78,6 +78,7 @@ test('controlled execution UI reports the real Edge probe and keeps unsupported 
   assert.match(source, /Prepare 未完成/)
   assert.match(source, /prepared\.state !== 'awaiting_confirmation'/)
   assert.match(source, /Prepare 服务端任务/)
+  assert.match(source, /new Date\(currentLease\.heartbeat_deadline\)\.getTime\(\) > Date\.now\(\)/)
   assert.match(source, /observedRunState/)
   assert.match(source, /重试 Prepare/)
   assert.match(source, /isSafePrepareRetryCandidate/)

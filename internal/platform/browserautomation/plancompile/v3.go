@@ -47,13 +47,14 @@ type V3Compiler struct {
 var _ rparunner.V3PlanCompiler = V3Compiler{}
 
 type v3ParentContext struct {
-	Carrier                  string            `json:"carrier"`
-	OptimizationTarget       string            `json:"optimization_target"`
-	DeepOptimization         string            `json:"deep_optimization"`
-	DeliveryMode             string            `json:"delivery_mode"`
-	PlacementMode            string            `json:"placement_mode"`
-	SearchTargetingExpansion bool              `json:"search_targeting_expansion,omitempty"`
-	ParentReferences         map[string]string `json:"parent_references,omitempty"`
+	Carrier                          string            `json:"carrier"`
+	OptimizationTarget               string            `json:"optimization_target"`
+	OptimizationTargetExternalAction string            `json:"optimization_target_external_action,omitempty"`
+	DeepOptimization                 string            `json:"deep_optimization"`
+	DeliveryMode                     string            `json:"delivery_mode"`
+	PlacementMode                    string            `json:"placement_mode"`
+	SearchTargetingExpansion         bool              `json:"search_targeting_expansion,omitempty"`
+	ParentReferences                 map[string]string `json:"parent_references,omitempty"`
 }
 
 type v3Step struct {
@@ -347,15 +348,20 @@ func nextUnboundPromotionForm(forms []V3PlannedForm) (V3PlannedForm, error) {
 
 func parentContext(project delivery.OceanEngineProjectDraft) (v3ParentContext, error) {
 	optimization := ""
+	externalAction := ""
 	if project.OptimizationTargetReference != nil {
+		externalAction = strings.TrimSpace(project.OptimizationTargetReference.ID)
 		optimization = strings.TrimSpace(project.OptimizationTargetReference.SemanticKey)
 		if optimization == "" {
 			optimization = strings.TrimSpace(project.OptimizationTargetReference.ID)
 		}
 	}
 	optimization = normalizedOptimizationTarget(optimization)
-	if !slices.Contains([]string{"button_jump", "in_app_order", "click", "impression", "store_call", "store_stay"}, optimization) {
+	if optimization == "" {
 		return v3ParentContext{}, fmt.Errorf("configuration has no calibrated optimization target key")
+	}
+	if project.MarketingPurpose == "lead_generation" && (project.OptimizationTargetReference == nil || strings.TrimSpace(project.OptimizationTargetReference.AuditAttributes["capability_snapshot_id"]) == "" || strings.TrimSpace(project.OptimizationTargetReference.AuditAttributes["capability_context_hash"]) == "") {
+		return v3ParentContext{}, fmt.Errorf("lead-generation optimization target has no account capability snapshot")
 	}
 	deep := strings.TrimSpace(project.DeepOptimizationMode)
 	if deep == "" {
@@ -363,6 +369,11 @@ func parentContext(project delivery.OceanEngineProjectDraft) (v3ParentContext, e
 	}
 	deliveryMode := strings.TrimSpace(project.DeliveryMode)
 	if deliveryMode == "automatic" {
+		deliveryMode = "ubmax"
+	}
+	// The lead-generation project form does not expose a delivery-mode input.
+	// OceanEngine fixes this branch to delivery_mode=3 (UBMax).
+	if project.MarketingPurpose == "lead_generation" {
 		deliveryMode = "ubmax"
 	}
 	placementMode := strings.TrimSpace(project.PlacementStrategy)
@@ -378,7 +389,7 @@ func parentContext(project delivery.OceanEngineProjectDraft) (v3ParentContext, e
 		searchExpansion = *project.SearchBoost.TargetingExpansion
 	}
 	return v3ParentContext{
-		Carrier: project.Carrier, OptimizationTarget: optimization, DeepOptimization: deep,
+		Carrier: project.Carrier, OptimizationTarget: optimization, OptimizationTargetExternalAction: externalAction, DeepOptimization: deep,
 		DeliveryMode: deliveryMode, PlacementMode: placementMode,
 		SearchTargetingExpansion: searchExpansion, ParentReferences: parentReferences,
 	}, nil
